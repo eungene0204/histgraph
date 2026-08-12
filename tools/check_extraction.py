@@ -25,6 +25,7 @@ from histgraph.extract import (  # noqa: E402
     build_gazetteer,
     extract_one,
     load_documents,
+    load_scope_ids,
     to_graph,
 )
 from histgraph.store import GraphStore  # noqa: E402
@@ -37,10 +38,12 @@ DB = Path(__file__).resolve().parents[1] / "data" / "histgraph.sqlite"
 def main() -> int:
     n_docs = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     backend_kind = sys.argv[2] if len(sys.argv) > 2 else "mlx"
+    scope = sys.argv[3] if len(sys.argv) > 3 else None
 
     store = GraphStore(DB)
-    gazetteer = build_gazetteer(store)
-    docs = load_documents(store, limit=n_docs, min_score=2.0)
+    scope_ids = load_scope_ids(scope) if scope else None
+    gazetteer = build_gazetteer(store, scope_ids=scope_ids)
+    docs = load_documents(store, limit=n_docs, min_score=2.0, scope_ids=scope_ids)
     backend = build_backend(backend_kind)
 
     print(f"\n{'='*60}")
@@ -74,9 +77,12 @@ def main() -> int:
     print(f"\n{'─'*60}\n2) 가제티어 연결률 (기존 노드에 붙는가)\n{'─'*60}")
     nodes, edges = [], []
     for r, doc in all_rels:
-        n, e = to_graph([r], doc.node_id, store)
+        n, e = to_graph([r], doc.node_id, store, doc_text=doc.text)
         nodes.extend(n)
         edges.extend(e)
+    print(f"  근거 검증 통과 후 남은 관계 {len(edges)}/{len(all_rels)}건")
+    flipped = sum(1 for e in edges if e.props.get("flipped"))
+    print(f"  방향 교정 {flipped}건")
     endpoints = [e.src for e in edges] + [e.dst for e in edges]
     orphan = sum(1 for x in endpoints if x.startswith("ex:"))
     linked = len(endpoints) - orphan
@@ -103,7 +109,7 @@ def main() -> int:
 
     print(f"\n{'─'*60}\n4) 속도 추정\n{'─'*60}")
     avg = sum(d for _, _, d in per_doc) / len(per_doc)
-    total_docs = len(load_documents(store, min_score=2.0))
+    total_docs = len(load_documents(store, min_score=2.0, scope_ids=scope_ids))
     print(f"  조각당 평균 {avg:.1f}초")
     print(f"  전체 {total_docs}조각 → 약 {avg * total_docs / 60:.0f}분 "
           f"({avg * total_docs / 3600:.1f}시간)")

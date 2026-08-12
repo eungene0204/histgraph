@@ -234,7 +234,7 @@ class MLXBackend:
     def __init__(
         self,
         model: str = DEFAULT_MLX_MODEL,
-        max_tokens: int = 4096,
+        max_tokens: int = 12000,
     ) -> None:
         self.model_path = model
         self.max_tokens = max_tokens

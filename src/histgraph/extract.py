@@ -85,6 +85,9 @@ OUTPUT_SCHEMA: dict[str, Any] = {
         "relations": {
             "type": "array",
             "description": "원문에서 추출한 관계 목록",
+            # 상한이 없으면 모델이 계속 생성하다 max_tokens 에 잘려
+            # JSON 이 닫히지 않는다 (실측: 4096 토큰에서 잘려 0건 처리됨).
+            "maxItems": 40,
             "items": {
                 "type": "object",
                 "properties": {
@@ -192,7 +195,9 @@ def get_client():
     return anthropic.Anthropic()
 
 
-def build_gazetteer(store: GraphStore, limit: int = 150) -> dict[str, list[str]]:
+def build_gazetteer(
+    store: GraphStore, limit: int = 150, scope_ids: set[str] | None = None
+) -> dict[str, list[str]]:
     """그래프에 이미 있는 개체명 목록.
 
     추출 결과를 기존 노드에 붙이려면 모델이 같은 표기를 써야 한다.
@@ -207,16 +212,19 @@ def build_gazetteer(store: GraphStore, limit: int = 150) -> dict[str, list[str]]
     gaz: dict[str, list[str]] = {}
     for node_type in ("person", "event", "place", "period"):
         rows = store.conn.execute(
-            """SELECT n.label, COUNT(e.src) AS degree
+            """SELECT n.id, n.label, COUNT(e.src) AS degree
                  FROM nodes n
                  LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
                 WHERE n.type = ? AND length(n.label) >= 2
              GROUP BY n.id
-             ORDER BY degree DESC, length(n.label)
-                LIMIT ?""",
-            (node_type, limit),
+             ORDER BY degree DESC, length(n.label)""",
+            (node_type,),
         ).fetchall()
-        gaz[node_type] = [r["label"] for r in rows]
+        # 시대를 한정하면 가제티어도 그 시대 개체만 남긴다. 조선 문서에
+        # 현대 정치인 목록을 붙여봐야 프롬프트만 길어지고 오히려 방해된다.
+        if scope_ids is not None:
+            rows = [r for r in rows if r["id"] in scope_ids]
+        gaz[node_type] = [r["label"] for r in rows[:limit]]
     return gaz
 
 
@@ -321,36 +329,106 @@ def collect_batch(client, batch_id: str, docs: list[Document]) -> dict[str, list
     return out
 
 
+def evidence_supported(evidence: str, text: str) -> bool:
+    """근거 구절이 원문에 실제로 있는가.
+
+    실측: 모델이 `evidence: "문서에 명시되지 않음"` 이라고 적으면서 관계는
+    만들어냈다. 근거 없는 관계는 검증이 불가능하므로 버린다 — 환각을
+    통째로 막는 가장 확실한 지점이다.
+
+    공백·줄바꿈 차이는 무시한다. 모델이 요약하거나 주석을 덧붙이는 경우가
+    있어 앞부분 일부만 일치해도 인정한다."""
+    ev = "".join((evidence or "").split())
+    if len(ev) < 8:  # 너무 짧으면 우연히 일치한다
+        return False
+    body = "".join(text.split())
+    return ev[:25] in body
+
+
+def orient(
+    edge_type: str, src_type: str, dst_type: str
+) -> tuple[bool, bool]:
+    """(스키마에 맞는가, 뒤집어야 하는가).
+
+    실측: 모델이 `제1차 왕자의 난 --participated_in--> 이방원` 처럼 방향을
+    뒤집어 낸다. 스키마는 형태를 강제하지만 **방향은 강제하지 못한다.**
+    온톨로지가 허용하는 방향을 알고 있으므로 후처리에서 바로잡는다."""
+    _, allowed_src, allowed_dst = EDGE_TYPES[edge_type]
+    if src_type in allowed_src and dst_type in allowed_dst:
+        return True, False
+    # 양끝을 바꾸면 맞는가
+    if dst_type in allowed_src and src_type in allowed_dst:
+        return True, True
+    return False, False
+
+
 def to_graph(
-    relations: list[dict], source_node: str, store: GraphStore
+    relations: list[dict],
+    source_node: str,
+    store: GraphStore,
+    doc_text: str | None = None,
 ) -> tuple[list[Node], list[Edge]]:
     """추출 결과를 노드·엣지로 변환.
 
-    이름으로 기존 노드를 찾고, 없으면 새로 만든다. 새 노드에는
-    `ex:` 접두사를 붙여 추출 산물임을 id 만 봐도 알 수 있게 한다."""
+    이름으로 기존 노드를 찾고(별칭도 본다), 없으면 새로 만든다. 새 노드에는
+    `ex:` 접두사를 붙여 추출 산물임을 id 만 봐도 알 수 있게 한다.
+
+    doc_text 를 주면 근거가 원문에 없는 관계를 버린다."""
     nodes: dict[str, Node] = {}
     edges: list[Edge] = []
+    dropped_evidence = dropped_schema = flipped = 0
 
-    def resolve(name: str, node_type: str) -> str:
+    def resolve(name: str, node_type: str) -> tuple[str, str]:
+        """이름 -> (노드 id, 실제 노드 타입)."""
         row = store.conn.execute(
-            "SELECT id FROM nodes WHERE label = ? AND type = ? LIMIT 1",
+            "SELECT id, type FROM nodes WHERE label = ? AND type = ? LIMIT 1",
             (name, node_type),
         ).fetchone()
         if row:
-            return row["id"]
+            return row["id"], row["type"]
+        # 별칭으로도 찾는다 — '이방원'은 '태종'의 별칭이다
+        row = store.conn.execute(
+            """SELECT n.id, n.type FROM aliases a JOIN nodes n ON n.id = a.node_id
+               WHERE a.alias = ? LIMIT 1""",
+            (name,),
+        ).fetchone()
+        if row:
+            return row["id"], row["type"]
+        # 타입 무시하고 라벨만 — 모델이 타입을 잘못 붙였을 수 있다
+        row = store.conn.execute(
+            "SELECT id, type FROM nodes WHERE label = ? LIMIT 1", (name,)
+        ).fetchone()
+        if row:
+            return row["id"], row["type"]
         nid = f"ex:{node_type}:{name}"
         nodes.setdefault(
             nid, Node(id=nid, type=node_type, label=name, source="extract")
         )
-        return nid
+        return nid, node_type
 
     for rel in relations:
         try:
             edge_type = rel["relation"]
             if edge_type not in EDGE_TYPES:
                 continue
-            src = resolve(rel["subject"], rel["subject_type"])
-            dst = resolve(rel["object"], rel["object_type"])
+
+            if doc_text is not None and not evidence_supported(
+                rel.get("evidence", ""), doc_text
+            ):
+                dropped_evidence += 1
+                continue
+
+            src, src_type = resolve(rel["subject"], rel["subject_type"])
+            dst, dst_type = resolve(rel["object"], rel["object_type"])
+
+            ok, flip = orient(edge_type, src_type, dst_type)
+            if not ok:
+                dropped_schema += 1
+                continue
+            if flip:
+                src, dst = dst, src
+                flipped += 1
+
             edges.append(
                 Edge(
                     src=src,
@@ -362,16 +440,36 @@ def to_graph(
                         "evidence": rel.get("evidence", ""),
                         "extracted_from": source_node,
                         "model": MODEL,
+                        **({"flipped": True} if flip else {}),
                     },
                 )
             )
         except (KeyError, ValueError) as err:
             log.warning("관계 변환 실패: %s (%s)", rel, err)
 
+    if dropped_evidence or dropped_schema or flipped:
+        log.info(
+            "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 방향교정 %d건",
+            dropped_evidence, dropped_schema, flipped,
+        )
     return list(nodes.values()), edges
 
 
-# 서사 표지 — "누가 무엇을 했는가"가 적힌 글인지 가늠한다.
+def load_scope_ids(scope_db: str) -> set[str]:
+    """시대 서브그래프에 속한 노드 id 집합.
+
+    `scope` 로 뽑아둔 DB 를 그대로 재사용한다 — 추출 대상을 그 시대로
+    좁히면 비용이 줄고, 결과가 그 그래프에 바로 반영되어 효과를 눈으로
+    확인할 수 있다."""
+    import sqlite3
+
+    conn = sqlite3.connect(scope_db)
+    try:
+        return {r[0] for r in conn.execute("SELECT id FROM nodes")}
+    finally:
+        conn.close()
+
+
 PERSON_HINT = re.compile(
     # 신분·관직
     r"왕|대군|공주|옹주|장군|정승|판서|영의정|좌의정|우의정|관찰사|"
@@ -409,16 +507,26 @@ def narrative_score(text: str) -> float:
 
 
 def load_documents(
-    store: GraphStore, limit: int | None = None, min_score: float = 1.0
+    store: GraphStore,
+    limit: int | None = None,
+    min_score: float = 1.0,
+    scope_ids: set[str] | None = None,
 ) -> list[Document]:
     """추출 가치가 높은 순으로 문서를 고른다.
 
     min_score=1.0 은 인물이나 사건 표지 중 하나 이상을 요구한다.
-    2.0 으로 올리면 둘 다 있는 글만 남는다."""
+    2.0 으로 올리면 둘 다 있는 글만 남는다.
+
+    scope_ids 를 주면 그 노드들의 산문만 대상으로 한다."""
     rows = store.conn.execute(
         """SELECT id, label, description FROM nodes
            WHERE description IS NOT NULL AND length(description) > 100"""
     ).fetchall()
+
+    if scope_ids is not None:
+        before = len(rows)
+        rows = [r for r in rows if r["id"] in scope_ids]
+        log.info("범위 한정: 산문 %d건 → %d건", before, len(rows))
 
     scored = [
         (narrative_score(r["description"]), r)

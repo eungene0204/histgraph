@@ -263,7 +263,9 @@ def cmd_extract(args: argparse.Namespace) -> int:
     from . import extract as ex
 
     with GraphStore(args.db) as store:
-        docs = ex.load_documents(store, limit=args.limit, min_score=args.min_score)
+        scope_ids = ex.load_scope_ids(args.scope) if args.scope else None
+        docs = ex.load_documents(store, limit=args.limit, min_score=args.min_score,
+                                 scope_ids=scope_ids)
         if not docs:
             print(
                 "  추출할 산문이 없습니다. 먼저 `ingest heritage` 로 content 를 수집하세요.",
@@ -403,6 +405,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="추출 백엔드. 기본값은 로컬 MLX(키·비용 불필요, 스키마 강제)")
     p_ex.add_argument("--model", default=None, help="모델 이름 (백엔드 기본값 사용하려면 생략)")
     p_ex.add_argument("--dry-run", action="store_true", help="API 호출 없이 프롬프트만 출력")
+    p_ex.add_argument("--scope", default=None,
+                      help="시대 서브그래프 DB 경로. 그 노드들의 산문만 추출 (예: data/joseon.sqlite)")
     p_ex.set_defaults(func=cmd_extract)
 
     p_sc = sub.add_parser("scope", help="한 시대만 별도 그래프로 추출")

@@ -463,3 +463,37 @@ def _iso_date(raw: str | None) -> str | None:
     if not raw:
         return None
     return raw.split("T", 1)[0]
+
+
+def fetch_aliases(
+    fetcher: Fetcher, qids: list[str], chunk: int = 200
+) -> dict[str, list[str]]:
+    """QID -> 한국어 별칭 목록 (skos:altLabel).
+
+    실측: 그래프에 '태종'은 있는데 '이방원'이 없어서, 추출 결과의 절반이
+    기존 노드에 붙지 못하고 고아가 됐다. 한 인물이 이름·자·호·묘호로
+    불리는 것은 한국사 문헌의 기본 특성이라 별칭 없이는 연결이 안 된다."""
+    out: dict[str, list[str]] = {}
+    failures: list[str] = []
+    ordered = sorted(set(qids))
+
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?e ?alias WHERE {{
+                  VALUES ?e {{ {values} }}
+                  ?e skos:altLabel ?alias .
+                  FILTER(LANG(?alias) = "ko")
+                }}""",
+            f"별칭/{i}",
+            failures,
+        )
+        for r in rows:
+            e, a = _val(r, "e"), _val(r, "alias")
+            if e and a:
+                out.setdefault(_qid(e), []).append(a)
+
+    if failures:
+        log.warning("별칭 조회 실패 %d구간", len(failures))
+    return out
