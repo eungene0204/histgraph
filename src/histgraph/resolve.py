@@ -1,0 +1,293 @@
+"""엔티티 해소 — 서로 다른 소스의 같은 실체를 잇는다.
+
+문제: 국가유산청 그래프와 Wikidata 그래프가 서로 닿지 않는 두 개의 섬이다.
+숭례문에서 세종으로 가는 경로가 없으면 온톨로지 그래프로서 작동하지 않는다.
+
+접합점은 **장소와 시대**다. 국가유산청은 유물마다 시도·시군구와 시대를
+주고, Wikidata 는 같은 지명과 왕조를 항목으로 갖고 있다. 둘을 이으면
+"경주에 있는 국보" 와 "경주에서 활동한 신라 인물" 이 한 그래프에서 만난다.
+
+모든 매칭은 `same_as` 테이블에 방법과 점수를 남긴다 — 자동 매칭은 틀릴 수
+있으므로 나중에 검증하거나 되돌릴 수 있어야 한다.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import sqlite3
+
+from .store import GraphStore
+
+log = logging.getLogger(__name__)
+
+# 행정구역 접미사 — 라벨 비교 전에 떼어낸다.
+# '서울특별시' 와 '서울', '경주시' 와 '경주' 를 같게 보기 위함.
+ADMIN_SUFFIX = re.compile(r"(특별자치시|특별자치도|광역시|특별시|[시군구도])$")
+
+# 국가유산청 시대명 -> Wikidata 왕조 QID.
+# ccceName 은 '조선시대' 처럼 '시대' 가 붙어 오고, Wikidata 는 '조선'이다.
+PERIOD_TO_POLITY: dict[str, str] = {
+    "고구려": "Q28370",
+    "백제": "Q28428",
+    "신라": "Q28456",
+    "통일신라": "Q28456",
+    "발해": "Q28322",
+    "고려": "Q28208",
+    "조선": "Q28179",
+    "대한제국": "Q28233",
+}
+
+
+def normalize_place(label: str) -> str:
+    """지명 정규화. '서울특별시' -> '서울', '경주시' -> '경주'."""
+    label = label.strip()
+    # 접미사를 반복 제거 ('경상북도' -> '경상북')는 과하므로 1회만
+    stripped = ADMIN_SUFFIX.sub("", label)
+    return stripped or label
+
+
+def normalize_period(label: str) -> str:
+    """'조선시대' -> '조선', '통일신라시대' -> '통일신라'."""
+    return re.sub(r"\s*시대$", "", label.strip())
+
+
+# 왕조명을 라벨 어디서든 찾는다. '통일신라'가 '신라'보다 먼저 와야
+# 긴 이름이 우선 매칭된다.
+_POLITY_PATTERN = re.compile(
+    "(" + "|".join(sorted(PERIOD_TO_POLITY, key=len, reverse=True)) + ")"
+)
+
+
+def extract_polities(label: str) -> list[str]:
+    """시대 라벨에서 언급된 왕조를 모두 뽑는다.
+
+    국가유산청 `ccceName` 은 깔끔한 왕조명이 아니라 자유 서술이다:
+      '통일신라시대∼고려시대', '판각: 1244년(고려 고종 31), 인출: 고려 말~조선 초',
+      '현종8년(1017)'
+    '시대' 접미사만 떼는 정규화로는 대부분 매칭되지 않는다."""
+    found: list[str] = []
+    for m in _POLITY_PATTERN.finditer(label):
+        name = m.group(1)
+        # '통일신라'를 잡았으면 그 안의 '신라'는 중복이므로 건너뛴다
+        if name not in found:
+            found.append(name)
+    if "통일신라" in found and "신라" in found:
+        found.remove("신라")
+    return found
+
+
+def link_periods(store: GraphStore) -> int:
+    """국가유산청 시대 노드를 Wikidata 왕조에 연결.
+
+    매핑 표가 있으므로 확실한 매칭 — score 1.0."""
+    rows = store.conn.execute(
+        "SELECT id, label FROM nodes WHERE type='period' AND source='khs'"
+    ).fetchall()
+
+    links = []
+    multi = unmatched = 0
+    for r in rows:
+        polities = extract_polities(r["label"])
+        if not polities:
+            unmatched += 1
+            log.debug("왕조를 못 찾음: %s", r["label"])
+            continue
+        if len(polities) > 1:
+            # '통일신라시대~조선시대' 는 어느 한 왕조와 '같은 실체'가 아니다.
+            # same_as 로 이으면 거짓말이 되므로 잇지 않는다.
+            multi += 1
+            log.debug("복수 왕조 (건너뜀): %s -> %s", r["label"], polities)
+            continue
+        target = f"wd:{PERIOD_TO_POLITY[polities[0]]}"
+        # 상대 노드가 실제로 그래프에 있을 때만 잇는다 — 없는 노드를
+        # 가리키는 same_as 는 경로를 만들어주지 못한다.
+        if store.conn.execute("SELECT 1 FROM nodes WHERE id=?", (target,)).fetchone():
+            links.append((r["id"], target, "period_polity", 1.0))
+
+    store.conn.executemany(
+        "INSERT OR REPLACE INTO same_as (a, b, method, score) VALUES (?,?,?,?)", links
+    )
+    store.conn.commit()
+    log.info(
+        "시대 연결 %d건 (복수 왕조 %d건, 왕조 미검출 %d건은 건너뜀)",
+        len(links), multi, unmatched,
+    )
+    return len(links)
+
+
+def link_places(store: GraphStore) -> int:
+    """국가유산청 장소 노드를 Wikidata 장소에 연결.
+
+    정규화한 지명이 정확히 일치할 때만 잇는다. 부분 일치는 '경주'와
+    '경주 시내' 처럼 다른 대상을 엮을 위험이 커서 쓰지 않는다."""
+    wd_places: dict[str, list[str]] = {}
+    for r in store.conn.execute(
+        "SELECT id, label FROM nodes WHERE type='place' AND source='wd'"
+    ):
+        wd_places.setdefault(normalize_place(r["label"]), []).append(r["id"])
+
+    links = []
+    ambiguous = 0
+    for r in store.conn.execute(
+        "SELECT id, label, props FROM nodes WHERE type='place' AND source='khs'"
+    ):
+        # 시군구가 있으면 그쪽이 더 구체적이라 우선 매칭한다
+        import json
+
+        props = json.loads(r["props"] or "{}")
+        candidates = [props.get("sigungu"), props.get("sido")]
+
+        for cand in candidates:
+            if not cand:
+                continue
+            matches = wd_places.get(normalize_place(cand))
+            if not matches:
+                continue
+            if len(matches) > 1:
+                # 동명이인 격 ('중구'는 서울·부산·대구에 다 있다). 자동으로
+                # 고르면 틀린 곳에 붙는다 — 다음 후보(시도)로 넘어간다.
+                # 여기서 break 하면 유물 전체가 연결에서 탈락한다.
+                ambiguous += 1
+                log.debug("모호한 지명 %s -> %d개 후보, 상위 행정구역으로 후퇴", cand, len(matches))
+                continue
+            links.append((r["id"], matches[0], "place_label_exact", 0.9))
+            break
+
+    store.conn.executemany(
+        "INSERT OR REPLACE INTO same_as (a, b, method, score) VALUES (?,?,?,?)", links
+    )
+    store.conn.commit()
+    log.info("장소 연결 %d건 (모호해서 건너뜀 %d건)", len(links), ambiguous)
+    return len(links)
+
+
+def prune_sports(store: GraphStore) -> dict[str, int]:
+    """스포츠 이벤트 노드와 그 엣지를 제거.
+
+    판정은 파이썬 정규식 하나로만 한다. SQL LIKE 목록을 따로 두면 두
+    패턴 목록이 반드시 갈라지고(실제로 갈라져서 배드민턴 대회가
+    남았다), 어느 쪽이 진짜인지 알 수 없게 된다.
+
+    노드만 지우면 엣지가 댕글링으로 남으므로 함께 지운다."""
+    from .filters import is_sports
+
+    ids = [
+        r["id"]
+        for r in store.conn.execute("SELECT id, label FROM nodes WHERE type='event'")
+        if is_sports(r["label"])
+    ]
+    if not ids:
+        return {"nodes": 0, "edges": 0}
+
+    edges = 0
+    for i in range(0, len(ids), 500):
+        batch = ids[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        cur = store.conn.execute(
+            f"DELETE FROM edges WHERE src IN ({marks}) OR dst IN ({marks})",
+            (*batch, *batch),
+        )
+        edges += cur.rowcount
+        store.conn.execute(f"DELETE FROM nodes WHERE id IN ({marks})", batch)
+
+    store.conn.commit()
+    log.info("스포츠 노드 %d개, 엣지 %d개 제거", len(ids), edges)
+    return {"nodes": len(ids), "edges": edges}
+
+
+def prune_sports_by_class(store: GraphStore, fetcher=None) -> dict[str, int]:
+    """Wikidata 클래스 계층으로 스포츠 이벤트를 제거한다.
+
+    라벨 정규식은 두더지잡기다 — 'Superseries', 'Konica Cup',
+    'Internationaux de France' 처럼 이름만으로는 스포츠인지 알 수 없는
+    항목이 계속 남는다. Wikidata 가 이미 P279* 계층을 갖고 있으므로
+    이름을 추측하지 말고 그 계층에 직접 물어본다."""
+    from .http import Fetcher
+    from .sources.wikidata import SPARQL_URL, _qid, _safe_query, _val
+
+    fetcher = fetcher or Fetcher(store.path.parent / "cache", min_interval=1.5)
+
+    qids = [
+        r["id"].split(":", 1)[1]
+        for r in store.conn.execute(
+            "SELECT id FROM nodes WHERE type='event' AND source='wd'"
+        )
+    ]
+    if not qids:
+        return {"nodes": 0, "edges": 0}
+
+    log.info("사건 노드 %d개의 클래스 조회 중...", len(qids))
+    sports: set[str] = set()
+    failures: list[str] = []
+
+    for i in range(0, len(qids), 300):
+        batch = qids[i : i + 300]
+        values = " ".join(f"wd:{q}" for q in batch)
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT DISTINCT ?e WHERE {{
+                  VALUES ?e {{ {values} }}
+                  VALUES ?sport {{ wd:Q13406554 wd:Q16510064 wd:Q46190676 wd:Q500834 }}
+                  ?e wdt:P31/wdt:P279* ?sport .
+                }}""",
+            f"스포츠분류/{i}",
+            failures,
+        )
+        sports.update(_qid(_val(r, "e") or "") for r in rows)
+
+    if failures:
+        log.warning("클래스 조회 실패 %d건 — 해당 구간은 걸러지지 않음", len(failures))
+    if not sports:
+        return {"nodes": 0, "edges": 0}
+
+    ids = [f"wd:{q}" for q in sports]
+    edges = 0
+    for i in range(0, len(ids), 500):
+        batch = ids[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        cur = store.conn.execute(
+            f"DELETE FROM edges WHERE src IN ({marks}) OR dst IN ({marks})",
+            (*batch, *batch),
+        )
+        edges += cur.rowcount
+        store.conn.execute(f"DELETE FROM nodes WHERE id IN ({marks})", batch)
+    store.conn.commit()
+
+    log.info("클래스 기반 스포츠 노드 %d개, 엣지 %d개 제거", len(ids), edges)
+    return {"nodes": len(ids), "edges": edges}
+
+
+def bridge_report(store: GraphStore) -> dict[str, object]:
+    """두 섬이 실제로 연결됐는지 검증한다.
+
+    same_as 행 수만 세면 '연결된 것 같다'는 착각을 하기 쉽다. 실제로
+    소스를 건너뛰는 경로가 생겼는지 확인한다."""
+    c = store.conn
+    total = c.execute("SELECT COUNT(*) FROM same_as").fetchone()[0]
+    by_method = {
+        r["method"]: r["n"]
+        for r in c.execute(
+            "SELECT method, COUNT(*) n FROM same_as GROUP BY method ORDER BY n DESC"
+        )
+    }
+    # 서로 다른 소스를 잇는 링크만이 섬을 연결한다
+    cross = c.execute(
+        """SELECT COUNT(*) FROM same_as s
+           JOIN nodes na ON na.id = s.a
+           JOIN nodes nb ON nb.id = s.b
+           WHERE na.source != nb.source"""
+    ).fetchone()[0]
+    # 국가유산청 유물에서 same_as 를 한 번 거쳐 Wikidata 로 나가는 경로 수
+    reachable = c.execute(
+        """SELECT COUNT(DISTINCT e.src) FROM edges e
+           JOIN same_as s ON s.a = e.dst
+           JOIN nodes n ON n.id = e.src
+           WHERE n.source = 'khs'"""
+    ).fetchone()[0]
+    return {
+        "same_as_total": total,
+        "cross_source": cross,
+        "by_method": by_method,
+        "heritage_nodes_reaching_wikidata": reachable,
+    }

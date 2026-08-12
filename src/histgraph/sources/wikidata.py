@@ -1,0 +1,465 @@
+"""Wikidata SPARQL 커넥터 — 엣지의 1차 공급원.
+
+국내 공공 API 는 개체(entity)는 잘 주지만 개체 사이의 '관계'는 거의 주지
+않는다. 그래프의 가치는 엣지에 있으므로, 관계는 Wikidata 에서 가져와
+골격을 세우고 공공데이터로 살을 붙이는 구조를 택했다.
+
+한계(실측): 조선 국적 인물 약 3,400명 중 '참여 사건'(P1344) 엣지는 35개뿐.
+인물↔사건 엣지는 결국 텍스트에서 추출해야 한다 — extract 단계의 근거.
+
+쿼리는 관계별로 쪼갰다. 한 쿼리에 OPTIONAL 을 여러 개 물리면 공개
+엔드포인트의 60초 제한에 걸린다.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import urllib.parse
+
+from ..http import Fetcher
+from ..ontology import EDGE_TYPES, Edge, Node
+
+log = logging.getLogger(__name__)
+
+SPARQL_URL = "https://query.wikidata.org/sparql"
+SOURCE = "wd"
+
+# 한국사 관련 국가/왕조 QID.
+# 전부 wbsearchentities 로 실측 확인함 — 추측한 QID 는 엉뚱한 개체를 가리킨다
+# (Q34049=셈어파, Q28194=독일 가수). `histgraph doctor` 가 라벨을 재검증한다.
+POLITIES = {
+    "Q28370": "고구려",
+    "Q28428": "백제",
+    "Q28456": "신라",
+    "Q28322": "발해",
+    "Q28208": "고려",
+    "Q28179": "조선",
+    "Q28233": "대한제국",
+    "Q884": "대한민국",
+    "Q423": "조선민주주의인민공화국",
+}
+
+# Wikidata 속성 -> 온톨로지 엣지 타입
+PERSON_RELATIONS: dict[str, tuple[str, str]] = {
+    "P22": ("child_of", "아버지"),
+    "P25": ("child_of", "어머니"),
+    "P26": ("spouse_of", "배우자"),
+    "P19": ("born_in", "출생지"),
+    "P20": ("died_in", "사망지"),
+    "P1344": ("participated_in", "참여"),
+    "P39": ("held_position", "직위"),
+    "P463": ("member_of", "소속"),
+    "P170": ("created", "제작자"),
+}
+
+
+# Wikidata 클래스(P31) -> 온톨로지 노드 타입.
+# 전부 열거할 수는 없으므로 매칭 실패 시 엣지 종류 기반 추론으로 넘어간다.
+WD_CLASS_TO_TYPE: dict[str, str] = {
+    "Q5": "person",
+    "Q515": "place", "Q486972": "place", "Q56061": "place", "Q82794": "place",
+    "Q3957": "place", "Q532": "place", "Q6256": "place", "Q1549591": "place",
+    "Q1190554": "event", "Q178561": "event", "Q198": "event", "Q625298": "event",
+    "Q13418847": "event", "Q1656682": "event",
+    "Q43229": "org", "Q7278": "org", "Q3024240": "org", "Q34770": "org",
+    "Q4164871": "role", "Q294414": "role", "Q216107": "role", "Q12737077": "role",
+    "Q11424": "media", "Q5398426": "media",
+    "Q838948": "artwork", "Q3305213": "artwork",
+}
+
+
+class SparqlError(RuntimeError):
+    pass
+
+
+def _query(fetcher: Fetcher, sparql: str) -> list[dict]:
+    """SPARQL 실행 후 바인딩 목록 반환. POST 를 쓰는 이유는 쿼리가 길어
+    GET 의 URL 길이 제한에 걸리기 때문.
+
+    실패 시 빈 리스트를 반환하면 '데이터 없음'과 구분되지 않아 조용히
+    잘못된 그래프가 만들어진다. 반드시 예외를 던진다."""
+    body = urllib.parse.urlencode({"query": sparql, "format": "json"})
+    raw = fetcher.post(
+        SPARQL_URL,
+        {"query": sparql, "format": "json"},
+        headers={
+            "Accept": "application/sparql-results+json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    try:
+        return json.loads(raw)["results"]["bindings"]
+    except (json.JSONDecodeError, KeyError) as err:
+        # 깨진 응답을 캐시에 남겨두면 재실행해도 같은 실패가 반복된다.
+        fetcher.invalidate(SPARQL_URL, body=body)
+        if raw.lstrip().startswith("{"):
+            hint = "응답이 중간에 잘림 — 캐시를 지웠으니 재실행하면 다시 시도합니다"
+        elif "timeout" in raw.lower():
+            hint = "쿼리 타임아웃(60초) — 더 잘게 쪼갤 것"
+        else:
+            hint = ""
+        raise SparqlError(f"SPARQL 응답 파싱 실패: {raw[:120]} … {hint}") from err
+
+
+def _safe_query(
+    fetcher: Fetcher, sparql: str, desc: str, failures: list[str]
+) -> list[dict]:
+    """쿼리 하나가 실패해도 수집 전체를 버리지 않는다. 대신 실패를 기록해
+    마지막에 반드시 보고한다 — 조용히 넘어가면 결손을 알 수 없다."""
+    try:
+        return _query(fetcher, sparql)
+    except (SparqlError, RuntimeError) as err:
+        log.error("쿼리 실패 [%s]: %s", desc, str(err)[:160])
+        failures.append(desc)
+        return []
+
+
+def _labels(fetcher: Fetcher, qids: set[str], chunk: int = 400) -> dict[str, tuple[str, str | None]]:
+    """QID -> (라벨, P31 타입 QID) 일괄 조회.
+
+    엣지 쿼리에 label service 를 같이 물리면 결과가 커질 때 60초 제한에
+    걸린다. 엣지는 QID 만 받고 라벨은 여기서 따로 채운다."""
+    out: dict[str, tuple[str, str | None]] = {}
+    ordered = sorted(qids)
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _query(
+            fetcher,
+            f"""SELECT ?e ?eLabel ?type WHERE {{
+                  VALUES ?e {{ {values} }}
+                  OPTIONAL {{ ?e wdt:P31 ?type }}
+                  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+                }}""",
+        )
+        for r in rows:
+            qid = _qid(_val(r, "e") or "")
+            type_uri = _val(r, "type")
+            out.setdefault(qid, (_val(r, "eLabel") or qid, _qid(type_uri) if type_uri else None))
+    return out
+
+
+def _qid(uri: str) -> str:
+    return uri.rsplit("/", 1)[-1]
+
+
+def _nid(uri_or_qid: str) -> str:
+    return f"{SOURCE}:{_qid(uri_or_qid)}"
+
+
+def _val(binding: dict, key: str) -> str | None:
+    item = binding.get(key)
+    return item.get("value") if item else None
+
+
+def verify_polities(fetcher: Fetcher) -> dict[str, str]:
+    """설정된 QID 가 실제로 어떤 개체인지 확인 — QID 오타 방지용."""
+    values = " ".join(f"wd:{q}" for q in POLITIES)
+    rows = _query(
+        fetcher,
+        f"""SELECT ?e ?eLabel WHERE {{
+              VALUES ?e {{ {values} }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+            }}""",
+    )
+    return {_qid(_val(r, "e") or ""): _val(r, "eLabel") or "" for r in rows}
+
+
+def fetch_persons(
+    fetcher: Fetcher,
+    polities: list[str] | None = None,
+    limit: int = 20000,
+    failures: list[str] | None = None,
+) -> list[Node]:
+    """정체별로 쪼개 조회한다. 9개를 한 쿼리에 넣으면 타임아웃."""
+    polities = polities or list(POLITIES)
+    failures = failures if failures is not None else []
+    nodes: dict[str, Node] = {}
+
+    for polity in polities:
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?p ?pLabel ?birth ?death WHERE {{
+                  ?p wdt:P27 wd:{polity} ; wdt:P31 wd:Q5 .
+                  OPTIONAL {{ ?p wdt:P569 ?birth }}
+                  OPTIONAL {{ ?p wdt:P570 ?death }}
+                  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+                }} LIMIT {limit}""",
+            f"인물/{POLITIES.get(polity, polity)}",
+            failures,
+        )
+        log.info("Wikidata 인물 %s(%s): %d행", polity, POLITIES.get(polity, "?"), len(rows))
+
+        for r in rows:
+            p_uri = _val(r, "p")
+            if not p_uri:
+                continue
+            nid = _nid(p_uri)
+            if nid in nodes:  # 복수 국적 인물 — 먼저 본 것 유지
+                continue
+            nodes[nid] = Node(
+                id=nid,
+                type="person",
+                label=_val(r, "pLabel") or _qid(p_uri),
+                source=SOURCE,
+                start_date=_iso_date(_val(r, "birth")),
+                end_date=_iso_date(_val(r, "death")),
+                url=p_uri,
+                props={"polity": POLITIES.get(polity, polity)},
+            )
+
+    return list(nodes.values())
+
+
+def fetch_person_edges(
+    fetcher: Fetcher,
+    polities: list[str] | None = None,
+    limit: int = 5000,
+    failures: list[str] | None = None,
+) -> tuple[list[Node], list[Edge]]:
+    """인물의 관계 엣지 + 관계 상대 노드(장소/사건/조직)를 함께 수집.
+
+    상대 노드를 같이 넣지 않으면 전부 댕글링 엣지가 되어 그래프가 그려지지
+    않는다."""
+    polities = polities or list(POLITIES)
+    failures = failures if failures is not None else []
+    edges: list[Edge] = []
+    targets: dict[str, str] = {}  # 상대 QID -> 추론 노드 타입
+
+    for prop, (edge_type, label) in PERSON_RELATIONS.items():
+        for polity in polities:
+            # label service 를 빼서 쿼리를 가볍게 유지 — 라벨은 뒤에서 일괄 조회
+            rows = _safe_query(
+                fetcher,
+                f"""SELECT ?p ?o WHERE {{
+                      ?p wdt:P27 wd:{polity} ; wdt:P31 wd:Q5 ; wdt:{prop} ?o .
+                    }} LIMIT {limit}""",
+                f"{prop}/{POLITIES.get(polity, polity)}",
+                failures,
+            )
+            if rows:
+                log.info(
+                    "Wikidata %s(%s) x %s: %d행",
+                    prop, label, POLITIES.get(polity, polity), len(rows),
+                )
+
+            for r in rows:
+                p_uri, o_uri = _val(r, "p"), _val(r, "o")
+                if not p_uri or not o_uri:
+                    continue
+                # P22(아버지)/P25(어머니)는 '자녀 -> 부모' 방향이라
+                # child_of 스키마와 그대로 일치한다.
+                targets.setdefault(_qid(o_uri), _infer_type(edge_type))
+                edges.append(
+                    Edge(
+                        src=_nid(p_uri),
+                        dst=_nid(o_uri),
+                        type=edge_type,
+                        source=SOURCE,
+                        label=label,
+                        props={"wikidata_property": prop},
+                    )
+                )
+
+    log.info("관계 상대 노드 %d개 라벨 조회 중...", len(targets))
+    resolved = _labels(fetcher, set(targets))
+
+    nodes: list[Node] = []
+    # 노드 id 를 그대로 키로 쓴다. _qid() 는 URI 용('/' 분리)이라
+    # 'wd:Q123' 같은 노드 id 에 쓰면 통째로 되돌아와 조회가 전부 빗나간다.
+    actual_type: dict[str, str] = {}
+    for qid, inferred in targets.items():
+        label, type_qid = resolved.get(qid, (qid, None))
+        # 엣지 종류로 넘겨짚지 않고 실제 P31 을 우선한다. Wikidata 의
+        # P463(소속) 대상에는 조직뿐 아니라 사건도 섞여 있다.
+        node_type = WD_CLASS_TO_TYPE.get(type_qid or "", inferred)
+        node_id = f"{SOURCE}:{qid}"
+        actual_type[node_id] = node_type
+        nodes.append(
+            Node(
+                id=node_id,
+                type=node_type,
+                label=label,
+                source=SOURCE,
+                url=f"http://www.wikidata.org/entity/{qid}",
+            )
+        )
+
+    # 실제 타입이 스키마와 안 맞으면 버리지 않고 related_to 로 낮춘다 —
+    # 관계 자체는 사실이므로 보존하되 거짓 의미를 부여하지 않는다.
+    downgraded = 0
+    for e in edges:
+        allowed_dst = EDGE_TYPES[e.type][2]
+        if actual_type.get(e.dst, "") not in allowed_dst:
+            e.props["original_type"] = e.type
+            e.type = "related_to"
+            downgraded += 1
+    if downgraded:
+        log.info("스키마 불일치 엣지 %d개를 related_to 로 완화", downgraded)
+
+    # 중복 엣지 제거 (정체별 조회에서 복수 국적 인물이 겹친다)
+    unique = {(e.src, e.dst, e.type): e for e in edges}
+    return nodes, list(unique.values())
+
+
+EVENT_CLASSES = {
+    "Q1190554": "사건",
+    "Q178561": "전투",
+    "Q198": "전쟁",
+    "Q625298": "조약",
+}
+
+
+def fetch_events(
+    fetcher: Fetcher,
+    polities: list[str] | None = None,
+    limit: int = 20000,
+    failures: list[str] | None = None,
+) -> tuple[list[Node], list[Edge]]:
+    """한국 관련 사건/전투 + 발생 장소 엣지.
+
+    사건 분류(?cls) x 정체(?c) 를 한 쿼리에 넣으면 wdt:P279* 전이 경로가
+    폭발해 타임아웃난다. 조합별로 쪼갠다."""
+    polities = polities or list(POLITIES)
+    failures = failures if failures is not None else []
+    nodes: dict[str, Node] = {}
+    edges: list[Edge] = []
+    places: set[str] = set()
+
+    # 사건 분류는 VALUES 로 묶고 정체별로만 쪼갠다. 36개 조합으로 나누면
+    # 쿼리 수가 많아져 WDQS 레이트리밋("Not writable.")에 걸린다.
+    class_values = " ".join(f"wd:{c}" for c in EVENT_CLASSES)
+
+    for polity in polities:
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?e ?eLabel ?cls ?start ?end ?place WHERE {{
+                  VALUES ?cls {{ {class_values} }}
+                  ?e wdt:P31/wdt:P279* ?cls ; wdt:P17 wd:{polity} .
+                  OPTIONAL {{ ?e wdt:P580 ?start }}
+                  OPTIONAL {{ ?e wdt:P582 ?end }}
+                  OPTIONAL {{ ?e wdt:P276 ?place }}
+                  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+                }} LIMIT {limit}""",
+            f"사건/{POLITIES.get(polity, polity)}",
+            failures,
+        )
+        if rows:
+            log.info(
+                "Wikidata 사건 x %s: %d행", POLITIES.get(polity, polity), len(rows)
+            )
+
+        for r in rows:
+            e_uri = _val(r, "e")
+            if not e_uri:
+                continue
+            eid = _nid(e_uri)
+            if eid not in nodes:
+                cls_uri = _val(r, "cls")
+                nodes[eid] = Node(
+                    id=eid,
+                    type="event",
+                    label=_val(r, "eLabel") or _qid(e_uri),
+                    source=SOURCE,
+                    start_date=_iso_date(_val(r, "start")),
+                    end_date=_iso_date(_val(r, "end")),
+                    url=e_uri,
+                    props={
+                        "event_class": EVENT_CLASSES.get(_qid(cls_uri), "사건")
+                        if cls_uri
+                        else "사건"
+                    },
+                )
+            if place_uri := _val(r, "place"):
+                places.add(_qid(place_uri))
+                edges.append(
+                    Edge(src=eid, dst=_nid(place_uri), type="occurred_at", source=SOURCE)
+                )
+
+    if places:
+        log.info("사건 발생지 %d개 라벨 조회 중...", len(places))
+        for qid, (label, _) in _labels(fetcher, places).items():
+            nodes.setdefault(
+                f"{SOURCE}:{qid}",
+                Node(
+                    id=f"{SOURCE}:{qid}",
+                    type="place",
+                    label=label,
+                    source=SOURCE,
+                    url=f"http://www.wikidata.org/entity/{qid}",
+                ),
+            )
+
+    unique = {(e.src, e.dst, e.type): e for e in edges}
+    return list(nodes.values()), list(unique.values())
+
+
+def fetch_media(
+    fetcher: Fetcher, limit: int = 500, failures: list[str] | None = None
+) -> tuple[list[Node], list[Edge]]:
+    """한국 영화·드라마와 그것이 다루는 역사 소재(P921) 엣지."""
+    failures = failures if failures is not None else []
+    rows = _safe_query(
+        fetcher,
+        f"""SELECT ?w ?wLabel ?date ?subj ?subjLabel WHERE {{
+              VALUES ?cls {{ wd:Q11424 wd:Q5398426 }}
+              ?w wdt:P31 ?cls ; wdt:P495 wd:Q884 ; wdt:P921 ?subj .
+              OPTIONAL {{ ?w wdt:P577 ?date }}
+              SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+            }} LIMIT {limit}""",
+        "영화·드라마",
+        failures,
+    )
+
+    nodes: dict[str, Node] = {}
+    edges: list[Edge] = []
+
+    for r in rows:
+        w_uri, s_uri = _val(r, "w"), _val(r, "subj")
+        if not w_uri or not s_uri:
+            continue
+        wid = _nid(w_uri)
+        nodes[wid] = Node(
+            id=wid,
+            type="media",
+            label=_val(r, "wLabel") or _qid(w_uri),
+            source=SOURCE,
+            start_date=_iso_date(_val(r, "date")),
+            url=w_uri,
+        )
+        sid = _nid(s_uri)
+        # 소재의 실제 타입은 미확정 — 사건으로 가정하고, 다른 소스가 같은
+        # QID 를 더 정확한 타입으로 덮어쓰면 갱신된다.
+        nodes.setdefault(
+            sid,
+            Node(
+                id=sid,
+                type="event",
+                label=_val(r, "subjLabel") or _qid(s_uri),
+                source=SOURCE,
+                url=s_uri,
+            ),
+        )
+        edges.append(Edge(src=wid, dst=sid, type="depicts", source=SOURCE))
+
+    return list(nodes.values()), edges
+
+
+def _infer_type(edge_type: str) -> str:
+    return {
+        "born_in": "place",
+        "died_in": "place",
+        "participated_in": "event",
+        "held_position": "org",
+        "member_of": "org",
+        "child_of": "person",
+        "spouse_of": "person",
+        "created": "person",
+    }.get(edge_type, "person")
+
+
+def _iso_date(raw: str | None) -> str | None:
+    """'1397-04-18T00:00:00Z' -> '1397-04-18'. 기원전(-)도 보존."""
+    if not raw:
+        return None
+    return raw.split("T", 1)[0]
