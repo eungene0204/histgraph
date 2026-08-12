@@ -310,23 +310,31 @@ def enrich(
     node_types: tuple[str, ...] = ("person", "event"),
     limit: int = 500,
     full: bool = False,
+    refresh: bool = False,
+    scope_ids: set[str] | None = None,
 ) -> dict[str, int]:
     """그래프의 Wikidata 노드에 위키백과 서사를 채운다.
 
     연결 차수가 높은 노드부터 고른다 — 많이 연결된 인물이 문헌에도 많이
     등장하고, 위키백과 항목도 길다. 전부 받으면 3만 건이라 비현실적이다."""
     marks = ",".join("?" * len(node_types))
+    # refresh=True 면 이미 산문이 있는 노드도 다시 받는다. 도입부만 받아둔
+    # 인물을 본문 전체로 교체할 때 필요하다 — 인물 486건이 평균 536자에
+    # 그쳤는데, 관직·사건 참여는 대부분 첫 문단 뒤에 있다.
+    have_clause = "" if refresh else "AND (n.description IS NULL OR length(n.description) < 100)"
     rows = store.conn.execute(
         f"""SELECT n.id, n.label, COUNT(e.src) AS degree
               FROM nodes n
               LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
              WHERE n.source = 'wd' AND n.type IN ({marks})
-               AND (n.description IS NULL OR length(n.description) < 100)
+               {have_clause}
           GROUP BY n.id
-          ORDER BY degree DESC
-             LIMIT ?""",
-        (*node_types, limit),
+          ORDER BY degree DESC""",
+        (*node_types,),
     ).fetchall()
+    if scope_ids is not None:
+        rows = [r for r in rows if r["id"] in scope_ids]
+    rows = rows[:limit]
 
     if not rows:
         log.info("보강할 노드가 없습니다")

@@ -186,6 +186,14 @@ def cmd_infobox(args: argparse.Namespace) -> int:
     return 0
 
 
+def ex_scope_ids(path: str | None) -> set[str] | None:
+    if not path:
+        return None
+    from .extract import load_scope_ids
+
+    return load_scope_ids(path)
+
+
 def cmd_enrich(args: argparse.Namespace) -> int:
     """한국어 위키백과 서사를 기존 노드에 채운다."""
     from .sources import wikipedia
@@ -199,6 +207,8 @@ def cmd_enrich(args: argparse.Namespace) -> int:
             node_types=tuple(args.types),
             limit=args.limit,
             full=args.full,
+            refresh=args.refresh,
+            scope_ids=ex_scope_ids(args.scope),
         )
         print(
             f"  ✓ 문서명 {result['titles']:,} · 본문 {result['extracts']:,}"
@@ -265,7 +275,9 @@ def cmd_extract(args: argparse.Namespace) -> int:
     with GraphStore(args.db) as store:
         scope_ids = ex.load_scope_ids(args.scope) if args.scope else None
         docs = ex.load_documents(store, limit=args.limit, min_score=args.min_score,
-                                 scope_ids=scope_ids)
+                                 scope_ids=scope_ids, skip_covered=not args.no_skip_covered,
+                                 max_chunks=args.max_chunks,
+                                 node_types=tuple(args.types) if args.types else None)
         if not docs:
             print(
                 "  추출할 산문이 없습니다. 먼저 `ingest heritage` 로 content 를 수집하세요.",
@@ -294,6 +306,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
             backend = build_backend(args.backend, args.model)
             print(f"  백엔드: {backend.name} ({args.model or '기본 모델'})")
             empty = 0
+            # 근거 검증에 원문이 필요하다. 같은 노드의 여러 조각을 이어붙여
+            # 둬야 조각 경계에 걸친 근거도 원문에 있는 것으로 인정된다.
+            texts: dict[str, str] = {}
+            for doc in docs:
+                texts[doc.node_id] = texts.get(doc.node_id, "") + doc.text
             for i, doc in enumerate(docs, 1):
                 part = f" [{doc.chunk + 1}/{doc.total_chunks}]" if doc.total_chunks > 1 else ""
                 rels = ex.extract_one(backend, doc, gazetteer)
@@ -306,7 +323,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
         all_nodes, all_edges = [], []
         for node_id, relations in results.items():
-            n, e = ex.to_graph(relations, node_id, store)
+            n, e = ex.to_graph(relations, node_id, store, doc_text=texts.get(node_id))
             all_nodes.extend(n)
             all_edges.extend(e)
 
@@ -387,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
     p_en.add_argument("--types", nargs="*", default=["person", "event"])
     p_en.add_argument("--full", action="store_true", help="도입부 대신 본문 전체 (요청당 1건, 느림)")
     p_en.add_argument("--interval", type=float, default=1.0)
+    p_en.add_argument("--refresh", action="store_true", help="이미 산문이 있는 노드도 다시 받기")
+    p_en.add_argument("--scope", default=None, help="시대 서브그래프 DB 로 대상 한정")
     p_en.set_defaults(func=cmd_enrich)
 
     p_prune = sub.add_parser("prune", help="스포츠 이벤트 노드 제거")
@@ -405,6 +424,12 @@ def main(argv: list[str] | None = None) -> int:
                       help="추출 백엔드. 기본값은 로컬 MLX(키·비용 불필요, 스키마 강제)")
     p_ex.add_argument("--model", default=None, help="모델 이름 (백엔드 기본값 사용하려면 생략)")
     p_ex.add_argument("--dry-run", action="store_true", help="API 호출 없이 프롬프트만 출력")
+    p_ex.add_argument("--no-skip-covered", action="store_true",
+                      help="구조화 소스가 이미 덮은 문서도 추출 (기본은 건너뜀)")
+    p_ex.add_argument("--types", nargs="*", default=["event", "org"],
+                      help="추출 대상 노드 타입 (기본: 사건·조직)")
+    p_ex.add_argument("--max-chunks", type=int, default=3,
+                      help="문서당 사용할 조각 수 (밀도 상위순, 0=제한없음)")
     p_ex.add_argument("--scope", default=None,
                       help="시대 서브그래프 DB 경로. 그 노드들의 산문만 추출 (예: data/joseon.sqlite)")
     p_ex.set_defaults(func=cmd_extract)

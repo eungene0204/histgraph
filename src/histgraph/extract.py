@@ -506,11 +506,107 @@ def narrative_score(text: str) -> float:
     return score + min(len(text) / 4000, 0.5)
 
 
+def structural_coverage(store: GraphStore, node_id: str) -> set[str]:
+    """이 노드에 대해 **구조화 소스로 이미 확보한** 관계 타입.
+
+    국가유산청 API, 위키백과 인포박스처럼 파싱으로 얻은 관계는 LLM 이
+    다시 뽑을 이유가 없다. 추출 대상에서 빼면 요청 수가 크게 준다."""
+    return {
+        r["type"]
+        for r in store.conn.execute(
+            """SELECT DISTINCT type FROM edges
+               WHERE (src = ? OR dst = ?)
+                 AND source IN ('khs', 'kowiki:infobox', 'kowiki', 'wd')""",
+            (node_id, node_id),
+        )
+    }
+
+
+# 산문에서 캘 수 있지만 구조화 소스가 못 주는 관계. 이게 없으면 LLM 을
+# 부를 이유가 없다.
+LLM_ONLY = {"participated_in", "created", "held_position", "child_of", "spouse_of"}
+
+
+# 유물 문서에서 LLM 만 줄 수 있는 것은 제작자뿐이다. 사람 이름과 함께
+# 나올 때만 값이 있다 — '건립되었다' 처럼 주체 없는 서술은 관계가 안 된다.
+MAKER_WITH_NAME = re.compile(
+    r"[가-힣]{2,4}(?:이|가|은|는|의)\s*(?:만들|제작|지었|썼|그렸|새겼|주조|봉안)"
+    r"|(?:만든|제작한|지은|쓴|그린|새긴)\s*(?:이|사람|장인)?\s*[가-힣]{2,4}"
+)
+
+
+def worth_extracting(store: GraphStore, node_id: str, node_type: str, text: str) -> bool:
+    """이 문서에 LLM 을 부를 값이 있는가. **노드 타입별로 다르다.**
+
+    실측 근거: 조선 추출 대상 404조각 중 270조각(67%)이 유물 해설문인데,
+    거기서 뽑을 located_in·from_period 는 국가유산청 API 로 이미 5,813건
+    확보돼 있다. LLM 만 줄 수 있는 제작자가 실제로 이름과 함께 나오는
+    조각은 270개 중 23개(9%)뿐이었다 — 18시간을 써서 23건을 얻는 셈이다.
+
+    주의: 여기서 인물·사건 표지를 다시 검사하면 안 된다. min_score 2.0 이
+    이미 그 조건을 요구하므로 통과 문서는 전부 참이 되어 필터가 무력해진다."""
+    if node_type == "heritage":
+        # 소재지·시대는 구조화 API 가 이미 100% 준다. 제작자만 새롭다.
+        return bool(MAKER_WITH_NAME.search(text))
+
+    if node_type == "event":
+        # 인포박스가 지휘관·교전국을 이미 뽑았다면 서사에서 더 캘 몫이 준다.
+        # 다만 인포박스는 대표 인물만 주므로 본문이 길면 여전히 값이 있다.
+        covered = {
+            r["type"]
+            for r in store.conn.execute(
+                """SELECT DISTINCT type FROM edges
+                   WHERE (src = ? OR dst = ?) AND source = 'kowiki:infobox'""",
+                (node_id, node_id),
+            )
+        }
+        if "participated_in" in covered and len(text) < 4000:
+            return False
+        return True
+
+    # 인물·조직은 구조화 소스가 관직·참여를 거의 못 준다. 항상 대상.
+    return True
+
+
+def chunk_density(text: str) -> float:
+    """조각의 관계 밀도 — 1,000자당 인물·사건 표지 수.
+
+    긴 인물 문서를 앞에서부터 N조각만 취하는 방식은 쓰지 않는다. 실측:
+    송시열 문서는 9번째 조각에도 인물표지가 32개 있고, 이순신은 5조각이
+    고르게 분포한다. 밀도가 떨어지는 건 마지막 조각(각주·저서 목록)뿐이라
+    위치가 아니라 내용으로 골라야 알짜를 버리지 않는다."""
+    if not text:
+        return 0.0
+    hits = len(PERSON_HINT.findall(text)) + len(EVENT_HINT.findall(text))
+    return hits / (len(text) / 1000)
+
+
+def pick_chunks(docs: list[Document], max_per_doc: int) -> list[Document]:
+    """문서당 밀도 상위 조각만 남긴다. 원래 순서는 유지한다."""
+    if max_per_doc <= 0:
+        return docs
+    by_node: dict[str, list[Document]] = {}
+    for d in docs:
+        by_node.setdefault(d.node_id, []).append(d)
+
+    kept: list[Document] = []
+    for parts in by_node.values():
+        if len(parts) <= max_per_doc:
+            kept.extend(parts)
+            continue
+        top = sorted(parts, key=lambda d: chunk_density(d.text), reverse=True)[:max_per_doc]
+        kept.extend(sorted(top, key=lambda d: d.chunk))
+    return kept
+
+
 def load_documents(
     store: GraphStore,
     limit: int | None = None,
     min_score: float = 1.0,
     scope_ids: set[str] | None = None,
+    skip_covered: bool = False,
+    max_chunks: int = 0,
+    node_types: tuple[str, ...] | None = None,
 ) -> list[Document]:
     """추출 가치가 높은 순으로 문서를 고른다.
 
@@ -518,10 +614,19 @@ def load_documents(
     2.0 으로 올리면 둘 다 있는 글만 남는다.
 
     scope_ids 를 주면 그 노드들의 산문만 대상으로 한다."""
-    rows = store.conn.execute(
-        """SELECT id, label, description FROM nodes
-           WHERE description IS NOT NULL AND length(description) > 100"""
-    ).fetchall()
+    if node_types:
+        marks = ",".join("?" * len(node_types))
+        rows = store.conn.execute(
+            f"""SELECT id, label, description FROM nodes
+                WHERE description IS NOT NULL AND length(description) > 100
+                  AND type IN ({marks})""",
+            node_types,
+        ).fetchall()
+    else:
+        rows = store.conn.execute(
+            """SELECT id, label, description FROM nodes
+               WHERE description IS NOT NULL AND length(description) > 100"""
+        ).fetchall()
 
     if scope_ids is not None:
         before = len(rows)
@@ -543,9 +648,26 @@ def load_documents(
     if limit:
         kept = kept[:limit]
 
+    if skip_covered:
+        before = len(kept)
+        types = {
+            row["id"]: row["type"]
+            for row in store.conn.execute("SELECT id, type FROM nodes")
+        }
+        kept = [
+            (sc, r) for sc, r in kept
+            if worth_extracting(store, r["id"], types.get(r["id"], ""), r["description"])
+        ]
+        log.info("구조화 소스가 이미 덮은 문서 %d건 제외", before - len(kept))
+
     docs: list[Document] = []
     for _, r in kept:
         docs.extend(split_document(r["id"], r["label"], r["description"]))
+    if max_chunks:
+        before = len(docs)
+        docs = pick_chunks(docs, max_chunks)
+        log.info("문서당 밀도 상위 %d조각만 사용: %d → %d조각", max_chunks, before, len(docs))
+
     long_docs = sum(1 for _, r in kept if len(r["description"]) > CHUNK_CHARS)
     if long_docs:
         log.info(
