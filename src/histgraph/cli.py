@@ -285,7 +285,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
             )
             return 1
 
-        gazetteer = ex.build_gazetteer(store)
+        gazetteer = ex.build_gazetteer(store, scope_ids=scope_ids)
         print(f"→ 문서 {len(docs)}건, 가제티어 {sum(len(v) for v in gazetteer.values())}개 개체")
 
         if args.dry_run:
@@ -351,6 +351,22 @@ def cmd_scope(args: argparse.Namespace) -> int:
     print("\n  관계 구성:")
     for k, v in result["by_edge_type"].items():
         print(f"    {k:16} {v:>6,}")
+    return 0
+
+
+def cmd_timeline(args: argparse.Namespace) -> int:
+    """연도를 일급 개체로 정규화한다."""
+    from . import timeline
+
+    with GraphStore(args.db) as store:
+        result = timeline.build(store, link_attributes=not args.labels_only)
+        print(f"  연도 노드 {result['year_nodes']:,}개  ({result['span']})")
+        print(f"  라벨 연결 {result['label_links']:,}건 · 속성 연결 {result['attribute_edges']:,}건")
+        print(f"  연도 미해독 라벨 {result['unparsed_labels']:,}건 (왕대·세기 표기 — 환산표 없이는 추정 불가)")
+        if args.year:
+            print(f"\n  === {args.year}년에 일어난 일 ===")
+            for row in timeline.whats_in(store, args.year):
+                print(f"    [{row['type']:8}] {row['label'][:40]:42} ({row['rel'] or row['via']})")
     return 0
 
 
@@ -440,6 +456,11 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
     p_sc.add_argument("--keep-isolated", action="store_true", help="엣지 없는 노드도 유지")
     p_sc.set_defaults(func=cmd_scope)
+
+    p_tl = sub.add_parser("timeline", help="연도를 일급 개체로 정규화")
+    p_tl.add_argument("--labels-only", action="store_true", help="날짜 속성 연결 생략")
+    p_tl.add_argument("--year", type=int, default=None, help="그 해에 무슨 일이 있었는지 확인")
+    p_tl.set_defaults(func=cmd_timeline)
 
     sub.add_parser("stats", help="그래프 통계").set_defaults(func=cmd_stats)
 

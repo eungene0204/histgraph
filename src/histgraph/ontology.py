@@ -47,6 +47,9 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     # 정의한다. 따라서 org(왕조)도 도착 타입으로 허용한다. 별도 period 노드를
     # 만들면 같은 대상이 둘로 갈라진다.
     "from_period": ("시대", ("heritage", "artwork", "person", "event"), ("period", "org")),
+    # 시간축. 인물·사건은 연도와 '같은 실체'가 아니므로 same_as 가 아니라
+    # 엣지로 잇는다. 출생/사망/시작/종료는 엣지 label 로 구분한다.
+    "dated_to": ("시점", tuple(NODE_TYPES), ("period",)),
     "part_of": ("상위", tuple(NODE_TYPES), tuple(NODE_TYPES)),
     "related_to": ("관련", tuple(NODE_TYPES), tuple(NODE_TYPES)),
 }
