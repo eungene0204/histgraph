@@ -130,6 +130,9 @@ export class GraphView {
     this.adjacency = null;
     this.alpha = 1;
     this.autoFit = true;   // 사용자가 화면을 움직이기 전까지는 카메라가 따라간다
+    // 첫 맞춤은 즉시. 처음부터 서서히 따라가면 그래프가 화면 밖에서
+    // 반 초 동안 날아 들어온다.
+    this._fitted = false;
     if (!merge) this.resetView();
     return incoming;
   }
@@ -219,10 +222,20 @@ export class GraphView {
     // 계속 퍼져서 결국 화면 밖으로 나간다 (실측: 노드 117개에서 6초에
     // 화면의 16%를 채우던 그래프가 20초에는 1%만 남았다). 사용자가
     // 직접 움직이기 시작하면 그때부터 손을 뗀다.
-    if (this.autoFit && this.alpha > 0.02) this.fitView();
+    if (this.autoFit && this.alpha > 0.02) {
+      this.fitView(70, this._fitted ? 0.08 : 0);
+      this._fitted = true;
+    }
   }
 
-  fitView(pad = 70) {
+  // `ease` 를 주면 목표로 **서서히** 따라간다.
+  //
+  // 매 프레임 목표값을 그대로 대입하면 배치 전체가 떨린다. 카메라는 노드
+  // 좌표의 최소/최대로 정해지는데, 경계값은 가장 흔들리는 통계라서 바깥
+  // 노드 하나가 몇 픽셀 움직이면 배율과 이동량이 같이 흔들리고, 그러면
+  // **가만히 있는 노드까지 화면에서 떨린다.** 시뮬레이션이 식는 4초 내내
+  // 그래프가 진동하는 것처럼 보였던 원인이다.
+  fitView(pad = 70, ease = 0) {
     if (!this.nodes.length) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of this.nodes) {
@@ -234,9 +247,16 @@ export class GraphView {
     const k = Math.min(1.35, Math.max(0.22,
       Math.min((w - pad * 2) / Math.max(maxX - minX, 1),
                (h - pad * 2) / Math.max(maxY - minY, 1))));
-    this.k = k;
-    this.tx = w / 2 - ((minX + maxX) / 2) * k;
-    this.ty = h / 2 - ((minY + maxY) / 2) * k;
+    const tx = w / 2 - ((minX + maxX) / 2) * k;
+    const ty = h / 2 - ((minY + maxY) / 2) * k;
+
+    if (ease <= 0) {           // 명시적 호출(버튼·첫 배치)은 즉시 맞춘다
+      this.k = k; this.tx = tx; this.ty = ty;
+      return;
+    }
+    this.k += (k - this.k) * ease;
+    this.tx += (tx - this.tx) * ease;
+    this.ty += (ty - this.ty) * ease;
   }
 
   // --- 렌더 -----------------------------------------------------------
@@ -339,11 +359,18 @@ export class GraphView {
 
   // --- 상호작용 -------------------------------------------------------
   _resize() {
-    this.dpr = window.devicePixelRatio || 1;
+    const dpr = window.devicePixelRatio || 1;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
-    this.canvas.width = w * this.dpr;
-    this.canvas.height = h * this.dpr;
+    const pw = Math.round(w * dpr);
+    const ph = Math.round(h * dpr);
+    // **크기가 그대로면 아무것도 하지 않는다.** ResizeObserver 는 상세
+    // 패널이 열리거나 소수점 반올림이 달라져도 불린다. 그때마다 alpha 를
+    // 되살리면 시뮬레이션이 영영 식지 않아 배치가 계속 떤다.
+    if (pw === this.canvas.width && ph === this.canvas.height) return;
+    this.dpr = dpr;
+    this.canvas.width = pw;
+    this.canvas.height = ph;
     this.alpha = Math.max(this.alpha, 0.35);
   }
 
@@ -443,9 +470,17 @@ export class GraphView {
     this.onSelect(node);
   }
 
+  // 프로그램에서 고르는 경로. **콜백을 부르지 않는다.**
+  //
+  // 부르면 무한히 돈다: 클릭 → onSelect → load() → select() → onSelect →
+  // load() → … 한 번 클릭할 때마다 요청이 끝없이 이어지고, load 마다
+  // setData 가 alpha 를 1 로 되돌려 배치가 영영 식지 않는다. 상세 패널도
+  // 매 바퀴 다시 그려져 여러 노드가 번갈아 나오는 것처럼 보인다.
+  //
+  // 호출부(app.js)는 이미 자기가 showDetail 을 부르므로 알림이 필요 없다.
   select(id) {
     const node = this.byId.get(id);
-    if (node) this._select(node);
+    if (node) this.selected = node.id;
   }
 
   // 노드가 화면 밖이면 사용자는 아무 일도 안 일어났다고 생각한다
