@@ -376,28 +376,83 @@ def to_graph(
     doc_text 를 주면 근거가 원문에 없는 관계를 버린다."""
     nodes: dict[str, Node] = {}
     edges: list[Edge] = []
-    dropped_evidence = dropped_schema = flipped = 0
+    dropped_evidence = dropped_schema = flipped = self_loops = 0
+    dropped_possessive = dropped_anachronism = dropped_reversed = 0
+    dropped_unnamed = 0
+
+    # 이름 하나가 여러 노드를 가리킬 때 **연결이 많은 쪽**을 고른다.
+    # 실측: '정종'을 이름 그대로 찾으면 엣지 1개짜리 동명 노드가 걸리고,
+    # 관계 25건을 가진 조선 정종(wd:Q485556)은 라벨이 '조선 정종'이라
+    # 비켜간다. 그래서 화면에서 정종은 아버지도 형제도 없는 외톨이가 됐다.
+    #
+    # 라벨과 별칭을 **한 번에** 본다. 라벨 일치를 무조건 앞세우면 위와
+    # 같은 일이 되풀이된다 — 그 이름으로 불릴 수 있는 후보를 모두 모은 뒤
+    # 가장 잘 연결된 것을 고르는 편이 산문의 의도에 가깝다.
+    CANDIDATES = """
+        SELECT n.id, n.type, n.start_date, n.end_date,
+               (SELECT COUNT(*) FROM edges e WHERE e.src = n.id OR e.dst = n.id) AS deg
+          FROM nodes n
+         WHERE (n.label = ?1
+                OR EXISTS (SELECT 1 FROM aliases a
+                            WHERE a.node_id = n.id AND a.alias = ?1))
+               {type_clause}
+      ORDER BY deg DESC, n.id
+         LIMIT 8"""
+
+    # 출처 문서의 연대. 동명이인을 가를 때 기준이 된다 — 안방준(1573~1654)
+    # 문서에 나온 '이황'은 예종(1450~1469)이 아니라 퇴계(1501~1570)다.
+    from .promote import life_span as _life_span
+
+    _doc = store.conn.execute(
+        "SELECT start_date, end_date FROM nodes WHERE id = ?", (source_node,)
+    ).fetchone()
+    doc_span = _life_span(_doc["start_date"], _doc["end_date"]) if _doc else None
+
+    def node_dates(node_id: str) -> tuple[str | None, str | None]:
+        """저장된 생몰년. 새로 만든 ex: 노드는 연대가 없다."""
+        row = store.conn.execute(
+            "SELECT start_date, end_date FROM nodes WHERE id = ?", (node_id,)
+        ).fetchone()
+        return (row["start_date"], row["end_date"]) if row else (None, None)
+
+    def reversed_by_source(edge_type: str, src: str, dst: str) -> bool:
+        """구조화 소스가 **반대 방향**을 이미 알고 있는가.
+
+        `child_of` 는 person→person 이라 `orient()` 가 방향을 못 가린다.
+        실측: 추출 가족 관계 122건 중 50건이 구조화 소스와 어긋났고 대부분
+        방향이 뒤집힌 것이었다 — `폐비 윤씨 --child_of--> 조선 연산군`
+        (연산군이 그녀의 아들이다), `조선 인조 --child_of--> 소현세자`
+        (소현세자가 인조의 아들이다).
+
+        Wikidata·인포박스가 `연산군 --child_of--> 폐비 윤씨` 를 이미 갖고
+        있으면 추출본은 뒤집힌 것이다. 옳은 엣지가 이미 있으므로 버린다."""
+        if edge_type not in ("child_of", "spouse_of"):
+            return False
+        return store.conn.execute(
+            """SELECT 1 FROM edges
+                WHERE src = ? AND dst = ? AND type = ?
+                  AND source IN ('wd', 'kowiki:infobox') LIMIT 1""",
+            (dst, src, edge_type),
+        ).fetchone() is not None
 
     def resolve(name: str, node_type: str) -> tuple[str, str]:
         """이름 -> (노드 id, 실제 노드 타입)."""
-        row = store.conn.execute(
-            "SELECT id, type FROM nodes WHERE label = ? AND type = ? LIMIT 1",
-            (name, node_type),
-        ).fetchone()
+        name = normalize_name(name)
+        row = pick_candidate(
+            store.conn.execute(
+                CANDIDATES.format(type_clause="AND n.type = ?2"), (name, node_type)
+            ).fetchall(),
+            doc_span,
+        )
         if row:
             return row["id"], row["type"]
-        # 별칭으로도 찾는다 — '이방원'은 '태종'의 별칭이다
-        row = store.conn.execute(
-            """SELECT n.id, n.type FROM aliases a JOIN nodes n ON n.id = a.node_id
-               WHERE a.alias = ? LIMIT 1""",
-            (name,),
-        ).fetchone()
-        if row:
-            return row["id"], row["type"]
-        # 타입 무시하고 라벨만 — 모델이 타입을 잘못 붙였을 수 있다
-        row = store.conn.execute(
-            "SELECT id, type FROM nodes WHERE label = ? LIMIT 1", (name,)
-        ).fetchone()
+        # 타입을 무시하고 한 번 더 — 모델이 타입을 잘못 붙였을 수 있다
+        row = pick_candidate(
+            store.conn.execute(
+                CANDIDATES.format(type_clause=""), (name,)
+            ).fetchall(),
+            doc_span,
+        )
         if row:
             return row["id"], row["type"]
         nid = f"ex:{node_type}:{name}"
@@ -418,8 +473,52 @@ def to_graph(
                 dropped_evidence += 1
                 continue
 
+            if possessive_mismatch(edge_type, rel.get("object", ""),
+                                   rel.get("evidence", "")):
+                dropped_possessive += 1
+                continue
+
+            # 이름 자리에 설명구가 온 것. 가리키는 사람을 특정할 수 없으므로
+            # 노드를 만들지 않는다 (`양윤순의 따님` → 이름을 모른다).
+            if is_descriptive_name(rel.get("object", "")) or is_descriptive_name(
+                rel.get("subject", "")
+            ):
+                dropped_possessive += 1
+                continue
+
             src, src_type = resolve(rel["subject"], rel["subject_type"])
             dst, dst_type = resolve(rel["object"], rel["object_type"])
+
+            # 모델이 같은 개체를 양끝에 놓는 일이 있다 (실측: '기사환국이
+            # 기사환국과 관련된다'). 자기순환은 아무 사실도 말하지 않는다.
+            if src == dst:
+                self_loops += 1
+                continue
+
+            if lifespan_conflict(edge_type, node_dates(src), node_dates(dst)):
+                dropped_anachronism += 1
+                continue
+
+            if reversed_by_source(edge_type, src, dst):
+                dropped_reversed += 1
+                continue
+
+            # 근거가 상대 인물을 지목하지 않으면 검증할 수 없는 엣지다.
+            # 문서 주인은 예외 (그 글이 곧 그 사람의 글이다).
+            if dst_type == "person" and dst != source_node:
+                row = store.conn.execute(
+                    "SELECT label FROM nodes WHERE id = ?", (dst,)
+                ).fetchone()
+                if row:
+                    names = name_variants(row["label"]) | {
+                        a["alias"]
+                        for a in store.conn.execute(
+                            "SELECT alias FROM aliases WHERE node_id = ?", (dst,)
+                        )
+                    }
+                    if not evidence_names_target(rel.get("evidence", ""), names):
+                        dropped_unnamed += 1
+                        continue
 
             ok, flip = orient(edge_type, src_type, dst_type)
             if not ok:
@@ -447,10 +546,15 @@ def to_graph(
         except (KeyError, ValueError) as err:
             log.warning("관계 변환 실패: %s (%s)", rel, err)
 
-    if dropped_evidence or dropped_schema or flipped:
+    if (dropped_evidence or dropped_schema or flipped or self_loops
+            or dropped_possessive or dropped_anachronism or dropped_reversed
+            or dropped_unnamed):
         log.info(
-            "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 방향교정 %d건",
-            dropped_evidence, dropped_schema, flipped,
+            "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 자기순환 %d건 버림"
+            " · 소유격오독 %d건 버림 · 연대충돌 %d건 버림"
+            " · 역방향 %d건 버림 · 근거무지목 %d건 버림 · 방향교정 %d건",
+            dropped_evidence, dropped_schema, self_loops, dropped_possessive,
+            dropped_anachronism, dropped_reversed, dropped_unnamed, flipped,
         )
     return list(nodes.values()), edges
 
@@ -487,6 +591,197 @@ EVENT_HINT = re.compile(
 CATALOG_HINT = re.compile(
     r"크기|규격|\dcm|재질|장정|판심|반곽|행자수|권차|장차|지질|보존상태"
 )
+
+# 족보 목록 행 — 인물 문서의 '가족 관계' 절은 `증손부 : 창녕조씨` 꼴
+# 목록이다. 실측(안방준 검증, 2026-08-14): 이 목록을 그대로 주면 모델이
+# (1) 증손부·손서 같은 방계 인물을 본인의 spouse_of 로 붙이고,
+# (2) 장남을 본인의 부모로 뒤집고 (`장남 : 안후지` → 안방준 child_of 안후지),
+# (3) 같은 관계 블록을 4번 반복하는 루프에 빠져 조각당 6분을 태운다.
+# 직계 가족은 서사 문단("아버지는 안중관이며, 처는…")에서 올바르게
+# 뽑히므로 목록 행을 지워도 잃는 것이 없다.
+#
+# **호칭을 열거하려 하지 말 것.** 처음엔 생부·양부·증손부처럼 60개를 적어
+# 뒀는데 실측(인물 산문 46,370줄)에서 2,265줄을 놓쳤다. 놓친 라벨 상위 30개가
+# 전부 친족어였다 — 할아버지·서손자·종증조부·재종숙·손녀사위·사돈·당질…
+# 한국어 친족어는 접두사(종·재종·삼종·외·처·시·양·이복)와 어간이 자유롭게
+# 붙는 생성형이라 목록으로 못 덮는다. 실제로 안방준 문서의 `종조부`·
+# `재종숙` 이 새어 나와 방계 9명이 그의 부모로 들어갔다.
+#
+# 그래서 어휘가 아니라 **구조**로 잡는다: 줄 첫머리의 짧은 한글 라벨 + 콜론.
+# 이 형태로 걸리는 9,129줄 중 친족어 힌트조차 없는 것은 430줄뿐이고
+# 그마저 대부분 친족이다(할아버지·사촌·올케·아내). 서술문은 걸리지 않는다
+# — `아버지는 첨지중추부사 안중관이며` 는 라벨 뒤가 콜론이 아니다.
+KINSHIP_LINE = re.compile(r"^\s*[가-힣]{1,6}(?:\([^)]{0,12}\))?\s*:\s")
+
+
+def strip_kinship_lists(text: str) -> str:
+    """족보 목록 행을 제거한다. 서사 문단은 건드리지 않는다."""
+    return "\n".join(
+        line for line in text.splitlines() if not KINSHIP_LINE.match(line)
+    )
+
+
+# 소유격을 삼켜 **한 세대를 건너뛰는** 오류를 잡는다.
+#
+# 실측: `처는 경주 정씨 판관 정승복(鄭承復)의 딸이다` 에서 모델이
+# `안방준 --spouse_of--> 정승복` 을 냈다. 안방준의 아내는 정승복의 딸이지
+# 정승복이 아니다. 근거 검증은 이걸 못 잡는다 — 근거 구절이 원문에 그대로
+# 있기 때문이다. 한국어 인물 산문에서 여성은 이름 대신 `누구의 딸` 로만
+# 적히는 일이 흔해서 이 형태가 반복된다.
+#
+# **관계 타입마다 판정이 뒤집힌다는 점이 함정이다.** `A --child_of--> B` 는
+# 'A 는 B 의 자녀' 라는 뜻이므로 `안중관의 아들 안방준` 에서 나온
+# `안방준 --child_of--> 안중관` 은 **옳다**. 같은 소유격이 spouse_of 에서는
+# 오류고 child_of 에서는 정답이다. 한 규칙으로 뭉뚱그리면 맞는 부모 관계를
+# 버린다.
+#
+# 딸의 이름이 원문에 없으므로 **고쳐 붙일 수 없다. 버리는 것이 맞다.**
+_PARENT_KIN = r"딸|따님|아들|자제|소생|자녀"      # 한 세대 아래
+_DESCENDANT_KIN = r"손자|손녀|증손|현손|후손|외손"  # 두 세대 이상 아래
+
+# 관계 타입 -> 그 타입에서 '건너뛴 세대' 를 뜻하는 친족어
+POSSESSIVE_SKIP: dict[str, str] = {
+    # 배우자는 상대의 부모·조부를 가리키면 전부 오류다
+    "spouse_of": rf"{_PARENT_KIN}|{_DESCENDANT_KIN}",
+    # 자녀 관계에서 `X의 아들` 은 정상. `X의 손자` 만 한 세대를 건너뛴 것.
+    "child_of": _DESCENDANT_KIN,
+}
+
+
+# 이름이 아니라 **설명구**인 것. 노드로 만들면 안 된다.
+#
+# 실측: `spouse_of 양윤순(梁允純)의 따님` 이라는 노드가 생겼다. 산문이
+# 여성을 이름 없이 `누구의 딸` 로만 적었는데 모델이 그 구절을 통째로
+# 이름으로 냈다. `possessive_mismatch` 는 **근거 안에서** 소유격을 찾으므로
+# 이름 자체가 설명구인 이 경우를 놓친다.
+DESCRIPTIVE_NAME = re.compile(
+    rf"의\s*(?:{_PARENT_KIN}|{_DESCENDANT_KIN}"
+    r"|부인|처|아내|남편|어머니|아버지|부모|형|아우|동생|누이)\s*$"
+)
+
+
+def name_variants(label: str) -> set[str]:
+    """산문이 이 인물을 부를 법한 표기들.
+
+    한국어 산문은 성을 떼고 부르는 일이 잦다 — `김종직` 을 `종직에게
+    수업하였는데`, `윤필상` 을 `필상 등에게` 로 쓴다. 라벨만 대조하면
+    멀쩡한 관계를 근거 없음으로 오판한다."""
+    parts = label.split()
+    bare = parts[-1]
+    # 파생형은 두 글자 이상만 쓴다 — 한 글자는 본문 아무 데나 걸린다.
+    derived = {x for x in (parts[-1], bare[1:] if 3 <= len(bare) <= 4 else "")
+               if len(x) >= 2}
+    # 원본 라벨은 길이와 무관하게 always 포함한다. 빼면 한 글자 라벨의
+    # 후보가 통째로 비어 모든 관계가 '근거 무지목' 으로 버려진다.
+    return {label} | derived
+
+
+def evidence_names_target(evidence: str, names: set[str]) -> bool:
+    """근거 구절이 상대를 실제로 지목하는가.
+
+    실측: 인물 대상 관계 268건 중 14건(5%)이 근거에 상대 이름이 없었고
+    대부분 지어낸 것이었다 — `정약종의 아들 정철상도 구속되었고` 에서
+    `child_of 정약용`, 이순신·김억추 이야기에서 `child_of 이이`.
+    **근거 검증은 구절이 원문에 있는지만 보므로 이것을 못 잡는다.**
+
+    문서 주인에게는 적용하지 않는다. `3·1 운동` 문서의 문장은 그 사건
+    이름을 다시 적지 않는 것이 자연스럽다 (실측: 그렇게 하면 정상 엣지
+    363건이 날아간다)."""
+    flat = "".join(evidence.split())
+    return any("".join(n.split()) in flat for n in names)
+
+# 한자 병기 꼬리. `송시열(宋時烈)` 이 `송시열` 과 다른 노드가 되는 것을 막는다.
+HANJA_TAIL = re.compile(r"\s*\([一-鿿\s,·]+\)\s*$")
+
+
+def normalize_name(name: str) -> str:
+    """추출된 이름을 그래프의 라벨 표기에 맞춘다.
+
+    실측: 같은 문서에서 `송시열` 과 `송시열(宋時烈)` 이 각각 노드가 되어
+    화면에 같은 사람이 둘로 나왔다. 조헌·이상익·최영성도 마찬가지였다.
+    한자 병기는 표기 차이일 뿐 다른 사람이 아니다."""
+    return HANJA_TAIL.sub("", name).strip()
+
+
+def is_descriptive_name(name: str) -> bool:
+    """`양윤순의 따님` 처럼 이름이 아니라 설명구인가."""
+    return bool(DESCRIPTIVE_NAME.search(name.strip()))
+
+
+# 가족 관계는 두 사람이 **같은 시대를 살아야** 성립한다.
+#
+# 실측(인물↔인물 추출 엣지 81건 중 생몰년을 아는 것): 70건은 생애가 겹치고
+# 121년 넘게 벌어진 7건은 전부 오류였다. 그중
+#   이세좌 --child_of--> 이수원   451년 차이
+#   이세좌 --spouse_of--> 이수원   451년 차이 (같은 쌍에 모순된 두 관계)
+# 처럼 정의상 불가능한 것이 5건이다. 이름이 같은 다른 시대 사람에게 붙은
+# 것으로, 근거 검증도 이름 해소도 막지 못한다.
+#
+# `related_to` 는 넣지 않는다 — `김종직 --related_to--> 주희`(498년)처럼
+# 학맥·추숭 관계는 시대가 달라도 참일 수 있다.
+LIFESPAN_CHECKED = {"child_of", "spouse_of"}
+# 생몰년 표기가 어긋나거나 한쪽만 아는 경우를 감안해 넉넉히 잡는다.
+LIFESPAN_TOLERANCE = 40
+
+
+def lifespan_conflict(
+    edge_type: str, src_dates: tuple[str | None, str | None],
+    dst_dates: tuple[str | None, str | None],
+) -> bool:
+    """가족 관계인데 두 사람의 생애가 겹칠 수 없는가."""
+    if edge_type not in LIFESPAN_CHECKED:
+        return False
+    from .promote import life_span
+
+    a, b = life_span(*src_dates), life_span(*dst_dates)
+    if a is None or b is None:
+        return False  # 근거가 없으면 막지 않는다
+    gap = max(a[0], b[0]) - min(a[1], b[1])
+    return gap > LIFESPAN_TOLERANCE
+
+
+def pick_candidate(rows: list, doc_span: tuple[int, int] | None):
+    """이름이 여러 노드를 가리킬 때 하나를 고른다.
+
+    기본 기준은 **연결 차수**다 — 산문이 '정종'이라 쓸 때 엣지 1개짜리
+    동명 노드가 아니라 관계 24건짜리 조선 정종을 뜻할 가능성이 크다.
+
+    다만 차수만 보면 **왕의 휘(諱)가 다른 유명인을 잡아먹는다.** 실측:
+    조선 예종의 휘가 이황(李晄)이라 별칭에 '이황'이 있는데, 안방준 문서의
+    `퇴계 이황(李滉)의 문인` 에서 차수 큰 예종이 이겼다. 한글이 같을 뿐
+    다른 사람이다.
+
+    그래서 **출처 문서의 연대와 겹치는 후보를 먼저 본다.** 겹치는 것이
+    있으면 그 안에서 차수로 고르고, 없으면 원래대로 차수만 본다
+    (연대를 모르는 후보를 탈락시키면 멀쩡한 연결이 사라진다)."""
+    if not rows:
+        return None
+    if doc_span is None:
+        return rows[0]
+    from .promote import life_span
+
+    compatible = []
+    for r in rows:
+        span = life_span(r["start_date"], r["end_date"])
+        if span is None:
+            continue
+        if not (max(span[0], doc_span[0]) - min(span[1], doc_span[1]) > LIFESPAN_TOLERANCE):
+            compatible.append(r)
+    return compatible[0] if compatible else rows[0]
+
+
+def possessive_mismatch(edge_type: str, obj: str, evidence: str) -> bool:
+    """근거가 `<대상>의 딸` 꼴이면 대상은 상대가 아니라 그 윗대다."""
+    kin = POSSESSIVE_SKIP.get(edge_type)
+    if not kin or not obj or not evidence:
+        return False
+    # 대상 이름 바로 뒤(한자 병기·공백은 건너뛴다)에 소유격 친족어가 오는가
+    pos = evidence.find(obj)
+    if pos < 0:
+        return False
+    tail = evidence[pos + len(obj):]
+    tail = re.sub(r"^\s*\([^)]{0,20}\)", "", tail)  # `(鄭承復)` 같은 한자 병기
+    return bool(re.match(rf"\s*의\s*(?:{kin})", tail))
 
 
 def narrative_score(text: str) -> float:
@@ -607,6 +902,7 @@ def load_documents(
     skip_covered: bool = False,
     max_chunks: int = 0,
     node_types: tuple[str, ...] | None = None,
+    skip_extracted: bool = True,
 ) -> list[Document]:
     """추출 가치가 높은 순으로 문서를 고른다.
 
@@ -632,6 +928,32 @@ def load_documents(
         before = len(rows)
         rows = [r for r in rows if r["id"] in scope_ids]
         log.info("범위 한정: 산문 %d건 → %d건", before, len(rows))
+
+    # 이미 추출한 문서는 건너뛴다. **`--limit` 으로 나눠 돌리려면 필수다** —
+    # 없으면 두 번째 배치가 첫 배치와 같은 문서를 다시 처리한다 (조각당
+    # 200초라 하루를 통째로 버린다). 다시 뽑고 싶으면 `--redo`.
+    if skip_extracted:
+        done = {
+            r["id"]
+            for r in store.conn.execute(
+                """SELECT DISTINCT json_extract(props, '$.extracted_from') AS id
+                     FROM edges WHERE source = 'extract'"""
+            )
+            if r["id"]
+        }
+        if done:
+            before = len(rows)
+            rows = [r for r in rows if r["id"] not in done]
+            log.info("이미 추출한 문서 %d건 제외 (남은 대상 %d건)",
+                     before - len(rows), len(rows))
+
+    # 족보 목록은 점수·밀도 산정 전에 지운다. 남겨두면 이름 밀도가
+    # 부풀어 족보 조각이 서사 조각을 밀어내고 상위로 뽑힌다.
+    rows = [
+        {**dict(r), "description": strip_kinship_lists(r["description"])}
+        for r in rows
+    ]
+    rows = [r for r in rows if len(r["description"]) > 100]
 
     scored = [
         (narrative_score(r["description"]), r)
