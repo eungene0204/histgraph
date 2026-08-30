@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 
 from ..http import Fetcher
@@ -139,6 +140,18 @@ def _labels(fetcher: Fetcher, qids: set[str], chunk: int = 400) -> dict[str, tup
     return out
 
 
+# 진짜 개체 식별자만. Wikidata 는 '값 불명'을 blank node 로 주는데
+# (`.well-known/genid/<32자리 해시>`) 그걸 QID 로 받아들이면 라벨이
+# 해시인 유령 인물이 그래프에 생긴다. 실측 75개가 그렇게 들어와 있었다 —
+# '누구의 어머니는 [알 수 없음]' 이 사람 노드가 된 것이다.
+QID_RE = re.compile(r"^[QPL]\d+$")
+
+
+def is_real_qid(uri: str) -> bool:
+    """이 URI 가 실제 Wikidata 개체를 가리키는가."""
+    return bool(QID_RE.match(uri.rsplit("/", 1)[-1]))
+
+
 def _qid(uri: str) -> str:
     return uri.rsplit("/", 1)[-1]
 
@@ -247,6 +260,10 @@ def fetch_person_edges(
                 p_uri, o_uri = _val(r, "p"), _val(r, "o")
                 if not p_uri or not o_uri:
                     continue
+                # '값 불명'(blank node)은 개체가 아니다. 받아들이면 라벨이
+                # 해시인 유령 인물이 생긴다 (`is_real_qid` 주석 참조).
+                if not is_real_qid(p_uri) or not is_real_qid(o_uri):
+                    continue
                 # P22(아버지)/P25(어머니)는 '자녀 -> 부모' 방향이라
                 # child_of 스키마와 그대로 일치한다.
                 targets.setdefault(_qid(o_uri), _infer_type(edge_type))
@@ -261,6 +278,69 @@ def fetch_person_edges(
                     )
                 )
 
+    return _resolve_targets(fetcher, edges, targets)
+
+
+def fetch_edges_for(
+    fetcher: Fetcher,
+    qids: list[str],
+    failures: list[str] | None = None,
+    chunk: int = 100,
+) -> tuple[list[Node], list[Edge]]:
+    """**지정한 QID** 들의 관계 엣지 + 상대 노드.
+
+    `fetch_person_edges` 는 국적(P27)으로 대상을 고른다. 승격으로 들어온
+    인물은 바로 그 국적 태그가 없어서 수집에서 빠진 사람들이라, 같은
+    경로로는 몇 번을 다시 돌려도 들어오지 않는다. QID 를 직접 지정하는
+    길이 따로 있어야 관계가 따라온다."""
+    failures = failures if failures is not None else []
+    edges: list[Edge] = []
+    targets: dict[str, str] = {}
+    ordered = sorted(set(qids))
+
+    for prop, (edge_type, label) in PERSON_RELATIONS.items():
+        for i in range(0, len(ordered), chunk):
+            values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+            rows = _safe_query(
+                fetcher,
+                f"""SELECT ?p ?o WHERE {{
+                      VALUES ?p {{ {values} }}
+                      ?p wdt:{prop} ?o .
+                    }}""",
+                f"승격보강/{prop}/{i}",
+                failures,
+            )
+            for r in rows:
+                p_uri, o_uri = _val(r, "p"), _val(r, "o")
+                if not p_uri or not o_uri:
+                    continue
+                # '값 불명'(blank node)은 개체가 아니다. 받아들이면 라벨이
+                # 해시인 유령 인물이 생긴다 (`is_real_qid` 주석 참조).
+                if not is_real_qid(p_uri) or not is_real_qid(o_uri):
+                    continue
+                targets.setdefault(_qid(o_uri), _infer_type(edge_type))
+                edges.append(
+                    Edge(
+                        src=_nid(p_uri),
+                        dst=_nid(o_uri),
+                        type=edge_type,
+                        source=SOURCE,
+                        label=label,
+                        props={"wikidata_property": prop},
+                    )
+                )
+
+    log.info("승격 노드 %d개에서 관계 %d건 수집", len(ordered), len(edges))
+    return _resolve_targets(fetcher, edges, targets)
+
+
+def _resolve_targets(
+    fetcher: Fetcher, edges: list[Edge], targets: dict[str, str]
+) -> tuple[list[Node], list[Edge]]:
+    """관계 상대 노드의 라벨·타입을 채우고 스키마에 맞춘다.
+
+    상대 노드를 같이 넣지 않으면 전부 댕글링 엣지가 되어 그래프가
+    그려지지 않는다."""
     log.info("관계 상대 노드 %d개 라벨 조회 중...", len(targets))
     resolved = _labels(fetcher, set(targets))
 
@@ -459,10 +539,20 @@ def _infer_type(edge_type: str) -> str:
 
 
 def _iso_date(raw: str | None) -> str | None:
-    """'1397-04-18T00:00:00Z' -> '1397-04-18'. 기원전(-)도 보존."""
+    """'1397-04-18T00:00:00Z' -> '1397-04-18'. 기원전(-)도 보존.
+
+    **Wikidata 는 '값 불명'을 blank node 로 준다.** `wdt:P569` 가
+    `http://www.wikidata.org/.well-known/genid/…` 로 오는데, 그대로 담으면
+    날짜 칸에 URL 이 들어앉는다. 실측으로 100개 노드가 그렇게 오염돼
+    있었고(침류왕·고국원왕·왕인…) 연대를 보는 관문이 전부 헛돌았다.
+    날짜로 읽히지 않는 값은 '모름'(None)으로 처리하는 것이 맞다."""
     if not raw:
         return None
-    return raw.split("T", 1)[0]
+    date = raw.split("T", 1)[0]
+    # 기원전은 '-0400' 처럼 앞에 부호가 붙는다
+    if not re.match(r"^-?\d{1,4}-\d{2}-\d{2}$", date):
+        return None
+    return date
 
 
 def fetch_aliases(
