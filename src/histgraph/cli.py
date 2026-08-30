@@ -39,7 +39,13 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), val.strip())
 
 
-def _persist(store: GraphStore, source: str, nodes: list[Node], edges: list[Edge]) -> None:
+def _persist(
+    store: GraphStore,
+    source: str,
+    nodes: list[Node],
+    edges: list[Edge],
+    quiet: bool = False,
+) -> None:
     node_map = {n.id: n for n in nodes}
     problems = [msg for e in edges if (msg := validate_edge_endpoints(e, node_map))]
     if problems:
@@ -49,7 +55,8 @@ def _persist(store: GraphStore, source: str, nodes: list[Node], edges: list[Edge
     n = store.upsert_nodes(nodes)
     e = store.upsert_edges(edges)
     store.log_ingest(source, n, e)
-    print(f"  ✓ {source}: 노드 {n:,}개, 엣지 {e:,}개 저장")
+    if not quiet:
+        print(f"  ✓ {source}: 노드 {n:,}개, 엣지 {e:,}개 저장")
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -175,14 +182,22 @@ def cmd_infobox(args: argparse.Namespace) -> int:
 
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
     with GraphStore(args.db) as store:
-        before = store.stats()["by_edge_type"].get("participated_in", 0)
-        nodes, edges = infobox.ingest(fetcher, store, limit=args.limit)
+        types = tuple(args.types)
+        before = store.stats()["by_edge_type"]
+        nodes, edges = infobox.ingest(
+            fetcher, store, limit=args.limit, node_types=types
+        )
         if not edges:
             print("  인포박스에서 관계를 찾지 못했습니다", file=sys.stderr)
             return 1
         _persist(store, "kowiki:infobox", nodes, edges)
-        after = store.stats()["by_edge_type"].get("participated_in", 0)
-        print(f"  participated_in: {before:,} → {after:,}")
+        after = store.stats()["by_edge_type"]
+        # 인물 인포박스는 participated_in 을 거의 안 준다. 한 종류만 찍으면
+        # 성과가 없는 것처럼 보이므로 늘어난 타입을 모두 보여준다.
+        for kind in sorted(set(before) | set(after)):
+            b, a = before.get(kind, 0), after.get(kind, 0)
+            if a > b:
+                print(f"  {kind}: {b:,} → {a:,}")
     return 0
 
 
@@ -277,7 +292,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
         docs = ex.load_documents(store, limit=args.limit, min_score=args.min_score,
                                  scope_ids=scope_ids, skip_covered=not args.no_skip_covered,
                                  max_chunks=args.max_chunks,
-                                 node_types=tuple(args.types) if args.types else None)
+                                 node_types=tuple(args.types) if args.types else None,
+                                 skip_extracted=not args.redo)
         if not docs:
             print(
                 "  추출할 산문이 없습니다. 먼저 `ingest heritage` 로 content 를 수집하세요.",
@@ -294,7 +310,11 @@ def cmd_extract(args: argparse.Namespace) -> int:
             print(ex.build_prompt(docs[0], gazetteer)[:2000])
             return 0
 
-        results: dict[str, list[dict]] = {}
+        # 근거 검증에 원문이 필요하다. 같은 노드의 여러 조각을 이어붙여
+        # 둬야 조각 경계에 걸친 근거도 원문에 있는 것으로 인정된다.
+        texts: dict[str, str] = {}
+        for doc in docs:
+            texts[doc.node_id] = texts.get(doc.node_id, "") + doc.text
 
         if args.backend == "anthropic" and not args.sync:
             # Claude 는 배치가 절반 값이다. 로컬 모델엔 배치 개념이 없다.
@@ -302,33 +322,156 @@ def cmd_extract(args: argparse.Namespace) -> int:
             batch_id = ex.submit_batch(client, docs, gazetteer)
             print(f"  배치 ID: {batch_id} (완료까지 최대 24시간)")
             results = ex.collect_batch(client, batch_id, docs)
-        else:
-            backend = build_backend(args.backend, args.model)
-            print(f"  백엔드: {backend.name} ({args.model or '기본 모델'})")
-            empty = 0
-            # 근거 검증에 원문이 필요하다. 같은 노드의 여러 조각을 이어붙여
-            # 둬야 조각 경계에 걸친 근거도 원문에 있는 것으로 인정된다.
-            texts: dict[str, str] = {}
-            for doc in docs:
-                texts[doc.node_id] = texts.get(doc.node_id, "") + doc.text
-            for i, doc in enumerate(docs, 1):
-                part = f" [{doc.chunk + 1}/{doc.total_chunks}]" if doc.total_chunks > 1 else ""
-                rels = ex.extract_one(backend, doc, gazetteer)
-                if not rels:
-                    empty += 1
-                results.setdefault(doc.node_id, []).extend(rels)
-                if i % 10 == 0 or i == len(docs):
-                    print(f"    {i}/{len(docs)}  관계 {sum(len(v) for v in results.values()):,}건 (빈 응답 {empty})")
-                del part
 
-        all_nodes, all_edges = [], []
-        for node_id, relations in results.items():
-            n, e = ex.to_graph(relations, node_id, store, doc_text=texts.get(node_id))
-            all_nodes.extend(n)
-            all_edges.extend(e)
+            all_nodes, all_edges = [], []
+            for node_id, relations in results.items():
+                n, e = ex.to_graph(relations, node_id, store, doc_text=texts.get(node_id))
+                all_nodes.extend(n)
+                all_edges.extend(e)
+            _persist(store, "extract", all_nodes, all_edges)
+            print(f"  추출된 관계 {len(all_edges):,}건 (문서 {len(results)}건에서)")
+            return 0
 
-        _persist(store, "extract", all_nodes, all_edges)
-        print(f"  추출된 관계 {len(all_edges):,}건 (문서 {len(results)}건에서)")
+        backend = build_backend(args.backend, args.model)
+        print(f"  백엔드: {backend.name} ({args.model or '기본 모델'})")
+
+        # **문서 단위로 저장한다.** 로컬 추출은 조각당 수십 초라 400조각이면
+        # 몇 시간짜리 작업이 된다. 끝에 한 번만 저장하면 중간에 죽었을 때
+        # 전부 잃는다. 한 노드의 조각이 끝날 때마다 커밋해서 손실을
+        # 마지막 노드 하나로 제한한다.
+        done = empty = saved_edges = saved_docs = 0
+        pending: list[dict] = []
+        current = docs[0].node_id
+
+        def flush(node_id: str, relations: list[dict]) -> int:
+            nodes, edges = ex.to_graph(
+                relations, node_id, store, doc_text=texts.get(node_id)
+            )
+            if not nodes and not edges:
+                return 0  # 빈 결과까지 기록하면 ingest_log 가 문서 수만큼 늘어난다
+            _persist(store, "extract", nodes, edges, quiet=True)
+            return len(edges)
+
+        for doc in docs:
+            if doc.node_id != current:
+                saved_edges += flush(current, pending)
+                saved_docs += 1
+                pending, current = [], doc.node_id
+            rels = ex.extract_one(backend, doc, gazetteer)
+            if not rels:
+                empty += 1
+            pending.extend(rels)
+            done += 1
+            if done % 10 == 0 or done == len(docs):
+                # 대기 중인 것을 따로 보여준다 — 저장은 노드가 끝나야 일어나므로
+                # 저장 수만 찍으면 마지막 노드가 통째로 사라진 것처럼 보인다
+                print(
+                    f"    {done}/{len(docs)}  저장 {saved_edges:,}건"
+                    f" · 대기 {len(pending):,}건 (빈 응답 {empty})"
+                )
+        saved_edges += flush(current, pending)
+        saved_docs += 1
+
+        print(f"  추출된 관계 {saved_edges:,}건 (문서 {saved_docs}건에서)")
+    return 0
+
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    """추출이 만든 ex: 고아 노드를 실제 노드로 승격·병합한다."""
+    from . import promote as pr
+
+    with GraphStore(args.db) as store:
+        before = store.stats()
+        ex_before = store.conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE id LIKE 'ex:%'"
+        ).fetchone()[0]
+
+        if not args.dry_run:
+            # 산문은 '정종'이라 쓰고 우리 라벨은 '조선 정종'이다. 별칭을
+            # 먼저 달아야 이어지는 매칭이 같은 노드를 찾는다.
+            print(f"→ 왕조 접두 별칭 {pr.add_bare_name_aliases(store)}개 추가")
+
+        # 이름으로 붙은 엣지가 옳은 노드에 갔는지 전수 조사
+        audit = pr.repair_links(store, dry_run=args.dry_run)
+        print(
+            f"\n→ 추출 엣지 끝점 {audit['checked']:,}개 검사"
+            f" · 이상 없음 {audit['ok']:,}"
+            f" · 옮김 {len(audit['moves'])}"
+            f" · 보류 {len(audit['ambiguous'])}"
+        )
+        for m in audit["moves"][: args.show]:
+            print(
+                f"    {m['label']:12} (엣지 {m['degree']}) → {m['target_label']}"
+                f" (엣지 {m['target_degree']})  [{m['method']}"
+                + (f" · {m['doc_era']} 문서]" if m["doc_era"] else "]")
+            )
+        if len(audit["moves"]) > args.show:
+            print(f"    … 외 {len(audit['moves']) - args.show}건")
+        if audit["ambiguous"]:
+            print("  보류 (진짜 동명이인 — 규칙 없이 옮기지 않는다):")
+            for a in audit["ambiguous"][:5]:
+                others = ", ".join(
+                    f"{c['label']}({c['degree']})" for c in a["candidates"][:3]
+                )
+                print(f"    {a['label']}({a['degree']}) ↔ {others}")
+
+        if not args.no_retype:
+            plan = pr.retype(store, dry_run=args.dry_run)["plan"]
+            print(f"→ 타입 교정 {len(plan)}건")
+            for old_id, _, label, new_type in plan[:12]:
+                print(f"    {label} : {old_id.split(':')[1]} → {new_type}")
+            if len(plan) > 12:
+                print(f"    … 외 {len(plan) - 12}건")
+
+        fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
+        result = pr.promote(
+            store,
+            fetcher,
+            types=tuple(args.types),
+            limit=args.limit,
+            local_only=args.local_only,
+            dry_run=args.dry_run,
+        )
+        print(
+            f"\n→ 승격 대상 {result['candidates']:,}개 중 {result['planned']:,}개 매칭"
+            f"  {result['by_method']}"
+        )
+        if result["skipped"]:
+            print(f"  건너뜀: {result['skipped']}")
+        for item in result["plan"][: args.show]:
+            print(f"    {item['label']:20} → {item['target']:16} ({item['method']})")
+        if len(result["plan"]) > args.show:
+            print(f"    … 외 {len(result['plan']) - args.show}건")
+
+        if args.dry_run:
+            print("\n  (dry-run — 아무것도 바꾸지 않았습니다)")
+            return 0
+
+        # QID 를 찾은 것만으로는 이름을 바꾼 데 지나지 않는다. 그 QID 에
+        # 달린 관계를 끌어와야 고아였던 인물이 그래프에 얽힌다.
+        pending = pr.pending_backfill(store)
+        if pending and not args.no_backfill:
+            print(f"\n→ 승격 노드 {len(pending)}개의 Wikidata 관계 보강 중...")
+            back = pr.backfill_relations(store, pending)
+            print(f"  ✓ 관계 상대 노드 {back['nodes']:,}개 · 엣지 {back['edges']:,}건")
+
+        # 스키마 정리는 **맨 끝에** 한다. 타입 교정·병합·보강이 모두
+        # 엣지 양끝을 바꾸므로, 먼저 돌리면 그 뒤에 들어온 불일치가 남는다
+        # (실측: 보강 뒤에 63건이 남아 다음 실행에서야 정리됐다).
+        fixed = pr.relax_invalid_edges(store)
+        print(f"  스키마 정리: 방향교정 {fixed['flipped']}건 · 완화 {fixed['relaxed']}건")
+
+        if args.prune_orphans:
+            print(f"  고립 ex 노드 {pr.prune_orphans(store)}개 제거")
+
+        after = store.stats()
+        ex_after = store.conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE id LIKE 'ex:%'"
+        ).fetchone()[0]
+        print(f"\n  ex 노드: {ex_before:,} → {ex_after:,}")
+        print(f"  전체 노드: {before['nodes_total']:,} → {after['nodes_total']:,}")
+        print(f"  전체 엣지: {before['edges_total']:,} → {after['edges_total']:,}")
+        print("\n  시대 서브그래프는 다시 뽑아야 반영됩니다: python3 -m histgraph scope joseon")
     return 0
 
 
@@ -367,6 +510,28 @@ def cmd_timeline(args: argparse.Namespace) -> int:
             print(f"\n  === {args.year}년에 일어난 일 ===")
             for row in timeline.whats_in(store, args.year):
                 print(f"    [{row['type']:8}] {row['label'][:40]:42} ({row['rel'] or row['via']})")
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """그래프 탐색 화면을 띄운다."""
+    from . import server
+
+    db = args.db
+    if args.era and db == DEFAULT_DB:
+        # scope 로 뽑아둔 시대 그래프가 기본 대상 — 전체 그래프(37,158 노드)는
+        # 탐색용으로는 너무 크고, 조선만 보겠다는 게 지금의 목표다.
+        candidate = ROOT / "data" / f"{args.era}.sqlite"
+        if candidate.exists():
+            db = candidate
+        else:
+            print(
+                f"  {candidate} 가 없습니다. 먼저 만드세요:\n"
+                f"    python3 -m histgraph scope {args.era} --out {candidate}",
+                file=sys.stderr,
+            )
+            return 1
+    server.serve(db, host=args.host, port=args.port, era=args.era)
     return 0
 
 
@@ -411,8 +576,11 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.set_defaults(func=cmd_events)
 
     p_ib = sub.add_parser("infobox", help="위키백과 인포박스에서 관계 추출 (LLM 불필요)")
-    p_ib.add_argument("--limit", type=int, default=None, help="처리할 사건 수")
+    p_ib.add_argument("--limit", type=int, default=None, help="처리할 문서 수")
     p_ib.add_argument("--interval", type=float, default=0.5)
+    p_ib.add_argument("--types", nargs="*", default=["event"],
+                      help="대상 노드 타입 (event·person). 인물은 부모·배우자·"
+                           "스승을 LLM 없이 준다")
     p_ib.set_defaults(func=cmd_infobox)
 
     p_en = sub.add_parser("enrich", help="한국어 위키백과 서사로 노드 보강")
@@ -446,9 +614,28 @@ def main(argv: list[str] | None = None) -> int:
                       help="추출 대상 노드 타입 (기본: 사건·조직)")
     p_ex.add_argument("--max-chunks", type=int, default=3,
                       help="문서당 사용할 조각 수 (밀도 상위순, 0=제한없음)")
+    p_ex.add_argument("--redo", action="store_true",
+                      help="이미 추출한 문서도 다시 처리 (기본은 건너뜀). "
+                           "--limit 으로 나눠 돌릴 때 기본값을 유지할 것")
     p_ex.add_argument("--scope", default=None,
                       help="시대 서브그래프 DB 경로. 그 노드들의 산문만 추출 (예: data/joseon.sqlite)")
     p_ex.set_defaults(func=cmd_extract)
+
+    p_pm = sub.add_parser("promote", help="추출 고아(ex:) 노드를 실제 노드로 승격")
+    p_pm.add_argument("--dry-run", action="store_true", help="바꾸지 않고 계획만 출력")
+    p_pm.add_argument("--local-only", action="store_true",
+                      help="위키백과 조회 없이 그래프 안에서만 매칭")
+    p_pm.add_argument("--no-retype", action="store_true", help="타입 교정 단계 생략")
+    p_pm.add_argument("--no-backfill", action="store_true",
+                      help="승격된 QID 의 Wikidata 관계 보강 생략")
+    p_pm.add_argument("--prune-orphans", action="store_true",
+                      help="엣지도 same_as 도 없는 ex 노드 제거")
+    p_pm.add_argument("--types", nargs="*",
+                      default=["person", "event", "org", "place", "role", "period"])
+    p_pm.add_argument("--limit", type=int, default=None, help="처리할 ex 노드 수")
+    p_pm.add_argument("--show", type=int, default=20, help="출력할 매칭 예시 수")
+    p_pm.add_argument("--interval", type=float, default=1.0)
+    p_pm.set_defaults(func=cmd_promote)
 
     p_sc = sub.add_parser("scope", help="한 시대만 별도 그래프로 추출")
     p_sc.add_argument("era", choices=["joseon", "goryeo", "silla", "goguryeo", "baekje"])
@@ -461,6 +648,12 @@ def main(argv: list[str] | None = None) -> int:
     p_tl.add_argument("--labels-only", action="store_true", help="날짜 속성 연결 생략")
     p_tl.add_argument("--year", type=int, default=None, help="그 해에 무슨 일이 있었는지 확인")
     p_tl.set_defaults(func=cmd_timeline)
+
+    p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
+    p_sv.add_argument("--era", default="joseon", help="띄울 시대 그래프 (data/{era}.sqlite)")
+    p_sv.add_argument("--host", default="127.0.0.1")
+    p_sv.add_argument("--port", type=int, default=8100)
+    p_sv.set_defaults(func=cmd_serve)
 
     sub.add_parser("stats", help="그래프 통계").set_defaults(func=cmd_stats)
 
