@@ -120,6 +120,11 @@ def build(store: GraphStore, link_attributes: bool = True) -> dict[str, int]:
                 y = _year_of(r[field])
                 if y is None:
                     continue
+                # 연도 노드 자신도 start_date 를 갖는다. 거르지 않으면
+                # `time:1443 -> time:1443` 자기순환이 연도 수만큼 생긴다
+                # (실측 1,253건). 아무 사실도 말하지 않는 엣지다.
+                if r["id"] == f"time:{y}":
+                    continue
                 # 인물이면 출생·사망으로 부르는 편이 읽기 쉽다
                 lbl = {"시작": "출생", "종료": "사망"}[when] if r["type"] == "person" else when
                 years.add(y)

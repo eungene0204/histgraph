@@ -64,6 +64,18 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
             (era.polity_label,),
         )
     ]
+    # **국적 태그가 없는 인물이 3,390명이고 거기에 왕들이 들어 있다.**
+    # '조선 정종'은 라벨에 시대가 적혀 있는데도 씨앗이 아니어서, 다른
+    # 인물의 이웃으로만 딸려 들어왔다. 그 바람에 그의 어머니(한씨)처럼
+    # 두 홉 밖에 있는 가족이 시대 그래프에서 통째로 잘려 나갔다.
+    by_label = [
+        r["id"]
+        for r in c.execute(
+            "SELECT id FROM nodes WHERE type='person' AND label LIKE ?",
+            (f"{era.polity_label} %",),
+        )
+    ]
+    persons = list({*persons, *by_label})
     seeds.update(persons)
 
     events = [

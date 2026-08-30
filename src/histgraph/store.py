@@ -83,6 +83,10 @@ class GraphStore:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        # 이 프로젝트는 몇 시간짜리 추출과 수집을 나란히 돌린다. 기본값
+        # (busy_timeout=0)이면 다른 쪽이 쓰는 순간 곧바로 'database is
+        # locked' 로 죽어서 진행 중이던 작업을 잃는다. 기다리게 한다.
+        self.conn.execute("PRAGMA busy_timeout = 30000")
         self.conn.executescript(SCHEMA)
 
     def close(self) -> None:
@@ -210,17 +214,38 @@ class GraphStore:
             )
         return rows
 
+    def degrees(self, ids: set[str]) -> dict[str, int]:
+        """노드별 연결 차수. 화면에 무엇을 크게 그릴지, 무엇을 먼저
+        보여줄지를 정하는 기준."""
+        rows = self._query_chunked(
+            """SELECT n.id AS id, COUNT(e.src) AS d
+                 FROM nodes n
+                 LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
+                WHERE n.id IN ({marks})
+             GROUP BY n.id""",
+            ids,
+        )
+        return {r["id"]: r["d"] for r in rows}
+
     def neighbors(
         self,
         node_id: str,
         depth: int = 1,
         max_nodes: int = 3000,
         follow_same_as: bool = True,
+        exclude_types: tuple[str, ...] = (),
     ) -> dict[str, list[dict]]:
         """노드 주변 서브그래프 — 프론트엔드가 실제로 그릴 단위.
 
         max_nodes 로 상한을 두지 않으면 허브 노드에서 그래프 절반이 딸려와
         화면에 그릴 수 없는 결과가 나온다.
+
+        **상한에 걸리면 차수가 높은 이웃부터 남긴다.** id 순으로 자르면
+        'wd:Q1…' 이 먼저 살아남을 뿐이라 무엇이 남는지가 우연에 맡겨진다.
+
+        `exclude_types` 는 아예 따라가지 않을 타입. 연도(`period`) 노드는
+        거의 모든 노드에 붙어 있어서, 그냥 두면 상한을 연도가 다 먹고
+        정작 보고 싶은 인물·사건이 화면에서 밀려난다.
 
         follow_same_as 가 켜져 있으면 엔티티 해소 링크를 건너 다른 소스로
         넘어간다 — 이게 없으면 국가유산청 유물에서 Wikidata 인물로 가는
@@ -231,6 +256,16 @@ class GraphStore:
         aliases: list[sqlite3.Row] = []
         truncated = False
 
+        blocked: set[str] = set()
+        if exclude_types:
+            marks = ",".join("?" * len(exclude_types))
+            blocked = {
+                r["id"]
+                for r in self.conn.execute(
+                    f"SELECT id FROM nodes WHERE type IN ({marks})", exclude_types
+                )
+            } - {node_id}  # 중심 노드는 스스로 제외되지 않는다
+
         for _ in range(depth):
             if not frontier:
                 break
@@ -240,7 +275,7 @@ class GraphStore:
                 per_row_repeat=2,
             )
             collected.extend(rows)
-            nxt = ({r["src"] for r in rows} | {r["dst"] for r in rows}) - seen
+            nxt = ({r["src"] for r in rows} | {r["dst"] for r in rows}) - seen - blocked
 
             # same_as 를 따라가지 않으면 엔티티 해소가 테이블에만 존재하고
             # 실제 탐색에서는 두 소스가 여전히 끊겨 있다. 동일 실체는
@@ -252,10 +287,16 @@ class GraphStore:
                     frontier,
                     per_row_repeat=2,
                 )
-                nxt |= ({r["a"] for r in alias_rows} | {r["b"] for r in alias_rows}) - seen
+                nxt |= (
+                    ({r["a"] for r in alias_rows} | {r["b"] for r in alias_rows})
+                    - seen
+                    - blocked
+                )
                 aliases.extend(alias_rows)
             if len(seen) + len(nxt) > max_nodes:
-                nxt = set(sorted(nxt)[: max_nodes - len(seen)])
+                rank = self.degrees(nxt)
+                ordered = sorted(nxt, key=lambda i: (-rank.get(i, 0), i))
+                nxt = set(ordered[: max(max_nodes - len(seen), 0)])
                 truncated = True
             frontier = nxt
             seen |= nxt
@@ -263,17 +304,39 @@ class GraphStore:
                 break
 
         nodes = self._query_chunked("SELECT * FROM nodes WHERE id IN ({marks})", seen)
+
+        # **유도 부분그래프(induced subgraph)를 돌려준다.** 탐색 중에 모은
+        # 엣지는 프론티어에 닿는 것뿐이라, 그것만 쓰면 이웃끼리의 관계가
+        # 통째로 빠진다 — 중심에서 바큇살만 뻗은 그림이 되고 "인조반정과
+        # 병자호란이 이어져 있다" 같은 것이 보이지 않는다 (실측: 조선의
+        # 이웃 105개 사이에 25건이 있었다).
+        collected.extend(
+            r
+            for r in self._query_chunked("SELECT * FROM edges WHERE src IN ({marks})", seen)
+            if r["dst"] in seen
+        )
+        # **자연키(출처 포함)로 중복을 없앤다.** 출처를 뺀 키로 합치면
+        # 같은 사실을 말한 두 소스 중 하나가 조용히 사라져, 화면이 어느
+        # 소스가 확인해 줬는지 알 수 없게 된다. 교차검증은 이 그래프의
+        # 신뢰도 근거라서 표현 계층까지 그대로 올려보낸다. 한 줄로 합칠지는
+        # 화면이 정할 일이다.
         edges = {
-            (r["src"], r["dst"], r["type"]): r
+            (r["src"], r["dst"], r["type"], r["source"]): r
             for r in collected
-            if r["src"] in seen and r["dst"] in seen
+            # 자기순환은 그래프에서 의미가 없고 화면에도 그릴 수 없다
+            if r["src"] in seen and r["dst"] in seen and r["src"] != r["dst"]
         }
         # same_as 는 별도로 돌려준다 — 사실 관계를 나타내는 엣지가 아니라
         # "이 둘은 같은 실체"라는 메타 정보라서 시각화도 다르게 해야 한다.
+        aliases.extend(
+            r
+            for r in self._query_chunked("SELECT a, b, method, score FROM same_as WHERE a IN ({marks})", seen)
+            if r["b"] in seen
+        )
         links = {
             (r["a"], r["b"]): r
             for r in aliases
-            if r["a"] in seen and r["b"] in seen
+            if r["a"] in seen and r["b"] in seen and r["a"] != r["b"]
         }
         return {
             "nodes": [dict(r) for r in nodes],
