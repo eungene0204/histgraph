@@ -216,6 +216,42 @@ with tempfile.TemporaryDirectory() as tmp:
     check("서울특별시에 연결됨", row is not None and row["b"] == "wd:Q8684")
     store.close()
 
+print("\n[회귀: 이웃끼리의 관계도 함께 온다]")
+# 탐색 중에 모은 엣지는 프론티어에 닿는 것뿐이다. 그것만 돌려주면
+# 중심에서 바큇살만 뻗은 그림이 되고, '인조반정과 병자호란이 이어져 있다'
+# 같은 것이 화면에서 사라진다 (실측: 조선의 이웃 105개 사이에 25건).
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "i.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q0", type="org", label="조선", source="wd"),
+        Node(id="wd:Q1", type="event", label="인조반정", source="wd"),
+        Node(id="wd:Q2", type="event", label="병자호란", source="wd"),
+        Node(id="wd:Q3", type="person", label="멀리 있는 사람", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:Q1", dst="wd:Q0", type="from_period", source="wd"),
+        Edge(src="wd:Q2", dst="wd:Q0", type="from_period", source="wd"),
+        # 중심에 닿지 않는, 이웃끼리의 관계
+        Edge(src="wd:Q1", dst="wd:Q2", type="related_to", source="extract", confidence=0.9),
+        # 서브그래프 밖으로 나가는 엣지는 들어오면 안 된다
+        Edge(src="wd:Q3", dst="wd:Q1", type="participated_in", source="wd"),
+    ])
+    sub = store.neighbors("wd:Q0", depth=1)
+    pairs = {(e["src"], e["dst"]) for e in sub["edges"]}
+    check("중심에 닿는 엣지", ("wd:Q1", "wd:Q0") in pairs and ("wd:Q2", "wd:Q0") in pairs)
+    check("이웃끼리의 엣지도 포함", ("wd:Q1", "wd:Q2") in pairs, str(pairs))
+    check("범위 밖 노드로 나가는 엣지는 제외", ("wd:Q3", "wd:Q1") not in pairs)
+
+    # 자기순환은 아무 사실도 말하지 않고 화면에도 그릴 수 없다
+    store.conn.execute(
+        "INSERT INTO edges (src,dst,type,source,confidence,props)"
+        " VALUES ('wd:Q1','wd:Q1','related_to','extract',0.9,'{}')"
+    )
+    store.conn.commit()
+    check("자기순환은 돌려주지 않음",
+          all(e["src"] != e["dst"] for e in store.neighbors("wd:Q0")["edges"]))
+    store.close()
+
 print("\n[회귀: 탐색이 same_as 를 따라간다]")
 # same_as 테이블에만 링크가 있고 탐색이 따라가지 않으면 두 소스는
 # 실제로는 여전히 끊겨 있다.
@@ -277,6 +313,37 @@ with tempfile.TemporaryDirectory() as tmp:
         }],
         "khs:test", store,
     )
+    # 실측: 모델이 '기사환국이 기사환국과 관련된다'를 낸다
+    _, loop = to_graph(
+        [{
+            "subject": "어떤 사건", "subject_type": "event", "relation": "related_to",
+            "object": "어떤 사건", "object_type": "event",
+            "evidence": "어떤 사건은 어떤 사건과 관련이 있다", "confidence": "certain",
+        }],
+        "khs:test", store,
+    )
+    check("양끝이 같은 관계는 버린다", loop == [])
+
+    # 실측 회귀: 동명 노드가 둘일 때 엣지 0개짜리에 붙어, 화면에서 정종이
+    # 아버지도 형제도 없는 외톨이가 됐다. 연결이 많은 쪽을 골라야 한다.
+    store.upsert_nodes([
+        Node(id="wd:Q485556", type="person", label="정종", source="wd"),
+        Node(id="wd:Q16177061", type="person", label="정종", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:Q485556", dst="wd:Q37682", type="child_of", source="wd"),
+    ])
+    _, kin = to_graph(
+        [{
+            "subject": "정종", "subject_type": "person", "relation": "child_of",
+            "object": "조선 세종", "object_type": "person",
+            "evidence": "정종은 세종의 자녀이다", "confidence": "certain",
+        }],
+        "khs:test", store,
+    )
+    check("동명이인 중 연결 많은 쪽을 고른다", kin and kin[0].src == "wd:Q485556",
+          str([(x.src, x.dst) for x in kin]))
+
     check("기존 노드에 연결 (새로 만들지 않음)", e[0].src == "wd:Q37682")
     check("없는 개체는 ex: 접두사로 생성", e[0].dst.startswith("ex:"))
     check("근거 보존", e[0].props["evidence"] == "세종은 훈민정음을 반포하였다")
@@ -310,6 +377,324 @@ with tempfile.TemporaryDirectory() as tmp:
     check("서지 문서는 선별에서 제외", [d.node_id for d in docs] == ["a:2"])
     check("min_score=2.0 도 서사만 통과", len(load_documents(store, min_score=2.0)) == 1)
     store.close()
+
+print("\n[족보 목록 제거]")
+# 실측(안방준): '증손부 : 창녕조씨' 꼴 목록을 그대로 주면 모델이 방계
+# 인물을 본인의 배우자로 붙이고, 같은 관계를 4번 반복하는 루프에 빠진다.
+from histgraph.extract import strip_kinship_lists  # noqa: E402
+
+genealogy = (
+    "안방준은 임진왜란 때 호남의병으로 활동하였다.\n"
+    "생부 : 안중관(安重寬, 1524~1605)\n"
+    "증손부 : 창녕조씨(昌寧曺氏) - 조이태(曺爾泰)의 따님.\n"
+    "손부(후실) : 진주하씨(晉州河氏)\n"
+    "사위 : 정창서(鄭昌瑞) - 본관은 서산(瑞山)\n"
+    "아버지는 첨지중추부사 안중관이며, 처는 경주 정씨이다.\n"
+    "1613년(광해군 5, 41세) 조헌의 《항의신편》을 편찬함.\n"
+)
+stripped = strip_kinship_lists(genealogy)
+check("족보 목록 행 제거", "증손부" not in stripped and "손부(후실)" not in stripped)
+check("서사 문단은 보존", "임진왜란 때 호남의병" in stripped)
+check("가족을 말하는 서사 문장도 보존", "아버지는 첨지중추부사" in stripped)
+check("연도로 시작하는 연보 행은 보존", "《항의신편》을 편찬함" in stripped)
+
+# 열거식 화이트리스트가 놓쳐 방계 9명이 안방준의 부모가 됐던 호칭들.
+# 한국어 친족어는 생성형이라 목록으로 못 덮는다 — 구조로 잡아야 한다.
+for _title in ["종조부", "재종조부", "종증조부", "재종숙", "할아버지",
+               "서손자", "손녀사위", "사돈", "당질", "이복형", "본인"]:
+    check(f"방계 호칭 '{_title}' 제거",
+          strip_kinship_lists(f"{_title} : 안정(安艇) - 자 강빈") == "")
+
+print("\n[소유격 오독 — 한 세대 건너뛰기]")
+# 실측: `처는 정승복의 딸이다` 에서 `안방준 spouse_of 정승복` 이 나왔다.
+# 아내는 정승복의 딸이지 정승복이 아니다. 근거 검증은 못 잡는다.
+from histgraph.extract import possessive_mismatch  # noqa: E402
+
+check("`X의 딸` 을 배우자로 읽으면 버린다",
+      possessive_mismatch("spouse_of", "정승복", "처는 경주 정씨 판관 정승복(鄭承復)의 딸이다."))
+check("한자 병기 없이도 잡는다",
+      possessive_mismatch("spouse_of", "정승복", "처는 정승복의 딸이다."))
+check("배우자 본인이면 통과",
+      not possessive_mismatch("spouse_of", "경주정씨", "부인 : 경주정씨(1571~1642)"))
+check("다른 관계 타입은 검사 안 함",
+      not possessive_mismatch("related_to", "정승복", "처는 정승복의 딸이다."))
+check("근거에 대상이 없으면 통과",
+      not possessive_mismatch("spouse_of", "정승복", "다른 이야기"))
+
+# **관계마다 판정이 뒤집힌다.** child_of 는 'A 는 B 의 자녀' 라는 뜻이므로
+# `안중관의 아들 안방준` → `안방준 child_of 안중관` 은 옳다. 이걸 버리면
+# 맞는 부모 관계가 통째로 사라진다.
+check("`X의 아들` 은 child_of 에서 정상 (버리면 안 됨)",
+      not possessive_mismatch("child_of", "안중관", "안중관의 아들 안방준은"))
+check("`X의 딸` 도 child_of 에서 정상",
+      not possessive_mismatch("child_of", "정승복", "정승복의 딸이다."))
+check("서술형 부모 관계도 통과",
+      not possessive_mismatch("child_of", "안중관", "아버지는 첨지중추부사 안중관이며"))
+check("`X의 손자` 는 child_of 에서 세대 건너뜀 → 버린다",
+      possessive_mismatch("child_of", "안민", "안민의 손자 안방준은"))
+
+# 이름 자리에 설명구가 온 경우. 근거가 아니라 **이름 자체**가 소유격이라
+# possessive_mismatch 가 놓친다.
+from histgraph.extract import is_descriptive_name, normalize_name  # noqa: E402
+check("`X의 따님` 은 이름이 아니다", is_descriptive_name("양윤순(梁允純)의 따님"))
+check("`X의 딸` 도 이름이 아니다", is_descriptive_name("정승복의 딸"))
+check("보통 이름은 통과", not is_descriptive_name("안중관"))
+check("한자 병기 이름도 통과", not is_descriptive_name("송시열(宋時烈)"))
+
+# 한자 병기가 붙으면 같은 사람이 두 노드가 된다
+check("한자 병기 제거", normalize_name("송시열(宋時烈)") == "송시열")
+check("공백 섞인 한자도 제거", normalize_name("조헌 (趙憲)") == "조헌")
+check("한글 괄호는 남긴다 (동명이인 구분)",
+      normalize_name("해명 (고구려)") == "해명 (고구려)")
+check("괄호 없는 이름은 그대로", normalize_name("안방준") == "안방준")
+
+print("\n[Wikidata 날짜 — '값 불명'은 URL 로 온다]")
+# 실측: 노드 100개의 start_date 에 blank node URL 이 들어앉아 있었다
+# (침류왕·고국원왕·왕인…). 연대를 보는 관문이 전부 헛돌았다.
+from histgraph.sources.wikidata import _iso_date  # noqa: E402
+
+check("정상 날짜", _iso_date("1397-04-18T00:00:00Z") == "1397-04-18")
+check("기원전 보존", _iso_date("-0400-01-01T00:00:00Z") == "-0400-01-01")
+check("세 자리 연도 보존", _iso_date("0385-01-01T00:00:00Z") == "0385-01-01")
+check("blank node URL 은 모름",
+      _iso_date("http://www.wikidata.org/.well-known/genid/a808c9f") is None)
+check("날짜 아닌 문자열은 모름", _iso_date("불명") is None)
+check("빈 값은 모름", _iso_date("") is None and _iso_date(None) is None)
+
+print("\n[연대 충돌 — 가족 관계는 같은 시대를 살아야 한다]")
+# 실측: `이세좌 --child_of--> 이수원` 451년 차이. 같은 쌍에 spouse_of 까지
+# 붙어 모순이었다. 이름이 같은 다른 시대 사람에게 붙은 것.
+from histgraph.extract import lifespan_conflict  # noqa: E402
+
+sejwa, susuwon = ("1445-01-01", "1504-01-01"), ("1896-01-01", "1970-01-01")
+check("451년 차이 child_of 는 버린다",
+      lifespan_conflict("child_of", sejwa, susuwon))
+check("451년 차이 spouse_of 도 버린다",
+      lifespan_conflict("spouse_of", sejwa, susuwon))
+check("생애가 겹치면 통과",
+      not lifespan_conflict("child_of", ("1573-01-01", "1654-01-01"),
+                            ("1524-01-01", "1605-01-01")))
+check("연대를 모르면 막지 않는다",
+      not lifespan_conflict("child_of", (None, None), susuwon))
+# related_to 는 학맥·추숭이 있으므로 시대가 달라도 참일 수 있다
+check("related_to 는 검사하지 않는다 (김종직→주희 498년)",
+      not lifespan_conflict("related_to", ("1431-01-01", "1492-01-01"),
+                            ("1130-01-01", "1200-01-01")))
+
+print("\n[동명이인 — 연대가 차수보다 먼저다]")
+# 실측: 조선 예종의 휘가 이황(李晄)이라 별칭에 '이황'이 있다. 안방준
+# 문서의 '퇴계 이황(李滉)의 문인'에서 차수 큰 예종이 이겼다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "amb.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:AN", type="person", label="안방준", source="wd",
+             start_date="1573-01-01", end_date="1654-01-01"),
+        # 예종: 차수를 크게 만들어 둔다 (왕이라 연결이 많다)
+        Node(id="wd:YJ", type="person", label="조선 예종", source="wd",
+             start_date="1450-01-01", end_date="1469-01-01"),
+        Node(id="wd:TG", type="person", label="이황", source="wd",
+             start_date="1501-01-01", end_date="1570-01-01"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:YJ", dst="wd:AN", type="related_to", source="wd"),
+        Edge(src="wd:YJ", dst="wd:TG", type="related_to", source="wd"),
+    ])
+    store.conn.execute("INSERT INTO aliases (node_id, alias) VALUES (?,?)",
+                       ("wd:YJ", "이황"))
+    _, e = to_graph([{
+        "subject": "안방준", "subject_type": "person", "relation": "related_to",
+        "object": "이황", "object_type": "person",
+        "evidence": "퇴계 이황의 문인이었다", "confidence": "certain",
+    }], "wd:AN", store)
+    check("연대가 맞는 퇴계로 붙는다", e and e[0].dst == "wd:TG",
+          str([(x.src, x.dst) for x in e]))
+    store.close()
+
+print("\n[근거가 상대를 지목하지 않으면 버린다]")
+# 실측: 인물 대상 관계 268건 중 14건이 근거에 상대 이름이 없었고 대부분
+# 지어낸 것이었다 — `정약종의 아들 정철상도` 에서 `child_of 정약용`.
+from histgraph.extract import evidence_names_target, name_variants  # noqa: E402
+
+check("성을 뗀 축약형도 인정", "종직" in name_variants("김종직"))
+check("왕조 접두를 뗀 형태도 인정", "세종" in name_variants("조선 세종"))
+check("두 글자 이름은 더 자르지 않음", name_variants("남은") == {"남은"})
+# 한 글자 라벨의 후보가 비면 그 인물의 관계가 통째로 사라진다
+check("한 글자 라벨도 후보가 비지 않음", name_variants("을") == {"을"})
+check("근거가 지목하면 통과",
+      evidence_names_target("종직에게 수업하였는데", name_variants("김종직")))
+check("근거가 지목 안 하면 버림",
+      not evidence_names_target("정약종의 아들 정철상도 구속되었고",
+                                name_variants("정약용")))
+check("공백 차이는 무시",
+      evidence_names_target("조선  세종 때", name_variants("조선 세종")))
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "named.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:A", type="person", label="정약종", source="wd"),
+        Node(id="wd:B", type="person", label="정약용", source="wd"),
+    ])
+    _, e = to_graph([{
+        "subject": "정약종", "subject_type": "person", "relation": "child_of",
+        "object": "정약용", "object_type": "person",
+        "evidence": "정약종의 아들 정철상도 구속되었고", "confidence": "certain",
+    }], "wd:A", store)
+    check("근거에 없는 인물은 엣지가 안 생김", e == [])
+    # 문서 주인은 예외 — 그 글이 곧 그 사람의 글이다
+    store.upsert_nodes([Node(id="ev:1", type="event", label="3·1 운동", source="t")])
+    _, e2 = to_graph([{
+        "subject": "정약종", "subject_type": "person", "relation": "participated_in",
+        "object": "3·1 운동", "object_type": "event",
+        "evidence": "손병희 등에 의해 주도되었으며", "confidence": "certain",
+    }], "ev:1", store)
+    check("문서 주인은 이름이 없어도 통과", len(e2) == 1)
+    store.close()
+
+print("\n[방향 뒤집힘 — 구조화 소스가 반대를 알고 있으면 버린다]")
+# child_of 는 person→person 이라 orient() 가 방향을 못 가린다. 실측:
+# 추출 가족 관계 122건 중 50건이 구조화 소스와 어긋났고 대부분 뒤집힘이었다
+# (`폐비 윤씨 child_of 조선 연산군` — 연산군이 그녀의 아들이다).
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "rev.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:M", type="person", label="폐비 윤씨", source="wd"),
+        Node(id="wd:S", type="person", label="조선 연산군", source="wd"),
+    ])
+    # 구조화 소스: 연산군이 폐비 윤씨의 자녀
+    store.upsert_edges([Edge(src="wd:S", dst="wd:M", type="child_of", source="wd")])
+    _, e = to_graph([{
+        "subject": "폐비 윤씨", "subject_type": "person", "relation": "child_of",
+        "object": "조선 연산군", "object_type": "person",
+        "evidence": "폐비 윤씨는 조선 연산군의 어머니이다",
+        "confidence": "certain",
+    }], "wd:M", store)
+    check("역방향 추출은 버린다", e == [], str([(x.src, x.dst) for x in e]))
+
+    _, e2 = to_graph([{
+        "subject": "조선 연산군", "subject_type": "person", "relation": "child_of",
+        "object": "폐비 윤씨", "object_type": "person",
+        "evidence": "조선 연산군은 폐비 윤씨의 아들이다",
+        "confidence": "certain",
+    }], "wd:S", store)
+    check("같은 방향은 통과", len(e2) == 1 and e2[0].src == "wd:S")
+
+    # 구조화 소스에 근거가 없으면 막지 않는다
+    store.upsert_nodes([Node(id="wd:X", type="person", label="갑", source="wd"),
+                        Node(id="wd:Y", type="person", label="을", source="wd")])
+    _, e3 = to_graph([{
+        "subject": "갑", "subject_type": "person", "relation": "child_of",
+        "object": "을", "object_type": "person",
+        "evidence": "갑은 을의 아들이다", "confidence": "certain",
+    }], "wd:X", store)
+    check("근거 없으면 막지 않는다", len(e3) == 1)
+    store.close()
+
+print("\n[이미 추출한 문서 건너뛰기 — --limit 배치의 전제]")
+# 없으면 두 번째 배치가 첫 배치를 다시 돌린다 (조각당 200초)
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "skip.sqlite")
+    store.upsert_nodes([
+        Node(id="p:1", type="person", label="갑", source="t", description=narrative),
+        Node(id="p:2", type="person", label="을", source="t", description=narrative),
+    ])
+    check("추출 전에는 둘 다 대상",
+          len({d.node_id for d in load_documents(store, min_score=1.0)}) == 2)
+    store.upsert_nodes([Node(id="ex:person:병", type="person", label="병", source="extract")])
+    store.upsert_edges([Edge(src="p:1", dst="ex:person:병", type="related_to",
+                             source="extract", props={"extracted_from": "p:1"})])
+    left = {d.node_id for d in load_documents(store, min_score=1.0)}
+    check("추출한 문서는 제외", left == {"p:2"}, str(left))
+    check("--redo 면 다시 포함",
+          len({d.node_id for d in load_documents(store, min_score=1.0,
+                                                 skip_extracted=False)}) == 2)
+    store.close()
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    # 족보 행이 밀도를 부풀리지 않도록 선별 전에 지워져야 한다
+    doc_text = narrative + "\n" + "장남 : 안후지(安厚之, 1590~1664)\n" * 30
+    store.upsert_nodes([
+        Node(id="p:1", type="person", label="안방준", source="t", description=doc_text),
+    ])
+    docs = load_documents(store, min_score=1.0)
+    check("선별된 문서에 족보 행이 없음",
+          docs and all("장남 :" not in d.text for d in docs))
+    store.close()
+
+print("\n[인포박스 — 인물 필드와 방향]")
+# 인포박스 필드는 문서 주인 기준으로 쓰여 있어 방향이 필드마다 다르다.
+# `아버지 = [[안중관]]` 과 `자녀 = [[안후지]]` 는 같은 child_of 인데 반대다.
+from histgraph.sources.infobox import (  # noqa: E402
+    EVENT_FIELDS, IN, OUT, PERSON_FIELDS, parse_infobox_links,
+)
+
+person_wikitext = """{{인물 정보
+|이름 = 안방준
+|아버지 = [[안중관]]
+|어머니 = [[진원 박씨]]
+|배우자 = [[경주 정씨]]
+|자녀 = [[안후지]]<br />[[안신지]]
+|스승 = [[성혼]]
+|출생지 = [[보성군]]
+|그림 = [[파일:Ahn.jpg|섬네일]]
+|직업 = 의병장
+}}"""
+# **필드 값은 인포박스가 닫히는 `}}` 에서 끝나야 한다.** 실측(세종):
+# `| 자녀 = [[#왕자|18남 4녀]]` 뒤에 `}}` 가 오는데 거기서 안 끊으면
+# 도입부를 통째로 삼켜 황희·장영실·김종서가 세종의 자녀가 된다.
+from histgraph.sources.infobox import infobox_span  # noqa: E402
+
+sejong_like = """{{다른 뜻|세종 (동음이의)}}
+{{조선의 국왕
+| 이름 = 세종
+| 아버지 = [[태종 (조선)|태종]]
+| 자녀 = [[#왕자|18남 4녀]] {{font color|gray|(19남 7녀)}}
+}}
+
+'''세종'''은 [[1397년]]에 태어났다. [[황희]], [[장영실]], [[김종서]]를 등용했다.
+"""
+sejong_links = parse_infobox_links(sejong_like, PERSON_FIELDS)
+check("본문 인물이 자녀로 새지 않음",
+      "황희" not in sejong_links.get("자녀", [])
+      and "장영실" not in sejong_links.get("자녀", []), str(sejong_links))
+check("본문 연도도 새지 않음", "1397년" not in sejong_links.get("자녀", []))
+check("문서 내 앵커는 개체가 아니다", "#왕자" not in sejong_links.get("자녀", []))
+check("인포박스 안의 필드는 정상 추출", sejong_links.get("아버지") == ["태종 (조선)"])
+# 앞에 붙은 작은 틀({{다른 뜻}})을 인포박스로 착각하면 전부 놓친다
+check("앞선 작은 틀을 건너뛴다", "아버지" in infobox_span(sejong_like, PERSON_FIELDS))
+check("중첩 틀에서 끊기지 않는다", "자녀" in infobox_span(sejong_like, PERSON_FIELDS))
+check("대상 필드가 없으면 빈 문자열",
+      infobox_span("{{다른 뜻|x}}\n본문 [[황희]]", PERSON_FIELDS) == "")
+
+plinks = parse_infobox_links(person_wikitext, PERSON_FIELDS)
+check("인물 필드를 읽는다", plinks.get("아버지") == ["안중관"])
+check("여러 링크가 한 필드에", plinks.get("자녀") == ["안후지", "안신지"])
+check("파일 링크는 제외", all("파일" not in t for ts in plinks.values() for t in ts))
+check("표에 없는 필드는 무시", "직업" not in plinks)
+
+check("아버지는 문서 주인이 출발 (child_of out)", PERSON_FIELDS["아버지"][2] == OUT)
+check("자녀는 방향이 반대 (child_of in)", PERSON_FIELDS["자녀"][2] == IN)
+check("출생지는 born_in", PERSON_FIELDS["출생지"][:2] == ("born_in", ("place",)))
+check("지휘관은 사건으로 들어온다", EVENT_FIELDS["지휘관1"][2] == IN)
+check("장소는 사건에서 나간다", EVENT_FIELDS["장소"][2] == OUT)
+
+# 사건 필드 표로 읽으면 인물 필드가 안 잡혀야 한다 (표가 갈리는지 확인)
+check("사건 표로는 인물 필드를 안 읽는다",
+      parse_infobox_links(person_wikitext, EVENT_FIELDS) == {})
+
+# 방향 표가 온톨로지와 어긋나면 엣지가 통째로 버려진다
+from histgraph.ontology import EDGE_TYPES  # noqa: E402
+for _f, (_rel, _expected, _dir) in {**EVENT_FIELDS, **PERSON_FIELDS}.items():
+    _, allowed_src, allowed_dst = EDGE_TYPES[_rel]
+    subject_side = "person" if _f in PERSON_FIELDS else "event"
+    ok = (subject_side in allowed_src) if _dir == OUT else (subject_side in allowed_dst)
+    check(f"'{_f}' 방향이 온톨로지와 맞음", ok, f"{_rel} {_dir}")
+
+# 지명 계층에서 가장 구체적인 것만 — 안 그러면 1392년에 죽은 정몽주에게
+# 1948년에 생긴 국가가 사망지로 붙는다
+from histgraph.sources.infobox import NARROWEST_ONLY  # noqa: E402
+check("출생지·사망지는 최협의만", NARROWEST_ONLY == {"born_in", "died_in"})
+check("가족 관계는 여러 건을 다 남긴다", "child_of" not in NARROWEST_ONLY)
 
 print("\n[긴 문서 조각내기]")
 # 위키백과 본문 전체를 받으면 6·25 전쟁이 57,451자다. 통째로 넣으면
@@ -362,6 +747,174 @@ try:
 except ValueError:
     check("알 수 없는 백엔드는 거부", True)
 
+print("\n[승격 — ex: 고아 노드]")
+from histgraph.promote import (  # noqa: E402
+    classify,
+    local_matches,
+    merge_node,
+    prune_orphans,
+    relax_invalid_edges,
+)
+
+check("관청은 조직", classify("조선총독부") == "org")
+check("N인 집단은 조직", classify("민족대표 33인") == "org")
+check("붕당은 조직", classify("벽파") == "org")
+check("관직은 직위", classify("병조판서") == "role")
+check("칭호 단독은 직위", classify("대왕대비") == "role")
+# 오탐이 더 위험하다 — 아래는 전부 사람이거나 사건이다
+check("칭호에 이름이 붙으면 인물", classify("인목대비") is None)
+check("관직이 앞에 붙으면 인물", classify("응교 최숙생") is None)
+check("이름에 관청이 들어가도 인물", classify("김정부") is None)
+check("가운데 관청은 사건 그대로", classify("간도 일본 영사관 습격") is None)
+check("나라 이름 아닌 제목", classify("나의 나라") is None)
+
+# 위키백과 응답을 흉내내 승격 관문(동음이의·넘겨주기)을 고정한다
+from histgraph.promote import fetch_qids  # noqa: E402
+
+
+class _StubFetcher:
+    """마지막 요청 파라미터를 기억하는 가짜 페처."""
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.params: dict[str, str] = {}
+
+    def get(self, url: str, params: dict[str, str], **kw: object) -> str:
+        import json as j
+
+        self.params = params
+        return j.dumps(self.payload)
+
+
+stub = _StubFetcher({
+    "query": {
+        "redirects": [{"from": "리델", "to": "펠릭스클레르 리델"}],
+        "pages": [
+            {"title": "펠릭스클레르 리델", "pageprops": {"wikibase_item": "Q12621740"}},
+            {"title": "선조", "pageprops": {"wikibase_item": "Q1", "disambiguation": ""}},
+            {"title": "없는사람", "missing": True},
+        ],
+    }
+})
+found, ambiguous = fetch_qids(stub, ["리델", "선조", "없는사람"])
+check("넘겨주기를 요청한 이름으로 되돌림", found == {"리델": "Q12621740"})
+check("동음이의 문서는 제외", ambiguous == ["선조"])
+check("없는 문서는 결과에 없음", "없는사람" not in found)
+
+fetch_qids(stub, ["삼진 의거"], follow_redirects=False)
+check("사건은 넘겨주기를 따라가지 않음", "redirects" not in stub.params)
+fetch_qids(stub, ["리델"])
+check("인물은 넘겨주기를 따라감", stub.params.get("redirects") == "1")
+
+# 회귀: 문서명만 보고 승격하면 동명이인에 붙는다. 무오사화 문서의 '한유'는
+# 조선 인물인데 위키백과 '한유'는 당나라 문인 韓愈(768~824)다.
+from histgraph.promote import life_span, plausible_period  # noqa: E402
+
+check("생몰년 한쪽만 있어도 구간", life_span("0768-01-01", None) == (768, 848))
+check("생몰년이 없으면 구간 없음", life_span(None, None) is None)
+check(
+    "600년 어긋나면 동명이인",
+    not plausible_period(life_span("0768-01-01", "0824-12-25"), [1431, 1491]),
+)
+check(
+    "동시대면 통과",
+    plausible_period(life_span("1431-01-01", "1491-08-19"), [1450, 1498]),
+)
+check("이웃에 연대가 없으면 막지 않음", plausible_period((768, 824), []))
+check("생몰년을 모르면 막지 않음", plausible_period(None, [1431]))
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "p.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q1", type="person", label="조선 세조", source="wd"),
+        Node(id="wd:Q2", type="event", label="계유정난", source="wd"),
+        Node(id="wd:Q3", type="person", label="고려 숙종", source="wd"),
+        Node(id="wd:Q4", type="person", label="조선 숙종", source="wd"),
+        Node(id="kr:period:조선 고종", type="period", label="조선 고종", source="khs"),
+        Node(id="ex:person:세조", type="person", label="세조", source="extract"),
+        Node(id="ex:person:숙종", type="person", label="숙종", source="extract"),
+        Node(id="ex:person:고종", type="person", label="고종", source="extract"),
+    ])
+    store.upsert_edges([
+        Edge(src="ex:person:세조", dst="wd:Q2", type="participated_in",
+             source="extract", confidence=0.9),
+        # 이미 구조화 소스가 말한 같은 사실 — 병합이 이걸 덮어쓰면 안 된다
+        Edge(src="wd:Q1", dst="wd:Q2", type="participated_in", source="wd"),
+        # 양끝이 같은 노드로 합쳐지는 엣지 (자기순환이 된다)
+        Edge(src="ex:person:세조", dst="wd:Q1", type="related_to", source="extract"),
+    ])
+
+    plan = {m["ex_id"]: m for m in local_matches(store)}
+    check("왕조 접두로 매칭", plan["ex:person:세조"]["target"] == "wd:Q1")
+    check("왕조가 둘이면 매칭하지 않음", "ex:person:숙종" not in plan)
+    check("타입이 다르면 매칭하지 않음", "ex:person:고종" not in plan)
+
+    stats = merge_node(store, "ex:person:세조", "wd:Q1", method="dynasty_prefix")
+    check("자기순환 엣지 제거", stats["self_loops"] == 1)
+    check("ex 노드 삭제됨",
+          store.conn.execute("SELECT 1 FROM nodes WHERE id='ex:person:세조'").fetchone() is None)
+    check("엣지가 대상 노드로 이동",
+          store.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE src='wd:Q1' AND dst='wd:Q2'"
+          ).fetchone()[0] == 2)
+    check("구조화 엣지의 confidence 보존",
+          store.conn.execute(
+              "SELECT confidence FROM edges WHERE src='wd:Q1' AND source='wd'"
+          ).fetchone()[0] == 1.0)
+    check("산문 표기를 별칭으로 남김",
+          store.conn.execute(
+              "SELECT 1 FROM aliases WHERE node_id='wd:Q1' AND alias='세조'"
+          ).fetchone() is not None)
+    import json as _json  # noqa: E402
+
+    props = _json.loads(
+        store.conn.execute("SELECT props FROM nodes WHERE id='wd:Q1'").fetchone()[0]
+    )
+    check("병합 이력 기록", props["merged_from"][0]["id"] == "ex:person:세조")
+    check("옮겨진 엣지에도 출처 기록",
+          _json.loads(store.conn.execute(
+              "SELECT props FROM edges WHERE src='wd:Q1' AND source='extract'"
+          ).fetchone()[0])["merged_from"] == "ex:person:세조")
+    store.close()
+
+# 타입을 고치면 그 노드에 걸린 엣지가 스키마와 어긋난다. 버리지 않는다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "q.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q1", type="person", label="어떤 인물", source="wd"),
+        Node(id="ex:role:병조판서", type="role", label="병조판서", source="extract"),
+        Node(id="wd:Q9", type="event", label="어떤 사건", source="wd"),
+        Node(id="ex:person:고아", type="person", label="고아", source="extract"),
+    ])
+    store.conn.executemany(
+        "INSERT INTO edges (src,dst,type,source,confidence,props) VALUES (?,?,?,?,?,'{}')",
+        [
+            # person -> role 인데 child_of 라 스키마 위반
+            ("wd:Q1", "ex:role:병조판서", "child_of", "extract", 0.7),
+            # 방향만 뒤집으면 맞는 엣지
+            ("wd:Q9", "wd:Q1", "participated_in", "extract", 0.9),
+        ],
+    )
+    store.conn.commit()
+    fixed = relax_invalid_edges(store)
+    check("뒤집으면 맞는 엣지는 방향 교정", fixed["flipped"] == 1)
+    check("교정된 방향이 저장됨",
+          store.conn.execute(
+              "SELECT 1 FROM edges WHERE src='wd:Q1' AND dst='wd:Q9' AND type='participated_in'"
+          ).fetchone() is not None)
+    check("못 맞추면 related_to 로 완화", fixed["relaxed"] == 1)
+    row = store.conn.execute(
+        "SELECT type, props FROM edges WHERE dst='ex:role:병조판서'"
+    ).fetchone()
+    check("완화해도 원래 타입은 남김",
+          row["type"] == "related_to" and _json.loads(row["props"])["original_type"] == "child_of")
+
+    check("엣지 없는 ex 노드 제거", prune_orphans(store) == 1)
+    check("엣지 있는 ex 노드는 유지",
+          store.conn.execute("SELECT 1 FROM nodes WHERE id='ex:role:병조판서'").fetchone()
+          is not None)
+    store.close()
+
 print("\n[위키백과 커넥터]")
 from histgraph.sources import wikipedia  # noqa: E402
 
@@ -377,6 +930,153 @@ check("시드 시대가 모두 왕조 매핑에 존재", all(
 ))
 # '대한제국'을 사건으로 넣으면 from_period 가 자기 자신을 가리킨다
 check("시대 이름이 사건 목록에 없음", not (set(seeds) & set(all_titles)))
+
+print("\n[이름이 엉뚱한 노드에 붙은 엣지 — 전수 조사]")
+# 실측: 태조의 아들 관계가 관계 24건짜리 조선 정종이 아니라 엣지 1개짜리
+# 동명 노드에 붙어, 화면에서 정종이 아버지도 형제도 없는 외톨이가 됐다.
+from histgraph.promote import audit_links, repair_links  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "rl.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:D1", type="event", label="갑자사화", source="wd",
+             props={"seed_era": "조선"}),
+        Node(id="wd:J", type="person", label="조선 태조", source="wd"),
+        Node(id="wd:G", type="person", label="고려 태조", source="wd"),
+        Node(id="ex:person:태조", type="person", label="태조", source="extract"),
+        # 진짜 동명이인 — 차수가 엇비슷하면 옮기지 않는다
+        Node(id="wd:K1", type="person", label="김구", source="wd"),
+        Node(id="wd:K2", type="person", label="김구", source="wd"),
+        Node(id="wd:X", type="person", label="누구", source="wd"),
+    ])
+    store.upsert_edges([
+        # 조선 태조는 이미 잘 연결돼 있고, 고려 태조도 그래프에 있다
+        Edge(src="wd:J", dst="wd:D1", type="participated_in", source="wd"),
+        Edge(src="wd:J", dst="wd:X", type="child_of", source="wd"),
+        Edge(src="wd:G", dst="wd:X", type="child_of", source="wd"),
+        # 조선 문서에서 나온 추출 엣지가 고아 '태조'에 붙어 있다
+        Edge(src="ex:person:태조", dst="wd:D1", type="participated_in",
+             source="extract", confidence=0.9, props={"extracted_from": "wd:D1"}),
+        Edge(src="wd:K1", dst="wd:D1", type="participated_in", source="extract",
+             confidence=0.9, props={"extracted_from": "wd:D1"}),
+        Edge(src="wd:K2", dst="wd:X", type="related_to", source="wd"),
+    ])
+
+    report = audit_links(store)
+    moves = {m["label"]: m for m in report["moves"]}
+    check("문서 시대로 동명이인을 가른다",
+          moves.get("태조", {}).get("target") == "wd:J", str(report["moves"]))
+    check("판정 근거를 남긴다", moves.get("태조", {}).get("method") == "시대일치")
+    held = {a["label"] for a in report["ambiguous"]}
+    check("차수가 엇비슷하면 보류", "김구" in held or not moves.get("김구"), str(report))
+    check("이상 없는 끝점이 대부분", report["ok"] > 0)
+
+    repair_links(store)
+    check("추출 엣지가 옳은 노드로 옮겨짐",
+          store.conn.execute(
+              "SELECT 1 FROM edges WHERE src='wd:J' AND dst='wd:D1' AND source='extract'"
+          ).fetchone() is not None)
+    check("옮긴 자리에 출처를 남김",
+          "repaired_from" in (store.conn.execute(
+              "SELECT props FROM edges WHERE src='wd:J' AND source='extract'"
+          ).fetchone()[0]))
+    check("구조화 엣지는 건드리지 않음",
+          store.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE source='wd'"
+          ).fetchone()[0] == 4)
+    check("두 번 돌려도 더 옮길 것이 없다", repair_links(store)["moves"] == [])
+    store.close()
+
+print("\n[탐색 서버]")
+from histgraph.server import GraphAPI, TYPE_GROUP, safe_static_path  # noqa: E402
+
+check("모든 노드 타입에 색 갈래가 있음", set(TYPE_GROUP) == set(NODE_TYPES))
+# 색은 갈래만 말하고 타입은 모양이 말한다 — 갈래가 넷을 넘으면 색약에서
+# 구분이 무너진다 (검증기 실측: 8색 전체 조합 최악 ΔE 1.6)
+check("색 갈래는 4개 이하", len(set(TYPE_GROUP.values())) <= 4)
+
+check("루트 밖 경로 거부", safe_static_path("/../.env") is None)
+check("URL 인코딩으로 우회 불가", safe_static_path("/%2e%2e/%2e%2e/.env") is None)
+check("존재하지 않는 파일은 None", safe_static_path("/없는파일.js") is None)
+check("정상 파일은 통과", safe_static_path("/index.html") is not None)
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "s.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q1", type="person", label="조선 세종", source="wd",
+             start_date="1397-04-10", end_date="1450-02-17", description="세종은 " * 40),
+        Node(id="wd:Q2", type="event", label="훈민정음 반포", source="wd"),
+        Node(id="wd:Q3", type="place", label="세종", source="khs"),
+        Node(id="wd:Q4", type="period", label="1443년", source="timeline"),
+        Node(id="wd:Q5", type="person", label="이방원", source="wd"),
+        Node(id="wd:Q28179", type="org", label="조선", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:Q1", dst="wd:Q2", type="participated_in", source="extract",
+             confidence=0.9, props={"evidence": "세종은 훈민정음을 반포하였다"}),
+        Edge(src="wd:Q1", dst="wd:Q5", type="child_of", source="wd"),
+        Edge(src="wd:Q1", dst="wd:Q4", type="dated_to", source="timeline"),
+    ])
+    api = GraphAPI(store, era="joseon")
+
+    # 실측 회귀: '세종'을 치면 세종특별자치시가 조선 세종보다 먼저 나왔다
+    hits = api.search("세종")
+    check("검색은 차수 높은 쪽을 먼저", hits[0]["id"] == "wd:Q1", str(hits[:2]))
+    check("부분 일치도 찾음", any(h["id"] == "wd:Q3" for h in hits))
+    check("빈 검색어는 빈 결과", api.search("  ") == [])
+
+    g = api.graph("wd:Q1", depth=1)
+    check("연도 노드는 기본적으로 빼고 그린다",
+          all(n["type"] != "period" for n in g["nodes"]), str(g["nodes"]))
+    check("연도 노드를 빼면 그 엣지도 사라짐",
+          all(e["type"] != "dated_to" for e in g["edges"]))
+    check("연도를 켜면 다시 들어옴",
+          any(n["type"] == "period" for n in api.graph("wd:Q1", exclude=())["nodes"]))
+    check("노드에 색 갈래가 실림", g["nodes"][0]["group"] in ("actor", "event", "thing", "frame"))
+    check("없는 노드는 missing", api.graph("wd:없음")["missing"] is True)
+
+    d = api.node("wd:Q1")
+    check("상세에 관계가 붙음", len(d["relations"]) == 3)
+    # 근거를 화면에 못 띄우면 사용자는 0.9 짜리 엣지를 믿을지 판단할 수 없다
+    ev = [r for r in d["relations"] if r["evidence"]]
+    check("추출 관계는 근거 구절을 함께 준다",
+          len(ev) == 1 and ev[0]["evidence"][0].startswith("세종은"))
+    check("관계에 출처가 실림",
+          {s for r in d["relations"] for s in r["sources"]} == {"extract", "wd", "timeline"})
+    check("없는 노드 상세는 None", api.node("wd:없음") is None)
+    check("메타에 시대가 실림", api.meta()["era"] == "joseon")
+
+    # 조선 그래프의 중심은 조선이다. 차수 1위로 대신하면 열 때마다
+    # 병자호란이 중심인 화면이 된다.
+    # 회귀: 같은 사실을 Wikidata 와 인포박스가 함께 말하면 화면에 '행주산성'
+    # 이 두 번 나왔다. 저장은 소스별로 두고(교차검증의 근거) 화면에는
+    # 한 줄로 합친다.
+    store.upsert_edges([
+        Edge(src="wd:Q1", dst="wd:Q3", type="born_in", source="wd"),
+        Edge(src="wd:Q1", dst="wd:Q3", type="born_in", source="kowiki:infobox",
+             confidence=0.95),
+    ])
+    born = [r for r in api.node("wd:Q1")["relations"] if r["type"] == "born_in"]
+    check("같은 사실은 한 줄로", len(born) == 1, str(born))
+    check("두 소스를 모두 남긴다", set(born[0]["sources"]) == {"wd", "kowiki:infobox"})
+    check("신뢰도는 가장 높은 소스 것", born[0]["confidence"] == 1.0)
+    g2 = api.graph("wd:Q1", depth=1)
+    same = [e for e in g2["edges"] if e["type"] == "born_in"]
+    check("그래프에도 선은 하나", len(same) == 1 and len(same[0]["sources"]) == 2)
+
+    check("왕조 노드가 그래프의 중심", api.root() == "wd:Q28179")
+    check("시작점 맨 위가 왕조", api.seeds(5)[0]["id"] == "wd:Q28179")
+    check("모르는 시대는 중심 없음", GraphAPI(store, era="").root() is None)
+    store.close()
+
+with tempfile.TemporaryDirectory() as tmp:
+    # 왕조 노드가 없는 그래프에서 중심을 지어내면 안 된다
+    store = GraphStore(Path(tmp) / "s2.sqlite")
+    store.upsert_nodes([Node(id="wd:Q1", type="person", label="누구", source="wd")])
+    empty_api = GraphAPI(store, era="joseon")
+    check("왕조 노드가 없으면 중심도 없음", empty_api.root() is None)
+    check("그래도 시작점은 나온다", isinstance(empty_api.seeds(5), list))
+    store.close()
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
