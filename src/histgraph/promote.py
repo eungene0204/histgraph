@@ -31,7 +31,7 @@ import logging
 import re
 import urllib.parse
 
-from .extract import orient
+from .extract import HANJA_TAIL, orient
 from .http import Fetcher
 from .ontology import EDGE_TYPES, Node
 from .store import GraphStore
@@ -375,6 +375,69 @@ def local_matches(store: GraphStore, ex_ids: list[str] | None = None) -> list[di
             out.append({"ex_id": r["id"], "target": same_as_targets[0],
                         "label": r["label"], "method": "same_as", "score": 0.95})
     return out
+
+
+# 한시 제목은 갈래 접두·접미가 붙었다 빠졌다 한다. `등만월대회고`
+# (登滿月臺懷古)와 `만월대 회고시`(滿月臺懷古詩)는 같은 시인데 라벨이 달라
+# 두 노드가 됐다 — 황진이 상세에 작품이 9편으로 부풀어 있었다. 한 문서
+# 안에서 두 문장이 같은 작품을 달리 부르면 그대로 두 개가 된다.
+#
+# **작품 타입에, 같은 창작자 안에서만 적용한다.** 문자열이 비슷하다는
+# 이유로 합치면 절반이 틀린다 — 실측 후보 26쌍에 `제1차 요동 정벌`/`제2차
+# 요동 정벌`, `단종 복위 사건 (1456년)`/`(1457년)`, `부산항의 개항`/`원산항의
+# 개항`, `동아일보사 부사장`/`동아일보사 주필` 이 섞여 있었다. 접두·접미만
+# 벗겨 **정확히 같아질 때**만 잇는다 (실측: 두 DB 전체에서 1쌍, 오탐 0).
+TITLE_NOISE = re.compile(r"[《》〈〉「」『』\s]")
+TITLE_PREFIX = re.compile(r"^[등영제]")  # 登(오르다)·詠/咏(읊다)·題(제하다)
+TITLE_SUFFIX = re.compile(r"[시가]$")  # 詩·歌
+TITLE_MIN_CORE = 4  # 이보다 짧으면 우연히 같아진다
+
+
+def title_core(label: str) -> str:
+    """한시 제목에서 갈래 접두·접미를 벗긴 핵심."""
+    core = TITLE_NOISE.sub("", HANJA_TAIL.sub("", label))
+    return TITLE_SUFFIX.sub("", TITLE_PREFIX.sub("", core))
+
+
+def title_variant_matches(store: GraphStore) -> list[dict]:
+    """같은 작품이 표기만 달라 두 노드가 된 것들."""
+    by_creator: dict[str, dict[str, dict]] = {}
+    for r in store.conn.execute(
+        """SELECT e.src, e.dst, n.label
+             FROM edges e JOIN nodes n ON n.id = e.dst
+            WHERE e.type = 'created' AND n.type = 'artwork'
+              AND n.id LIKE ?""",
+        (EX_PREFIX + "%",),
+    ):
+        by_creator.setdefault(r["src"], {})[r["dst"]] = dict(r)
+
+    def rank(item: dict) -> tuple[int, int, str]:
+        """남길 쪽 고르기 — 연결이 많은 것, 그다음 표기가 온전한 것."""
+        degree = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE src = ?1 OR dst = ?1", (item["dst"],)
+        ).fetchone()[0]
+        return (degree, len(item["label"]), item["dst"])
+
+    plan: list[dict] = []
+    for items in by_creator.values():
+        groups: dict[str, list[dict]] = {}
+        for item in items.values():
+            core = title_core(item["label"])
+            if len(core) >= TITLE_MIN_CORE:
+                groups.setdefault(core, []).append(item)
+        for core, members in groups.items():
+            if len(members) < 2:
+                continue
+            keep = max(members, key=rank)
+            for m in members:
+                if m["dst"] == keep["dst"]:
+                    continue
+                plan.append({
+                    "ex_id": m["dst"], "target": keep["dst"], "label": m["label"],
+                    "target_label": keep["label"], "core": core,
+                    "method": "title_variant", "score": 0.9,
+                })
+    return plan
 
 
 # --- 3단계: 한국어 위키백과 문서명 -> QID ---------------------------------

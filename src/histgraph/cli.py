@@ -415,6 +415,17 @@ def cmd_promote(args: argparse.Namespace) -> int:
                 )
                 print(f"    {a['label']}({a['degree']}) ↔ {others}")
 
+        # 같은 작품이 표기만 달라 두 노드가 된 것. 승격 앞에 둔다 —
+        # 뒤에 두면 다음 실행까지 화면에 중복이 남는다.
+        variants = pr.title_variant_matches(store)
+        print(f"\n→ 작품 표기 변이 {len(variants)}쌍")
+        for v in variants[: args.show]:
+            print(f"    {v['label']} → {v['target_label']}  (핵심 '{v['core']}')")
+        if not args.dry_run:
+            for v in variants:
+                pr.merge_node(store, v["ex_id"], v["target"], v["method"], v["score"])
+            store.conn.commit()
+
         if not args.no_retype:
             plan = pr.retype(store, dry_run=args.dry_run)["plan"]
             print(f"→ 타입 교정 {len(plan)}건")
