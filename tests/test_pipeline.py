@@ -443,6 +443,107 @@ check("한자 병기 이름도 통과", not is_descriptive_name("송시열(宋�
 
 # 한자 병기가 붙으면 같은 사람이 두 노드가 된다
 check("한자 병기 제거", normalize_name("송시열(宋時烈)") == "송시열")
+
+print("\n[참여 오독 — 죽은 뒤의 사건]")
+# 실측: 황진이(1506~1567) 문서의 "임진왜란과 병자호란 등으로 인해 대부분
+# 실전되었고"(작품이 소실됐다는 뜻)에서 participated_in 이 나왔다. 근거는
+# 원문에 실제로 있고 상대 이름도 들어 있어 기존 검증을 전부 통과한다.
+from histgraph.extract import (  # noqa: E402
+    evidence_year,
+    label_year,
+    lifespan_conflict,
+    loss_context,
+)
+
+check("`~로 인해 실전` 은 참여가 아니다 → 버린다",
+      loss_context("participated_in",
+                   "그러나 임진왜란과 병자호란 등으로 인해 대부분 실전되었고"))
+check("소실 어휘만으로는 안 버린다 (원균의 해전 참여가 정상)",
+      not loss_context("participated_in",
+                       "옥포 해전에서 조선 수군은 개전 이후 최초의 대규모 승리를"))
+check("원인 문형만으로는 안 버린다",
+      not loss_context("participated_in", "임진왜란으로 인해 의병을 일으켰다"))
+check("다른 관계 타입은 검사 안 함",
+      not loss_context("related_to", "병자호란으로 인해 소실되었고"))
+
+check("죽은 뒤의 사건 참여 → 연대 충돌",
+      lifespan_conflict("participated_in", ("1506", "1544"), ("1636-12-09", None)))
+check("생전의 사건 참여는 통과",
+      lifespan_conflict("participated_in",
+                        ("1545", "1598"), ("1592-05-23", "1593-01-01")) is False)
+check("연대를 모르면 막지 않는다",
+      not lifespan_conflict("participated_in", ("1506", "1544"), (None, None)))
+
+# `황진이 (2006년)` 같은 영화·드라마 사건 노드는 라벨의 연도가 유일한
+# 연대 단서다. 이게 없으면 사후 400년 뒤 드라마 '참여'가 살아남는다.
+check("라벨 연도 추출", label_year("황진이 (2006년)") == "2006")
+check("연도 없는 라벨은 None", label_year("병자호란") is None)
+# **끝자리 괄호만 보면 절반을 놓친다.** 처음에 `(YYYY년)` 꼬리만 봤다가
+# 드라마 참여 76건이 그대로 남았다 — 연도가 라벨 앞에 오는 꼴이었다.
+check("라벨 앞머리 연도도 잡는다",
+      label_year("2021년~2022년 KBS 1TV 드라마 《태종 이방원》") == "2021")
+check("범위 라벨은 시작 연도", label_year("1996년~1998년 KBS 1TV 드라마 《용의 눈물》") == "1996")
+check("재위년은 연도가 아니다 (두 자리)", label_year("조선 세조 12년(1466)") is None)
+
+check("근거에서 가장 이른 연도", evidence_year("《왕과 비》 (KBS 1TV, 1998년~2000년 배우:이광기)") == "1998")
+check("근거에 연도가 없으면 None", evidence_year("장희재가 스스로 죄를 청하였으나") is None)
+check("근거 연도로 사후 참여를 잡는다",
+      lifespan_conflict("participated_in", ("1418", "1446"),
+                        (evidence_year("《왕과 비》 (KBS 1TV, 1998년~2000년)"), None)))
+check("라벨 연도로 사후 참여를 잡는다",
+      lifespan_conflict("participated_in", ("1506", "1544"),
+                        (label_year("황진이 (2006년)"), None)))
+
+print("\n[가제티어 덤프 — 한 문장이 낳은 묶음]")
+# 실측: `무오사화 --from_period-->` 39건이 문서 첫 문장 하나를 근거로 달려
+# 있었고 대상 39개가 전부 가제티어 period 상위 150개였다 (무오사화는
+# 1498년인데 조선 선조 17년(1584)…). 낱개로 보면 근거가 원문에 실제로
+# 있어 멀쩡하다 — 묶음의 **지목률**로만 갈린다.
+from histgraph.extract import gazetteer_dump  # noqa: E402
+
+_dump_ev = ("무오사화(戊午士禍)는 1498년(연산군 4년) 음력 7월 훈구파가 사림파를 대대적으로"
+            " 숙청한 사건이다. 조선시대 4대사화 가운데 첫 번째 사화이다.")
+_dump = [
+    {"subject": "무오사화", "relation": "from_period", "object": obj, "evidence": _dump_ev}
+    for obj in ("조선 세조 12년(1466)", "조선 선조 17년(1584)", "조선 숙종 9년(1683)",
+                "조선 영조 4년(1728)", "조선 중종 8년(1513)", "조선시대")
+]
+_dropped = gazetteer_dump(_dump)
+check("근거가 지목 못한 대상을 버린다", len(_dropped) == 5)
+check("근거가 지목한 것은 남긴다 (조선시대)", 5 not in _dropped)
+
+# 정상 열거문은 대상을 다 지목한다. 이걸 버리면 황진이의 시조가 사라진다.
+_list_ev = "시조 작품으로는 청산리 벽계수야, 동짓달 기나긴 밤을, 내언제 신의 없어, 산은 옛 산이로되, 어져 내일이여 등이 있다."
+_list = [
+    {"subject": "황진이", "relation": "created", "object": obj, "evidence": _list_ev}
+    for obj in ("청산리 벽계수야", "동짓달 기나긴 밤을", "내언제 신의 없어",
+                "산은 옛 산이로되", "어져 내일이여")
+]
+check("정상 열거문은 그대로 둔다", gazetteer_dump(_list) == set())
+
+# 묶음이 작으면 열거문과 구분되지 않는다 — 근거가 대상을 안 적는 것이
+# 자연스러운 경우가 많다 (`김일경은 조선후기의 문신` → from_period 조선시대).
+_small = [
+    {"subject": "김일경", "relation": "from_period", "object": obj,
+     "evidence": "김일경(金一鏡, 1662년 ~ 1724년)은 조선후기의 문신이다."}
+    for obj in ("조선시대", "조선시대 후기")
+]
+check("작은 묶음은 건드리지 않는다", gazetteer_dump(_small) == set())
+check("근거 없는 관계는 묶지 않는다",
+      gazetteer_dump([{"subject": "a", "relation": "related_to", "object": "b"}]) == set())
+
+print("\n[작품 표기 변이]")
+# 실측: 황진이 상세에 작품이 9편으로 부풀어 있었다. `등만월대회고`
+# (登滿月臺懷古)와 `만월대 회고시` 가 같은 시인데 두 노드였다.
+from histgraph.promote import title_core  # noqa: E402
+
+check("갈래 접두·접미를 벗긴다", title_core("등만월대회고") == title_core("만월대 회고시"))
+check("핵심이 다르면 안 같아진다", title_core("박연폭포시") != title_core("영초월시"))
+# 문자열이 비슷하다고 합치면 절반이 틀린다 — 이것들은 서로 다른 사건이다
+check("차수가 다른 사건은 안 같아진다",
+      title_core("제1차 요동 정벌") != title_core("제2차 요동 정벌"))
+check("연도가 다른 사건은 안 같아진다",
+      title_core("단종 복위 사건 (1456년)") != title_core("단종 복위 사건 (1457년)"))
 check("공백 섞인 한자도 제거", normalize_name("조헌 (趙憲)") == "조헌")
 check("한글 괄호는 남긴다 (동명이인 구분)",
       normalize_name("해명 (고구려)") == "해명 (고구려)")
