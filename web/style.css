@@ -41,6 +41,14 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 }
 
 .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+.menu-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; margin-right: 2px;
+  background: none; border: 1px solid var(--line); border-radius: 7px;
+  color: var(--text-2); cursor: pointer;
+}
+.menu-toggle:hover { color: var(--text); border-color: var(--text-3); }
+.menu-toggle[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
 .brand h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
 .brand .mark {
   width: 13px; height: 13px; border-radius: 50%;
@@ -90,13 +98,16 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* --- 배치 --- */
 .layout { flex: 1; display: flex; min-height: 0; }
 
+/* 기본은 접힘 — 그래프가 주인공이니 메뉴(☰)를 눌러야 열린다. */
 .side {
   width: 244px; flex: none;
   border-right: 1px solid var(--line);
   background: var(--surface-2);
   overflow-y: auto;
   padding: 14px;
+  display: none;
 }
+.layout.side-open .side { display: block; }
 .side section { margin-bottom: 22px; }
 .side h2 {
   font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
@@ -181,10 +192,6 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   background: none; border: none; color: var(--actor);
   font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0;
 }
-.d-links { display: flex; gap: 12px; margin: 8px 0 4px; font-size: 12px; }
-.d-links a { color: var(--actor); text-decoration: none; }
-.d-links a:hover { text-decoration: underline; }
-
 .d-section-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--text-3); margin: 20px 0 8px;
@@ -207,17 +214,13 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .rel-line { display: flex; align-items: center; gap: 7px; font-size: 13px; min-width: 0; }
 .rel-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .rel-dir { color: var(--text-3); font-size: 11px; flex: none; }
-/* 두 소스가 확인한 관계는 배지가 길다 ('Wikidata + 인포박스').
-   이름 쪽이 줄어들게 두고 배지는 자르지 않는다 — 출처가 판단 근거다. */
 .rel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel-conf {
-  margin-left: auto; color: var(--text-3); font-size: 11px;
-  flex: none; white-space: nowrap;
-}
 .rel-ev {
   margin-top: 6px; font-size: 11.5px; line-height: 1.6; color: var(--text-3);
   border-left: 2px solid var(--line); padding-left: 8px;
 }
+/* 여러 관계가 함께 딛고 선 근거. 카드 밖에 한 번만 둔다. */
+.rel-ev.shared { margin: 0 0 7px; }
 
 .side::-webkit-scrollbar, .detail::-webkit-scrollbar, .results::-webkit-scrollbar { width: 9px; }
 .side::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb, .results::-webkit-scrollbar-thumb {

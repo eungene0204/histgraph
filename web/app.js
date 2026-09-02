@@ -49,6 +49,14 @@ window.addEventListener('hashchange', () => {
 
 const ERA_LABEL = { joseon: '조선', goryeo: '고려', silla: '신라', goguryeo: '고구려', baekje: '백제' };
 
+// --- 사이드 패널 --------------------------------------------------------
+// 기본은 접힘. 캔버스 크기는 graph.js 의 ResizeObserver 가 따라온다.
+$('menu-toggle').onclick = () => {
+  const open = document.querySelector('.layout').classList.toggle('side-open');
+  $('menu-toggle').setAttribute('aria-expanded', String(open));
+  $('menu-toggle').setAttribute('aria-label', open ? '패널 닫기' : '패널 열기');
+};
+
 // --- 범례 --------------------------------------------------------------
 // 색은 갈래, 모양은 타입. 둘 다 범례에 있어야 색만으로 읽지 않게 된다.
 const GROUP_LABEL = { actor: '인물·단체', event: '사건', thing: '장소·유물', frame: '시대·직위' };
@@ -196,29 +204,43 @@ async function showDetail(id) {
   if (d.error) return;
 
   const dates = [fmtDate(d.start), fmtDate(d.end)].filter(Boolean).join(' ~ ');
-  // 관계는 종류별로 묶는다. 방향까지 키에 넣어야 '자녀'와 '자녀(받음)'가
-  // 한 덩어리로 뭉쳐 부모와 자식이 뒤섞이는 일이 없다.
+  // 관계는 종류·방향별로 묶는다. 방향까지 키에 넣어야 부모와 자식이
+  // 한 덩어리로 뒤섞이는 일이 없다.
   const groups = new Map();
   for (const r of d.relations) {
-    const key = r.label + (r.dir === 'in' ? ' (받음)' : '');
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    if (!groups.has(relHead(r))) groups.set(relHead(r), []);
+    groups.get(relHead(r)).push(r);
   }
 
-  const relHtml = [...groups.entries()].map(([head, rels]) => `
+  const relHtml = [...groups.entries()].map(([head, rels]) => {
+    // 열거문("시조 작품으로는 A, B, C 등이 있다") 하나가 관계 여럿을 낳는다.
+    // 카드마다 같은 문장을 찍으면 다른 작품인데 내용이 같아 보인다 —
+    // 여럿이 공유하는 근거는 묶음 머리에 한 번만 둔다.
+    const shared = new Set();
+    const seen = new Set();
+    for (const r of rels) {
+      for (const ev of new Set(r.evidence || [])) {
+        if (seen.has(ev)) shared.add(ev); else seen.add(ev);
+      }
+    }
+    return `
     <div class="rel-group">
       <div class="rel-head">${esc(head)} · ${rels.length}</div>
-      ${rels.map((r) => `
+      ${[...shared].map((ev) => `<div class="rel-ev shared">“${esc(ev)}”</div>`).join('')}
+      ${rels.map((r) => {
+        const own = (r.evidence || []).filter((ev) => !shared.has(ev));
+        return `
         <button class="rel" data-id="${esc(r.other.id)}">
           <span class="rel-line">
             <span class="rel-dot" style="background:${GROUP_COLOR[r.other.group]}"></span>
             <span class="rel-name">${esc(r.other.label)}</span>
             ${r.dir === 'in' ? '<span class="rel-dir">←</span>' : ''}
-            <span class="rel-conf">${sourceBadge(r)}</span>
           </span>
-          ${(r.evidence || []).map((ev) => `<div class="rel-ev">“${esc(ev)}”</div>`).join('')}
-        </button>`).join('')}
-    </div>`).join('');
+          ${own.map((ev) => `<div class="rel-ev">“${esc(ev)}”</div>`).join('')}
+        </button>`;
+      }).join('')}
+    </div>`;
+  }).join('');
 
   $('detail-body').innerHTML = `
     <span class="d-type">${glyph(d.type, d.group, 11)} ${esc(d.type_label)}</span>
@@ -226,14 +248,8 @@ async function showDetail(id) {
     ${dates ? `<div class="d-dates">${esc(dates)}</div>` : ''}
     ${d.description ? `<div class="d-desc" id="desc">${esc(d.description)}</div>
        <button class="d-more" id="more">전문 보기</button>` : ''}
-    <div class="d-links">
-      ${d.kowiki_url ? `<a href="${esc(d.kowiki_url)}" target="_blank" rel="noopener">위키백과</a>` : ''}
-      ${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${d.id.startsWith('wd:') ? 'Wikidata' : '원본'}</a>` : ''}
-    </div>
     ${d.aliases.length ? `<div class="d-section-title">다른 이름</div>
       <div class="d-aliases">${d.aliases.map((a) => `<span>${esc(a)}</span>`).join('')}</div>` : ''}
-    ${d.merged_from.length ? `<div class="d-section-title">병합 이력</div>
-      <div class="d-aliases">${d.merged_from.map((m) => `<span>${esc(m.label)} · ${esc(m.method)}</span>`).join('')}</div>` : ''}
     <div class="d-section-title">관계 ${d.relations.length}</div>
     ${relHtml || '<p class="hint">연결된 관계가 없습니다.</p>'}
   `;
@@ -255,25 +271,16 @@ async function showDetail(id) {
 $('detail-close').onclick = closeDetail;
 function closeDetail() { $('detail').hidden = true; }
 
-// 이 관계를 어디서 얻었는지. 신뢰도 숫자만 보여주면 0.9가 LLM 추출인지
-// 인포박스 파싱인지 알 수 없다 — 판단은 출처를 알아야 할 수 있다.
-const SOURCE_LABEL = {
-  wd: 'Wikidata',
-  khs: '국가유산청',
-  kowiki: '위키백과',
-  'kowiki:infobox': '인포박스',
-  'kowiki:event': '위키백과',
-  extract: '추출',
-  timeline: '연표',
+// 엣지 라벨은 출발 노드 기준이라 그대로 쓰면 방향이 뒤집힌다.
+// child_of 는 'A → B = A가 B의 자녀' — 나가는 상대는 부모, 들어오는
+// 상대가 자녀다. 방향별 이름이 있는 타입만 바꿔 부른다.
+const DIR_HEAD = {
+  child_of: { out: '부모', in: '자녀' },
+  part_of: { out: '상위', in: '하위' },
 };
 
-// 여러 소스가 같은 말을 했으면 그걸 드러낸다. 한 줄로 합치되 '누가
-// 확인해 줬는가'는 남긴다 — 교차검증이 이 그래프의 신뢰도 근거다.
-function sourceBadge(r) {
-  const names = (r.sources || []).map((s) => SOURCE_LABEL[s] || esc(s));
-  const conf = r.confidence < 1 ? ` ${r.confidence.toFixed(1)}` : '';
-  if (names.length > 1) return `${names.join(' + ')}${conf}`;
-  return `${names[0] || ''}${conf}`;
+function relHead(r) {
+  return DIR_HEAD[r.type]?.[r.dir] || r.label;
 }
 
 // --- 잡동사니 ----------------------------------------------------------

@@ -10,6 +10,11 @@
 
 <header class="top">
   <div class="brand">
+    <button class="menu-toggle" id="menu-toggle" aria-label="패널 열기" aria-expanded="false" title="시작점·범례·표시 설정">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </button>
     <span class="mark"></span>
     <h1>histgraph</h1>
     <button class="era" id="go-root" title="이 그래프의 중심으로">조선</button>
@@ -67,7 +72,7 @@
     <canvas id="canvas"></canvas>
     <div class="stage-note" id="note" hidden></div>
     <div class="empty" id="empty">
-      <p>왼쪽에서 시작점을 고르거나 위에서 검색하세요.</p>
+      <p>왼쪽 위 메뉴(☰)에서 시작점을 고르거나 위에서 검색하세요.</p>
     </div>
   </main>
 
