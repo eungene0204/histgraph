@@ -413,11 +413,12 @@ def fetch_events(
     for polity in polities:
         rows = _safe_query(
             fetcher,
-            f"""SELECT ?e ?eLabel ?cls ?start ?end ?place WHERE {{
+            f"""SELECT ?e ?eLabel ?cls ?start ?end ?point ?place WHERE {{
                   VALUES ?cls {{ {class_values} }}
                   ?e wdt:P31/wdt:P279* ?cls ; wdt:P17 wd:{polity} .
                   OPTIONAL {{ ?e wdt:P580 ?start }}
                   OPTIONAL {{ ?e wdt:P582 ?end }}
+                  OPTIONAL {{ ?e wdt:P585 ?point }}
                   OPTIONAL {{ ?e wdt:P276 ?place }}
                   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
                 }} LIMIT {limit}""",
@@ -441,8 +442,13 @@ def fetch_events(
                     type="event",
                     label=_val(r, "eLabel") or _qid(e_uri),
                     source=SOURCE,
-                    start_date=_iso_date(_val(r, "start")),
-                    end_date=_iso_date(_val(r, "end")),
+                    # 짧은 사건은 P580/P582 없이 P585(시점)만 갖는다.
+                    # 실측: 병자호란(Q487757)이 그래서 무연대로 들어왔고,
+                    # 죽은 사람의 '참여'를 연대 검사가 못 걸렀다.
+                    start_date=_iso_date(_val(r, "start"))
+                    or _iso_date(_val(r, "point")),
+                    end_date=_iso_date(_val(r, "end"))
+                    or _iso_date(_val(r, "point")),
                     url=e_uri,
                     props={
                         "event_class": EVENT_CLASSES.get(_qid(cls_uri), "사건")

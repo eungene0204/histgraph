@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -378,7 +379,10 @@ def to_graph(
     edges: list[Edge] = []
     dropped_evidence = dropped_schema = flipped = self_loops = 0
     dropped_possessive = dropped_anachronism = dropped_reversed = 0
-    dropped_unnamed = 0
+    dropped_unnamed = dropped_loss = 0
+
+    # 가제티어 덤프는 낱개로 보면 멀쩡해 보인다. 묶음 단위로 먼저 걸러낸다.
+    dumped = gazetteer_dump(relations)
 
     # 이름 하나가 여러 노드를 가리킬 때 **연결이 많은 쪽**을 고른다.
     # 실측: '정종'을 이름 그대로 찾으면 엣지 1개짜리 동명 노드가 걸리고,
@@ -409,7 +413,10 @@ def to_graph(
     doc_span = _life_span(_doc["start_date"], _doc["end_date"]) if _doc else None
 
     def node_dates(node_id: str) -> tuple[str | None, str | None]:
-        """저장된 생몰년. 새로 만든 ex: 노드는 연대가 없다."""
+        """저장된 연대. 이번에 만든 ex: 노드는 아직 store 에 없으므로
+        메모리의 것을 본다 — 라벨 연도(`황진이 (2006년)`)가 여기서 잡힌다."""
+        if node_id in nodes:
+            return (nodes[node_id].start_date, nodes[node_id].end_date)
         row = store.conn.execute(
             "SELECT start_date, end_date FROM nodes WHERE id = ?", (node_id,)
         ).fetchone()
@@ -457,14 +464,18 @@ def to_graph(
             return row["id"], row["type"]
         nid = f"ex:{node_type}:{name}"
         nodes.setdefault(
-            nid, Node(id=nid, type=node_type, label=name, source="extract")
+            nid, Node(id=nid, type=node_type, label=name, source="extract",
+                      start_date=label_year(name) if node_type == "event" else None)
         )
         return nid, node_type
 
-    for rel in relations:
+    for index, rel in enumerate(relations):
         try:
             edge_type = rel["relation"]
             if edge_type not in EDGE_TYPES:
+                continue
+
+            if index in dumped:
                 continue
 
             if doc_text is not None and not evidence_supported(
@@ -478,6 +489,10 @@ def to_graph(
                 dropped_possessive += 1
                 continue
 
+            if loss_context(edge_type, rel.get("evidence", "")):
+                dropped_loss += 1
+                continue
+
             # 이름 자리에 설명구가 온 것. 가리키는 사람을 특정할 수 없으므로
             # 노드를 만들지 않는다 (`양윤순의 따님` → 이름을 모른다).
             if is_descriptive_name(rel.get("object", "")) or is_descriptive_name(
@@ -486,6 +501,7 @@ def to_graph(
                 dropped_possessive += 1
                 continue
 
+            evidence = rel.get("evidence", "")
             src, src_type = resolve(rel["subject"], rel["subject_type"])
             dst, dst_type = resolve(rel["object"], rel["object_type"])
 
@@ -495,7 +511,15 @@ def to_graph(
                 self_loops += 1
                 continue
 
-            if lifespan_conflict(edge_type, node_dates(src), node_dates(dst)):
+            # 사건 라벨에 연도가 없으면 근거의 연도를 임시 단서로 쓴다.
+            # **저장하지는 않는다** — 실측 정확도가 88%(신유박해를 1760년
+            # 으로 읽는 식)라 사실로 적을 수 없다. 죽은 지 수백 년 뒤를
+            # 가리는 데에는 그 정확도로 충분하다.
+            dst_dates = node_dates(dst)
+            if dst_type == "event" and not any(dst_dates):
+                dst_dates = (evidence_year(evidence), None)
+
+            if lifespan_conflict(edge_type, node_dates(src), dst_dates):
                 dropped_anachronism += 1
                 continue
 
@@ -548,13 +572,15 @@ def to_graph(
 
     if (dropped_evidence or dropped_schema or flipped or self_loops
             or dropped_possessive or dropped_anachronism or dropped_reversed
-            or dropped_unnamed):
+            or dropped_unnamed or dropped_loss or dumped):
         log.info(
             "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 자기순환 %d건 버림"
-            " · 소유격오독 %d건 버림 · 연대충돌 %d건 버림"
-            " · 역방향 %d건 버림 · 근거무지목 %d건 버림 · 방향교정 %d건",
+            " · 소유격오독 %d건 버림 · 소실문형 %d건 버림 · 연대충돌 %d건 버림"
+            " · 역방향 %d건 버림 · 근거무지목 %d건 버림 · 가제티어덤프 %d건 버림"
+            " · 방향교정 %d건",
             dropped_evidence, dropped_schema, self_loops, dropped_possessive,
-            dropped_anachronism, dropped_reversed, dropped_unnamed, flipped,
+            dropped_loss, dropped_anachronism, dropped_reversed, dropped_unnamed,
+            len(dumped), flipped,
         )
     return list(nodes.values()), edges
 
@@ -690,8 +716,77 @@ def evidence_names_target(evidence: str, names: set[str]) -> bool:
     flat = "".join(evidence.split())
     return any("".join(n.split()) in flat for n in names)
 
+
+# 가제티어 덤프. 모델이 원문을 읽는 대신 프롬프트의 '알려진 개체' 목록을
+# 그대로 쏟아내고, 근거 칸에는 문서 첫 문장을 붙인다.
+#
+# 실측(조선 그래프): `무오사화 --from_period-->` 39건이 한 문장을 근거로
+# 달려 있었고 대상 39개가 **전부** 가제티어 period 상위 150개였다
+# (조선 세조 12년(1466), 조선 선조 17년(1584)…). 무오사화는 1498년이다.
+# 같은 꼴로 조선 효종 23건·이순신 11건·정승충 5건이 더 있었다.
+#
+# 열거문과는 **지목률**로 갈린다. `시조 작품으로는 A, B, C 등이 있다` 같은
+# 정상 열거문은 근거가 대상을 88~100% 지목하는데, 덤프는 0~20%다. 그래서
+# 낱개로 보지 않고 **한 문장이 낳은 묶음 단위**로 본다 — 근거가 원문에
+# 실제로 있고 문장 하나만 놓고 보면 멀쩡해서 낱개 검사로는 못 잡는다.
+#
+# 지목 못한 것만 버린다. 통째로 버리면 `손자이자 정숭조의 아들인 정승충은`
+# 에서 하나뿐인 옳은 부모(정숭조)까지 같이 날아간다.
+DUMP_MIN_GROUP = 5        # 이보다 작으면 열거문과 구분되지 않는다
+DUMP_UNNAMED_RATIO = 0.5  # 지목 못한 것이 과반이면 읽고 쓴 것이 아니다
+
+
+def gazetteer_dump(relations: list[dict]) -> set[int]:
+    """버릴 관계의 인덱스. 모델 출력을 (주어, 관계, 근거)로 묶어 판정한다."""
+    groups: dict[tuple[str, str, str], list[int]] = defaultdict(list)
+    for i, rel in enumerate(relations):
+        if evidence := rel.get("evidence", ""):
+            groups[(rel.get("subject", ""), rel.get("relation", ""), evidence)].append(i)
+
+    drop: set[int] = set()
+    for (_, _, evidence), members in groups.items():
+        if len(members) < DUMP_MIN_GROUP:
+            continue
+        unnamed = [
+            i for i in members
+            if not evidence_names_target(
+                evidence, name_variants(normalize_name(relations[i].get("object", "")))
+            )
+        ]
+        if len(unnamed) > len(members) * DUMP_UNNAMED_RATIO:
+            drop.update(unnamed)
+    return drop
+
+
 # 한자 병기 꼬리. `송시열(宋時烈)` 이 `송시열` 과 다른 노드가 되는 것을 막는다.
 HANJA_TAIL = re.compile(r"\s*\([一-鿿\s,·]+\)\s*$")
+
+# 라벨·근거에 적힌 연도. 영화·드라마를 사건으로 추출한 노드는 start_date 가
+# 비어 연대 검사에 안 걸린다 — 죽은 지 400년 뒤의 드라마에 '참여'한 엣지가
+# 그래서 살아남았다.
+#
+# **끝자리 괄호만 보면 절반을 놓친다.** 처음에 `(YYYY년)` 꼬리만 봤더니
+# `황진이 (2006년)` 은 잡고 `2021년~2022년 KBS 1TV 드라마 《태종 이방원》`,
+# `1996년~1998년 …《용의 눈물》` 은 그대로 통과해 76건이 남았다. 자리를
+# 가리지 않고 **처음 나오는 네 자리 연도**를 쓴다. 세 자리 미만은 받지
+# 않는다 — `조선 세조 12년(1466)` 의 `12년` 은 재위년이지 연도가 아니다.
+LABEL_YEAR = re.compile(r"(\d{3,4})년")
+
+
+def label_year(text: str) -> str | None:
+    """라벨(또는 근거)에서 처음 나오는 연도. 없으면 None."""
+    m = LABEL_YEAR.search(text or "")
+    return m.group(1) if m else None
+
+
+def evidence_year(evidence: str) -> str | None:
+    """근거에 적힌 가장 이른 연도. 라벨에 연도가 없는 사건의 마지막 단서다.
+
+    `《왕과 비》 (KBS 1TV, 1998년~2000년 배우:이광기)` 처럼 라벨(`왕과 비
+    출연`)만으로는 언제 일인지 알 수 없는 것들이 있다. **가장 이른 것**을
+    쓴다 — 연대 충돌 판정을 느슨한 쪽으로 몰아 멀쩡한 엣지를 덜 죽인다."""
+    years = LABEL_YEAR.findall(evidence or "")
+    return min(years, key=int) if years else None
 
 
 def normalize_name(name: str) -> str:
@@ -719,7 +814,13 @@ def is_descriptive_name(name: str) -> bool:
 #
 # `related_to` 는 넣지 않는다 — `김종직 --related_to--> 주희`(498년)처럼
 # 학맥·추숭 관계는 시대가 달라도 참일 수 있다.
-LIFESPAN_CHECKED = {"child_of", "spouse_of"}
+#
+# `participated_in` 도 검사한다 — 참여는 그 시대를 살아야 성립한다.
+# 실측: 황진이(1506~1567)가 병자호란(1636)에 '참여'했다고 추출됐다.
+# 근거 문장("임진왜란과 병자호란 등으로 인해 대부분 실전되었고")은
+# 원문에 실제로 있고 상대 이름도 들어 있어 근거 검증을 다 통과한다 —
+# 관계(서술어)만 틀린 오류는 연대로밖에 못 잡는다.
+LIFESPAN_CHECKED = {"child_of", "spouse_of", "participated_in"}
 # 생몰년 표기가 어긋나거나 한쪽만 아는 경우를 감안해 넉넉히 잡는다.
 LIFESPAN_TOLERANCE = 40
 
@@ -782,6 +883,22 @@ def possessive_mismatch(edge_type: str, obj: str, evidence: str) -> bool:
     tail = evidence[pos + len(obj):]
     tail = re.sub(r"^\s*\([^)]{0,20}\)", "", tail)  # `(鄭承復)` 같은 한자 병기
     return bool(re.match(rf"\s*의\s*(?:{kin})", tail))
+
+
+# `~로 인해 소실되었다` — 사건이 원인으로만 언급된 문장. 참여가 아니다.
+# 실측: 황진이 문서의 "임진왜란과 병자호란 등으로 인해 대부분 실전되었고"
+# 에서 participated_in 두 건이 나왔다 (작품이 실전된 것이지 본인이 참전한
+# 것이 아니다). 원인 문형과 소실 어휘가 **둘 다** 있어야 버린다 — 소실
+# 어휘만으로 거르면 원균의 해전 참여 7건 같은 정상 엣지가 날아간다.
+LOSS_CAUSE = re.compile(r"(?:으로|로)\s*인해|때문에")
+LOSS_VERB = re.compile(r"소실|실전|인멸|불타|파괴|훼손|망실|유실|소각")
+
+
+def loss_context(edge_type: str, evidence: str) -> bool:
+    """근거가 참여가 아니라 '그 사건 탓에 잃었다'는 문장인가."""
+    if edge_type != "participated_in" or not evidence:
+        return False
+    return bool(LOSS_CAUSE.search(evidence) and LOSS_VERB.search(evidence))
 
 
 def narrative_score(text: str) -> float:
