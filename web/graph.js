@@ -276,10 +276,11 @@ export class GraphView {
     ctx.translate(this.tx, this.ty);
     ctx.scale(this.k, this.k);
 
-    // **어둡게 하는 것은 가리킬 때뿐이다.** 선택만으로 나머지를 죽이면,
-    // 중심을 열어둔 기본 화면에서 이웃끼리의 관계가 가장 흐린 선이 된다 —
-    // 정작 "서로 어떻게 얽혀 있나"가 안 보인다.
-    const spot = this.hover;
+    // 가리키는 동안은 hover 가, 마우스를 떼면 클릭해 둔 노드가 조명을
+    // 이어받는다 — 빈 곳을 클릭하기 전까지 유지된다. 선택 노드가 화면에
+    // 없으면(새 데이터 로드 뒤) 조명 없는 기본 화면으로 돌아간다.
+    const spot = this.hover
+      ?? (this.byId.has(this.selected) ? this.selected : null);
     const near = spot ? this.neighborsOf(spot) : null;
     const lit = (id) => !spot || id === spot || near.has(id);
     const focus = spot || this.selected;  // 라벨을 굵게 쓸 대상
@@ -438,6 +439,8 @@ export class GraphView {
 
     const release = (ev) => {
       if (dragNode && !moved) this._select(dragNode);
+      // 빈 곳 클릭(끌지 않은 팬)은 선택 해제 — 조명이 여기서 꺼진다
+      if (!dragNode && !moved) this.selected = null;
       dragNode = null;
       panning = false;
       last = null;
