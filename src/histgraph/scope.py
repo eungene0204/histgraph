@@ -35,10 +35,19 @@ class Era:
     polity_label: str
     # 유물 시대 라벨에서 이 왕조를 가리키는 표기들
     aliases: list[str] = field(default_factory=list)
+    # 이 시대의 **사건**을 함께 담을 후계 정체. 조선은 1897년에 대한제국이
+    # 되고 1910년에 끝나는데, Wikidata 는 경술국치·을사조약·군대해산의
+    # P17 을 대한제국으로 적는다. 1897년에서 자르면 '조선이 어떻게 끝났나'가
+    # 통째로 빠진다 — 이미 3·1 운동·청산리 전투가 인물을 타고 들어와 있어
+    # 자르는 쪽이 오히려 실제와 안 맞았다.
+    #
+    # **인물에는 적용하지 않는다.** 대한제국 국적 인물까지 씨앗으로 삼으면
+    # 근현대로 끌려간다 (전체 인물 28,471명 중 65%가 대한민국이다).
+    successor_events: list[str] = field(default_factory=list)
 
 
 ERAS: dict[str, Era] = {
-    "joseon": Era("조선", "Q28179", "조선", ["조선"]),
+    "joseon": Era("조선", "Q28179", "조선", ["조선"], successor_events=["대한제국"]),
     "goryeo": Era("고려", "Q28208", "고려", ["고려"]),
     "silla": Era("신라", "Q28456", "신라", ["신라", "통일신라"]),
     "goguryeo": Era("고구려", "Q28370", "고구려", ["고구려"]),
@@ -84,6 +93,20 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
             """SELECT id FROM nodes WHERE type='event'
                AND json_extract(props,'$.seed_era')=?""",
             (era.polity_label,),
+        )
+    ]
+    # **Wikidata 가 그 정체의 사건이라고 말한 것.** 수집 쿼리가
+    # `?e wdt:P17 wd:{polity}` 로 물어 놓고 답을 버리고 있어서, 여기 걸릴
+    # 사건이 하나도 없었다. 실측: 조선 P17 사건 73건 — 진주민란·갑오개혁·
+    # 신임사화·경신 대기근과 임진왜란 전투 30여 건이 통째로 빠져 있었다.
+    polities = [era.polity_label, *era.successor_events]
+    marks = ",".join("?" * len(polities))
+    events += [
+        r["id"]
+        for r in c.execute(
+            f"""SELECT id FROM nodes WHERE type='event'
+                 AND json_extract(props,'$.polity') IN ({marks})""",
+            polities,
         )
     ]
     # 왕조 노드에 from_period 로 직접 걸린 사건도 포함
@@ -246,7 +269,18 @@ def extract(
                 connected.add(r["b"])
         isolated = keep - connected
         keep &= connected
-        log.info("고립 노드 %d개 제외 (남은 노드 %d)", len(isolated), len(keep))
+        # **연대를 아는 사건은 엣지가 없어도 남긴다.** 고립 노드를 버리는
+        # 이유는 화면에 점으로만 뜨기 때문인데, 연표에서는 '언제'라는 값
+        # 하나로 제 몫을 한다. 실측: 경술국치(한일병합, 1910-08-29)가
+        # 엣지 0개라 조선 그래프에서 통째로 빠져 있었다.
+        rescued = _dated_events(store, isolated & seeds)
+        if rescued:
+            keep |= rescued
+            isolated -= rescued
+        log.info(
+            "고립 노드 %d개 제외 (연대 있는 사건 %d개는 남김 · 남은 노드 %d)",
+            len(isolated), len(rescued), len(keep),
+        )
 
     out = Path(out_path)
     if out.exists():
@@ -254,12 +288,19 @@ def extract(
     dest = GraphStore(out)
 
     ordered = sorted(keep)
-    node_rows, edge_rows, alias_rows = [], [], []
+    node_rows, edge_rows, alias_rows, name_rows = [], [], [], []
     for i in range(0, len(ordered), 500):
         batch = ordered[i : i + 500]
         marks = ",".join("?" * len(batch))
         node_rows += store.conn.execute(
             f"SELECT * FROM nodes WHERE id IN ({marks})", batch
+        ).fetchall()
+        # **별칭도 함께 옮긴다.** 안 옮기고 있었다 — 전체 그래프에 5,064건이
+        # 있는데 시대 그래프에는 0건이었다. 화면이 읽는 것은 시대 그래프라,
+        # 이 프로젝트가 내세우는 "'이방원'으로 태종을 찾는다"가 정작
+        # 화면에서는 한 번도 동작한 적이 없었다.
+        name_rows += store.conn.execute(
+            f"SELECT * FROM aliases WHERE node_id IN ({marks})", batch
         ).fetchall()
         # 한쪽 끝만 배치에 걸고 가져온 뒤 파이썬에서 양끝을 검사한다.
         # SQL 에서 `src IN (batch) AND dst IN (batch)` 로 거르면 배치를
@@ -279,6 +320,10 @@ def extract(
     dest.conn.executemany(
         f"INSERT OR REPLACE INTO nodes ({cols}) VALUES ({','.join('?' * 12)})",
         [tuple(r[c] for c in cols.split(",")) for r in node_rows],
+    )
+    dest.conn.executemany(
+        "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?,?)",
+        [(r["node_id"], r["alias"]) for r in name_rows],
     )
     ecols = "src,dst,type,source,label,start_date,end_date,confidence,props"
     dest.conn.executemany(
@@ -302,6 +347,7 @@ def extract(
         "out": str(out),
         "seeds": len(seeds),
         "isolated_dropped": len(isolated),
+        "kept_aliases": len(name_rows),
         "kept_nodes": stats["nodes_total"],
         "kept_edges": stats["edges_total"],
         "by_node_type": stats["by_node_type"],

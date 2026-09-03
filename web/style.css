@@ -157,7 +157,128 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 }
 /* [hidden] 은 display 기본값만 끈다 — .empty 의 flex 가 이기므로 명시한다.
    (실측: 그래프 위에 안내문이 겹쳐 그려졌다) */
-.empty[hidden], .stage-note[hidden], .results[hidden], .detail[hidden] { display: none; }
+.empty[hidden], .stage-note[hidden], .results[hidden], .detail[hidden],
+.timeline[hidden] { display: none; }
+
+/* --- 연표 ---
+   그래프는 관계만 말하고 시간은 말하지 않는다. 고른 노드가 몇 년쯤의
+   일이고 무엇 뒤 무엇 앞인지를 이 막대가 맡는다. 자리는 연도에 비례하고,
+   겹쳐서 밀린 라벨은 실선으로 제자리와 이어 둔다. */
+.timeline {
+  width: 252px; flex: none;
+  position: relative;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--surface-2);
+  min-height: 0;
+}
+.tl-head { flex: none; padding: 13px 14px 11px; border-bottom: 1px solid var(--line); }
+.tl-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.tl-kicker {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--text-3);
+}
+/* 줌 — 멀리서는 큰 사건만, 가까이 가면 더 많이. 지도와 같은 몸짓이다. */
+.tl-zoom { display: flex; align-items: center; gap: 2px; }
+.tl-zoom button {
+  width: 22px; height: 22px; padding: 0;
+  background: none; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text-2); font: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.tl-zoom button:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
+.tl-zoom button:disabled { opacity: .35; cursor: default; }
+.tl-level {
+  min-width: 30px; text-align: center;
+  font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+/* 몇 개가 물러나 있는지. 안 보이는 사건이 없는 셈이 되면 안 된다. */
+.tl-count { margin-top: 4px; font-size: 11px; color: var(--text-3); }
+.tl-count b { color: var(--text-2); font-weight: 600; }
+.tl-more { color: var(--actor); }
+/* 연표는 화면보다 길어서 훑다 보면 고른 자리를 잃는다. 누르면 돌아온다. */
+.tl-when {
+  display: block; width: 100%; padding: 0; text-align: left;
+  background: none; border: none; cursor: pointer;
+  color: var(--text); font: inherit; font-size: 16px; font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.tl-when:hover { color: var(--actor); }
+/* 노드가 스스로 적고 있는 날짜가 아니라 이어진 연도 노드에서 가져온 값.
+   같은 얼굴로 내놓으면 안 된다. */
+.tl-via {
+  margin-left: 6px; vertical-align: 2px;
+  font-size: 10.5px; font-weight: 400; color: var(--text-3);
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px;
+}
+
+/* 훑기 막대 — 연표가 화면보다 길 때만 나온다.
+   밝은 칸이 지금 보이는 구간, 파란 표식이 고른 노드의 자리.
+   누르거나 끌면 그 해로 옮긴다. */
+.tl-map {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 10px; font-size: 10.5px; color: var(--text-3);
+  cursor: pointer; user-select: none;
+}
+.tl-map[hidden] { display: none; }
+.tl-map-bar {
+  position: relative; flex: 1; height: 12px; border-radius: 3px;
+  background: var(--surface-3); touch-action: none;
+}
+/* 지금 보이는 구간 — 창틀로 그린다. 칠해 버리면 고른 노드 표식과
+   둘 다 '막대'로 보여 무엇이 무엇인지 갈리지 않는다. */
+.tl-map-view {
+  position: absolute; top: 0; bottom: 0; min-width: 8px;
+  border: 1.5px solid var(--text-3); border-radius: 3px;
+}
+.tl-map:hover .tl-map-view { border-color: var(--text-2); }
+/* 고른 노드의 자리 (인물이면 생몰 구간) */
+.tl-map-here {
+  position: absolute; top: 3px; bottom: 3px; min-width: 2px;
+  border-radius: 2px; background: var(--actor);
+}
+
+.tl-body { flex: 1; overflow-y: auto; position: relative; min-height: 0; }
+/* 아래로 더 있다는 표시. 연표는 화면보다 길다. */
+.timeline::after {
+  content: ''; position: absolute; left: 0; right: 9px; bottom: 0; height: 28px;
+  background: linear-gradient(transparent, var(--surface-2));
+  pointer-events: none;
+}
+.tl-canvas { position: relative; }
+.tl-wires { position: absolute; inset: 0; pointer-events: none; }
+.tl-hint {
+  margin: 9px 0 0; font-size: 11px; line-height: 1.55; color: var(--text-3);
+}
+
+.tl-mark {
+  position: absolute; left: 0; right: 8px; transform: translateY(-50%);
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 3px 4px 3px 0;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text-2); font: inherit; font-size: 12px;
+  text-align: left; cursor: pointer;
+}
+.tl-mark:hover { background: var(--surface-3); color: var(--text); }
+.tl-y {
+  flex: none; width: 38px; text-align: right;
+  font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+}
+.tl-name {
+  margin-left: 14px;                 /* 38(연도) + 6(gap) + 14 = 58 = DOT_X */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tl-rel { flex: none; font-size: 10.5px; color: var(--text-3); }
+/* 고른 노드 자신. 나머지는 그 자리를 재는 눈금이므로 물러나 있어야 한다. */
+.tl-mark.k-self { color: var(--text); font-weight: 650; }
+.tl-mark.k-self .tl-y { color: var(--text-2); }
+.tl-mark.k-anchor { color: var(--text-3); }
+.tl-mark.k-anchor:hover { color: var(--text-2); }
+/* 왕조 자신. 사건이 아니라 그것들이 놓인 틀이라 조금 물러나 있다. */
+.tl-mark.k-era { color: var(--text-2); font-weight: 600; }
+.tl-empty { padding: 16px 14px; color: var(--text-3); font-size: 12px; line-height: 1.6; }
+
+.tl-body::-webkit-scrollbar { width: 9px; }
+.tl-body::-webkit-scrollbar-thumb { background: #35352f; border-radius: 5px; }
 
 /* --- 상세 --- */
 .detail {
@@ -257,4 +378,5 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 @media (max-width: 1100px) {
   .side { width: 200px; }
   .detail { width: 300px; }
+  .timeline { width: 208px; }
 }

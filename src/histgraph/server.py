@@ -53,6 +53,29 @@ TYPE_GROUP: dict[str, str] = {
     "role": "frame",
 }
 
+# --- 연표 --------------------------------------------------------------
+# 뼈대로 쓸 사건을 고르는 풀. 차수 상위부터 훑되 여기서 끊는다 — 아래로
+# 내려가면 연결이 두어 개뿐인 사건이라 "그 무렵의 큰일"이 되지 못한다.
+# (조선 그래프의 연도 있는 사건은 73개라 사실상 전부 들어온다.)
+ANCHOR_POOL = 400
+# 한 노드에 붙일 이웃 수. 이보다 많으면 한 해에 라벨이 겹쳐 쌓인다.
+TIMELINE_NEAR = 8
+# 연표에 점으로 찍어도 되는 타입. **일어난 일과 만들어진 것뿐이다.**
+# 사람·장소·조직은 이어지는 것이라 한 점에 찍으면 거짓을 말한다 — 윤필상
+# (1427년생)을 갑자사화(1504) 옆에 '참여'라고 달아 1427년에 세우면,
+# 화면은 "1427년에 참여했다"고 읽힌다. 사람이 언제 살았는지는 그 사람을
+# 골랐을 때 자기 자리에서 생몰 구간으로 말한다.
+POINT_TYPES = ("event", "artwork", "media")
+# 이웃이 이만큼 떨어져 있으면 더는 '그 무렵'이 아니다. 실측: 갑자사화
+# (1504) 참여자 목록에 1955년생 정성근이 들어 있다 — 동명이인을 붙잡은
+# 것인데, 그대로 그리면 축이 450년으로 늘어나 정작 사화 앞뒤가 몇 픽셀
+# 안에서 뭉개진다. 한 사람의 일생과 그 앞뒤 세대까지가 '무렵'이다.
+NEAR_WINDOW = 150
+# 믿을 수 있는 존속 구간의 상한. 넘으면 끝 연도를 없는 셈 친다.
+# (실측: 몰년을 모르는 인물의 end_date 가 2000-01-01 로 적혀 있다 —
+#  이재현 1870~2000. 사건 쪽은 정축하성이 1637~1895 로 258년짜리다.)
+MAX_SPAN = {"person": 110, "event": 60}
+
 # 관계를 볼 때 사람이 먼저 궁금해하는 순서. 상세 패널의 정렬 기준이다.
 RELATION_ORDER = [
     "participated_in", "held_position", "member_of", "created",
@@ -62,11 +85,33 @@ RELATION_ORDER = [
 ]
 
 
+# 라벨 서비스가 한국어·영어 어느 쪽도 못 준 노드. 라벨 자리에 QID 가
+# 그대로 들어앉는다.
+UNLABELED = re.compile(r"^Q\d+$")
+
+
 def _year(value: str | None) -> int | None:
     if not value:
         return None
     m = re.match(r"^(-?)(\d{1,4})", value.strip())
     return int(m.group(2)) * (-1 if m.group(1) else 1) if m else None
+
+
+def _span(row) -> tuple[int | None, int | None]:
+    """노드가 스스로 말하는 연대. **인물의 생년=몰년은 없는 셈 친다.**
+
+    실측: 서장옥의 생몰이 둘 다 1900-01-01 이다(몰년만 아는 인물). 그대로
+    믿으면 연표에 1900년 한 점으로 찍히고, 동학농민혁명(1894) 뒤에 태어난
+    사람이 그 혁명에 참여한 그림이 된다. `promote.life_of` 와 같은 규칙이다.
+
+    사건은 다르다 — 하루짜리 사건은 시작과 끝이 같은 게 정상이다."""
+    start, end = _year(row["start_date"]), _year(row["end_date"])
+    if row["type"] == "person" and start is not None and start == end:
+        return None, None
+    ceiling = MAX_SPAN.get(row["type"])
+    if ceiling and start is not None and end is not None and end - start > ceiling:
+        return start, None
+    return start, end
 
 
 def _node_brief(row, degree: int = 0) -> dict:
@@ -350,6 +395,275 @@ class GraphAPI:
         }
 
 
+    # --- 연표 ---------------------------------------------------------
+    def _linked_years(self, ids: set[str]) -> dict[str, int]:
+        """`time:1504` 로 이어진 해. 노드가 스스로 날짜를 말하지 않을 때 쓴다.
+
+        실측: 갑자사화에는 start_date 가 없는데 from_period 로 time:1504 에
+        붙어 있다. 이 경로가 없으면 조선 그래프에서 사화·정변 여럿이
+        연표에 자리를 못 잡는다.
+
+        여러 해가 걸려 있으면 **가장 이른 해**를 쓴다. 인물의 dated_to 에는
+        출생과 사망이 함께 걸리는데, 그중 하나를 골라야 한다면 생년이
+        '언제 사람인가'에 가깝다."""
+        out: dict[str, int] = {}
+        rows = self.store._query_chunked(
+            "SELECT src AS id, dst AS t FROM edges "
+            "WHERE src IN ({marks}) AND dst LIKE 'time:%'",
+            ids,
+        )
+        # period 노드는 자기 표기와 정규 연도가 same_as 로 이어져 있다
+        # ('1862년 10월' -> time:1862). 엣지만 보면 이 경로가 빠진다.
+        rows += self.store._query_chunked(
+            "SELECT a AS id, b AS t FROM same_as "
+            "WHERE a IN ({marks}) AND b LIKE 'time:%'",
+            ids,
+        )
+        for r in rows:
+            y = _year(r["t"][len("time:"):])
+            if y is None:
+                continue
+            if r["id"] not in out or y < out[r["id"]]:
+                out[r["id"]] = y
+        return out
+
+    def _year_of(self, row) -> tuple[int | None, int | None, str]:
+        """노드의 연대와, 그것을 어디서 알았는지.
+
+        출처를 함께 돌려주는 이유: 화면이 '1504년'이라고 단정하기 전에
+        그게 노드가 적고 있는 날짜인지, 시대 노드에 붙어 있어 알게 된
+        것인지 구분해서 말할 수 있어야 한다."""
+        start, end = _span(row)
+        if start is not None:
+            return start, end, "node"
+        linked = self._linked_years({row["id"]}).get(row["id"])
+        return (linked, None, "edge") if linked is not None else (None, None, "")
+
+    def _anchors(self) -> list[dict]:
+        """시대의 뼈대 — 그 무렵의 큰일. 연표 전체에 고르게 깔린다.
+
+        **차수 상위 사건에서 고른다.** '언제쯤 일인가'를 사람은 절대
+        연도가 아니라 아는 사건과의 앞뒤로 읽는다 ("임진왜란 뒤, 병자호란
+        전"). 많이 연결된 사건이 곧 그 자리를 맡을 수 있는 사건이다.
+
+        연도를 못 찾은 사건은 뺀다 — 연표에 놓을 자리가 없다.
+        (조선 그래프 실측: 사건 297개 중 연도가 잡히는 것은 76개다.)
+
+        **솎지 않는다.** 연대를 아는 사건은 다 세운다 — 연표에서 빠진
+        사건은 그 시대에 없었던 일이 된다. 몰린 곳(1590년대에 20건)은
+        라벨이 서로를 밀어내지만, 밀린 만큼은 실선으로 제자리와 이어
+        둔다."""
+        cached = getattr(self._local, "anchors", None)
+        if cached is not None:
+            return cached
+        rows = self.store.conn.execute(
+            """SELECT n.id, n.type, n.label, n.start_date, n.end_date,
+                      COUNT(e.src) AS d
+                 FROM nodes n
+                 LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
+                WHERE n.type = 'event'
+             GROUP BY n.id
+             ORDER BY d DESC
+                LIMIT ?""",
+            (ANCHOR_POOL,),
+        ).fetchall()
+        undated = {r["id"] for r in rows if _span(r)[0] is None}
+        linked = self._linked_years(undated) if undated else {}
+
+        out: list[dict] = []
+        seen_labels: set[tuple[str, int]] = set()
+        for r in rows:
+            start, end = _span(r)
+            if start is None:
+                start = linked.get(r["id"])
+            if start is None:
+                continue
+            # **한 번 언급된 추출 고아는 뼈대가 못 된다.** `ex:` 노드는
+            # 산문에서 이름만 뽑혀 나온 것이고, 엣지가 하나뿐이면 아무도
+            # 확인해 주지 않았다는 뜻이다. 실측: '1908년 복권'·'1963년
+            # 문집 간행'이 그렇게 들어와 축을 1963년까지 늘려 놓았다
+            # (사건 이름도 아니다). 여럿이 가리키는 것은 남긴다 —
+            # 진산사건(1791, 차수 3)이 1728~1791년의 빈 구간을 메운다.
+            if r["id"].startswith("ex:") and r["d"] < 2:
+                continue
+            # **이름도 해도 같으면 한 줄만 세운다.** 실측: 임진왜란이
+            # wd:Q122846639(차수 37)와 wd:Q576338(차수 1) 둘로 있어 1592년
+            # 자리에 같은 이름이 나란히 찍혔다. 화면에서 둘은 구별되지
+            # 않으므로 많이 연결된 쪽만 남긴다 (rows 가 차수 내림차순).
+            # 노드를 합치지는 않는다 — 라벨 유사도로 합치면 제1차/제2차
+            # 요동 정벌이 한 노드가 된다. 여기서는 보이는 것만 정리한다.
+            # 이름을 못 받아온 노드는 연표에 세울 수 없다. 라벨이 QID
+            # 그대로면(wd:Q85881723 → 'Q85881723') 읽는 사람에게 아무
+            # 말도 하지 않는 줄이 된다. 조선 그래프에 한 건 있다.
+            if UNLABELED.match(r["label"]):
+                continue
+            if (r["label"], start) in seen_labels:
+                continue
+            seen_labels.add((r["label"], start))
+            out.append({
+                "id": r["id"], "label": r["label"], "type": r["type"],
+                "group": TYPE_GROUP.get(r["type"], "thing"),
+                "year": start, "end": end, "degree": r["d"],
+            })
+        out.sort(key=lambda a: a["year"])
+        self._local.anchors = out
+        return out
+
+    def timeline(self, node_id: str) -> dict | None:
+        """이 노드가 몇 년쯤의 일이고, 그 앞뒤에 무엇이 있었나.
+
+        세 겹으로 답한다:
+          - `self`   — 노드 자신의 연도(또는 생몰·존속 구간)
+          - `near`   — 연도를 아는 **직접 이웃**. 이 노드의 개인 연표다.
+          - `anchor` — 그 무렵의 큰 사건. 절대 연도를 못 외우는 사람에게
+                       "임진왜란 다음 해"가 훨씬 정확한 위치다.
+
+        창(window) 밖의 큰 사건도 앞뒤로 둘씩 붙인다. 창 안이 비어 있어도
+        '무엇 뒤, 무엇 앞'은 언제나 말할 수 있어야 하기 때문이다."""
+        row = self.store.conn.execute(
+            "SELECT * FROM nodes WHERE id = ?", (node_id,)
+        ).fetchone()
+        if row is None:
+            return None
+
+        start, end, origin = self._year_of(row)
+        marks: list[dict] = []
+        if start is not None:
+            marks.append({
+                "id": row["id"], "label": row["label"], "type": row["type"],
+                "group": TYPE_GROUP.get(row["type"], "thing"),
+                "year": start, "end": end, "kind": "self",
+            })
+
+        # --- 연도를 아는 직접 이웃 -------------------------------------
+        # 날짜가 있거나 시대 노드에 붙어 있는 이웃만 가져온다. 조선처럼
+        # 이웃이 수천인 허브에서 전부 끌어오면 연표 한 번에 그래프 절반을
+        # 읽게 된다.
+        kinds = ",".join(f"'{t}'" for t in POINT_TYPES)   # 코드 안의 고정 목록이다
+        rows = self.store.conn.execute(
+            f"""SELECT e.type AS rel, CASE WHEN e.src = ?1 THEN 'out' ELSE 'in' END AS dir,
+                       n.id, n.type, n.label, n.start_date, n.end_date
+                  FROM edges e
+                  JOIN nodes n
+                    ON n.id = CASE WHEN e.src = ?1 THEN e.dst ELSE e.src END
+                 WHERE (e.src = ?1 OR e.dst = ?1)
+                   AND n.id != ?1
+                   AND n.type IN ({kinds})
+                   AND ((n.start_date IS NOT NULL AND n.start_date != '')
+                        OR EXISTS (SELECT 1 FROM edges t
+                                    WHERE t.src = n.id AND t.dst LIKE 'time:%'))""",
+            (node_id,),
+        ).fetchall()
+
+        # 상대 하나에 카드 하나. '관련'은 구체 관계에 밀린다 — 상세 패널이
+        # 같은 이유로 접는 관계다.
+        picked: dict[str, dict] = {}
+        for r in rows:
+            cur = picked.get(r["id"])
+            if cur is not None and (cur["rel"] != "related_to" or r["rel"] == "related_to"):
+                continue
+            picked[r["id"]] = {"row": r, "rel": r["rel"], "dir": r["dir"]}
+
+        undated = {k for k, v in picked.items() if _span(v["row"])[0] is None}
+        linked = self._linked_years(undated) if undated else {}
+        near: list[dict] = []
+        for nid, v in picked.items():
+            y, y_end = _span(v["row"])
+            if y is None:
+                y = linked.get(nid)
+            if y is None:
+                continue
+            near.append({
+                "id": nid, "label": v["row"]["label"], "type": v["row"]["type"],
+                "group": TYPE_GROUP.get(v["row"]["type"], "thing"),
+                "year": y, "end": y_end, "kind": "near",
+                # 화면이 관계 이름을 붙여 부를 수 있게 그대로 넘긴다
+                "rel": {"type": v["rel"], "dir": v["dir"],
+                        "label": EDGE_TYPES[v["rel"]][0]},
+            })
+        # 노드 자신의 연도에서 가까운 것부터 남긴다. 연도를 모르면 그냥
+        # 이른 순 — 아무 기준 없이 자르는 것보다 낫다.
+        pivot = start if start is not None else (
+            sorted(n["year"] for n in near)[len(near) // 2] if near else 0
+        )
+        near = [n for n in near if abs(n["year"] - pivot) <= NEAR_WINDOW]
+        near.sort(key=lambda n: (abs(n["year"] - pivot), n["year"]))
+        near = near[:TIMELINE_NEAR]
+        marks.extend(near)
+
+        # --- 그 무렵의 큰 사건 -----------------------------------------
+        # **뼈대는 통째로 보낸다.** 고른 노드 언저리만 잘라 보내면 연표가
+        # 그 노드만큼만 길어서, 화면에서 위아래로 훑어도 시대의 처음과
+        # 끝에 닿지 못한다. 자를 이유도 없다 — 십년마다 둘로 솎아 두어
+        # 조선 그래프에서 쉰 남짓이다.
+        seen = {m["id"] for m in marks}
+        # 이웃으로 이미 선 것과 이름·해가 같은 뼈대도 뺀다. 노드는 달라도
+        # 화면에서는 같은 줄이 두 번 찍힌 것으로만 보인다.
+        seen_labels = {(m["label"], m["year"]) for m in marks}
+        anchors = self._anchors()
+        marks.extend(
+            dict(a, kind="anchor") for a in anchors
+            if a["id"] not in seen and (a["label"], a["year"]) not in seen_labels
+        )
+        # **왕조 자신도 세운다.** 조선의 존속 기간은 1392-08-13~1897-10-12
+        # 인데 org 라서 사건 뼈대에 못 들어왔고, 1392년 자리가 비어 있었다 —
+        # 연표를 훑으면 위화도 회군(1388) 다음이 곧장 제1차 왕자의
+        # 난(1398)이다. 그래프에 '조선 건국' 이라는 사건 노드가 있지만
+        # 날짜가 없고 엣지 둘뿐인 추출 고아라, 거기에 왕조의 P571 을
+        # 옮겨 적는 것은 추측이 된다. 왕조 노드가 자기 날짜로 서면 된다.
+        root = self.root()
+        if root and root not in {m["id"] for m in marks}:
+            row_root = self.store.conn.execute(
+                "SELECT id, type, label, start_date, end_date FROM nodes WHERE id = ?",
+                (root,),
+            ).fetchone()
+            if row_root is not None:
+                r_start, r_end = _span(row_root)
+                if r_start is not None:
+                    marks.append({
+                        "id": row_root["id"], "label": row_root["label"],
+                        "type": row_root["type"],
+                        "group": TYPE_GROUP.get(row_root["type"], "thing"),
+                        "year": r_start, "end": r_end, "kind": "era",
+                    })
+
+        marks.sort(key=lambda m: (m["year"], m["label"]))
+
+        # 자리를 무엇에 기대어 잡았는지. 화면이 단정할 수 있는 범위가
+        # 여기서 갈린다.
+        basis = "self" if start is not None else "near" if near else "era"
+
+        # --- 축 ---------------------------------------------------------
+        span_years = [m["year"] for m in marks] + [
+            m["end"] for m in marks if m.get("end") is not None
+        ]
+        # 처음·끝 표시가 가장자리에 딱 붙지 않게 몇 해만 띄운다. 비율로
+        # 잡으면 축이 시대 전체(600년)라 앞뒤로 36년씩 빈 데가 생긴다.
+        if span_years:
+            axis_from, axis_to = min(span_years) - 3, max(span_years) + 3
+        else:
+            axis_from = axis_to = 0
+
+        return {
+            "id": row["id"],
+            "label": row["label"],
+            "type": row["type"],
+            "group": TYPE_GROUP.get(row["type"], "thing"),
+            "type_label": NODE_TYPES.get(row["type"], row["type"]),
+            "year": start,
+            "end": end,
+            # '' 이면 이 노드의 연도를 우리가 모른다는 뜻이다. 화면은
+            # 이웃의 연대로 자리만 가늠해 주고 단정하지 않는다.
+            "year_source": origin,
+            # self: 노드가 자기 연도를 안다 / near: 연도를 아는 이웃으로
+            # 자리만 가늠했다 / era: 아무것도 몰라 시대만 펼쳤다
+            "basis": basis,
+            # 이 연표가 담은 처음과 끝 해. 화면의 훑기 막대가 쓰는 눈금이다.
+            "axis": {"from": axis_from, "to": axis_to},
+            "marks": marks,
+        }
+
+
 def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
     """정적 파일 경로. 루트 밖을 가리키면 None.
 
@@ -414,6 +728,9 @@ class Handler(BaseHTTPRequestHandler):
                     limit=int(one("limit", str(DEFAULT_LIMIT))),
                     exclude=exclude,
                 ))
+            elif url.path == "/api/timeline":
+                tl = self.api.timeline(one("id"))
+                self._json(tl or {"error": "not found"}, 200 if tl else 404)
             elif url.path.startswith("/api/node/"):
                 node = self.api.node(unquote(url.path[len("/api/node/"):]))
                 self._json(node or {"error": "not found"}, 200 if node else 404)

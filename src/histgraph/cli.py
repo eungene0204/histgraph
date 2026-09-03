@@ -505,7 +505,8 @@ def cmd_scope(args: argparse.Namespace) -> int:
                                    drop_isolated=not args.keep_isolated)
     print(f"\n=== {result['era']} 서브그래프 ===")
     print(f"  출력: {result['out']}")
-    print(f"  씨앗 {result['seeds']:,} → 노드 {result['kept_nodes']:,} · 엣지 {result['kept_edges']:,}")
+    print(f"  씨앗 {result['seeds']:,} → 노드 {result['kept_nodes']:,} · 엣지 {result['kept_edges']:,}"
+          f" · 별칭 {result['kept_aliases']:,}")
     if result["isolated_dropped"]:
         print(f"  고립 노드 {result['isolated_dropped']:,}개 제외 (엣지가 없어 그래프에 기여하지 않음)")
     print(f"  댕글링 엣지: {result['dangling']}")
@@ -531,6 +532,109 @@ def cmd_timeline(args: argparse.Namespace) -> int:
             print(f"\n  === {args.year}년에 일어난 일 ===")
             for row in timeline.whats_in(store, args.year):
                 print(f"    [{row['type']:8}] {row['label'][:40]:42} ({row['rel'] or row['via']})")
+    return 0
+
+
+def cmd_spans(args: argparse.Namespace) -> int:
+    """조직·왕조의 존속 기간을 Wikidata 에서 채운다.
+
+    **수집이 여태 물어본 적 없는 값이다.** 인물은 P569/P570, 사건은
+    P580/P582 를 처음부터 가져왔는데 조직은 다른 노드의 엣지 상대로만
+    들어와 라벨과 URL 뿐이었다 — 조선 그래프의 org 80개가 전부 날짜
+    없음이고 거기에 이 그래프의 중심인 조선이 있었다.
+
+    이미 적혀 있는 날짜는 건드리지 않는다. 채우기만 한다."""
+    with GraphStore(args.db) as store:
+        rows = store.conn.execute(
+            f"""SELECT id, label FROM nodes
+                 WHERE type IN ({",".join("?" * len(args.types))})
+                   AND id LIKE 'wd:%'
+                   AND (start_date IS NULL OR start_date = '')
+                   AND (end_date IS NULL OR end_date = '')""",
+            tuple(args.types),
+        ).fetchall()
+        if not rows:
+            print("  채울 노드가 없습니다.")
+            return 0
+        print(f"  날짜 없는 {'·'.join(args.types)} 노드 {len(rows):,}개 조회 중...")
+
+        fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.5))
+        failures: list[str] = []
+        spans = wikidata.fetch_spans(
+            fetcher, [r["id"][len("wd:"):] for r in rows], failures=failures
+        )
+
+        filled = 0
+        for r in rows:
+            start, end = spans.get(r["id"][len("wd:"):], (None, None))
+            if not (start or end):
+                continue
+            store.conn.execute(
+                """UPDATE nodes
+                      SET start_date = COALESCE(start_date, ?),
+                          end_date   = COALESCE(end_date, ?),
+                          updated_at = datetime('now')
+                    WHERE id = ?""",
+                (start, end, r["id"]),
+            )
+            filled += 1
+            if filled <= 15:
+                print(f"    {r['label'][:24]:26} {start or '?'} ~ {end or '?'}")
+        store.conn.commit()
+
+        print(f"\n  채운 노드 {filled:,}개 / {len(rows):,}개")
+        # 못 채운 것이 대부분일 수 있다. 그건 Wikidata 에 없는 것이지
+        # 우리가 잘못 물은 것이 아니라는 걸 숫자로 남긴다.
+        print(f"  Wikidata 에도 없음 {len(rows) - filled:,}개")
+        if failures:
+            print(f"  ⚠ 실패한 쿼리 {len(failures)}건 — 재실행하면 그 구간만 다시 시도합니다.",
+                  file=sys.stderr)
+    return 0
+
+
+def cmd_aliases(args: argparse.Namespace) -> int:
+    """Wikidata 의 한국어 별칭(skos:altLabel)을 채운다.
+
+    **`wikidata.fetch_aliases` 는 쓰이지 않는 코드였다.** 함수는 있는데
+    파이프라인 어디에서도 부르지 않아, 지금 있는 별칭 5,064건은 전부
+    국가유산청·위키백과가 노드에 얹어 준 것이다. 그래서 사건에는 별칭이
+    420개 중 39개뿐이고, 경술국치·을사늑약·국권피탈 같은 이름으로는
+    아무것도 찾을 수 없었다 (Wikidata 에는 한일병합의 한국어 별칭이
+    17개나 적혀 있다).
+
+    별칭 표는 (노드, 별칭)이 자연키라 여러 번 돌려도 쌓이지 않는다."""
+    with GraphStore(args.db) as store:
+        marks = ",".join("?" * len(args.types))
+        rows = store.conn.execute(
+            f"""SELECT id, label FROM nodes
+                 WHERE id LIKE 'wd:%' AND type IN ({marks})""",
+            tuple(args.types),
+        ).fetchall()
+        if not rows:
+            print("  대상 노드가 없습니다.")
+            return 0
+        print(f"  {'·'.join(args.types)} 노드 {len(rows):,}개 조회 중"
+              f" (배치 {len(rows) // 200 + 1}회)...")
+
+        fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.5))
+        found = wikidata.fetch_aliases(fetcher, [r["id"][len("wd:"):] for r in rows])
+
+        label_of = {r["id"]: r["label"] for r in rows}
+        pairs = [
+            (f"wd:{qid}", alias)
+            for qid, names in found.items()
+            for alias in dict.fromkeys(names)
+            # 라벨과 같은 별칭은 아무것도 더하지 않는다
+            if alias and alias != label_of.get(f"wd:{qid}")
+        ]
+        before = store.conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0]
+        store.conn.executemany(
+            "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?,?)", pairs
+        )
+        store.conn.commit()
+        after = store.conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0]
+        print(f"\n  별칭을 가진 노드 {len(found):,}개 · 이름 {len(pairs):,}개")
+        print(f"  별칭 표 {before:,} → {after:,} (새로 {after - before:,}건)")
     return 0
 
 
@@ -669,6 +773,19 @@ def main(argv: list[str] | None = None) -> int:
     p_tl.add_argument("--labels-only", action="store_true", help="날짜 속성 연결 생략")
     p_tl.add_argument("--year", type=int, default=None, help="그 해에 무슨 일이 있었는지 확인")
     p_tl.set_defaults(func=cmd_timeline)
+
+    p_sp = sub.add_parser("spans", help="조직·왕조의 존속 기간 보강 (Wikidata P571/P576)")
+    p_sp.add_argument("--types", nargs="+", default=["org"],
+                      help="채울 노드 타입 (기본: org)")
+    p_sp.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
+    p_sp.set_defaults(func=cmd_spans)
+
+    p_al = sub.add_parser("aliases", help="Wikidata 한국어 별칭 수집 (skos:altLabel)")
+    p_al.add_argument("--types", nargs="+",
+                      default=["event", "org", "place", "role", "media"],
+                      help="채울 노드 타입 (기본: 인물 제외 — 인물은 28,961개라 따로 돌린다)")
+    p_al.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
+    p_al.set_defaults(func=cmd_aliases)
 
     p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
     p_sv.add_argument("--era", default="joseon", help="띄울 시대 그래프 (data/{era}.sqlite)")

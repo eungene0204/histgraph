@@ -453,7 +453,14 @@ def fetch_events(
                     props={
                         "event_class": EVENT_CLASSES.get(_qid(cls_uri), "사건")
                         if cls_uri
-                        else "사건"
+                        else "사건",
+                        # **어느 정체에서 걸려 왔는지 적어 둔다.** 쿼리가
+                        # `?e wdt:P17 wd:{polity}` 로 물어 놓고 답을 버리고
+                        # 있었다. 인물은 처음부터 props.polity 를 적었고
+                        # `scope` 가 그걸로 씨앗을 고른다 — 사건은 그게
+                        # 없어서 시대 그래프를 뽑을 때 통째로 떨어졌다
+                        # (실측: 조선 P17 사건 73건이 그래서 빠졌다).
+                        "polity": POLITIES.get(polity, polity),
                     },
                 )
             if place_uri := _val(r, "place"):
@@ -559,6 +566,69 @@ def _iso_date(raw: str | None) -> str | None:
     if not re.match(r"^-?\d{1,4}-\d{2}-\d{2}$", date):
         return None
     return date
+
+
+def spans_from_rows(rows: list[dict]) -> dict[str, tuple[str | None, str | None]]:
+    """SPARQL 결과 -> QID 별 (시작, 끝). 네트워크 없이 시험할 수 있게 뗀다.
+
+    **P571(설립)을 먼저 본다.** 왕조·조직에는 설립/해체가 맞는 술어다.
+    없을 때만 P580/P582(시작/종료)로 물러난다 — 전쟁처럼 사건에 가깝게
+    적힌 조직이 그 짝을 쓴다.
+
+    끝이 시작보다 앞서면 둘 다 버린다. 실측으로 Wikidata 날짜는 지저분해서
+    (생년>몰년이 섞여 있다) 뒤집힌 값을 그대로 담으면 연표가 거꾸로 선다."""
+    out: dict[str, tuple[str | None, str | None]] = {}
+    for r in rows:
+        uri = _val(r, "o")
+        if not uri or not is_real_qid(uri):
+            continue
+        start = _iso_date(_val(r, "inception")) or _iso_date(_val(r, "start"))
+        end = _iso_date(_val(r, "dissolved")) or _iso_date(_val(r, "end"))
+        if start and end and end < start:
+            continue
+        if not (start or end):
+            continue
+        # 여러 값이 걸린 개체는 가장 이른 시작·가장 늦은 끝으로 모은다
+        # (조선의 P571 은 하나지만, 재건된 조직은 설립일이 둘씩 있다).
+        old_start, old_end = out.get(_qid(uri), (None, None))
+        out[_qid(uri)] = (
+            min(x for x in (start, old_start) if x) if (start or old_start) else None,
+            max(x for x in (end, old_end) if x) if (end or old_end) else None,
+        )
+    return out
+
+
+def fetch_spans(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 200,
+    failures: list[str] | None = None,
+) -> dict[str, tuple[str | None, str | None]]:
+    """조직·왕조의 존속 기간. **수집이 여태 물어본 적 없는 값이다.**
+
+    인물은 P569/P570, 사건은 P580/P582/P585 를 처음부터 가져왔지만 조직은
+    다른 노드의 엣지 상대로만 들어와서 라벨과 URL 뿐이었다. 실측: 조선
+    그래프의 org 80개(전체 387개) 전부가 날짜 없음이고, 그중에 이 그래프의
+    중심인 조선(Q28179)이 있다 — Wikidata 에는 1392-08-13 ~ 1897-10-12 로
+    적혀 있는데 우리가 안 물어봤을 뿐이다."""
+    out: dict[str, tuple[str | None, str | None]] = {}
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?o ?inception ?dissolved ?start ?end WHERE {{
+                  VALUES ?o {{ {values} }}
+                  OPTIONAL {{ ?o wdt:P571 ?inception }}
+                  OPTIONAL {{ ?o wdt:P576 ?dissolved }}
+                  OPTIONAL {{ ?o wdt:P580 ?start }}
+                  OPTIONAL {{ ?o wdt:P582 ?end }}
+                }}""",
+            f"존속 기간/{i}",
+            failures if failures is not None else [],
+        )
+        out.update(spans_from_rows(rows))
+    return out
 
 
 def fetch_aliases(

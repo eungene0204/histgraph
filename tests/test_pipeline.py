@@ -1132,6 +1132,39 @@ with tempfile.TemporaryDirectory() as tmp:
     check("두 번 돌려도 더 옮길 것이 없다", repair_links(store)["moves"] == [])
     store.close()
 
+# --- 조직·왕조의 존속 기간 (Wikidata P571/P576) --------------------------
+# 실측 회귀: 수집이 조직에는 날짜를 한 번도 물어본 적이 없어서, 조선
+# 그래프의 org 80개가 전부 날짜 없음이었다 — 그 안에 이 그래프의 중심인
+# 조선이 있었다 (Wikidata 에는 1392-08-13 ~ 1897-10-12 로 적혀 있다).
+def _b(uri, **kw):
+    row = {"o": {"value": uri}}
+    row.update({k: {"value": v} for k, v in kw.items()})
+    return row
+
+spans = wikidata.spans_from_rows([
+    _b("http://www.wikidata.org/entity/Q28179",
+       inception="1392-08-13T00:00:00Z", dissolved="1897-10-12T00:00:00Z"),
+    # 설립/해체가 없으면 시작/종료로 물러난다
+    _b("http://www.wikidata.org/entity/Q1", start="1616-01-01T00:00:00Z"),
+    # 끝이 시작보다 앞선 값은 통째로 버린다 (Wikidata 날짜는 지저분하다)
+    _b("http://www.wikidata.org/entity/Q2",
+       inception="1700-01-01T00:00:00Z", dissolved="1600-01-01T00:00:00Z"),
+    # '값 불명' blank node 는 날짜가 아니다
+    _b("http://www.wikidata.org/entity/Q3",
+       inception="http://www.wikidata.org/.well-known/genid/a808c9f"),
+])
+check("설립·해체를 읽는다", spans.get("Q28179") == ("1392-08-13", "1897-10-12"), str(spans))
+check("설립이 없으면 시작으로 물러난다", spans.get("Q1") == ("1616-01-01", None))
+check("끝이 시작보다 앞서면 버린다", "Q2" not in spans, str(spans))
+check("'값 불명'은 날짜가 아니다", "Q3" not in spans, str(spans))
+check("재건된 조직은 가장 이른 설립·가장 늦은 해체",
+      wikidata.spans_from_rows([
+          _b("http://www.wikidata.org/entity/Q9", inception="1920-01-01T00:00:00Z",
+             dissolved="1930-01-01T00:00:00Z"),
+          _b("http://www.wikidata.org/entity/Q9", inception="1910-01-01T00:00:00Z",
+             dissolved="1940-01-01T00:00:00Z"),
+      ]).get("Q9") == ("1910-01-01", "1940-01-01"))
+
 print("\n[탐색 서버]")
 from histgraph.server import GraphAPI, TYPE_GROUP, safe_static_path  # noqa: E402
 
@@ -1229,6 +1262,133 @@ with tempfile.TemporaryDirectory() as tmp:
     check("그래도 시작점은 나온다", isinstance(empty_api.seeds(5), list))
     store.close()
 
+# --- 연표 ---------------------------------------------------------------
+# 그래프는 무엇이 무엇과 이어져 있는지만 말한다. 왼쪽 연표가 "몇 년쯤,
+# 무엇 뒤 무엇 앞"을 맡는데, 여기서 틀리면 화면이 없는 연도를 지어낸다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "tl.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:E1", type="event", label="무오사화", source="wd",
+             start_date="1498-07-01", end_date="1498-07-01"),
+        # 날짜가 없고 연도 노드로만 이어진 사건 (실측: 갑자사화가 그렇다)
+        Node(id="wd:E2", type="event", label="갑자사화", source="wd"),
+        Node(id="wd:E3", type="event", label="중종반정", source="wd", start_date="1506"),
+        Node(id="wd:E4", type="event", label="임진왜란", source="wd", start_date="1592"),
+        # 400년 밖 — 이어져 있어도 '그 무렵'이 아니다
+        Node(id="wd:E5", type="event", label="청산리 전투", source="wd", start_date="1920"),
+        Node(id="time:1504", type="period", label="1504년", source="timeline",
+             start_date="1504"),
+        Node(id="wd:P1", type="person", label="조선 연산군", source="wd",
+             start_date="1476", end_date="1506"),
+        # 몰년만 아는 인물 — 생년으로 읽으면 안 된다
+        Node(id="wd:P2", type="person", label="서장옥", source="wd",
+             start_date="1900-01-01", end_date="1900-01-01"),
+        # 연도를 전혀 모르는 유물
+        Node(id="khs:H1", type="heritage", label="훈민정음", source="khs"),
+        # 한 십년에 몰린 사건 셋 — 솎지 않고 다 세운다
+        Node(id="wd:D1", type="event", label="사건가", source="wd", start_date="1560"),
+        Node(id="wd:D2", type="event", label="사건나", source="wd", start_date="1562"),
+        Node(id="wd:D3", type="event", label="사건다", source="wd", start_date="1565"),
+        # 이름도 해도 같은 다른 노드 (실측: 임진왜란이 wd:Q122846639 과
+        # wd:Q576338 둘로 있다). 화면에서 둘은 구별되지 않는다.
+        Node(id="wd:DUP", type="event", label="사건가", source="wd", start_date="1560"),
+        Node(id="wd:P3", type="person", label="아무개", source="wd",
+             start_date="1530", end_date="1580"),
+        # 산문에서 이름만 뽑혀 나온 사건. 엣지가 하나면 아무도 확인해 주지
+        # 않은 것이다 (실측: '1963년 문집 간행'이 축을 1963년까지 늘렸다)
+        Node(id="ex:event:홀로", type="event", label="문집 간행", source="extract",
+             start_date="1700"),
+        Node(id="ex:event:여럿", type="event", label="진산사건", source="extract",
+             start_date="1710"),
+        # 왕조 자신. org 라서 사건 뼈대에는 못 들어오지만 연표에는 서야
+        # 한다 — 실측: 1392년 자리가 비어 위화도 회군 다음이 곧장 제1차
+        # 왕자의 난이었다.
+        Node(id="wd:Q28179", type="org", label="조선", source="wd",
+             start_date="1392-08-13", end_date="1897-10-12"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:E2", dst="time:1504", type="from_period", source="timeline"),
+        Edge(src="wd:P1", dst="wd:E2", type="participated_in", source="wd"),
+        Edge(src="wd:P2", dst="wd:E2", type="participated_in", source="extract"),
+        Edge(src="wd:E2", dst="wd:E1", type="related_to", source="wd"),
+        Edge(src="wd:E2", dst="wd:E4", type="related_to", source="wd"),
+        Edge(src="wd:E2", dst="wd:E5", type="related_to", source="wd"),
+        Edge(src="wd:E1", dst="wd:E3", type="related_to", source="wd"),
+        Edge(src="wd:P3", dst="wd:D1", type="participated_in", source="wd"),
+        Edge(src="wd:P3", dst="wd:D2", type="participated_in", source="wd"),
+        Edge(src="wd:D1", dst="wd:D2", type="related_to", source="wd"),
+        Edge(src="ex:event:홀로", dst="wd:E5", type="related_to", source="extract"),
+        Edge(src="ex:event:여럿", dst="wd:E5", type="related_to", source="extract"),
+        Edge(src="ex:event:여럿", dst="wd:D3", type="related_to", source="extract"),
+    ])
+    tl_api = GraphAPI(store, era="joseon")
+
+    t = tl_api.timeline("wd:E2")
+    kinds = {m["id"]: m["kind"] for m in t["marks"]}
+    check("날짜가 없어도 연도 노드로 이어지면 연도를 안다", t["year"] == 1504)
+    check("어디서 알았는지 함께 말한다", t["year_source"] == "edge")
+    check("고른 노드가 연표에 자기 자리로 선다", kinds.get("wd:E2") == "self")
+    # 실측 회귀: 갑자사화(1504) 참여자 명단에 1955년생 정성근이 있다.
+    # 사람을 한 점에 찍으면 "1427년에 참여했다"로 읽히고, 축도 늘어난다.
+    check("사람은 연표의 점이 되지 않는다",
+          all(m["type"] != "person" for m in t["marks"]), str(t["marks"]))
+    check("앞뒤 사건이 함께 선다",
+          kinds.get("wd:E1") and kinds.get("wd:E3"), str(kinds))
+    # 실측: 갑자사화 참여자에 1955년생이 섞여 있었다. 그대로 세우면 축이
+    # 450년으로 늘어나 정작 사화 앞뒤가 몇 픽셀로 뭉개진다.
+    check("400년 밖의 이웃은 연표에 세우지 않는다", kinds.get("wd:E5") != "near", str(kinds))
+    check("축이 표시들을 모두 담는다",
+          t["axis"]["from"] <= min(m["year"] for m in t["marks"])
+          and t["axis"]["to"] >= max(m["year"] for m in t["marks"]))
+
+    t1 = tl_api.timeline("wd:E1")
+    check("이어진 사건은 이웃으로 선다",
+          [m["kind"] for m in t1["marks"] if m["id"] == "wd:E2"] == ["near"])
+    check("이웃에는 관계 이름이 붙는다",
+          [m["rel"]["label"] for m in t1["marks"] if m["id"] == "wd:E2"] == ["관련"])
+
+    # 생년=몰년은 몰년만 아는 인물이다. 그대로 찍으면 1900년 사람이 된다.
+    check("생년=몰년인 인물은 연도가 없는 셈", tl_api.timeline("wd:P2")["year"] is None)
+    check("인물의 생몰은 구간으로 말한다",
+          (tl_api.timeline("wd:P1")["year"], tl_api.timeline("wd:P1")["end"]) == (1476, 1506))
+
+    # 아무것도 모르는 개체를 축 위에 세우면 모르는 것을 아는 척한 것이 된다
+    h = tl_api.timeline("khs:H1")
+    check("연도를 모르면 시대만 펼친다", h["basis"] == "era" and h["year"] is None)
+    check("그래도 볼 것은 준다", len(h["marks"]) > 0)
+    check("없는 노드의 연표는 None", tl_api.timeline("wd:없음") is None)
+
+    # **축은 고른 노드와 무관하다.** 노드마다 잘라 보내면 위아래로 훑어도
+    # 시대의 양 끝에 닿지 못하고, 축이 달라 노드끼리 자리를 견줄 수 없다.
+    check("어느 노드를 골라도 같은 축 위에 선다",
+          tl_api.timeline("wd:E1")["axis"] == tl_api.timeline("wd:E3")["axis"],
+          str(tl_api.timeline("wd:E1")["axis"]))
+
+    bones = {m["id"] for m in t["marks"] if m["kind"] == "anchor"}
+    # 연표에서 빠진 사건은 그 시대에 없었던 일이 된다. 한 십년에 몰려
+    # 있어도(조선 1590년대에 20건) 솎지 않는다.
+    check("한 십년에 몰려도 연대를 아는 사건은 다 선다",
+          {"wd:D1", "wd:D2", "wd:D3"} <= bones, str(bones))
+    check("이름도 해도 같으면 차수 높은 쪽만 남는다",
+          "wd:DUP" not in bones, str(bones))
+    check("확인해 준 데가 없는 추출 고아는 뼈대가 못 된다",
+          "ex:event:홀로" not in bones, str(bones))
+    check("여럿이 가리키는 추출 사건은 뼈대로 남는다",
+          "ex:event:여럿" in bones, str(bones))
+
+    # 왕조는 org 라 사건 뼈대에 못 들어온다. 그렇다고 빼면 연표에 건국이
+    # 없는 시대가 된다 — 자기 존속 기간으로 따로 세운다.
+    era_mark = [m for m in t["marks"] if m["kind"] == "era"]
+    check("왕조가 자기 존속 기간으로 연표에 선다",
+          [(m["id"], m["year"], m["end"]) for m in era_mark]
+          == [("wd:Q28179", 1392, 1897)], str(era_mark))
+    # 왕조를 고르면 그건 '자기 자리'다. 둘 다 세우면 같은 줄이 두 번 찍힌다.
+    own = tl_api.timeline("wd:Q28179")
+    check("왕조를 고르면 자기 자리로만 선다",
+          [m["kind"] for m in own["marks"] if m["id"] == "wd:Q28179"] == ["self"],
+          str([m for m in own["marks"] if m["id"] == "wd:Q28179"]))
+    store.close()
+
 # --- 시대 서브그래프: 장소 보강 -----------------------------------------
 # 실측 회귀: '위화도 회군'이 이성계의 이웃으로 서브그래프에 들어왔는데
 # 위화도는 두 홉 밖이라 잘려 나갔다. 남은 발생 장소가 개경뿐이어서
@@ -1250,12 +1410,50 @@ with tempfile.TemporaryDirectory() as tmp:
         Edge(src="wd:H", dst="wd:E", type="participated_in", source="wd"),
         Edge(src="wd:X", dst="wd:P1", type="located_in", source="wd"),
     ])
+    # 실측 회귀: 연표에 경술국치가 없어서 따라가 보니, 수집 쿼리가
+    # `?e wdt:P17 wd:{polity}` 로 정체를 물어 놓고 답을 버리고 있었다.
+    # 인물만 props.polity 를 갖고 있어서 사건은 씨앗이 될 길이 없었다 —
+    # 조선 연대 안에서만 P17=조선 사건 73건이 통째로 빠졌다.
+    from histgraph.scope import ERAS, select_seeds  # noqa: E402
+
+    store.upsert_nodes([
+        Node(id="wd:Q28179", type="org", label="조선", source="wd"),
+        Node(id="wd:EV1", type="event", label="갑오개혁", source="wd",
+             start_date="1894-01-01", props={"polity": "조선"},
+             aliases=["갑오경장"]),
+        Node(id="wd:EV2", type="event", label="무신정변", source="wd",
+             props={"polity": "고려"}),
+    ])
+    era_seeds = select_seeds(store, ERAS["joseon"])
+    check("Wikidata 가 그 정체의 사건이라 한 것은 씨앗이 된다",
+          "wd:EV1" in era_seeds, str(sorted(era_seeds)))
+    check("다른 시대의 사건은 안 데려온다", "wd:EV2" not in era_seeds)
+
     kept = close_places(store, {"wd:H", "wd:E", "wd:P2"})
     check("사건이 남으면 그 사건이 일어난 곳도 데려온다", "wd:P1" in kept)
     check("이미 있던 노드는 그대로", {"wd:H", "wd:E", "wd:P2"} <= kept)
     check("사건과 무관한 노드는 안 딸려온다", "wd:X" not in kept)
     check("장소가 없으면 아무것도 안 는다",
           close_places(store, {"wd:H"}) == {"wd:H"})
+
+    # 실측 회귀: 시대 그래프에 별칭이 **0건**이었다. 전체 그래프에는
+    # 5,064건이 있는데 `scope` 가 aliases 표를 안 옮기고 있었다. 화면이
+    # 읽는 것은 시대 그래프라, 이 프로젝트가 내세우는 "'이방원'으로 태종을
+    # 찾는다"가 정작 화면에서는 한 번도 동작한 적이 없었다.
+    from histgraph.scope import extract as scope_extract  # noqa: E402
+
+    out_db = Path(tmp) / "era.sqlite"
+    scope_extract(store, "joseon", str(out_db))
+    dest = GraphStore(out_db)
+    check("시대 그래프로 별칭이 함께 옮겨간다",
+          dest.conn.execute(
+              "SELECT COUNT(*) FROM aliases WHERE node_id='wd:EV1' AND alias='갑오경장'"
+          ).fetchone()[0] == 1)
+    # 갑오개혁은 엣지가 하나도 없다. 고립 노드로 버리면 연표에서 사라진다.
+    check("연대를 아는 사건은 엣지가 없어도 남는다",
+          dest.conn.execute(
+              "SELECT 1 FROM nodes WHERE id='wd:EV1'").fetchone() is not None)
+    dest.close()
     store.close()
 
 # --- 사실 정합성 보수 ----------------------------------------------------

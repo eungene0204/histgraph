@@ -1,13 +1,19 @@
 // 화면 조립 — 검색·시작점·상세 패널을 그래프 뷰에 붙인다.
 import { GraphView, GROUP_COLOR, TYPE_SHAPE } from '/graph.js';
+import { TimelineRail } from '/timeline.js';
 
 const $ = (id) => document.getElementById(id);
 const api = (path) => fetch(path).then((r) => r.json());
 
-const state = { meta: null, depth: 2, limit: 120, includePeriod: false, current: null, detail: null };
+const state = { meta: null, depth: 2, limit: 120, includePeriod: false,
+                current: null, detail: null, timeline: null, rail: true };
 
 // 상세에서 관계를 타고 들어간 자취. '←' 로 한 칸씩 되짚어 올라간다.
 const trail = [];
+
+// 왼쪽 연표. 그래프는 무엇이 무엇과 이어져 있는지만 말하고 언제인지는
+// 말하지 않는다 — 고른 노드를 시간 위에 얹어 주는 것이 이 막대의 일이다.
+const rail = new TimelineRail($('timeline'), { onPick: (id) => visit(id) });
 
 const view = new GraphView($('canvas'), {
   // **클릭하면 그 사람의 세계가 열려야 한다.** 고르기만 하면 화면에는
@@ -177,6 +183,14 @@ $('depth').onchange = (ev) => { state.depth = +ev.target.value; reload(); };
 $('limit').onchange = (ev) => { state.limit = +ev.target.value; reload(); };
 $('show-period').onchange = (ev) => { state.includePeriod = ev.target.checked; reload(); };
 $('show-labels').onchange = (ev) => { view.showLabels = ev.target.checked; };
+// 연표는 화면 폭을 250px 먹는다. 관계망만 크게 보고 싶을 때가 있다.
+$('show-timeline').onchange = (ev) => {
+  state.rail = ev.target.checked;
+  state.timeline = null;
+  if (!state.rail) rail.hide();
+  else if (state.current) showTimeline(state.current);
+};
+
 function reload() { if (state.current) load(state.current); }
 
 // --- 그래프 적재 -------------------------------------------------------
@@ -190,6 +204,7 @@ async function load(id, { merge = false } = {}) {
     return;
   }
   state.current = id;
+  showTimeline(id);
   if (!merge) location.hash = encodeURIComponent(id);
   $('empty').hidden = true;
   view.setData(data, { merge });
@@ -217,6 +232,7 @@ async function showDetail(id, { back = false } = {}) {
   const d = await api(`/api/node/${encodeURIComponent(id)}`);
   if (d.error) return;
   state.detail = { id, label: d.label };
+  showTimeline(id);   // 상세로 옮겨가면 연표의 주인공도 함께 옮긴다
 
   const dates = [fmtDate(d.start), fmtDate(d.end)].filter(Boolean).join(' ~ ');
   // 관계는 종류·방향별로 묶는다. 방향까지 키에 넣어야 부모와 자식이
@@ -341,7 +357,25 @@ async function showDetail(id, { back = false } = {}) {
 }
 
 $('detail-close').onclick = closeDetail;
-function closeDetail() { $('detail').hidden = true; trail.length = 0; state.detail = null; }
+function closeDetail() {
+  $('detail').hidden = true;
+  trail.length = 0;
+  state.detail = null;
+  // 연표는 남긴다 — 상세를 닫아도 화면 한가운데 그 노드는 그대로 있고,
+  // '언제 사람인가'는 관계 목록과 달리 계속 붙어 있어야 할 정보다.
+}
+
+// 연표의 주인공은 **지금 보고 있는 노드**다. 검색으로 옮겨가든 캔버스에서
+// 누르든 상세를 타고 들어가든, 화면 한가운데가 바뀌면 연표도 따라간다.
+async function showTimeline(id) {
+  if (!state.rail || state.timeline === id) return;
+  state.timeline = id;
+  const t = await api(`/api/timeline?id=${encodeURIComponent(id)}`);
+  // 그 사이에 다른 노드로 옮겼으면 늦게 온 답은 버린다
+  if (state.timeline !== id) return;
+  if (t.error) { rail.hide(); return; }
+  rail.show(t);
+}
 
 // 되짚어 올라가기 — 그래프에도 그 노드가 다시 보여야 '돌아왔다'가 된다.
 function backDetail() {

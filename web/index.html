@@ -64,8 +64,15 @@
       </label>
       <label class="check"><input type="checkbox" id="show-period"> 연도·시대 노드 포함</label>
       <label class="check"><input type="checkbox" id="show-labels" checked> 이름표 보이기</label>
+      <label class="check"><input type="checkbox" id="show-timeline" checked> 왼쪽 연표 보이기</label>
       <p class="hint">노드 클릭 = 상세 + 주변 펼치기 · 드래그 = 고정 · 휠 = 확대</p>
     </section>
+  </aside>
+
+  <!-- 고른 노드가 몇 년쯤의 일인지. 그래프는 관계만 말하고 시간은 말하지 않는다. -->
+  <aside class="timeline" id="timeline" hidden>
+    <div class="tl-head"></div>
+    <div class="tl-body"></div>
   </aside>
 
   <main class="stage">
