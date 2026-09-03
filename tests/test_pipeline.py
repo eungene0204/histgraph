@@ -2964,6 +2964,103 @@ with tempfile.TemporaryDirectory() as tmp:
           sc2.eras_of("korea") == ("joseon", "ilje", "daehan") and sc2.label_of("korea") == "조선~대한민국")
     store.close()
 
+# --- 국사편찬위원회 정본 (한국사연대기 · 실록) --------------------------------
+# 세종 재위 32년에 사건이 삼포 개항 하나였다. 정본 표에서 사건을 세우고
+# 실록 기사 제목으로 날짜를 잡는 경로가 이 절이다.
+
+print("\n[국편 정본 — 연대기·실록]")
+from histgraph.sources import nikh  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    rows = [
+        ["레벨아이디", "링크정보", "정보ID", "링크명", "유형", "한글명칭", "한자명칭", "설명", "제목", "내용"],
+        ["kc_i300100_0010", "kc_i300100", "n_1", "한국사 연대기", "사건", "훈민정음 창제", "訓民正音創製",
+         "", "개요", "세종의 명으로 1443년(세종 25) 훈민정음이 만들어졌다. 신숙주(申叔舟)·성삼문(成三問)이 도왔다."],
+        ["kc_i300100_0020", "kc_i300100", "n_1", "한국사 연대기", "사건", "훈민정음 창제", "訓民正音創製",
+         "", "반포", "1446년에 반포되었다. 세종대왕기념사업회가 뒤에 생겼다."],
+        ["kc_n300200_0010", "kc_n300200", "n_2", "한국사 연대기", "인물", "세종", "世宗", "조선 4대 왕", "개요", "…"],
+        ["kc_n300300_0010", "kc_n300300", "n_3", "한국사 연대기", "인물", "신숙주", "申叔舟", "", "개요", "…"],
+        ["kc_i200400_0010", "kc_i200400", "n_4", "한국사 연대기", "사건", "무신정변", "武臣政變",
+         "", "개요", "100년 무신정권의 시작. 의종 24년(1170)에 일어났다."],
+    ]
+    ents = nikh.group_entities(rows)
+    check("절 단위 행이 항목으로 묶인다", len(ents) == 4 and len(ents[0].sections) == 2)
+    ev = ents[0]
+    check("연도는 재위년 괄호가 붙은 것을 먼저 믿는다", nikh.entity_year(ev) == 1443)
+    check("'100년 무신정권' 은 연도가 아니다 — 괄호 안 1170 을 쓴다",
+          nikh.entity_year(ents[3]) == 1170, str(nikh.entity_year(ents[3])))
+    check("연대기 ID 의 자릿수가 시대다", nikh.era_of(ev, 1443) == "조선" and nikh.era_of(ents[3], 1170) == "고려")
+
+    ms = nikh.mentions(ev.full_text(), ["세종", "신숙주"], plain_text=ev.overview)
+    names = {(n, h) for n, h, _ in ms}
+    check("이름(漢字) 언급을 잡는다", ("신숙주", "申叔舟") in names and ("성삼문", "成三問") in names, str(names))
+    check("연대기 인물은 맨 이름으로도 잡는다", ("세종", "") in names, str(names))
+    check("'세종대왕기념사업회' 안의 세종은 언급이 아니다",
+          sum(1 for n, _, _ in ms if n == "세종") == 1, str(ms))
+    check("검색어는 이름 전체, 꼬리말을 뗀 몸통, 그리고 낱말 전부를 요구하는 검색",
+          nikh._search_terms("4군 6진 개척") == [("4군 6진 개척", ()), ("4군 6진", ()), ("4군", ("4군", "6진")), ("4군", ()), ("6진", ())],
+          str(nikh._search_terms("4군 6진 개척")))
+    check("두 글자 몸통('기묘')은 검색하지 않는다 — 간지에 걸린다",
+          nikh._search_terms("기묘사화") == [("기묘사화", ())], str(nikh._search_terms("기묘사화")))
+
+    # 실록 색인: 작은 XML 로 만든다
+    raw = Path(tmp)
+    (raw / "sillok").mkdir()
+    (raw / "sillok" / "2nd_wda_125.xml").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<level2 id="wda_125"><level4 id="wda_12512030">
+ <level5 id="wda_12512030_001"><front><biblioData type="T"><title><mainTitle>삭제에 쓸 향과 축문을 전하다</mainTitle></title>
+  <date><dateOccured date="1443-12-30L0" type="서기"/></date></biblioData></front>
+  <text><content><paragraph>○傳香祝。</paragraph></content></text></level5>
+ <level5 id="wda_12512030_002"><front><biblioData type="T"><title><mainTitle>훈민정음을 창제하다</mainTitle></title>
+  <date><dateOccured date="1443-12-30L0" type="서기"/></date><subjectClass>어문학-문학(文學)</subjectClass></biblioData></front>
+  <text><content><paragraph>○是月, 上親制諺文二十八字, 是謂<index num="1" type="서명">訓民正音</index>。</paragraph></content></text></level5>
+ <level5 id="wda_12812001_001"><front><biblioData type="T"><title><mainTitle>훈민정음을 반포하다</mainTitle></title>
+  <date><dateOccured date="1446-09-29L0" type="서기"/></date></biblioData></front>
+  <text><content><paragraph>○<index num="2" ref="M_0000001" type="이름">鄭麟趾</index></paragraph></content></text></level5>
+</level4></level2>""", encoding="utf-8")
+    (raw / "sillok_gojong").mkdir()
+    n = nikh.build_sillok_index(raw, raw / "sillok.sqlite")
+    check("실록 기사가 색인된다", n == 3, str(n))
+    idx = nikh.SillokIndex(raw / "sillok.sqlite")
+    hit = nikh.date_from_sillok(idx, "훈민정음 창제", [1446, 1443])
+    check("후보 연도 순서대로 같은 해 기사를 찾는다 (1446 반포가 먼저 걸린다)", hit and hit["date"] == "1446-09-29L0", str(hit))
+    hit = nikh.date_from_sillok(idx, "훈민정음 창제", [1443])
+    check("같은 해의 가장 이른 기사가 날짜다", hit and hit["date"] == "1443-12-30L0", str(hit))
+    check("후보 연도에 기사가 없으면 고르지 않는다", nikh.date_from_sillok(idx, "훈민정음 창제", [1450]) is None)
+    check("음력 날짜의 윤달 꼬리를 뗀다", nikh.lunar_iso("1443-12-30L0") == "1443-12-30")
+    check("연도를 모르고 기사가 많으면 고르지 않는다",
+          nikh.date_from_sillok(idx, "훈민정음", None) is not None  # 2건뿐이라 고른다
+          and nikh.date_from_sillok(idx, "향과 축문", None)["date"].startswith("1443"))
+    refs = idx.conn.execute("SELECT refs FROM articles WHERE id='wda_12812001_001'").fetchone()[0]
+    check("인명 색인의 인물 ID 가 기사에 붙는다", refs == "M_0000001", refs)
+
+    # 이름이 같은 노드 가르기
+    store = GraphStore(raw / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:A", type="person", label="김구", source="wd", start_date="1876"),
+        Node(id="wd:B", type="person", label="김구", source="wd", start_date="1488"),
+        Node(id="wd:E1", type="event", label="임진왜란", source="wd", start_date="1592"),
+        Node(id="wd:E2", type="event", label="임진왜란", source="wd", start_date="1592"),
+        Node(id="wd:P", type="person", label="이순신", source="wd"),
+        Node(id="ex:event:훈민정음 창제", type="event", label="훈민정음 창제", source="extract"),
+    ])
+    store.upsert_edges([Edge(src="wd:P", dst="wd:E1", type="participated_in", source="wd")])
+    nidx = nikh.NodeIndex(store)
+    p_modern = nikh.Entity("kc_n400100", "인물", "김구", "金九", "")
+    p_joseon = nikh.Entity("kc_n300100", "인물", "김구", "金絿", "")
+    check("같은 이름은 시대로 가른다",
+          nikh.pick_target(nidx, p_modern)[0] == "wd:A"
+          and nikh.pick_target(nidx, p_joseon)[0] == "wd:B")
+    check("실록 인물 CSV 의 생년이 있으면 그것으로 가른다",
+          nikh.pick_target(nidx, p_joseon, birth=1876)[0] == "wd:A")
+    e_imjin = nikh.Entity("kc_i300500", "사건", "임진왜란", "壬辰倭亂", "1592년(선조 25) 일본이 침입한 전쟁")
+    check("연대까지 같으면 차수가 압도적인 쪽만 받는다",
+          nikh.pick_target(nidx, e_imjin, [1592])[0] == "wd:E1")
+    nid, orphans, _ = nikh.pick_target(nidx, ev, [1443])
+    check("이름이 같은 추출 고아는 흡수 대상이다", nid is None and orphans == ["ex:event:훈민정음 창제"], str((nid, orphans)))
+    store.close()
+
 
 # --- 말뭉치 (RAG 저장·검색층) ---------------------------------------------
 # "이재명은 12.3 내란에 참여했다"가 틀렸다는 것은 구조화 소스 어디에도
