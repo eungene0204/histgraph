@@ -1,7 +1,7 @@
 """그래프 탐색 서버 — 프론트엔드가 실제로 붙는 곳.
 
 **의존성 없이 표준 라이브러리로만 만든다.** 수집 파이프라인이 그렇듯이
-`python3 -m histgraph serve` 한 줄로 뜨는 게 이 프로젝트의 조건이다.
+`uv run histgraph serve` 한 줄로 뜨는 게 이 프로젝트의 조건이다.
 
 **전부 그리지 않는다.** 조선 그래프만 해도 노드 5,637 · 엣지 9,629 다.
 한 화면에 다 뿌리면 털뭉치가 되고 브라우저도 버틴다고 그릴 뿐 읽히지
@@ -29,18 +29,37 @@ from .store import GraphStore
 log = logging.getLogger(__name__)
 
 
+WEB_SRC = Path(__file__).resolve().parents[2] / "web"
+WEB_DIST = WEB_SRC / "dist"
+
+
 def _web_root() -> Path:
     """정적 파일을 어디서 읽을지.
 
-    `npm run build` 를 돌렸으면 web/dist/ 가 생긴다. 배포는 그쪽을 봐야 하고,
-    아무것도 안 빌드한 상태에서는 web/ 의 원본이 그대로 돌아야 한다 — 빌드
-    단계는 선택이지 전제가 아니다."""
-    web = Path(__file__).resolve().parents[2] / "web"
-    dist = web / "dist"
-    return dist if (dist / "index.html").is_file() else web
+    화면이 React(JSX)라 **브라우저가 원본을 직접 못 읽는다.** `npm run build`
+    가 만든 web/dist/ 를 내줘야 하고, 그게 없으면 web/ 의 index.html 이
+    /src/main.jsx 를 가리켜 빈 화면이 된다. 아래 warn_if_unbuilt() 가 그때
+    무엇을 하라고 말해 준다."""
+    return WEB_DIST if (WEB_DIST / "index.html").is_file() else WEB_SRC
 
 
 WEB_ROOT = _web_root()
+
+
+def warn_if_unbuilt() -> bool:
+    """화면이 빌드돼 있는지. 안 돼 있으면 무엇을 하라고 적는다.
+
+    API 는 빌드와 무관하게 멀쩡하므로 서버를 막지는 않는다 — 빈 화면 앞에서
+    이유를 못 찾는 것보다 낫다."""
+    if (WEB_DIST / "index.html").is_file():
+        return True
+    print(
+        "  ⚠ 화면이 아직 빌드되지 않았습니다 (web/dist 없음).\n"
+        "    화면을 고치는 중이라면:  npm run dev      (5173, 자동 반영)\n"
+        "    이 포트로 볼 것이라면:    npm run build    (그 뒤 다시 serve)\n"
+        "    API 는 그대로 씁니다.",
+    )
+    return False
 
 # 화면이 견디는 노드 수. 이보다 많으면 힘기반 배치가 수렴하기 전에
 # 사람이 먼저 포기한다.
@@ -70,6 +89,9 @@ TYPE_GROUP: dict[str, str] = {
     "media": "thing",
     "period": "frame",
     "role": "frame",
+    # 개념은 뼈대 쪽이다. 색을 하나 더 만들지 않는다 — 아홉 색도 이미
+    # 흩어진 작은 원에서는 구별이 빠듯하다. 물러나 있는 것이 맞다.
+    "concept": "frame",
 }
 
 # --- 연표 --------------------------------------------------------------
@@ -200,11 +222,19 @@ class GraphAPI:
     경로를 주면 스레드별로 열고, 이미 만든 저장소를 주면 그대로 쓴다 —
     테스트는 단일 스레드라 새로 열 이유가 없다."""
 
-    def __init__(self, db: Path | str | GraphStore, era: str = "") -> None:
+    def __init__(
+        self,
+        db: Path | str | GraphStore,
+        era: str = "",
+        *,
+        readonly: bool = False,
+    ) -> None:
         self._shared = db if isinstance(db, GraphStore) else None
         self._db = db.path if isinstance(db, GraphStore) else Path(db)
         self._local = threading.local()
         self.era = era
+        # 배포(서버리스)에서는 쓸 수 없는 파일시스템 위에서 연다. store.py 참고.
+        self.readonly = readonly
 
     @property
     def store(self) -> GraphStore:
@@ -212,7 +242,7 @@ class GraphAPI:
             return self._shared
         store = getattr(self._local, "store", None)
         if store is None:
-            store = GraphStore(self._db)
+            store = GraphStore(self._db, readonly=self.readonly)
             self._local.store = store
         return store
 
@@ -822,6 +852,40 @@ def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
     return target if target.is_file() else None
 
 
+def dispatch(
+    api: GraphAPI, path: str, q: dict[str, list[str]]
+) -> tuple[int, object]:
+    """엔드포인트 하나를 골라 (상태코드, 응답) 을 돌려준다.
+
+    HTTP 껍데기에서 떼어 둔 이유는 **이 표를 두 벌 두지 않기 위해서다.**
+    로컬은 `histgraph serve` 의 Handler 가, 배포는 서버리스 함수(api/index.py)
+    가 부른다. 분기가 양쪽에 흩어지면 한쪽에만 엔드포인트가 생기고, 그 차이는
+    배포한 다음에야 404 로 드러난다."""
+    one = lambda k, d="": (q.get(k) or [d])[0]  # noqa: E731
+
+    if path == "/api/meta":
+        return 200, api.meta()
+    if path == "/api/seeds":
+        return 200, api.seeds(int(one("limit", "12")))
+    if path == "/api/search":
+        return 200, api.search(one("q"), int(one("limit", "25")))
+    if path == "/api/graph":
+        exclude = tuple(t for t in one("exclude", "").split(",") if t)
+        return 200, api.graph(
+            one("id"),
+            depth=max(1, min(int(one("depth", "1")), 3)),
+            limit=int(one("limit", str(DEFAULT_LIMIT))),
+            exclude=exclude,
+        )
+    if path == "/api/timeline":
+        tl = api.timeline(one("id"))
+        return (200, tl) if tl else (404, {"error": "not found"})
+    if path.startswith("/api/node/"):
+        node = api.node(unquote(path[len("/api/node/"):]))
+        return (200, node) if node else (404, {"error": "not found"})
+    return 404, {"error": "unknown endpoint"}
+
+
 class Handler(BaseHTTPRequestHandler):
     api: GraphAPI  # 서브클래스가 채운다
     server_version = "histgraph"
@@ -855,32 +919,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
         url = urlparse(self.path)
-        q = parse_qs(url.query)
-        one = lambda k, d="": (q.get(k) or [d])[0]  # noqa: E731
-
         try:
-            if url.path == "/api/meta":
-                self._json(self.api.meta())
-            elif url.path == "/api/seeds":
-                self._json(self.api.seeds(int(one("limit", "12"))))
-            elif url.path == "/api/search":
-                self._json(self.api.search(one("q"), int(one("limit", "25"))))
-            elif url.path == "/api/graph":
-                exclude = tuple(t for t in one("exclude", "").split(",") if t)
-                self._json(self.api.graph(
-                    one("id"),
-                    depth=max(1, min(int(one("depth", "1")), 3)),
-                    limit=int(one("limit", str(DEFAULT_LIMIT))),
-                    exclude=exclude,
-                ))
-            elif url.path == "/api/timeline":
-                tl = self.api.timeline(one("id"))
-                self._json(tl or {"error": "not found"}, 200 if tl else 404)
-            elif url.path.startswith("/api/node/"):
-                node = self.api.node(unquote(url.path[len("/api/node/"):]))
-                self._json(node or {"error": "not found"}, 200 if node else 404)
-            elif url.path.startswith("/api/"):
-                self._json({"error": "unknown endpoint"}, 404)
+            if url.path.startswith("/api/"):
+                status, payload = dispatch(self.api, url.path, parse_qs(url.query))
+                self._json(payload, status)
             else:
                 self._static(url.path)
         except (ValueError, KeyError) as err:
@@ -896,6 +938,7 @@ def serve(db: Path, host: str = "127.0.0.1", port: int = 8100, era: str = "") ->
     httpd = ThreadingHTTPServer((host, port), handler)
     stats = api.store.stats()
     print(f"  그래프: {db}  (노드 {stats['nodes_total']:,} · 엣지 {stats['edges_total']:,})")
+    warn_if_unbuilt()
     print(f"  http://{host}:{port}  — Ctrl+C 로 종료", flush=True)
     try:
         httpd.serve_forever()

@@ -186,7 +186,7 @@ def get_client():
         import anthropic
     except ImportError as err:
         raise ExtractError(
-            "anthropic 패키지가 필요합니다: pip install anthropic"
+            "anthropic 패키지가 필요합니다: uv sync --extra anthropic"
         ) from err
 
     if not os.environ.get("ANTHROPIC_API_KEY"):

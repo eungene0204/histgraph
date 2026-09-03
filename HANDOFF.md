@@ -10,9 +10,15 @@
 전체 그래프   노드 38,479 · 엣지 62,597 · same_as 1,859 · 별칭 7,625
 조선 그래프   노드  7,133 · 엣지 13,601 · 별칭 3,189 (data/joseon.sqlite)
 추출 고아     ex: 노드 1,361 (인물 680 · 사건 305 · 직위 194 · 작품 75 · 그 외 107)
-화면          python3 -m histgraph serve  →  http://127.0.0.1:8100 (이 프로젝트 전용 포트)
-테스트        450/450 통과   PYTHONPATH=src python3 tests/test_pipeline.py
+화면          uv run histgraph serve  →  http://127.0.0.1:8100 (이 프로젝트 전용 포트)
+테스트        474/474 통과   uv run tests/test_pipeline.py
+환경          uv (Python 3.11) — `uv sync --extra mlx` 로 잡는다
 ```
+
+환경은 uv 가 관리한다. `PYTHONPATH=src` 는 더 필요 없다 — 프로젝트가
+편집 가능 설치로 들어가 있어서 `uv run histgraph …` 가 `src/` 를 바로 읽는다.
+추출을 돌리려면 `--extra mlx` 가 있어야 한다 (없으면 `mlx_lm` 임포트에서
+죽는다). 원격 추출은 `--extra anthropic`.
 
 엣지 수가 줄어든 것은 **자기순환 1,258건을 지웠기 때문**이다. `timeline`
 이 연도 노드를 자기 자신에 잇고 있었다 (`time:1443 → time:1443`).
@@ -28,6 +34,53 @@
 | LLM 추출 (로컬 MLX) | 키 불필요 | 관계 965건 (participated_in 454) |
 | 승격 보강 (`promote`) | 불필요 | 신규 노드 69 · 관계 189건 |
 | 공공데이터포털 / 문화광장 | **활용신청 대기** | 0 |
+
+## 2026-09-04 — 개념이 사건 행세를 하고 있었다 (`reclassify`)
+
+작품이 역사에 붙어 있는 것처럼 보였다. `depicts` 157건. **그중 실제 역사
+사건은 6.25 전쟁 6건뿐이었고**, 나머지는 '조직범죄'(20)·'보복'(11)·
+'연쇄살인범'(7)·'자살'(5) 같은 주제어가 **사건 노드로 앉아 있던 것**이다.
+원인은 `fetch_media` 가 P921(주제)을 묻지 않고 사건으로 가정한 한 줄.
+
+한 것:
+
+- 온톨로지에 `concept`(개념·주제) 타입과 `about`(주제) 엣지. `depicts` 는
+  실체(인물·사건·장소·단체)만 가리킨다. `set_in`(배경)도 타입만 세워 뒀다.
+- `reclassify` 명령 — Wikidata 에 물어 사건과 개념을 가른다. 지우지 않고
+  옮긴다. `--dry-run` 으로 계획만 볼 수 있다.
+- `fetch_media` 가 인물 여부를 같은 질의에서 함께 묻고, 판정이 안 서면
+  **개념으로** 떨어뜨린다 (사건이 아니라).
+- `server.TYPE_GROUP` 에 `concept` → `frame`. 색은 늘리지 않았다.
+
+결과:
+
+```
+노드 77개 재분류 (개념 71 · 인물 4 · 단체 1 · 시대 1) · 보류 11
+depicts  157 → 21건  (전부 실체: 사건 13 · 인물 7 · 단체 1)
+about      0 → 135건
+어긋난 엣지 0건 · 테스트 474/474
+```
+
+인물로 간 넷은 이봉창·윤봉길·이춘재·김헌창이다. 사람이 사건 노드로 앉아
+있었다.
+
+판정 사다리와 그것을 만들며 틀린 것들(P279 단독 판정, 사건 계층 신뢰,
+조직 뿌리, 매핑표 앞자리)은 README "개념이 사건 행세를 하고 있었다" 에
+적어 뒀다. **되풀이하지 말 것.**
+
+남은 보류 11건은 손대지 않았다. 특히:
+
+- **정미의병** — Wikidata 가 클래스도 시점도 주지 않아 '보복'과 구별되지
+  않는다. 사람이 판단해야 한다.
+- **진주성 전투(wd:Q15878954)** — 실은 **위키미디어 동음이의어 문서**다.
+  개념이 아니라 노드로 있으면 안 되는 것이라 지우는 판단을 넘겨 둔다.
+- 임오화변·원격현장감 — Wikidata 에 P31 이 아예 없다.
+
+**주의: `data/histgraph.sqlite` 를 파일 복사로 되돌리지 말 것.** 이 작업 중에
+백업으로 되돌렸는데, 그때 다른 세션의 `extract` 가 같은 DB 에 쓰는 중이었고
+그쪽이 02:27~02:36 사이에 쓴 배치 2건가량이 지워졌다. 그 문서들은 '이미
+추출함' 표시도 함께 사라졌으므로 다음 `extract` 가 다시 처리한다(영구 손실은
+아니다). 되돌릴 일이 있으면 파일이 아니라 SQL 로 할 것.
 
 ## 2026-09-03 — 설명이 빈 노드 (`enrich`)
 
@@ -327,7 +380,7 @@ Wikidata: wd:Q28179 P571=1392-08-13 · P576=1897-10-12
 **아직 안 한 것.** `timeline` 을 다시 돌리지 않아서 새로 생긴 날짜가 아직
 `dated_to` 엣지로는 안 걸려 있다 (화면 연표는 `start_date` 를 직접 읽으므로
 이미 보인다). "1392년에 무슨 일이" 질의에 조선이 걸리게 하려면
-`python3 -m histgraph timeline` 을 다시 돌려야 한다.
+`uv run histgraph timeline` 을 다시 돌려야 한다.
 place 323개·role 33개도 여전히 날짜가 없다 — `spans --types place role` 로
 같은 방법이 되지만 장소의 '설립'은 연표에서 뜻이 흐려 손대지 않았다.
 
@@ -722,7 +775,7 @@ histgraph extract --types event --max-participants 1 --min-chars 1500
 실행 (끝나면 promote → timeline → scope 순서 유지):
 
 ```sh
-PYTHONPATH=src python3 -m histgraph extract --scope data/joseon.sqlite \
+uv run histgraph extract --scope data/joseon.sqlite \
     --types person --limit 100
 ```
 
@@ -763,8 +816,8 @@ vm_stat | head -4            # free 가 한 자리 GB 면 아직 부족하다
 돌리는 것이 맞다.
 
 ```sh
-python3 -m histgraph infobox --types person --limit 50   # 먼저 소량으로
-python3 -m histgraph infobox --types person              # 확인되면 전체
+uv run histgraph infobox --types person --limit 50   # 먼저 소량으로
+uv run histgraph infobox --types person              # 확인되면 전체
 ```
 
 방향이 필드마다 다르다는 점이 핵심이다: `아버지 = [[안중관]]` 은
@@ -825,7 +878,7 @@ held_position 엣지에 채웠으므로(2026-09-03), 남은 것은 `timeline.py`
   `scope` 로 다시 뽑아야 반영된다.
 
 ### 5. 다른 시대 확장
-`python3 -m histgraph scope goryeo --out data/goryeo.sqlite` 로 같은
+`uv run histgraph scope goryeo --out data/goryeo.sqlite` 로 같은
 파이프라인이 돈다. 다만 `wikipedia.EVENT_SEEDS` 가 조선에 치우쳐 있어
 시대별 시드 보강이 먼저다.
 
@@ -847,7 +900,7 @@ grep -n "to_graph" src/histgraph/cli.py        # doc_text= 가 있어야 함
 grep -n "build_gazetteer" src/histgraph/cli.py # scope_ids= 가 있어야 함
 
 # 3. 소량 검증 (3문서, 약 10분)
-PYTHONPATH=src python3 tools/check_extraction.py 3 mlx data/joseon.sqlite
+uv run tools/check_extraction.py 3 mlx data/joseon.sqlite
 ```
 
 네 지표를 본다: 관계 유형 분포(`participated_in` 이 나오는가) ·
@@ -856,32 +909,32 @@ PYTHONPATH=src python3 tools/check_extraction.py 3 mlx data/joseon.sqlite
 ## 파이프라인 실행 순서
 
 ```sh
-export PYTHONPATH=src
-python3 -m histgraph doctor                      # 소스 접근 진단
-python3 -m histgraph ingest heritage --kinds 11 12
-python3 -m histgraph ingest wikidata
-python3 -m histgraph events                      # 핵심 사건 직접 수집
-python3 -m histgraph enrich --limit 1200         # 위키백과 서사
-python3 -m histgraph infobox                     # 사건 인포박스 (LLM 불필요)
-python3 -m histgraph infobox --types person      # 인물 인포박스 (LLM 불필요)
-python3 -m histgraph prune                       # 스포츠 제거 (필수)
-python3 -m histgraph resolve                     # 소스 간 연결
-python3 -m histgraph extract --scope data/joseon.sqlite --types event org
-python3 -m histgraph extract --scope data/joseon.sqlite --types person --limit 100
-python3 -m histgraph aliases                     # 한국어 별칭 (승격 **앞에**)
-python3 -m histgraph promote --prune-orphans     # 추출 고아를 실제 노드로
-python3 -m histgraph spans                       # 조직·왕조 존속 기간 (P571/P576)
-PYTHONPATH=src python3 tools/backfill_event_polity.py --apply   # 사건의 정체 (P17)
-python3 -m histgraph timeline                    # 연도 정규화 (승격 뒤에)
-python3 -m histgraph scope joseon                # 시대별 서브그래프 (맨 끝)
-python3 -m histgraph reigns                      # 왕의 재위 (P39 한정어 → 엣지 날짜)
-python3 -m histgraph links                       # 사건끼리의 상하위·전후 (P361/P527/P155/P156)
-python3 -m histgraph relabel                     # 영문 라벨 → 한국어 (표 덮어쓰기)
-python3 -m histgraph redescribe                  # 영문 설명 → 한국어 (사전, 모르면 비움)
-python3 -m histgraph --db data/joseon.sqlite relabel     # 시대 그래프에도 한 번 더
-python3 -m histgraph --db data/joseon.sqlite redescribe  # 시대 그래프에도 한 번 더
-python3 -m histgraph --db data/joseon.sqlite reigns      # (scope 를 다시 돌렸으면 불필요)
-python3 -m histgraph serve                       # 화면 (조선 그래프를 읽는다)
+uv run histgraph doctor                      # 소스 접근 진단
+uv run histgraph ingest heritage --kinds 11 12
+uv run histgraph ingest wikidata
+uv run histgraph events                      # 핵심 사건 직접 수집
+uv run histgraph enrich --limit 1200         # 위키백과 서사
+uv run histgraph infobox                     # 사건 인포박스 (LLM 불필요)
+uv run histgraph infobox --types person      # 인물 인포박스 (LLM 불필요)
+uv run histgraph prune                       # 스포츠 제거 (필수)
+uv run histgraph reclassify                  # 개념을 사건에서 갈라냄 (필수)
+uv run histgraph resolve                     # 소스 간 연결
+uv run histgraph extract --scope data/joseon.sqlite --types event org
+uv run histgraph extract --scope data/joseon.sqlite --types person --limit 100
+uv run histgraph aliases                     # 한국어 별칭 (승격 **앞에**)
+uv run histgraph promote --prune-orphans     # 추출 고아를 실제 노드로
+uv run histgraph spans                       # 조직·왕조 존속 기간 (P571/P576)
+uv run tools/backfill_event_polity.py --apply   # 사건의 정체 (P17)
+uv run histgraph timeline                    # 연도 정규화 (승격 뒤에)
+uv run histgraph scope joseon                # 시대별 서브그래프 (맨 끝)
+uv run histgraph reigns                      # 왕의 재위 (P39 한정어 → 엣지 날짜)
+uv run histgraph links                       # 사건끼리의 상하위·전후 (P361/P527/P155/P156)
+uv run histgraph relabel                     # 영문 라벨 → 한국어 (표 덮어쓰기)
+uv run histgraph redescribe                  # 영문 설명 → 한국어 (사전, 모르면 비움)
+uv run histgraph --db data/joseon.sqlite relabel     # 시대 그래프에도 한 번 더
+uv run histgraph --db data/joseon.sqlite redescribe  # 시대 그래프에도 한 번 더
+uv run histgraph --db data/joseon.sqlite reigns      # (scope 를 다시 돌렸으면 불필요)
+uv run histgraph serve                       # 화면 (조선 그래프를 읽는다)
 ```
 
 `promote` → `timeline` → `scope` 순서를 지킬 것. 승격이 노드를 만들고

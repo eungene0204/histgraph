@@ -1,0 +1,31 @@
+[project]
+name = "histgraph"
+version = "0.1.0"
+description = "한국사 온톨로지 그래프 — 인물·사건·장소·작품·유물을 노드와 엣지로 잇는 수집 파이프라인"
+requires-python = ">=3.11"
+
+# 본체는 표준 라이브러리만 쓴다. 여기가 빈 채로 남아 있는 것이 정상이다 —
+# 무언가 추가하려면 정말 필요한지 먼저 의심하라.
+dependencies = []
+
+[project.optional-dependencies]
+# 로컬 추출용. Apple Silicon 에서만 돈다. 자리를 35GB 쯤 잡으므로
+# 메모리를 비우고 돌려야 한다.
+mlx = [
+    "mlx-lm>=0.31",
+    "outlines>=1.2",
+]
+# 원격 추출용. ANTHROPIC_API_KEY 가 있어야 뜻이 있다.
+anthropic = [
+    "anthropic>=0.40",
+]
+
+[project.scripts]
+histgraph = "histgraph.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/histgraph"]

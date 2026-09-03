@@ -1,0 +1,36 @@
+# 무엇을 올릴지 여기서 정한다. .vercelignore 가 있으면 .gitignore 는 보지
+# 않으므로, 올라가면 안 되는 것을 여기에 다시 적어야 한다 — 특히 .env.
+
+.env
+.env.*
+!.env.example
+
+.git
+.venv
+node_modules
+__pycache__
+*.pyc
+.pytest_cache
+.DS_Store
+
+# 수집 파이프라인의 흔적. 화면과 API 에는 필요 없다.
+data/cache
+data/raw
+data/histgraph.sqlite
+*.duckdb
+tools
+tests
+web/tests
+web/dist
+web/.render-test-*.mjs
+
+# 문서는 저장소에서 읽는다.
+*.md
+
+# 로컬은 3.11 이지만 Vercel 런타임은 3.12 이상만 받는다. 이 파일을 보이면
+# 빌드가 3.11 로 venv 를 만들다 죽는다 — 감춰서 기본값(3.12)을 쓰게 한다.
+# 로컬 파이썬을 3.12 로 올리지 않는 이유: 추출 환경(mlx)이 여기에 물려 있다.
+.python-version
+
+# 이전 로컬 빌드 산출물
+.vercel

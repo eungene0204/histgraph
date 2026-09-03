@@ -10,6 +10,7 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
+from urllib.request import pathname2url
 
 from .ontology import Edge, Node
 
@@ -77,17 +78,28 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 
 
 class GraphStore:
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, *, readonly: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        self.readonly = readonly
+        if readonly:
+            # 배포된 서버의 파일시스템은 읽기 전용이다. 평소처럼 열면 sqlite 가
+            # 저널 파일을 만들려 들고, 아래 executescript(SCHEMA) 가 곧바로
+            # 'attempt to write a readonly database' 로 첫 요청을 죽인다.
+            # 연결 자체를 ro 로 열어 쓰기를 시도하지 않게 한다.
+            self.conn = sqlite3.connect(
+                f"file:{pathname2url(str(self.path))}?mode=ro", uri=True
+            )
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         # 이 프로젝트는 몇 시간짜리 추출과 수집을 나란히 돌린다. 기본값
         # (busy_timeout=0)이면 다른 쪽이 쓰는 순간 곧바로 'database is
         # locked' 로 죽어서 진행 중이던 작업을 잃는다. 기다리게 한다.
         self.conn.execute("PRAGMA busy_timeout = 30000")
-        self.conn.executescript(SCHEMA)
+        if not readonly:
+            self.conn.executescript(SCHEMA)
 
     def close(self) -> None:
         self.conn.close()

@@ -7,7 +7,7 @@
   4. 처리 속도 — 971건 전체에 얼마나 걸릴지 추정
 
 사용:
-  PYTHONPATH=src python3 tools/check_extraction.py [문서수]
+  uv run tools/check_extraction.py [문서수]
 """
 
 from __future__ import annotations

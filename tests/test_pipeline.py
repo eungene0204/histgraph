@@ -1,6 +1,6 @@
 """파이프라인 스모크 테스트 (네트워크 불필요).
 
-  PYTHONPATH=src python3 tests/test_pipeline.py
+  uv run tests/test_pipeline.py
 
 과거에 실제로 파이프라인을 망가뜨린 버그들을 회귀 테스트로 고정한다.
 """
@@ -2196,6 +2196,67 @@ with tempfile.TemporaryDirectory() as tmp:
     del koreanize.JOB["person cbdb = 1"]
     store.close()
 
+
+print("[사건과 개념 갈라내기]")
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import reclassify as rc  # noqa: E402
+
+    store = GraphStore(Path(tmp) / "rc.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:W1", type="media", label="영화", source="wd"),
+        # 주제 자리에만 있는 노드 — 다른 관계도 연대도 없다
+        Node(id="wd:T1", type="event", label="조직범죄", source="wd"),
+        # 주제끼리만 이어진 섬 — 엣지가 있어도 사실층에 닿지 않는다
+        Node(id="wd:T2", type="event", label="상실", source="wd"),
+        Node(id="wd:T3", type="event", label="상실감", source="wd"),
+        # 사실층에 닿는다 — 주제 자리에 있어도 빠져야 한다
+        Node(id="wd:E1", type="event", label="어떤 사건", source="wd"),
+        Node(id="wd:P1", type="place", label="대한민국", source="wd"),
+        # 연대를 스스로 말하는 노드도 주제로 보지 않는다
+        Node(id="wd:E2", type="event", label="연대 있는 사건", source="wd",
+             start_date="1801-01-01"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:W1", dst="wd:T1", type="depicts", source="wd"),
+        Edge(src="wd:W1", dst="wd:T2", type="depicts", source="wd"),
+        Edge(src="wd:W1", dst="wd:T3", type="depicts", source="wd"),
+        Edge(src="wd:W1", dst="wd:E1", type="depicts", source="wd"),
+        Edge(src="wd:W1", dst="wd:E2", type="depicts", source="wd"),
+        Edge(src="wd:T2", dst="wd:T3", type="related_to", source="wd"),
+        Edge(src="wd:E1", dst="wd:P1", type="related_to", source="wd"),
+    ])
+    only = rc._subject_only(store)
+    check("주제 자리에만 있는 노드를 고른다", "T1" in only, str(only))
+    check("주제끼리 이어진 섬도 주제로 남는다", {"T2", "T3"} <= only, str(only))
+    check("사실층에 닿으면 빠진다", "E1" not in only, str(only))
+    check("연대가 있으면 빠진다", "E2" not in only, str(only))
+
+    # 계획을 손으로 만들어 적용만 시험한다 (네트워크 없이)
+    plan = rc.Plan(
+        changes={"wd:T1": ("event", "concept")},
+        labels={"wd:T1": "조직범죄"},
+    )
+    result = rc.apply_plan(store, plan)
+    check("타입을 바꾼다", store.conn.execute(
+        "SELECT type FROM nodes WHERE id='wd:T1'").fetchone()[0] == "concept")
+    check("개념으로 가면 depicts 가 about 이 된다",
+          result["depicts_to_about"] == 1, str(result))
+    check("바뀐 뒤 어긋난 엣지가 없다", not rc.invalid_edges(store),
+          str(rc.invalid_edges(store)))
+
+    # 되돌아오는 쪽도 된다
+    back = rc.Plan(changes={"wd:T1": ("concept", "event")}, labels={"wd:T1": "조직범죄"})
+    result = rc.apply_plan(store, back)
+    check("사건으로 되돌리면 about 이 depicts 로 돌아온다",
+          result["about_to_depicts"] == 1, str(result))
+
+    report = rc.depicts_report(store)
+    check("depicts 대상 타입을 센다", report["by_type"].get("event") == 5, str(report))
+    store.close()
+
+check("작품이 주제를 가리키는 엣지가 있다", "about" in EDGE_TYPES)
+check("about 의 도착은 개념뿐", EDGE_TYPES["about"][2] == ("concept",))
+check("depicts 의 도착에 개념이 없다", "concept" not in EDGE_TYPES["depicts"][2])
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

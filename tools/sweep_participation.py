@@ -17,7 +17,7 @@
 기본은 계획만 출력한다. 건수를 확인한 뒤 --apply 로 실행할 것.
 
 사용:
-  PYTHONPATH=src python3 tools/sweep_participation.py [--apply] [DB ...]
+  uv run tools/sweep_participation.py [--apply] [DB ...]
   (DB 를 안 주면 data/histgraph.sqlite 와 data/joseon.sqlite 둘 다)
 """
 

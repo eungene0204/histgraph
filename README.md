@@ -7,37 +7,41 @@
 
 ```bash
 cp .env.example .env        # 인증키 입력
-export PYTHONPATH=src
+uv sync --extra mlx         # 환경 구성 (추출은 mlx 가 있어야 돈다)
 
-python3 -m histgraph doctor                          # 소스별 접근 진단
-python3 -m histgraph ingest heritage --kinds 11 12   # 국보·보물 수집
-python3 -m histgraph ingest wikidata                 # 인물/사건/영상물 수집
-python3 -m histgraph prune                           # 스포츠 이벤트 제거 (필수)
-python3 -m histgraph resolve                         # 소스 간 엔티티 연결
-python3 -m histgraph events                          # 한국사 주요 사건 직접 수집
-python3 -m histgraph enrich                         # 위키백과 서사로 노드 보강
-python3 -m histgraph extract --dry-run               # 추출 프롬프트 확인
-python3 -m histgraph extract --min-score 2.0 --limit 50   # 관계 추출 (배치)
-python3 -m histgraph promote --dry-run               # 추출 고아 승격 계획 확인
-python3 -m histgraph promote --prune-orphans         # ex: 노드를 실제 노드로 병합
-python3 -m histgraph relabel                         # 영어로 들어온 이름을 한국어로
-python3 -m histgraph redescribe                      # 영어로 들어온 설명을 한국어로
-python3 -m histgraph reigns                          # 왕의 재위 기간 (P39 한정어)
-python3 -m histgraph links                           # 사건끼리의 상하위·전후 관계
-python3 -m histgraph stats                           # 그래프 통계
-python3 -m histgraph show wd:Q37682 --depth 2        # 세종 주변 서브그래프
-python3 -m histgraph serve                           # 브라우저에서 탐색
+uv run histgraph doctor                          # 소스별 접근 진단
+uv run histgraph ingest heritage --kinds 11 12   # 국보·보물 수집
+uv run histgraph ingest wikidata                 # 인물/사건/영상물 수집
+uv run histgraph prune                           # 스포츠 이벤트 제거 (필수)
+uv run histgraph reclassify                      # 개념을 사건에서 갈라냄 (필수)
+uv run histgraph resolve                         # 소스 간 엔티티 연결
+uv run histgraph events                          # 한국사 주요 사건 직접 수집
+uv run histgraph enrich                         # 위키백과 서사로 노드 보강
+uv run histgraph extract --dry-run               # 추출 프롬프트 확인
+uv run histgraph extract --min-score 2.0 --limit 50   # 관계 추출 (배치)
+uv run histgraph promote --dry-run               # 추출 고아 승격 계획 확인
+uv run histgraph promote --prune-orphans         # ex: 노드를 실제 노드로 병합
+uv run histgraph relabel                         # 영어로 들어온 이름을 한국어로
+uv run histgraph redescribe                      # 영어로 들어온 설명을 한국어로
+uv run histgraph reigns                          # 왕의 재위 기간 (P39 한정어)
+uv run histgraph links                           # 사건끼리의 상하위·전후 관계
+uv run histgraph stats                           # 그래프 통계
+uv run histgraph show wd:Q37682 --depth 2        # 세종 주변 서브그래프
+uv run histgraph serve                           # 브라우저에서 탐색
 ```
 
-**`prune` 은 선택이 아니라 필수입니다.** 아래 "스포츠 오염" 참조.
+**`prune` 과 `reclassify` 는 선택이 아니라 필수입니다.** 아래 "스포츠 오염"과
+"개념이 사건 행세를 하고 있었다" 참조.
 
 **`relabel`·`redescribe` 는 수집 뒤마다 다시 돌려야 합니다.**
 `upsert_nodes` 가 라벨을 통째로 덮어쓰므로, 다시 수집하면 한국어 이름이
 영어로 되돌아갑니다. 시대 그래프는 별도 파일이라 거기에도 한 번 더:
-`python3 -m histgraph --db data/joseon.sqlite relabel`. 아래 "영어로 뜨는
+`uv run histgraph --db data/joseon.sqlite relabel`. 아래 "영어로 뜨는
 노드"·"영어로 뜨는 설명" 참조.
 
-의존성 없음 (Python 3.11+ 표준 라이브러리만 사용).
+환경은 uv 가 잡는다 (Python 3.11+). 본체는 표준 라이브러리만 쓰고,
+서드파티는 추출 백엔드에만 붙는다 — `--extra mlx` 는 로컬 추출(Apple
+Silicon), `--extra anthropic` 은 원격 추출. 둘 다 없어도 수집·화면은 돈다.
 
 ## 설계에서 가장 중요한 사실
 
@@ -79,6 +83,113 @@ Wikidata 조차 부족하다. 실측치:
 필터는 라벨 정규식만으로는 부족하다 — 'Konica Cup', 'Superseries',
 'Internationaux de France' 는 이름만으로 스포츠인지 알 수 없다.
 Wikidata 의 P279* 계층에 직접 물어보는 2차 필터가 필요하다.
+
+### 개념이 사건 행세를 하고 있었다 (`reclassify`)
+
+작품 96편이 역사에 붙어 있는 것처럼 보였다. `depicts` 엣지가 157건이었다.
+**그중 실제 역사 사건을 가리키는 것은 6건이었다.**
+
+| depicts 가 가리키던 것 | 엣지 |
+|---|---:|
+| 조직범죄 | 20 |
+| 보복 | 11 |
+| 연쇄살인범 | 7 |
+| **6.25 전쟁** | **6** |
+| 자살 · 시간 여행 · 사형 · 성매매 … | 나머지 전부 |
+
+원인은 `fetch_media` 의 한 줄이었다. Wikidata 의 P921(주제)이 무엇인지
+묻지 않고 사건으로 가정했다.
+
+```python
+# 소재의 실제 타입은 미확정 — 사건으로 가정하고, 다른 소스가 같은
+# QID 를 더 정확한 타입으로 덮어쓰면 갱신된다.
+nodes.setdefault(sid, Node(..., type="event", ...))
+```
+
+덮어쓸 다른 소스는 오지 않았고, '자살'·'간통죄'·'조직범죄'가 사건 노드로
+앉았다. **스포츠 오염과 같은 모양이다 — 총계가 아니라 대상 노드의 라벨
+분포를 봐야 보인다.**
+
+P921 은 대개 역사가 아니다. 한국 영화·드라마의 주제 500건 중 447건이
+부류(개념)였고 사람은 10건이었다. 이제 `fetch_media` 는 같은 질의에서
+인물 여부를 함께 묻고, **판정이 안 서면 개념으로 떨어뜨린다** — 개념을
+사건으로 올리기는 쉽고, 사건 틈에 낀 개념은 나중에 찾아내기 어렵다.
+
+#### 지우지 않고 옮긴다
+
+주제어는 쓰레기가 아니라 **자리를 잘못 찾은 개념**이다. `concept` 타입과
+`about` 엣지를 만들고 그리로 옮긴다. `reclassify` 가 그 일을 한다.
+
+#### 판정은 점수가 아니라 사다리다
+
+```
+1. P31 에 Q5(사람)가 있으면            → 인물
+2. 주제 자리에만 있고 사실층에 안 닿으면  → 개념
+3. 참여자·발생지가 붙어 있으면          → 사건
+4. 동음이의어·목록 문서면               → 보류
+5. P279(상위 부류)를 갖고 있으면
+     시점(P580/P585)이 있으면          → 사건
+     없으면                          → 보류
+6. 클래스가 없거나 조회에 실패하면        → 보류
+7. 클래스가 사건 계층에 닿으면           → 사건
+8. 클래스가 매핑표에 있으면              → 그 타입
+9. 그 밖에는                          → 보류
+```
+
+이 순서는 하나씩 틀려 가며 만들어졌다. 되풀이하지 말 것:
+
+- **P279 만으로 개념이라고 하면 안 된다.** 신유박해(참여 28건)·제2차 세계
+  대전·메이지 6년 정변이 P279 를 갖고 있어 개념으로 넘어갔다. 한국사
+  항목에는 부류이면서 개별 사건인 것이 섞여 있다. 가르는 것은 **시점**이다 —
+  진짜 부류('자살'·'전쟁'·'살인'·'조직범죄')는 하나도 P580/P585 를 갖고
+  있지 않다.
+- **사건 계층(P31/P279* → Q1190554)을 믿으면 안 된다.** '플롯 장치'·
+  '식사장애'·'유무죄인정'이 전부 사건에 닿는다. **깊이로 자르는 것도 안
+  된다** — 진짜 사건인 광주 학생 항일 운동이 5단계, 쓰레기인 바디 스왑도
+  5단계다.
+- **조직(Q43229)은 뿌리로 쓸 수 없다.** 농민 봉기 → 사회 운동 → 집단 행동
+  → 인포멀 그룹 → 단체로 이어져서 민란·시위·군사작전이 전부 조직에도 닿는다.
+  뿌리를 늘리면 갈라지는 것이 아니라 겹쳐서, 진짜 사건들이 '둘 다에 닿음'
+  으로 보류된다 (보류가 14개에서 54개로 늘었다).
+- **매핑표를 사다리 앞에 두면 안 된다.** 제2차 세계 대전의 P31 에 '시대'가
+  섞여 있어 시대 노드가 됐다. 앞에 두는 것은 Q5(사람) 하나뿐이다.
+- **판정하지 못하면 손대지 않는다.** 11건이 보류로 남았다. 정미의병은
+  Wikidata 가 클래스도 시점도 주지 않아 '보복'과 구별되지 않는다. 짐작으로
+  옮기면 진짜 사건을 잃는다.
+
+#### 그래프에서의 역할이 Wikidata 의 분류보다 무겁다
+
+사다리의 2·3번이 그것이다. 특히 2번 — **작품이 가리킨 것 말고는 사실층에
+닿지 않는 노드는 주제다.** 실측으로 그 자리의 노드 71개가 하나도 빠짐없이
+주제어였다. 되돌릴 수 있는 판정이기도 하다: 나중에 그 노드가 연대나 다른
+엣지를 얻으면 이 규칙은 더는 걸리지 않고, 7번이 사건으로 되돌린다.
+
+주제끼리 이어져 있어도 주제다. '성 도덕'과 '인간의 성'이 `part_of` 로,
+'상실'과 '상실감'이 `related_to` 로 묶여 있었다. 그 엣지 하나 때문에 둘 다
+사건으로 남으면 규칙이 무의미해진다. 그래서 '엣지가 없다'가 아니라
+**'사실층에 닿지 않는다'** 로 잰다. 닿는 것이 하나라도 있으면 빠지고(그래서
+'이춘재 연쇄 살인 사건'은 대한민국과 이어져 있어 사건으로 남는다), 빠진
+이웃에 기대던 노드도 따라 빠진다.
+
+#### 속성 경로 질의는 쓰지 않는다
+
+`?c wdt:P279* wd:Q1190554` 는 60개 VALUES 에도 WDQS 가 504 로 거절한다.
+타임아웃을 90초로 늘려도 마찬가지다. 대신 **P279 를 한 단계씩 걸어
+올라간다** — 같은 크기에서 2.5초에 끝나고, 단계마다 캐시가 남아 다시 돌릴
+때 공짜가 된다. 상위로 갈수록 클래스가 합쳐지므로 깊이가 늘어도 질의는
+커지지 않는다.
+
+#### 결과
+
+```
+노드 77개 재분류 (개념 71 · 인물 4 · 단체 1 · 시대 1) · 보류 11
+depicts  157건 → 21건   (전부 실체: 사건 13 · 인물 7 · 단체 1)
+about      0건 → 135건
+어긋난 엣지 0건
+```
+
+인물로 간 4개는 이봉창·윤봉길·이춘재·김헌창이다. **사람이 사건 노드로
+앉아 있었다.**
 
 ### 두 개의 섬 — 엔티티 해소
 
@@ -416,7 +527,7 @@ Wikidata 에는 P571=1392-08-13 · P576=1897-10-12 로 적혀 있다
 화면에서 조선을 골랐을 때 연표가 '연도 미상'이라고 말한 것이 이 구멍을
 드러냈다. 없는 데이터가 아니라 **안 물어본 데이터**였다.
 
-`python3 -m histgraph --db data/joseon.sqlite spans` 이 P571/P576 을
+`uv run histgraph --db data/joseon.sqlite spans` 이 P571/P576 을
 채운다(없으면 P580/P582 로 물러난다). 조선 그래프 80개 중 33개, 전체
 그래프 342개 중 158개가 채워졌다 — 나머지는 Wikidata 에도 없다.
 **이미 적혀 있는 날짜는 건드리지 않는다.** 채우기만 한다.
@@ -888,16 +999,21 @@ QID 를 직접 지정하는 `fetch_edges_for` 가 따로 필요했다.
 ## 화면 (`serve`)
 
 ```bash
-python3 -m histgraph serve          # http://127.0.0.1:8100  (data/joseon.sqlite)
+uv run histgraph serve          # http://127.0.0.1:8100  (data/joseon.sqlite)
 ```
 
-런타임 의존성은 없다. 표준 라이브러리 HTTP 서버 + 순수 JS 캔버스 — 그래프
-라이브러리를 쓰지 않는다. `/api/*` 는 JSON, 나머지는 정적 파일이다.
+서버는 여전히 표준 라이브러리뿐이다. 화면은 React + d3-force 를 쓴다 —
+`/api/*` 는 JSON, 나머지는 정적 파일이라는 갈래는 그대로다.
+
+**화면은 이제 빌드해야 한다.** JSX 는 브라우저가 직접 못 읽는다. `npm run
+build` 가 만든 `web/dist/` 를 `serve` 가 내주고, 그게 없으면 무엇을 하라고
+적어 준다 (`server.warn_if_unbuilt`). 고치는 중이라면 빌드 대신 `npm run
+dev` 를 쓴다.
 
 ### 화면만 따로 고칠 때 (`npm run dev`)
 
-빌드 없이도 돌지만, 화면을 고치는 동안에는 새로고침 대신 HMR 이 낫다.
-API 는 파이썬이 그대로 맡고, Vite 가 `/api` 를 8100 으로 넘긴다.
+화면을 고치는 동안에는 빌드를 다시 돌리는 대신 HMR 을 쓴다. API 는 파이썬이
+그대로 맡고, Vite 가 `/api` 를 8100 으로 넘긴다.
 
 ```bash
 npm install               # 처음 한 번
@@ -930,11 +1046,46 @@ npm run dev -- --db data/histgraph.sqlite    # 전체 그래프로
 것은 `--prefix web` 으로 넘기기만 한다 — 화면 파일이 `web/` 에 모여 있는
 것과, 루트에서 `npm run dev` 가 그냥 되는 것 둘 다 지키려는 것이다.
 
-`npm run build` 를 돌리면 `web/dist/` 가 생기고, 그때부터 `serve` 는 원본
-대신 **번들을 내준다** (`server._web_root`). 빌드 단계는 선택이지 전제가
-아니어서, `dist/` 가 없으면 `web/` 의 원본이 그대로 돌아간다. 화면을 고친
-뒤 8100 에서 옛날 것이 보인다면 `dist/` 가 낡은 것이다 — 다시 빌드하거나
-지우면 된다.
+`npm run build` 가 만든 `web/dist/` 를 `serve` 가 내준다 (`server._web_root`).
+8100 에서 옛날 화면이 보인다면 `dist/` 가 낡은 것이다 — 다시 빌드한다.
+
+### 화면 구조 (React)
+
+React 는 **껍데기만** 맡는다 — 머리·검색·사이드·상세 패널. 캔버스는 초당
+60번 다시 그려지는 곳이라 가상 DOM 을 통과시킬 이유가 없어서, `GraphView`
+와 `TimelineRail` 은 React 를 모르는 명령형 클래스로 남았다. React 쪽은
+`useRef` 로 자리를 잡아주고 **수명만** 관리한다 (`destroy()` 를 부르지
+않으면 RAF 루프와 ResizeObserver 가 죽은 캔버스를 붙잡고 계속 돈다).
+
+콜백은 ref 에 담아 넘긴다. 그냥 넘기면 `onSelect` 가 바뀔 때마다 `GraphView`
+를 새로 만들어야 하고, 그러면 펼칠 때마다 배치가 처음부터 다시 튄다.
+
+**배치는 d3-force 로 옮겼다.** 손으로 짠 1/d² 반발력은 근거리에서 강성이
+폭발해 진동했고, 그걸 최소거리로 잘라 막고 있었다 — d3 는 같은 문제를
+`forceCollide` 로 푼다. 다만 **틱은 여전히 직접 돌린다**: 힘 계수가 전부
+"한 틱당"으로 잡혀 있어서 d3 타이머에 맡기면 120Hz 화면(ProMotion)에서
+힘이 두 배로 들어간다.
+
+색은 손대지 않았다. `uv run tools/check_palette.py` 가 그대로 통과한다
+(정상 10.7 · 2형 5.9 · 1형 5.7).
+
+### 화면 검증 (브라우저 없이)
+
+```bash
+npm test
+```
+
+세 벌이 돈다 — 브라우저를 띄우지 않는다.
+
+| 파일 | 무엇을 |
+|---|---|
+| `layout.test.mjs` | 배치가 식는가 · 겹치지 않는가 · 중심이 가운데를 지키는가 |
+| `relations.test.mjs` | 조사·문장·카드 합치기 (실측 버그들이 쌓인 자리) |
+| `render.test.mjs` | 서버 렌더링으로 실제 조립 · **화면에 영어가 새지 않는가** |
+
+`render.test.mjs` 는 esbuild 로 컴포넌트를 묶어 `renderToString` 을 돌린다.
+컴포넌트를 함수로 직접 부르면 훅이 React 바깥에서 돌아 터지므로 반드시
+`createElement` 로 감싼다.
 
 ### 중심은 왕조다
 
@@ -986,7 +1137,7 @@ npm run dev -- --db data/histgraph.sqlite    # 전체 그래프로
 아홉이어도 화면은 먼저 네 덩어리로 읽히고 그 안에서 타입이 갈린다. 뼈대
 (시대·직위)는 어둡게 묶어 물러나 있게 했다.
 
-**색 거리는 재서 안다.** `python3 tools/check_palette.py` 가 `web/graph.js`
+**색 거리는 재서 안다.** `uv run tools/check_palette.py` 가 `web/src/lib/graph-view.js`
 에서 팔레트를 직접 읽어 잰다 (OKLab ΔE ×100, 색약은 Viénot 1999). 처음 고른
 아홉 색은 눈금(5.0) 아래였고, 색상만으로 벌린 탓이었다. **밝기까지 층으로
 갈라** 다시 골랐다 — 색을 잃은 눈에 남는 것은 밝기다:
@@ -1248,10 +1399,19 @@ src/histgraph/
     └── culture.py    문화공공데이터광장
 
 web/
-├── index.html    화면 뼈대
+├── index.html    빈 뼈대 (React 가 #root 에 붙는다)
 ├── style.css     어두운 한 벌 (그래프가 주인공이라 UI 는 조용하게)
-├── graph.js      힘기반 배치 + 캔버스 렌더러 (라이브러리 없음)
-└── app.js        검색 · 시작점 · 상세 패널
+├── src/
+│   ├── main.jsx          진입점
+│   ├── App.jsx           상태 · 자취 · 주소 동기화
+│   ├── components/       Search · SidePanel · GraphCanvas · TimelinePanel · DetailPanel
+│   └── lib/
+│       ├── layout.js     힘기반 배치 (d3-force)
+│       ├── graph-view.js 캔버스 렌더러 · 팔레트 · 상호작용
+│       ├── timeline.js   연표
+│       ├── relations.js  관계를 한국어 문장으로 (DOM 을 모른다)
+│       └── api.js        /api/* 호출
+└── tests/        node 로 도는 검증 (브라우저 없이)
 ```
 
 ### 설계 원칙
@@ -1273,10 +1433,15 @@ web/
 ## 온톨로지
 
 **노드** — 인물, 사건, 장소, 예술작품, 유물·문화재, 영화·드라마,
-단체·국가·왕조, 시대, 직위·칭호
+단체·국가·왕조, 시대, 직위·칭호, 개념·주제
 
 **엣지** — 참여, 발생 장소, 발생 시기, 출생지, 사망지, 제작, 소재지,
-소재로 다룸, 자녀, 배우자, 소속, 직위, 시대, 상위, 관련
+소재로 다룸, 주제, 배경, 자녀, 배우자, 소속, 직위, 시대, 상위, 관련
+
+**개념·주제**는 사상·제도·풍습·소재가 앉는 자리다. 이 자리가 없으면 개념이
+사건 행세를 한다 — "개념이 사건 행세를 하고 있었다" 참조. 작품이 **실체**를
+다루면 `depicts`(소재로 다룸), **주제어**를 다루면 `about`(주제)이다.
+`set_in`(배경)은 작품이 다루는 시대·장소로, 개봉연도와 다른 축이다.
 
 노드 ID 는 `{source}:{native_id}` (`wd:Q37682`, `khs:11-11-0000010000000`).
 소스 간 동일 개체 연결은 `same_as` 테이블이 담당한다.

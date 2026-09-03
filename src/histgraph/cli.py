@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .backends import build_backend
 from .http import Fetcher
-from .ontology import EDGE_TYPES, Edge, Node, validate_edge_endpoints
+from .ontology import EDGE_TYPES, NODE_TYPES, Edge, Node, validate_edge_endpoints
 from .sources import culture, datagokr, heritage, wikidata
 from .store import GraphStore
 
@@ -282,6 +282,76 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reclassify(args: argparse.Namespace) -> int:
+    """개념을 사건에서 갈라낸다 — 화면의 '이 사건을 다룬 작품'이 서려면 먼저.
+
+    지우는 명령이 아니다. 주제어는 쓰레기가 아니라 자리를 잘못 찾은
+    개념이므로 `concept` 으로 옮기고 엣지를 `about` 으로 바꾼다."""
+    from . import reclassify as rc
+
+    with GraphStore(args.db) as store:
+        before = rc.depicts_report(store)
+        # 재분류 전에는 이 비율이 늘 100%다 — 개념이 사건 행세를 하고 있으니
+        # 타입만 봐서는 멀쩡해 보인다. 오염은 대상 라벨에서 드러난다.
+        print(f"→ 지금 depicts {before['total']:,}건이 가리키는 것:")
+        for label, node_type, n in before["top"][:8]:
+            print(f"    {n:>3}  {label} ({NODE_TYPES[node_type]})")
+
+        plan = rc.plan_reclassify(store, limit=args.limit)
+        if plan.failed_batches:
+            print(
+                f"  ⚠ 조회 실패 {plan.failed_batches}건 — 그 구간은 보류합니다"
+                " (다시 돌리면 캐시된 구간은 건너뜁니다)",
+                file=sys.stderr,
+            )
+
+        buckets: dict[tuple[str, str], list[str]] = {}
+        for node_id, move in plan.changes.items():
+            buckets.setdefault(move, []).append(plan.labels[node_id])
+        for (before_type, after), labels in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
+            head = ", ".join(labels[: args.show])
+            more = f" 외 {len(labels) - args.show:,}개" if len(labels) > args.show else ""
+            print(
+                f"  {NODE_TYPES[before_type]} → {NODE_TYPES[after]}"
+                f" {len(labels):,}개: {head}{more}"
+            )
+        if plan.held:
+            print(f"  보류 {len(plan.held):,}개 (판정 못 함 — 손대지 않습니다)")
+            for node_id, label in plan.held[: args.show]:
+                print(f"    · {label} ({node_id})")
+
+        if args.dry_run:
+            print("\n  --dry-run 입니다. 실제로 바꾸려면 --dry-run 을 빼고 다시 실행하세요.")
+            return 0
+        if not plan.changes:
+            print("  바꿀 것이 없습니다.")
+            return 0
+
+        result = rc.apply_plan(store, plan)
+        print(
+            f"\n  ✓ 노드 {result['nodes']:,}개 재분류,"
+            f" depicts → about {result['depicts_to_about']:,}건,"
+            f" about → depicts {result['about_to_depicts']:,}건"
+        )
+
+        after = rc.depicts_report(store)
+        print(
+            f"  depicts {before['total']:,} → {after['total']:,}건,"
+            f" about {after['about']:,}건"
+            f" (실체를 가리키던 것은 처음부터 {after['total']:,}건이었다)"
+        )
+        print("  이제 depicts 가 가리키는 것:")
+        for label, node_type, n in after["top"]:
+            print(f"    {n:>3}  {label} ({NODE_TYPES[node_type]})")
+
+        bad = rc.invalid_edges(store)
+        if bad:
+            print(f"\n  ⚠ 타입이 바뀌면서 어긋난 엣지 {len(bad)}건:", file=sys.stderr)
+            for src, dst, etype, st, dt in bad[: args.show]:
+                print(f"    {etype}: {st} → {dt}  ({src} → {dst})", file=sys.stderr)
+    return 0
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     """엔티티 해소 — 국가유산청 섬과 Wikidata 섬을 잇는다."""
     from . import resolve as resolve_mod
@@ -523,7 +593,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
         print(f"\n  ex 노드: {ex_before:,} → {ex_after:,}")
         print(f"  전체 노드: {before['nodes_total']:,} → {after['nodes_total']:,}")
         print(f"  전체 엣지: {before['edges_total']:,} → {after['edges_total']:,}")
-        print("\n  시대 서브그래프는 다시 뽑아야 반영됩니다: python3 -m histgraph scope joseon")
+        print("\n  시대 서브그래프는 다시 뽑아야 반영됩니다: uv run histgraph scope joseon")
     return 0
 
 
@@ -890,8 +960,8 @@ def cmd_relabel(args: argparse.Namespace) -> int:
     수집이 라벨을 덮어쓰므로 `ingest`·`scope` 뒤에 다시 돌려야 한다.
     시대 그래프는 별도 파일이니 거기에도 한 번 더:
 
-        python3 -m histgraph relabel
-        python3 -m histgraph --db data/joseon.sqlite relabel
+        uv run histgraph relabel
+        uv run histgraph --db data/joseon.sqlite relabel
     """
     from . import labels as labels_mod
 
@@ -952,8 +1022,8 @@ def cmd_redescribe(args: argparse.Namespace) -> int:
     있으므로 `enrich` 뒤에 다시 돌린다. 시대 그래프는 별도 파일이니
     거기에도 한 번 더:
 
-        python3 -m histgraph redescribe
-        python3 -m histgraph --db data/joseon.sqlite redescribe
+        uv run histgraph redescribe
+        uv run histgraph --db data/joseon.sqlite redescribe
     """
     from . import koreanize
 
@@ -1004,7 +1074,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         else:
             print(
                 f"  {candidate} 가 없습니다. 먼저 만드세요:\n"
-                f"    python3 -m histgraph scope {args.era} --out {candidate}",
+                f"    uv run histgraph scope {args.era} --out {candidate}",
                 file=sys.stderr,
             )
             return 1
@@ -1078,6 +1148,11 @@ def main(argv: list[str] | None = None) -> int:
     p_prune = sub.add_parser("prune", help="스포츠 이벤트 노드 제거")
     p_prune.add_argument("--labels-only", action="store_true", help="Wikidata 클래스 조회 생략 (빠름)")
     p_prune.set_defaults(func=cmd_prune)
+    p_rc = sub.add_parser("reclassify", help="개념을 사건에서 갈라낸다 (Wikidata 클래스 계층)")
+    p_rc.add_argument("--dry-run", action="store_true", help="바꾸지 않고 계획만 출력")
+    p_rc.add_argument("--limit", type=int, default=None, help="검사할 사건 노드 수")
+    p_rc.add_argument("--show", type=int, default=12, help="출력할 예시 수")
+    p_rc.set_defaults(func=cmd_reclassify)
     sub.add_parser("resolve", help="엔티티 해소 (소스 간 연결)").set_defaults(func=cmd_resolve)
 
     p_ex = sub.add_parser("extract", help="산문에서 관계 추출 (Claude API)")

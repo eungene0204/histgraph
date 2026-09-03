@@ -65,6 +65,10 @@ WD_CLASS_TO_TYPE: dict[str, str] = {
     "Q13418847": "event", "Q1656682": "event",
     "Q43229": "org", "Q7278": "org", "Q3024240": "org", "Q34770": "org",
     "Q4164871": "role", "Q294414": "role", "Q216107": "role", "Q12737077": "role",
+    # 라벨 대조로 확인한 것만 넣는다 (Q11514315=시대, Q16261338=대한민국 특수부대).
+    # 추측한 QID 는 반드시 틀린다 — Q34049 는 고려가 아니라 셈어파였다.
+    "Q11514315": "period",
+    "Q16261338": "org",
     "Q11424": "media", "Q5398426": "media",
     "Q838948": "artwork", "Q3305213": "artwork",
 }
@@ -536,14 +540,28 @@ def fetch_events(
 def fetch_media(
     fetcher: Fetcher, limit: int = 500, failures: list[str] | None = None
 ) -> tuple[list[Node], list[Edge]]:
-    """한국 영화·드라마와 그것이 다루는 역사 소재(P921) 엣지."""
+    """한국 영화·드라마와 그것이 다루는 소재(P921) 엣지.
+
+    **P921 은 대개 역사가 아니라 주제어다.** 실체를 가리킬 때만 `depicts`,
+    나머지는 `about` 으로 나간다. 이 함수만으로는 사건 판정이 끝나지 않으므로
+    수집 뒤에 `reclassify` 를 돌려야 한다 — `prune` 과 같은 위치의 필수 단계다."""
     failures = failures if failures is not None else []
+    # P921 의 값이 무엇인지 **같은 질의에서 함께 묻는다.** 예전에는 묻지
+    # 않고 사건으로 가정했고, 그 한 줄 때문에 '자살'·'조직범죄'가 사건
+    # 노드로 앉았다. 실측: 주제 500건 중 447건이 부류(개념)였고 사건은
+    # 6.25 전쟁 정도였다.
+    #
+    # 사건이냐 개념이냐까지 여기서 가르지는 않는다 — 그 판정에 필요한
+    # `P31/P279*` 를 이 질의에 얹으면 WDQS 가 504 로 거절한다(실측).
+    # 인물 판정만 붙이면 6초에 끝나고, 나머지는 `reclassify` 가 계층을
+    # 한 단계씩 걸어 올라가며 마저 가른다.
     rows = _safe_query(
         fetcher,
-        f"""SELECT ?w ?wLabel ?date ?subj ?subjLabel WHERE {{
+        f"""SELECT ?w ?wLabel ?date ?subj ?subjLabel ?isPerson WHERE {{
               VALUES ?cls {{ wd:Q11424 wd:Q5398426 }}
               ?w wdt:P31 ?cls ; wdt:P495 wd:Q884 ; wdt:P921 ?subj .
               OPTIONAL {{ ?w wdt:P577 ?date }}
+              BIND(EXISTS {{ ?subj wdt:P31 wd:Q5 }} AS ?isPerson)
               SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
             }} LIMIT {limit}""",
         "영화·드라마",
@@ -567,19 +585,24 @@ def fetch_media(
             url=w_uri,
         )
         sid = _nid(s_uri)
-        # 소재의 실제 타입은 미확정 — 사건으로 가정하고, 다른 소스가 같은
-        # QID 를 더 정확한 타입으로 덮어쓰면 갱신된다.
+        # 판정이 안 서면 **개념으로 떨어뜨린다.** 개념을 사건으로 올리기는
+        # 쉽고(`reclassify` 가 한다), 사건 틈에 낀 개념은 나중에
+        # 찾아내기 어렵다 — 타입만 봐서는 멀쩡해 보이기 때문이다.
+        if _val(r, "isPerson") == "true":
+            subj_type, edge_type = "person", "depicts"
+        else:
+            subj_type, edge_type = "concept", "about"
         nodes.setdefault(
             sid,
             Node(
                 id=sid,
-                type="event",
+                type=subj_type,
                 label=_val(r, "subjLabel") or _qid(s_uri),
                 source=SOURCE,
                 url=s_uri,
             ),
         )
-        edges.append(Edge(src=wid, dst=sid, type="depicts", source=SOURCE))
+        edges.append(Edge(src=wid, dst=sid, type=edge_type, source=SOURCE))
 
     return list(nodes.values()), edges
 

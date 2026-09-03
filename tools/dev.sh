@@ -31,7 +31,7 @@ if listening "$PORT_API"; then
   # 터미널의 로그가 끊긴다.
   echo "  $PORT_API 은 이미 떠 있다 — 그대로 쓴다."
 else
-  PYTHONPATH=src python3 -m histgraph serve "$@" &
+  uv run histgraph serve "$@" &
   API_PID=$!
   for _ in $(seq 1 60); do
     listening "$PORT_API" && break

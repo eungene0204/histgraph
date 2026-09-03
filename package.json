@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "bash tools/dev.sh",
     "dev:web": "npm run dev --prefix web",
-    "dev:api": "PYTHONPATH=src python3 -m histgraph serve",
+    "dev:api": "uv run histgraph serve",
     "build": "npm run build --prefix web",
     "preview": "npm run preview --prefix web",
-    "postinstall": "npm install --prefix web"
+    "postinstall": "npm install --prefix web",
+    "test": "npm test --prefix web",
+    "deploy": "npx --yes vercel@latest deploy --prod",
+    "deploy:preview": "npx --yes vercel@latest deploy"
   }
 }

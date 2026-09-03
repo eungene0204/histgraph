@@ -18,7 +18,7 @@
 기본은 계획만 출력한다. 건수를 확인한 뒤 --apply 로 실행할 것.
 
 사용:
-  PYTHONPATH=src python3 tools/sweep_dumps.py [--apply] [DB ...]
+  uv run tools/sweep_dumps.py [--apply] [DB ...]
 """
 
 from __future__ import annotations

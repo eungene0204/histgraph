@@ -1,4 +1,4 @@
-# 한국어 라벨 덮어쓰기 표 — `python3 -m histgraph relabel` 이 읽는다.
+# 한국어 라벨 덮어쓰기 표 — `uv run histgraph relabel` 이 읽는다.
 #
 # Wikidata 라벨 서비스는 "ko,en" 으로 물어보므로 한국어 라벨이 없는 개체만
 # 영어로 들어온다. 그런 노드가 전체 그래프에 1,490개, 조선 그래프에 32개
