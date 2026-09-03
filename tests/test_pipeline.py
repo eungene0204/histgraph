@@ -846,6 +846,74 @@ check("중첩 틀에서 끊기지 않는다", "자녀" in infobox_span(sejong_li
 check("대상 필드가 없으면 빈 문자열",
       infobox_span("{{다른 뜻|x}}\n본문 [[황희]]", PERSON_FIELDS) == "")
 
+print("\n[인포박스 — 날짜·별칭·참가자]")
+# 임오화변이 연표에 못 섰다. Wikidata 에 P580/P582/P585 가 없어서인데,
+# **답은 인포박스에 적혀 있었다.** 파서가 링크만 뽑고 값 필드를 지나쳤다.
+from histgraph.sources.infobox import (  # noqa: E402
+    EVENT_FIELDS, EVENT_VALUE_FIELDS, apply_event_attrs, infobox_aliases,
+    infobox_date, parse_infobox_values,
+)
+
+imo = """{{역사적 사건 정보
+| 이름 = 임오화변
+| 별칭 = 임오옥, 사도세자사건
+| 참가자 = [[영조]]·[[노론]]<br/>[[정조|세손 산]], [[이석문 (1713년)|이석문]], 홍화보
+| 장소 = {{국기|조선}}
+| 날짜 = [[1762년]] (영조 38) [[7월 5일]]
+| 결과 = 세자의 지위를 아들이 계승
+}}
+'''임오화변'''은 [[1762년]] [[7월 4일]] … [[사도세자]]가 [[노론]]과 …
+"""
+vals = parse_infobox_values(imo, EVENT_VALUE_FIELDS, EVENT_FIELDS)
+check("값 필드를 읽는다", vals.get("날짜") == "[[1762년]] (영조 38) [[7월 5일]]", str(vals))
+check("값이 본문으로 새지 않는다", "사도세자가" not in vals.get("결과", ""))
+check("날짜를 ISO 로", infobox_date(vals["날짜"]) == "1762-07-05")
+check("별칭을 가른다", infobox_aliases(vals["별칭"], "임오화변") == ["임오옥", "사도세자사건"])
+
+# 괄호 안 재위 연차를 연도로 집으면 안 된다 — 거의 모든 사건에 붙어 있다.
+check("재위 연차는 연도가 아니다", infobox_date("(영조 38)") is None)
+check("연차가 붙어도 서기를 집는다", infobox_date("[[1504년]](연산군 10년)") == "1504-01-01")
+check("범위는 시작만", infobox_date("[[1592년]] [[5월 23일]] ~ [[1598년]]") == "1592-05-23")
+check("시작일 틀도 읽는다", infobox_date("{{시작일|1894|1|11}}") == "1894-01-11")
+check("월만 있으면 1일로", infobox_date("[[1519년]] (중종 14) [[12월]]") == "1519-12-01")
+check("못 읽으면 비운다", infobox_date("알 수 없음") is None and infobox_date("") is None)
+check("13월은 버리고 연도만", infobox_date("1762년 13월") == "1762-01-01")
+
+# 참가자는 `역사적 사건 정보` 틀의 필드다. 전투 틀의 지휘관/교전국만 보고
+# 있어서 옥사·사화·정변의 인물이 통째로 빠져 있었다.
+from histgraph.sources.infobox import parse_infobox_links as _pil  # noqa: E402
+
+ilinks = _pil(imo, EVENT_FIELDS)
+check("참가자 필드를 읽는다", "영조" in ilinks.get("참가자", []), str(ilinks))
+check("파이프 링크는 문서명으로", "이석문 (1713년)" in ilinks.get("참가자", []))
+check("링크 아닌 이름은 안 가져온다", "홍화보" not in ilinks.get("참가자", []))
+
+# 이미 있는 날짜는 덮지 않는다 — Wikidata 는 사람이 손본 값이다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "ib.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:A", type="event", label="빈 사건", source="wd"),
+        Node(id="wd:B", type="event", label="찬 사건", source="wd",
+             start_date="1500-03-04"),
+    ])
+    attrs = {"wd:A": {"start_date": "1762-07-05", "aliases": ["임오옥", "사도세자사건"]},
+             "wd:B": {"start_date": "1600-01-01"}}
+    dated, aliased = apply_event_attrs(store, attrs)
+    check("빈 날짜를 채운다", dated == 1)
+    check("채운 값이 들어갔다",
+          store.conn.execute("SELECT start_date FROM nodes WHERE id='wd:A'").fetchone()[0]
+          == "1762-07-05")
+    check("있는 날짜는 안 덮는다",
+          store.conn.execute("SELECT start_date FROM nodes WHERE id='wd:B'").fetchone()[0]
+          == "1500-03-04")
+    check("별칭이 들어갔다", aliased == 2)
+    d2, _ = apply_event_attrs(store, attrs, refresh=True)
+    check("--refresh 면 덮는다",
+          store.conn.execute("SELECT start_date FROM nodes WHERE id='wd:B'").fetchone()[0]
+          == "1600-01-01")
+    check("두 번 돌려도 별칭은 안 쌓인다", apply_event_attrs(store, attrs)[1] == 0)
+    store.close()
+
 plinks = parse_infobox_links(person_wikitext, PERSON_FIELDS)
 check("인물 필드를 읽는다", plinks.get("아버지") == ["안중관"])
 check("여러 링크가 한 필드에", plinks.get("자녀") == ["안후지", "안신지"])

@@ -749,6 +749,79 @@ histgraph extract --types event --max-participants 1 --min-chars 1500
 — 사건 128개만 넣으면 아는 개체가 127개로 줄어(600 → 127) 인물 이름이
 전부 `ex:` 고아가 된다. 새 플래그는 대상만 좁힌다.
 
+## 2026-09-04 — 같은 틀을 열어놓고 그 줄만 안 읽었다 (`infobox`)
+
+임오화변이 연표에 없었다. `start_date` 가 비어서다. Wikidata 에
+`P580/P582/P585` 가 없는 사건이 **238건**이고 임오화변이 그중 하나다.
+
+날짜를 세우는 코드가 여섯 군데인데 **전부 구조화 필드만 본다.**
+
+```
+timeline.py:66      연도 노드 자신
+promote.py:805      Wikidata 생몰년
+extract.py:582      label_year(name)   ← 라벨의 괄호 연도만
+wikidata.py:289/543/632    P569/P570/P580/P582/P585
+```
+
+`description` 을 읽는 자리가 한 곳도 없다. `parse_years()` 도 인자가
+`label` 이다 — 이름에 숫자가 없는 사건은 그냥 지나간다.
+
+**그런데 답은 산문이 아니라 인포박스에 적혀 있었다.**
+
+```
+{{역사적 사건 정보
+| 별칭   = 임오옥, 사도세자사건
+| 참가자 = [[영조]]·[[노론]]·[[구선복]]<br/>[[정조|세손 산]], [[이석문]] …
+| 날짜   = [[1762년]] (영조 38) [[7월 5일]]
+}}
+```
+
+**우리 파서는 이 틀을 이미 열고 있었다.** `장소` 를 읽으려고. 그런데
+필드 표에 `날짜`·`참가자`·`별칭` 이 없어서 그 줄들을 지나쳤다.
+
+원인은 **필드 표를 전투 문서만 보고 짠 것**이다. `지휘관`·`교전국` 은
+`전쟁 정보` 틀의 이름이라 옥사·사화·정변에는 아예 없다. 그쪽은 `역사적
+사건 정보` 틀을 쓰고 참가자를 `참가자` 한 칸에 몰아 적는다. "옥사에는
+인포박스 필드가 없다"고 결론 냈던 것이 틀렸다 — **필드가 없는 게 아니라
+이름이 달랐다.**
+
+고친 것:
+
+- `EVENT_FIELDS` 에 `참가자` 추가 (person·org 양쪽 허용).
+- `EVENT_VALUE_FIELDS` 신설 — **링크가 아니라 값 원문**을 읽는 경로.
+  날짜·별칭은 엣지가 아니라 노드 자신의 속성이라 기존 경로를 못 탄다.
+- `infobox_date()` — 실측한 네 가지 서식을 읽는다. **괄호 안은 절대 안
+  본다**: `(영조 38)` 의 38 을 연도로 집으면 안 되는데 재위 연차가 거의
+  모든 사건에 붙어 있다. 범위는 시작만 취한다.
+- `infobox_aliases()` — 쉼표·가운뎃점으로 가르고 서식을 벗긴다.
+- `apply_event_attrs()` — **빈 날짜만 채운다.** Wikidata P585 는 사람이
+  손본 값이고 인포박스는 자유 기술이라, 어느 쪽이 옳은지 모를 때 이미
+  있는 것을 밀어내지 않는다 (`--refresh` 면 덮는다).
+
+```
+임오화변   start_date  (없음) → 1762-07-05        연표에 선다
+          별칭        임오옥 · 사도세자사건
+          참여자      0명 → 영조·정조·노론·구선복·이석문·장조
+
+조선 그래프   participated_in  1,048 → 1,647 (+599) · occurred_at 171 → 268
+전체 그래프   participated_in  1,953 → 2,137 (+184) · occurred_at 427 → 484
+```
+
+**날짜 수확은 7건뿐이다** (전체 4 · 조선 3). 사건 312건을 훑었는데
+인포박스를 가진 것이 70건이고, 날짜 없는 사건 230건 중 kowiki 문서가
+있는 것이 97건뿐이다. 인포박스로 얻을 것은 여기까지가 거의 전부다.
+
+**남은 구멍은 산문 정의문이다.** 날짜 없고 설명 있는 사건 143건 중
+**79건**이 도입부 200자 안에 연도를 적어 두고 있다 (갑자사화 1504 ·
+요동 정벌 1388 · 송유진의 난 1594 · 영남 만인소 사건 1792).
+
+다만 **첫 연도를 그냥 집으면 안 된다.** 같은 목록에 `신라의 대외 관계
+676` · `고려의 역사 474` 가 섞여 있는데 이건 사건이 난 해가 아니라 시대
+서술의 첫 연도다. 규칙은 "첫 연도"가 아니라 **"정의문의 연도"** 여야 한다
+— 라벨 뒤 `은/는` 다음, 서술어가 `사건이다/일이다/변란이다` 로 닫히는
+문장. 라벨에 간지(`임오`)가 있으면 연도와 **대조까지 할 수 있다** —
+1762년은 임오년이 맞다. 아직 안 만들었다.
+
 ## 이전 세션에서 끝낸 것
 
 - **프론트엔드** (`serve` + `web/`) — 왕조에서 시작해 이웃을 펼쳐 나가는
@@ -961,17 +1034,20 @@ uv run histgraph doctor                      # 소스 접근 진단
 uv run histgraph ingest heritage --kinds 11 12
 uv run histgraph ingest wikidata
 uv run histgraph events                      # 핵심 사건 직접 수집
-uv run histgraph enrich --limit 1200         # 위키백과 서사
-uv run histgraph infobox                     # 사건 인포박스 (LLM 불필요)
-uv run histgraph infobox --types person      # 인물 인포박스 (LLM 불필요)
+uv run histgraph enrich --types event --full # 사건은 본문 전체 (도입부로는 참여자가 안 나온다)
+uv run histgraph enrich --limit 1200         # 나머지 타입의 위키백과 서사
 uv run histgraph prune                       # 스포츠 제거 (필수)
 uv run histgraph reclassify                  # 개념을 사건에서 갈라냄 (필수)
 uv run histgraph works                       # 역사를 다룬 작품 명단 (분류 순회)
+uv run histgraph aliases                     # 한국어 별칭 (인포박스·승격 **앞에**)
+uv run histgraph infobox                     # 사건 인포박스 — 날짜·별칭·참가자 (LLM 불필요)
+uv run histgraph infobox --types person      # 인물 인포박스 (LLM 불필요)
 uv run histgraph resolve                     # 소스 간 연결
-uv run histgraph extract --scope data/joseon.sqlite --types event org
-uv run histgraph extract --scope data/joseon.sqlite --types person --limit 100
-uv run histgraph aliases                     # 한국어 별칭 (승격 **앞에**)
 uv run histgraph promote --prune-orphans     # 추출 고아를 실제 노드로
+# 남은 것만 LLM 으로. 인포박스가 채운 사건은 --max-participants 가 걸러낸다
+uv run histgraph extract --types event --max-participants 1 --min-chars 1500
+uv run histgraph extract --scope data/joseon.sqlite --types person --limit 100
+uv run histgraph promote --local-only        # 추출이 만든 고아를 다시 붙인다
 uv run histgraph spans                       # 조직·왕조 존속 기간 (P571/P576)
 uv run tools/backfill_event_polity.py --apply   # 사건의 정체 (P17)
 uv run histgraph timeline                    # 연도 정규화 (승격 뒤에)
@@ -985,6 +1061,21 @@ uv run histgraph --db data/joseon.sqlite redescribe  # 시대 그래프에도 �
 uv run histgraph --db data/joseon.sqlite reigns      # (scope 를 다시 돌렸으면 불필요)
 uv run histgraph serve                       # 화면 (조선 그래프를 읽는다)
 ```
+
+**싼 것을 먼저, 비싼 것을 뒤에.** `enrich` → `infobox` → `extract` 순서가
+그것이다. 셋 다 같은 자리를 채우려 하는데 비용이 세 자릿수로 다르다.
+
+| 단계 | 비용 | 얻는 것 |
+|---|---|---|
+| `enrich --full` | 요청 1건/문서 | 산문. **이게 없으면 뒤의 둘이 읽을 게 없다** |
+| `infobox` | 요청 1건/문서 | 날짜·별칭·참가자 — 구조에서 직접, 오독 위험 없음 |
+| `extract` | **조각당 수 분** (로컬 MLX) | 산문에 흩어진 관계 |
+
+**`infobox` 는 반드시 `enrich` 뒤에 둘 것.** 인포박스는 `props.kowiki_url`
+이 있는 노드만 보는데 그 값을 채우는 것이 `enrich` 다. 앞에 두면 대상이
+그만큼 적다 — 실측: `enrich --full` 로 kowiki_url 이 늘어난 뒤에 돌리니
+사건 312건이 대상이 됐고, participated_in 이 조선 그래프에서 1,048 →
+1,647 로 늘었다.
 
 `promote` → `timeline` → `scope` 순서를 지킬 것. 승격이 노드를 만들고
 지우므로 연표와 서브그래프는 그 뒤에 다시 만들어야 반영된다.

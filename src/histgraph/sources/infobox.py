@@ -47,9 +47,26 @@ EVENT_FIELDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "주요인물2": ("participated_in", ("person",), IN),
     "교전국1": ("participated_in", ("org",), IN),
     "교전국2": ("participated_in", ("org",), IN),
+    # **전투 틀만 보고 필드 표를 짰다.** `지휘관`·`교전국`은 `전쟁 정보`
+    # 틀의 이름이라 옥사·사화·정변에는 없다. 그쪽은 `역사적 사건 정보`
+    # 틀을 쓰고 참가자를 `참가자` 한 칸에 몰아 적는다 — 임오화변에
+    # 영조·노론·구선복·정조·이석문·권정침·이이장·윤숙·임덕제가 그렇게
+    # 들어 있는데 우리는 그 줄을 한 번도 안 읽었다.
+    "참가자": ("participated_in", ("person", "org"), IN),
     "장소": ("occurred_at", ("place",), OUT),
     "지역": ("occurred_at", ("place",), OUT),
 }
+
+# 링크가 아니라 **값 그대로** 읽는 필드. 위 표는 `[[링크]]` 를 뽑아 엣지를
+# 만들지만, 날짜와 별칭은 엣지가 아니라 **노드 자신의 속성**이다. 파서가
+# 링크만 보고 있어서 같은 틀을 열어놓고 이 두 줄을 지나쳤다.
+#
+#     | 날짜 = [[1762년]] (영조 38) [[7월 5일]]
+#     | 별칭 = 임오옥, 사도세자사건
+#
+# 임오화변은 이 때문에 연표에 못 섰다 — Wikidata 에 P580/P582/P585 가
+# 없어서 날짜가 빈 사건이 238건인데, 그 답이 인포박스에 적혀 있었다.
+EVENT_VALUE_FIELDS = ("날짜", "별칭", "다른 이름")
 
 # 인물 문서의 인포박스. 산문의 족보 목록과 달리 **필드의 주인이 명확** 해서
 # LLM 없이 정확하게 가져올 수 있다 (족보 목록 문제는 extract 쪽 참조).
@@ -143,6 +160,96 @@ def infobox_span(wikitext: str, fields: dict | None = None) -> str:
         if any(re.search(rf"^\s*\|\s*{re.escape(f)}\s*=", span, re.M) for f in names):
             return span
     return ""
+
+
+# 인포박스 날짜는 서식이 제각각이다. 실측한 꼴:
+#
+#     [[1762년]] (영조 38) [[7월 5일]]        임오화변
+#     [[1592년]] [[5월 23일]] ~ [[1598년]]     임진왜란
+#     1811년 12월 ~ 1812년 4월                홍경래의 난
+#     {{시작일|1894|1|11}}                     동학 농민 혁명
+#
+# **괄호 안은 절대 보지 않는다.** `(영조 38)` 의 38 을 연도로 집으면
+# 안 되고, 실제로 `(선조 25)` 같은 재위 연차가 거의 모든 사건에 붙어 있다.
+_PAREN = re.compile(r"\([^)]*\)")
+_START_TMPL = re.compile(
+    r"\{\{\s*시작일[^}|]*\|\s*(\d{3,4})\s*(?:\|\s*(\d{1,2}))?\s*(?:\|\s*(\d{1,2}))?"
+)
+_YEAR_IN = re.compile(r"(\d{3,4})\s*년")
+_MONTH_DAY = re.compile(r"(\d{1,2})\s*월\s*(?:(\d{1,2})\s*일)?")
+
+
+def infobox_date(value: str) -> str | None:
+    """인포박스 `날짜` 필드에서 **시작 시점**을 ISO 로.
+
+    연도만 확실하면 `YYYY-01-01`, 월·일까지 읽히면 그대로 채운다.
+    `timeline` 은 연도만 보므로 월·일이 틀려도 연표는 안 흔들리지만,
+    맞게 읽을 수 있는 것을 버릴 이유는 없다.
+
+    **못 읽으면 None 이다.** 반쯤 읽은 값을 넣느니 비워 둔다 — 빈 칸은
+    다음 실행이 다시 채우지만 틀린 날짜는 아무도 다시 안 본다."""
+    if not value:
+        return None
+    if m := _START_TMPL.search(value):
+        y, mo, d = m.group(1), m.group(2), m.group(3)
+        return f"{int(y):04d}-{int(mo or 1):02d}-{int(d or 1):02d}"
+    head = _PAREN.sub(" ", value)
+    head = re.split(r"~|∼|―|—|–|부터", head)[0]
+    ym = _YEAR_IN.search(head)
+    if not ym:
+        return None
+    year = int(ym.group(1))
+    if not 1 <= year <= 2100:
+        return None
+    month = day = 1
+    if md := _MONTH_DAY.search(head[ym.end():]):
+        m2, d2 = int(md.group(1)), int(md.group(2) or 1)
+        if 1 <= m2 <= 12 and 1 <= d2 <= 31:
+            month, day = m2, d2
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+# 별칭 값은 쉼표·가운뎃점으로 늘어놓는다: `임오옥, 사도세자사건`.
+_ALIAS_SPLIT = re.compile(r"[,·/]|<br\s*/?>")
+_MARKUP = re.compile(r"<ref[^>]*>.*?</ref>|<[^>]+>|'{2,3}|\[\[|\]\]|\{\{[^}]*\}\}")
+_PIPED_LINK = re.compile(r"\[\[[^\]|]*\|([^\]]*)\]\]")
+
+
+def infobox_aliases(value: str, label: str = "") -> list[str]:
+    """인포박스 `별칭` 필드에서 이름들을 뽑는다.
+
+    `[[문서|표기]]` 는 표기 쪽을 쓴다 — 별칭 칸에 적힌 것이 그 이름이다."""
+    if not value:
+        return []
+    value = _PIPED_LINK.sub(r"\1", value)
+    out: list[str] = []
+    for part in _ALIAS_SPLIT.split(value):
+        name = _MARKUP.sub("", part).strip().strip("·,")
+        # 한 글자는 본문 아무 데나 걸리고, 너무 길면 이름이 아니라 설명이다
+        if 2 <= len(name) <= 40 and name != label and name not in out:
+            out.append(name)
+    return out
+
+
+def parse_infobox_values(
+    wikitext: str, fields: tuple[str, ...], span_fields: dict | None = None
+) -> dict[str, str]:
+    """링크가 아니라 **값 원문**이 필요한 필드를 읽는다.
+
+    틀을 고르는 기준은 `parse_infobox_links` 와 같아야 한다 — 날짜만으로
+    틀을 찾으면 `{{시작일}}` 을 품은 다른 작은 틀에 걸린다. 링크 필드 표를
+    같이 넘겨 **같은 인포박스**를 집는다."""
+    names = dict.fromkeys(list(span_fields or EVENT_FIELDS) + list(fields))
+    span = infobox_span(wikitext, names)
+    if not span:
+        return {}
+    out: dict[str, str] = {}
+    parts = re.split(r"^\s*\|\s*([가-힣A-Za-z0-9_ ]+?)\s*=", span, flags=re.M)
+    for i in range(1, len(parts) - 1, 2):
+        field = parts[i].strip()
+        if field in fields and field not in out:
+            out[field] = parts[i + 1].strip()
+    return out
 
 
 def parse_infobox_links(
@@ -283,6 +390,7 @@ def ingest(
     store: GraphStore,
     limit: int | None = None,
     node_types: tuple[str, ...] = ("event",),
+    refresh: bool = False,
 ) -> tuple[list[Node], list[Edge]]:
     """인포박스에서 관계를 뽑는다.
 
@@ -317,6 +425,8 @@ def ingest(
     per_subject: dict[str, dict[str, list[str]]] = {}
     subject_types: dict[str, str] = {}
     all_titles: set[str] = set()
+    # 링크가 아닌 값 필드 — 날짜와 별칭. 엣지가 아니라 노드 자신의 속성이다.
+    attrs: dict[str, dict] = {}
     for r in rows:
         url = _json.loads(r["props"])["kowiki_url"]
         title = urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
@@ -328,6 +438,23 @@ def ingest(
             per_subject[r["id"]] = links
             subject_types[r["id"]] = r["type"]
             all_titles.update(t for ts in links.values() for t in ts)
+        if r["type"] == "event":
+            values = parse_infobox_values(
+                wikitext, EVENT_VALUE_FIELDS, FIELDS_BY_TYPE[r["type"]]
+            )
+            got: dict = {}
+            # **이미 있는 날짜는 덮지 않는다.** Wikidata 의 P585 는 사람이
+            # 손본 값이고 인포박스는 본문 서식이 섞인 자유 기술이다.
+            # 비어 있는 자리만 채운다 (`--refresh` 면 덮어쓴다).
+            if date := infobox_date(values.get("날짜", "")):
+                got["start_date"] = date
+            names: list[str] = []
+            for f in ("별칭", "다른 이름"):
+                names += infobox_aliases(values.get(f, ""), r["label"])
+            if names:
+                got["aliases"] = list(dict.fromkeys(names))
+            if got:
+                attrs[r["id"]] = got
 
     log.info("인포박스 보유 %d건, 링크 대상 %d개 해소 중...", len(per_subject), len(all_titles))
     qids = resolve_titles(fetcher, list(all_titles))
@@ -436,4 +563,39 @@ def ingest(
         " 신규 노드 %d개)",
         len(unique), skipped_unknown, skipped_anachronism, len(nodes),
     )
+    dated, aliased = apply_event_attrs(store, attrs, refresh=refresh)
+    log.info("인포박스 날짜 %d건 · 별칭 %d건", dated, aliased)
     return list(nodes.values()), list(unique.values())
+
+
+def apply_event_attrs(
+    store: GraphStore, attrs: dict[str, dict], refresh: bool = False
+) -> tuple[int, int]:
+    """인포박스에서 읽은 날짜·별칭을 노드에 얹는다.
+
+    엣지와 달리 이건 **노드 자신의 속성**이라 `_persist` 경로를 못 탄다
+    (그쪽은 upsert 로 라벨·설명까지 덮어쓴다). 여기서 직접 채운다.
+
+    날짜는 **빈 자리만** 채운다 — Wikidata 의 P585 는 사람이 손본 값이고
+    인포박스는 자유 기술이다. 어느 쪽이 옳은지 모를 때 이미 있는 것을
+    밀어내지 않는다."""
+    dated = aliased = 0
+    for node_id, got in attrs.items():
+        if date := got.get("start_date"):
+            row = store.conn.execute(
+                "SELECT start_date FROM nodes WHERE id = ?", (node_id,)
+            ).fetchone()
+            if row and (refresh or not (row["start_date"] or "").strip()):
+                store.conn.execute(
+                    "UPDATE nodes SET start_date = ? WHERE id = ?", (date, node_id)
+                )
+                dated += 1
+        if names := got.get("aliases"):
+            before = store.conn.total_changes
+            store.conn.executemany(
+                "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?,?)",
+                [(node_id, a) for a in names],
+            )
+            aliased += store.conn.total_changes - before
+    store.conn.commit()
+    return dated, aliased

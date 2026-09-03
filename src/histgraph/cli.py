@@ -221,7 +221,8 @@ def cmd_infobox(args: argparse.Namespace) -> int:
         types = tuple(args.types)
         before = store.stats()["by_edge_type"]
         nodes, edges = infobox.ingest(
-            fetcher, store, limit=args.limit, node_types=types
+            fetcher, store, limit=args.limit, node_types=types,
+            refresh=args.refresh,
         )
         if not edges:
             print("  인포박스에서 관계를 찾지 못했습니다", file=sys.stderr)
@@ -1299,6 +1300,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ib.add_argument("--types", nargs="*", default=["event"],
                       help="대상 노드 타입 (event·person). 인물은 부모·배우자·"
                            "스승을 LLM 없이 준다")
+    p_ib.add_argument("--refresh", action="store_true",
+                      help="이미 날짜가 있는 사건도 인포박스 값으로 덮어쓴다")
     p_ib.set_defaults(func=cmd_infobox)
 
     p_en = sub.add_parser("enrich", help="한국어 위키백과 서사로 노드 보강")
