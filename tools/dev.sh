@@ -45,5 +45,5 @@ else
   listening "$PORT_API" || { echo "  API 가 $PORT_API 을 열지 않았다." >&2; exit 1; }
 fi
 
-echo "  화면: http://localhost:5173  — Ctrl+C 로 둘 다 종료"
+echo "  화면: http://127.0.0.1:5173  — Ctrl+C 로 둘 다 종료"
 npm run dev --prefix web
