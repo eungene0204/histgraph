@@ -480,6 +480,10 @@ class GraphAPI:
                 fact["sources"].append(r["source"])
             if edge_props.get("evidence"):
                 fact["evidence"].append(edge_props["evidence"])
+            # `roles` 가 말뭉치에서 찾은 근거. 역할('대항'·'표적')을 말할 때는
+            # 그 문장을 함께 보여야 한다 — 역할은 판정이고 문장은 사실이다.
+            if edge_props.get("role_evidence"):
+                fact["evidence"].append(edge_props["role_evidence"])
         relations = list(by_fact.values())
         # 같은 종류 안에서는 확인할 수 있는 것을 먼저 보여준다 — 여러
         # 소스가 확인해 준 사실, 그다음 근거 구절이 달린 관계 순이다.

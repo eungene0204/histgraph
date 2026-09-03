@@ -1129,6 +1129,77 @@ def cmd_precision(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_corpus(args: argparse.Namespace) -> int:
+    """근현대 문서를 통째로 내려받아 말뭉치(`data/corpus.sqlite`)에 넣는다.
+
+    그래프가 아니라 글이다. "이재명은 12.3 내란에 참여했다"가 틀렸다는
+    것은 구조화 소스 어디에도 없고 산문에만 있다 — 그 산문을 문단으로
+    쪼개 검색할 수 있게 둔다 (`ask`), 그리고 `roles` 가 거기서 근거를
+    찾는다. 설명(`nodes.description`)과 다른 점: 설명은 화면용으로 잘려
+    있고(인물은 도입부만) 검색 색인이 없다."""
+    from . import corpus as corpus_mod
+
+    fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
+    with GraphStore(args.db) as store:
+        picked = corpus_mod.pick_nodes(store, since=args.since)
+        conn = corpus_mod.open_corpus(args.corpus)
+        by_reason: dict[str, int] = {}
+        for why in picked.values():
+            by_reason[why] = by_reason.get(why, 0) + 1
+        print(f"  대상 노드 {len(picked):,}개: "
+              + " · ".join(f"{k} {v:,}" for k, v in sorted(by_reason.items())))
+        if args.dry_run:
+            return 0
+        got = corpus_mod.build(fetcher, store, conn, sorted(picked), refresh=args.refresh,
+                               limit=args.limit)
+        st = corpus_mod.stats(conn)
+        conn.close()
+    print(f"  내려받음 {got['fetched']:,}건 / 요청 {got['asked']:,}건 · 없는 문서 {got['missing']:,}건"
+          f" · 새 문단 {got['passages']:,}개")
+    print(f"  말뭉치: 문서 {st['docs']:,}건 · 문단 {st['passages']:,}개 · {st['chars'] / 10000:,.0f}만 자")
+    return 0
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    """말뭉치에서 물음에 가까운 문단을 찾는다 (검색만, 모델 없음)."""
+    from . import corpus as corpus_mod
+
+    conn = corpus_mod.open_corpus(args.corpus)
+    hits = corpus_mod.search(conn, args.query, k=args.k)
+    if not hits:
+        print("  맞는 문단이 없습니다.")
+        return 1
+    for h in hits:
+        head = h["title"] + (f" · {h['section']}" if h["section"] else "")
+        print(f"\n  [{head}]\n  {h['text'][:600]}")
+    return 0
+
+
+def cmd_roles(args: argparse.Namespace) -> int:
+    """사건에 '참여'한 인물이 실제로 무엇을 했는지 말뭉치의 근거로 적는다.
+
+    `--dry-run` 은 모델 없이 근거 문단이 있는 엣지만 센다. 모델은 MLX 가
+    기본이고 메모리를 35GB 잡는다 — 다른 `extract` 가 돌고 있으면 함께
+    띄우지 말 것 (커널이 둘 중 하나를 죽인다)."""
+    from . import corpus as corpus_mod
+    from . import roles as roles_mod
+
+    backend = None if args.dry_run else build_backend(args.backend, args.model)
+    conn = corpus_mod.open_corpus(args.corpus)
+    with GraphStore(args.db) as store:
+        got = roles_mod.run(store, conn, backend, since=args.since, limit=args.limit,
+                            dry_run=args.dry_run, redo=args.redo)
+    c = got["counts"]
+    print(f"  후보 {c['후보']:,}건 · 근거 문단 있음 {c['문단 있음']:,} · 없음 {c['문단 없음']:,}")
+    if got["by_role"]:
+        print("  판정: " + " · ".join(f"{k} {v}" for k, v in sorted(got["by_role"].items(), key=lambda x: -x[1])))
+    for line in got["samples"]:
+        print(f"    {line}")
+    if not args.dry_run:
+        print("  화면 DB 는 `scope korea` 를 다시 돌려야 바뀝니다.")
+    return 0
+
+
 def cmd_reigns(args: argparse.Namespace) -> int:
     """왕의 재위·대통령의 재임 기간을 held_position 엣지에 채운다.
 
@@ -1347,6 +1418,48 @@ def cmd_relabel(args: argparse.Namespace) -> int:
                     print(f"    {ntype:<7} {node_id:>16}  {label}")
         else:
             print("\n  한글이 없는 노드가 없습니다.")
+    return 0
+
+
+def cmd_nikh(args: argparse.Namespace) -> int:
+    """국사편찬위원회 정본(한국사연대기·실록)을 그래프에 씌운다."""
+    from .sources import nikh
+
+    raw = Path(args.raw) if args.raw else nikh.RAW_DIR
+    index_path = raw / nikh.SILLOK_INDEX
+    if args.build_index or not index_path.exists():
+        print(f"  실록 색인을 만든다: {index_path} (몇 분 걸린다)")
+        n = nikh.build_sillok_index(raw, index_path)
+        print(f"  ✓ 실록 기사 {n:,}건 색인")
+        if args.index_only:
+            return 0
+
+    index = nikh.SillokIndex(index_path)
+    with GraphStore(args.db) as store:
+        kinds = tuple(args.kinds) if args.kinds else None
+        nodes, edges, rep = nikh.ingest(store, raw, index, kinds=kinds)
+        print(f"  연대기 항목 {len(nodes):,} → 기존 노드에 씌움 {rep.matched:,} · 새 노드 {rep.created:,}")
+        print(f"  연대: 실록 기사로 {rep.dated_sillok:,} · 설명 문장으로 {rep.dated_text:,} · "
+              f"인물 생몰년 {rep.person_dates:,} · 연도 못 잡은 사건 {len(rep.undated_events):,}")
+        print(f"  엣지: 참여 {rep.edges_participated:,} · 시대 {rep.edges_period:,} · "
+              f"흡수할 추출 고아 {len(rep.merges):,}")
+        if rep.undated_events:
+            print(f"    연도 없음: {', '.join(rep.undated_events[:args.show])}")
+        if rep.ambiguous:
+            print(f"  이름이 여럿에 걸린 항목 {len(rep.ambiguous)}건 (새 노드로 세우거나 차수로 골랐다):")
+            for label, ids in rep.ambiguous[:args.show]:
+                print(f"    {label}: {', '.join(ids)}")
+        if rep.unresolved_mentions:
+            top = rep.unresolved_mentions.most_common(args.show)
+            print(f"  노드를 못 찾은 인물 언급 {sum(rep.unresolved_mentions.values()):,}건: "
+                  + ", ".join(f"{n}({c})" for n, c in top))
+        if args.dry_run:
+            print("  (dry-run: 저장하지 않음)")
+            return 0
+        _persist(store, nikh.SOURCE, nodes, edges)
+        merged = nikh.apply_merges(store, rep.merges)
+        if merged:
+            print(f"  ✓ 추출 고아 {merged}개를 정본 노드로 합침")
     return 0
 
 
@@ -1591,6 +1704,18 @@ def main(argv: list[str] | None = None) -> int:
     p_nm.add_argument("--refresh", action="store_true", help="못 찾았다고 표시한 노드도 다시 본다")
     p_nm.set_defaults(func=cmd_namu)
 
+    p_nk = sub.add_parser(
+        "nikh", help="국사편찬위원회 정본(한국사연대기·실록)을 씌운다 — data/raw/nikh"
+    )
+    p_nk.add_argument("--raw", default=None, help="자료 폴더 (기본 data/raw/nikh)")
+    p_nk.add_argument("--build-index", action="store_true", help="실록 색인을 다시 만든다")
+    p_nk.add_argument("--index-only", action="store_true", help="색인만 만들고 끝낸다")
+    p_nk.add_argument("--kinds", nargs="*", default=None,
+                      help="연대기 유형만 (사건 인물 조직·단체 유물·유적 지리 기타)")
+    p_nk.add_argument("--show", type=int, default=20, help="출력할 예시 수")
+    p_nk.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
+    p_nk.set_defaults(func=cmd_nikh)
+
     p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
     p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")
     p_rd.add_argument("--list-cleared", action="store_true",
@@ -1633,6 +1758,31 @@ def main(argv: list[str] | None = None) -> int:
     p_lk.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_lk.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_lk.set_defaults(func=cmd_links)
+
+    p_cp = sub.add_parser("corpus", help="근현대 문서 전문을 말뭉치로 내려받는다 (RAG 저장층)")
+    p_cp.add_argument("--corpus", type=Path, default=None, help="말뭉치 파일 (기본 data/corpus.sqlite)")
+    p_cp.add_argument("--since", type=int, default=1945, help="이 해 뒤의 사건과 그 이웃 (기본 1945)")
+    p_cp.add_argument("--limit", type=int, default=None)
+    p_cp.add_argument("--refresh", action="store_true", help="이미 있는 문서도 다시 받는다")
+    p_cp.add_argument("--interval", type=float, default=0.5)
+    p_cp.add_argument("--dry-run", action="store_true", help="대상만 세고 받지 않는다")
+    p_cp.set_defaults(func=cmd_corpus)
+
+    p_ask = sub.add_parser("ask", help="말뭉치에서 물음에 가까운 문단을 찾는다")
+    p_ask.add_argument("query")
+    p_ask.add_argument("--corpus", type=Path, default=None)
+    p_ask.add_argument("-k", type=int, default=5)
+    p_ask.set_defaults(func=cmd_ask)
+
+    p_ro = sub.add_parser("roles", help="사건 참여자의 역할(주도·대항·피해…)을 말뭉치 근거로 판정")
+    p_ro.add_argument("--corpus", type=Path, default=None)
+    p_ro.add_argument("--since", type=int, default=1945)
+    p_ro.add_argument("--limit", type=int, default=None)
+    p_ro.add_argument("--backend", choices=["anthropic", "mlx", "ollama"], default="mlx")
+    p_ro.add_argument("--model", default=None)
+    p_ro.add_argument("--dry-run", action="store_true", help="모델 없이 근거 문단 유무만 센다")
+    p_ro.add_argument("--redo", action="store_true", help="이미 판정한 엣지도 다시")
+    p_ro.set_defaults(func=cmd_roles)
 
     p_rg = sub.add_parser("reigns", help="왕의 재위·대통령의 재임 기간을 직위 엣지에 채운다 (P39 한정어)")
     p_rg.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")

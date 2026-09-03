@@ -2964,5 +2964,133 @@ with tempfile.TemporaryDirectory() as tmp:
           sc2.eras_of("korea") == ("joseon", "ilje", "daehan") and sc2.label_of("korea") == "조선~대한민국")
     store.close()
 
+
+# --- 말뭉치 (RAG 저장·검색층) ---------------------------------------------
+# "이재명은 12.3 내란에 참여했다"가 틀렸다는 것은 구조화 소스 어디에도
+# 없고 산문에만 있다. 글을 문단으로 쪼개 두고 찾을 수 있어야 한다.
+from histgraph import corpus as corpus_mod  # noqa: E402
+from histgraph import roles as roles_mod  # noqa: E402
+from histgraph.sources.infobox import FIELD_LABEL, FIELD_SIDE  # noqa: E402
+
+_DOC = """12.3 내란은 2024년 12월 3일 윤석열이 비상계엄을 선포한 사건이다.
+
+== 배경 ==
+정부 지지율이 최저 17%까지 하락하는 등 부정적 평가를 받았다.
+
+=== 국회 개회 및 계엄 해제 ===
+계엄 선포 직후 국회의장 우원식은 국회를 긴급소집했다. 경찰 바리케이드를 피해 11시경 이재명, 우원식은 담을 넘어 국회 건물에 들어갔다.
+
+=== 체포 지시 ===
+여 사령관은 다음과 같은 체포 명단을 불러주며 위치 추적을 요청했다: 이재명 더불어민주당 대표 우원식 국회의장 한동훈 국민의힘 대표
+
+== 각주 ==
+1. 오마이뉴스 2024년 12월 4일
+"""
+parts = corpus_mod.split_passages(_DOC)
+sections = [sec for sec, _ in parts]
+check("절 제목이 문단에 붙는다", "체포 지시" in sections, str(sections))
+check("각주 절은 글이 아니다", not any("오마이뉴스" in t for _, t in parts))
+check("절이 바뀌면 묶음도 끊긴다",
+      not any("담을 넘어" in t and "체포 명단" in t for _, t in parts))
+long = "가나다라마바사. " * 300
+check("긴 문단은 문장에서 자른다",
+      all(len(t) <= corpus_mod.PASSAGE_MAX + 20 for _, t in corpus_mod.split_passages(long)))
+
+with tempfile.TemporaryDirectory() as tmp:
+    conn = corpus_mod.open_corpus(Path(tmp) / "c.sqlite")
+    n = corpus_mod.put_doc(conn, "wd:EV", "12.3 내란", _DOC)
+    corpus_mod.put_doc(conn, "wd:P", "이재명", "이재명은 2025년 6월 4일 대통령에 취임했다.\n\n계엄 당시 국회 담을 넘었다.")
+    check("문서를 문단으로 넣는다", n >= 3 and corpus_mod.stats(conn)["docs"] == 2)
+    hits = corpus_mod.search(conn, "체포 명단")
+    check("두 글자 낱말을 FTS 로 찾는다", hits and "체포 명단" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "우원식은")
+    check("조사가 붙어도 찾는다 (앞머리 일치)", hits and "우원식" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "긴급소집")
+    check("어절 안의 낱말은 앞머리 일치라 찾는다", hits and "긴급소집" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "담")
+    check("한 글자는 LIKE 로 물러난다", any("담을 넘어" in h["text"] for h in hits))
+    check("fts 질의는 토큰을 따옴표로 감싸고 기본은 AND 다",
+          corpus_mod.fts_query("12.3 내란 체포") == '"12.3"* AND "내란"* AND "체포"*', corpus_mod.fts_query("12.3 내란 체포"))
+    corpus_mod.put_doc(conn, "wd:P2", "형수 욕설", "이재명 이재명 이재명 이재명 이재명 이재명이 욕설을 했다.")
+    hits = corpus_mod.search(conn, "체포 명단 이재명")
+    check("다 있는 문단이 이름 반복에 밀리지 않는다", hits and "체포 명단" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "체포 명단 없는말이다")
+    check("다 있는 문단이 없으면 OR 로 물러난다", any("체포 명단" in h["text"] for h in hits))
+    ment = corpus_mod.mentions(conn, "wd:EV", ["이재명"])
+    check("이름이 나오는 문단을 문서 순서로 준다",
+          [m["section"] for m in ment] == ["국회 개회 및 계엄 해제", "체포 지시"], str([m["section"] for m in ment]))
+    corpus_mod.put_doc(conn, "wd:EV", "12.3 내란", "다시 넣은 글. 아무 이름도 없다.")
+    check("같은 노드를 다시 넣으면 옛 문단이 지워진다",
+          not corpus_mod.mentions(conn, "wd:EV", ["이재명"]) and corpus_mod.stats(conn)["docs"] == 3)
+    corpus_mod.reindex(conn)
+    check("색인을 다시 지어도 같은 것을 찾는다", any("욕설" in h["text"] for h in corpus_mod.search(conn, "욕설")))
+    conn.close()
+
+# --- 역할 판정 -------------------------------------------------------------
+passages = [{"title": "12.3 내란", "section": "체포 지시",
+             "text": "여 사령관은 다음과 같은 체포 명단을 불러주며 위치 추적을 요청했다: 이재명 더불어민주당 대표"}]
+v = roles_mod.accept([{"role": "표적", "evidence": "체포 명단을 불러주며 위치 추적을 요청했다", "confidence": "certain"}], passages)
+check("근거가 문단에 있으면 판정을 받는다", v == {"role": "표적", "evidence": "체포 명단을 불러주며 위치 추적을 요청했다", "confidence": 0.9}, str(v))
+check("근거가 문단에 없으면 버린다",
+      roles_mod.accept([{"role": "주도", "evidence": "그가 계엄을 계획했다", "confidence": "certain"}], passages) is None)
+check("목록 밖의 역할은 버린다",
+      roles_mod.accept([{"role": "영웅", "evidence": "체포 명단", "confidence": "certain"}], passages) is None)
+check("빈 답은 None", roles_mod.accept([], passages) is None)
+check("인포박스 칸 이름이 라벨이 되고 편 번호를 읽는다",
+      FIELD_LABEL["주요인물2"] == "주요 인물" and FIELD_SIDE.search("주요인물2").group(1) == "2"
+      and FIELD_SIDE.search("참가자") is None)
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "roles.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:EV", type="event", label="12.3 내란", source="wd", start_date="2024-12-03"),
+        Node(id="wd:OLD", type="event", label="갑자사화", source="wd", start_date="1504"),
+        Node(id="wd:P1", type="person", label="이재명", source="wd"),
+        Node(id="wd:P2", type="person", label="김용현 (군인)", source="wd"),
+        Node(id="wd:P3", type="person", label="연산군", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:P1", dst="wd:EV", type="participated_in", source="kowiki:infobox",
+             label="주요 인물", confidence=0.95, props={"infobox_field": "주요인물2", "side": 2}),
+        Edge(src="wd:P2", dst="wd:EV", type="participated_in", source="kowiki:infobox",
+             label="주요 인물", confidence=0.95, props={"infobox_field": "주요인물1", "side": 1}),
+        Edge(src="wd:P3", dst="wd:OLD", type="participated_in", source="wd"),
+    ])
+    conn = corpus_mod.open_corpus(Path(tmp) / "c.sqlite")
+    corpus_mod.put_doc(conn, "wd:EV", "12.3 내란", _DOC)
+    cands = roles_mod.candidates(store, conn, since=1945)
+    check("말뭉치에 문서가 있는 근현대 사건의 참여 엣지만 후보다",
+          {c["src"] for c in cands} == {"wd:P1", "wd:P2"}, str([c["src"] for c in cands]))
+    check("문서명 괄호를 뗀 이름으로도 찾는다", "김용현" in roles_mod.names_of(store, "wd:P2"))
+    got = roles_mod.gather(store, conn, "wd:P1", "wd:EV")
+    check("그 사람이 나오는 문단만 모은다", got and all("이재명" in g["text"] for g in got))
+    check("문단이 없으면 빈 목록", roles_mod.gather(store, conn, "wd:P2", "wd:EV") == [])
+
+    class _Fake:
+        model = "fake"
+        def complete(self, system, user, schema):
+            assert "이재명" in user and "체포 명단" in user
+            return [{"role": "표적", "evidence": "체포 명단을 불러주며", "confidence": "certain"}]
+
+    got = roles_mod.run(store, conn, _Fake(), since=1945)
+    check("문단이 있는 것만 모델에 묻고 없는 것은 근거 없음",
+          got["by_role"] == {"표적": 1, "근거 없음": 1}, str(got))
+    moved = store.conn.execute(
+        "SELECT type, label, json_extract(props,'$.role') AS role, json_extract(props,'$.was') AS was,"
+        " json_extract(props,'$.role_evidence') AS ev FROM edges WHERE src='wd:P1' AND dst='wd:EV'").fetchall()
+    check("피해·표적은 참여가 아니라 관련으로 옮긴다",
+          len(moved) == 1 and moved[0]["type"] == "related_to" and moved[0]["label"] == "표적"
+          and moved[0]["was"] == "participated_in" and "체포 명단" in moved[0]["ev"], str([dict(m) for m in moved]))
+    none = store.conn.execute(
+        "SELECT type, label FROM edges WHERE src='wd:P2' AND dst='wd:EV'").fetchone()
+    check("근거 없는 참여는 화면에 두지 않는다", none["type"] == "related_to" and none["label"] == "근거 없음")
+    check("한 번 판정한 엣지는 다시 묻지 않는다", roles_mod.candidates(store, conn, since=1945) == [])
+    api = GraphAPI(store, era="korea")
+    rel = [r for r in api.node("wd:P1")["relations"] if r["other"]["id"] == "wd:EV"]
+    check("화면에 역할과 근거가 함께 간다",
+          rel and rel[0]["edge_label"] == "표적" and any("체포 명단" in e for e in rel[0]["evidence"]), str(rel))
+    conn.close()
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

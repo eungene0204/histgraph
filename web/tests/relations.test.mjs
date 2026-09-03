@@ -175,6 +175,22 @@ eq('기원전', fmtDate('-0057-01-01'), '기원전 57년');
 eq('빈 값', fmtDate(null), '');
 eq('날짜가 아니면 빈 값', fmtDate('알 수 없음'), '');
 
+console.log('\n역할 — 참여로 뭉개지 않는다');
+{
+  const me = { id: 'p', label: '이재명', type: 'person' };
+  const ev = other('e', '12.3 내란', 'event', 'event');
+  const r = (label, type = 'participated_in') => rel({ type, dir: 'out', other: ev, edge_label: label });
+  eq('역할이 없으면 참여했다', sentence(r(null), me), '이재명은 12.3 내란에 참여했다');
+  eq('인포박스 주요 인물은 주요 인물이다', sentence(r('주요 인물'), me), '이재명은 12.3 내란의 주요 인물이다');
+  eq('대항은 맞섰다', sentence(r('대항'), me), '이재명은 12.3 내란에 맞섰다');
+  eq('표적은 관련 엣지로 온다', sentence(r('표적', 'related_to'), me), '이재명은 12.3 내란에서 표적이 되었다');
+  eq('피해자', sentence(r('피해', 'related_to'), me), '이재명은 12.3 내란의 피해자다');
+  eq('근거 없음은 그렇다고 말한다', sentence(r('근거 없음', 'related_to'), me),
+     '이재명과 12.3 내란은 관련이 있다고 하나 근거를 찾지 못했다');
+  eq('원인·다음은 그대로', sentence(rel({ type: 'related_to', dir: 'out', other: ev, edge_label: '원인' }), me),
+     '이재명은 12.3 내란의 원인이 되었다');
+}
+
 console.log('\n==============================================');
 console.log(`통과 ${pass} / 실패 ${fail}`);
 process.exit(fail ? 1 : 0);
