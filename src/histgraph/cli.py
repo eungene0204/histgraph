@@ -25,6 +25,7 @@ from .store import GraphStore
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "data" / "histgraph.sqlite"
 DEFAULT_CACHE = ROOT / "data" / "cache"
+DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -638,6 +639,67 @@ def cmd_aliases(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_relabel(args: argparse.Namespace) -> int:
+    """영어로 들어온 노드 이름을 한국어로 바꾼다.
+
+    수집이 라벨을 덮어쓰므로 `ingest`·`scope` 뒤에 다시 돌려야 한다.
+    시대 그래프는 별도 파일이니 거기에도 한 번 더:
+
+        python3 -m histgraph relabel
+        python3 -m histgraph --db data/joseon.sqlite relabel
+    """
+    from . import labels as labels_mod
+
+    try:
+        table = labels_mod.load_table(args.table)
+    except (OSError, labels_mod.LabelTableError) as err:
+        print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
+        return 1
+
+    with GraphStore(args.db) as store:
+        report = labels_mod.apply_overrides(
+            store.conn, table, dry_run=args.dry_run
+        )
+        head = "바꿀 이름" if args.dry_run else "바꾼 이름"
+        print(f"  표 {len(table):,}개 · {head} {len(report.applied):,}개"
+              f" · 이미 한국어 {report.already:,}개")
+        for node_id, old, new in report.applied[:12]:
+            print(f"    {node_id:>16}  {old} → {new}")
+        if len(report.applied) > 12:
+            print(f"    … 그 밖 {len(report.applied) - 12:,}개")
+
+        if report.absent:
+            # 표에는 있는데 그래프에 없는 QID. 시대 그래프에서는 정상이다
+            # (조선 그래프에 교황청 직위가 없는 게 당연하다).
+            print(f"  이 그래프에 없는 QID {len(report.absent):,}개"
+                  f" (예: {', '.join(report.absent[:5])})")
+
+        if report.collisions:
+            # 이름을 고치고 나니 같은 이름이 이미 있더라 — 한 인물이 두
+            # 노드로 들어와 있다는 뜻이다. 합치는 건 여기서 하지 않는다.
+            print(f"\n  ⚠ 같은 이름의 노드가 이미 있는 경우 {len(report.collisions)}건"
+                  f" — 중복 의심, 합치지는 않았습니다:")
+            for node_id, label, twin in report.collisions[:10]:
+                print(f"    {label}: {node_id} ↔ {twin}")
+
+        rest = report.remaining
+        if rest:
+            by_type: dict[str, int] = {}
+            for _, ntype, _ in rest:
+                by_type[ntype] = by_type.get(ntype, 0) + 1
+            shape = " · ".join(f"{t} {n:,}" for t, n in sorted(
+                by_type.items(), key=lambda kv: -kv[1]))
+            print(f"\n  아직 한글이 없는 노드 {len(rest):,}개 — {shape}")
+            print("    대부분 한자 없이 로마자 표기만 있는 근현대 인물이라"
+                  " 음절을 복원할 근거가 없습니다.")
+            if args.list_remaining:
+                for node_id, ntype, label in rest:
+                    print(f"    {ntype:<7} {node_id:>16}  {label}")
+        else:
+            print("\n  한글이 없는 노드가 없습니다.")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """그래프 탐색 화면을 띄운다."""
     from . import server
@@ -786,6 +848,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="채울 노드 타입 (기본: 인물 제외 — 인물은 28,961개라 따로 돌린다)")
     p_al.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_al.set_defaults(func=cmd_aliases)
+
+    p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
+    p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,
+                      help=f"한국어 라벨 표 (기본 {DEFAULT_LABELS.name})")
+    p_rl.add_argument("--dry-run", action="store_true", help="바꾸지 않고 계획만 출력")
+    p_rl.add_argument("--list-remaining", action="store_true",
+                      help="아직 영문인 노드를 전부 나열 (표에 더 적을 때)")
+    p_rl.set_defaults(func=cmd_relabel)
 
     p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
     p_sv.add_argument("--era", default="joseon", help="띄울 시대 그래프 (data/{era}.sqlite)")

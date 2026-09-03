@@ -1,0 +1,472 @@
+# 한국어 라벨 덮어쓰기 표 — `python3 -m histgraph relabel` 이 읽는다.
+#
+# Wikidata 라벨 서비스는 "ko,en" 으로 물어보므로 한국어 라벨이 없는 개체만
+# 영어로 들어온다. 그런 노드가 전체 그래프에 1,490개, 조선 그래프에 32개
+# 있었다 (2026-09-03 실측). 대부분은 Wikidata 에 한국어 라벨·별칭·한국어
+# 위키백과 문서가 아예 없어서 (실측: 1,480개 중 한글 라벨을 새로 얻을 수
+# 있는 건 2개뿐) 다시 수집해도 영어 그대로다. 그래서 여기에 손으로 적는다.
+#
+# 형식: QID <TAB> 한국어 라벨 <TAB> 근거
+#   근거 칸에 어디서 나온 이름인지 적는다. 한자(ja=/zh=)가 근거면 그 한자를
+#   그대로 옮겼다는 뜻이고, '로마자'면 로마자 표기를 음역했다는 뜻 —
+#   후자는 한자 확인 없이 적은 것이니 의심스러우면 이 칸부터 볼 것.
+#
+# 원칙:
+#   · 한국·중국 인물의 한자 이름은 한국 한자음으로 읽는다 (趙秉昌→조병창).
+#   · 일본 인물·지명은 일본어 발음을 음역한다 (加藤清忠→가토 기요타다) —
+#     이미 그래프에 들어와 있는 '가토 기요마사'와 표기를 맞춘 것.
+#   · 근거가 없는 것은 적지 않는다. 로마자만 있고 한자가 없는 현대 인물
+#     1,200여 명(대부분 남북한 체육인·관료)은 음절 복원이 갈려서 뺐다.
+#     relabel 이 끝나고 '아직 영문인 노드' 수를 찍는 이유가 그것이다.
+
+### 사건 ------------------------------------------------------------
+Q108523769	경복궁 점령 사건	ja=朝鮮王宮占領事件 · 1894년 일본군의 경복궁 점령
+Q11086182	조일 무역	ja=日朝貿易
+Q11510264	신라·일본 관계	ja=日羅関係
+Q139892746	평양성 포위전	고구려-당 전쟁의 전투
+Q1588702	조선의 류큐 사행	en=Joseon missions to the Ryukyu Kingdom
+Q2887845	안북부 전투	1231년 고려-몽골 전쟁
+Q5644543	가토 기요마사의 함경도 침공	ja=咸鏡道経略 · zh=加藤清正入侵咸镜道
+Q6202487	신라의 진한 병합	ja=新羅の辰韓統一
+Q70585589	단종 복위 운동	en=Sayuksin assassination plot · 1456년 사육신 · 이미 있는 ex:event:단종 복위 운동 과 같은 이름으로 맞춰 뒀다
+Q85881723	김홍륙 독차 사건	ja=毒茶事件 · 1898년
+Q105888744	성 도덕	en=sexual morality
+Q108625222	조손 관계	en=grandparent-grandchild relationship
+Q112056237	섭식 거부	en=food refusal
+Q1239812	필멸성	en=mortality
+Q1334052	부모-자녀 관계	en=parent-child relationship
+Q1415338	범죄 수사	en=criminal investigation
+Q18386464	초자연적 치유	en=supernatural healing
+Q1956046	모성	ja=母性
+Q20888800	상실	en=loss
+Q2910239	상류 사회	ja=上流社会
+Q3485507	음식 공포증	en=cibophobia
+Q359385	무죄	en=innocence
+Q65088305	계급 관계	zh=阶级间关系
+Q114717220	2004년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2004
+Q114717229	2013년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2013
+Q114717230	2014년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2014
+Q114717231	2015년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2015
+Q114717232	2016년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2016
+Q114717233	2017년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2017
+Q114717234	2018년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2018
+Q114717235	2019년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2019
+Q114717236	2020년 세계경제포럼 연차총회	ja=世界経済フォーラム年次総会2020
+Q116672237	2021년 IMF 연차총회	en=IMF 2021 Annual Meetings
+Q116790970	2015년 세계정부정상회의	en=World Government Summit 2015
+Q11981770	1988년 추기경 회의	en=Consistory - 1988
+Q11981775	1985년 추기경 회의	en=Consistory - 1985
+Q11981778	2003년 추기경 회의	en=Consistory - 2003
+Q16160019	1979년 추기경 회의	en=Consistory - 1979
+Q16160036	1983년 추기경 회의	en=Consistory - 1983
+Q16160069	1991년 추기경 회의	en=Consistory - 1991
+Q16160102	1994년 추기경 회의	en=Consistory - 1994
+Q16160119	1998년 추기경 회의	en=Consistory - 1998
+Q25419240	2001년 추기경 회의	en=Consistory - 2001
+Q65173652	1967년 추기경 회의	en=Consistory - 1967
+Q137888482	제2차 바티칸 공의회 제1회기	en=Second Vatican Council: Session One
+Q137888514	제2차 바티칸 공의회 제2회기	en=Second Vatican Council: Session Two
+Q137892636	제2차 바티칸 공의회 제3회기	en=Second Vatican Council: Session Three
+Q137892806	제2차 바티칸 공의회 제4회기	en=Second Vatican Council: Session Four
+Q2019678	1823년 콘클라베	zh=1823年教宗選舉秘密會議
+Q2209841	1830~1831년 콘클라베	zh=1830年至1831年教宗選舉秘密會議
+Q2448354	1829년 콘클라베	zh=1829年教宗選舉秘密會議
+Q1428113	1991년 세계 청년 대회	zh=1991年世界青年日
+Q2705677	1995년 세계 청년 대회	zh=1995年世界青年日
+Q3765905	1985년 세계 청년 대회	en=World Youth Day 1985
+Q2099655	교황 요한 바오로 2세의 영국 방문	en=Pope John Paul II's visit to the United Kingdom
+Q65175176	요한 바오로 2세의 그리스·시리아·몰타 사목 방문	en=Apostolic Journey of John Paul II to Greece, Syria and Malta
+Q86687266	요한 바오로 2세의 보스니아 헤르체고비나 사목 방문	en=Apostolic Journey of John Paul II to Bosnia and Herzegovina
+Q9132314	요한 바오로 2세의 제2차 폴란드 사목 방문	en=2nd apostolic journey to Poland of John Paul II
+Q9136563	요한 바오로 2세의 이스라엘 방문	en=Pope John Paul II visit in Israel
+Q9386425	1982년 요한 바오로 2세 암살 미수 사건	en=Assassination attempt on John Paul II (1982)
+Q1233991	도쿠멘타 8	ja=ドクメンタ8
+Q265395	도쿠멘타 13	ja=ドクメンタ13
+Q3557159	아테네 에피다우로스 페스티벌	ja=アテネ・フェスティバル
+Q9383131	제15회 쇼팽 국제 피아노 콩쿠르	ja=第15回ショパン国際ピアノコンクール
+Q27962823	1984~1988년 누벨칼레도니 사태	en=Political events from 1984 to 1988 in New Caledonia
+Q28104354	프랑스-타히티 전쟁	zh=法國—塔希提戰爭
+
+### 조직·직함 --------------------------------------------------------
+Q105847387	산타 마리아 마조레 대성전 수석사제	en=Archpriest of the Basilica di Santa Maria Maggiore
+Q1072304	최고투자책임자	ja=最高投資責任者
+Q1072363	최고책임자	ja=チーフ・オフィサー
+Q10854400	교황 대표	zh=宗座代表 · 외교 신분이 아닌 교황 사절
+Q113643217	조선-프랑스 친선협회	fr=Association d'amitié Corée-France · 북한 단체
+Q11433206	다이산지	ja=大参事 · 메이지 초기 번(藩)의 직명
+Q114371233	부교구장 대주교	en=coadjutor archbishop
+Q11578531	유수정부	ja=留守政府 · 1871~73년 일본
+Q11604673	세이추구미	ja=精忠組
+Q12087706	왕(王)	zh=王 · 중국 작위
+Q123497071	천주교 서울대교구장	en=Roman Catholic Archbishop of Seoul
+Q124606175	천주교 광주대교구장	en=Roman Catholic Archbishop of Gwangju
+Q124606238	천주교 대구대교구장	en=Roman Catholic Archbishop of Daegu
+Q124607739	덕원 자치수도원구 교구장 서리	en=apostolic administrator of the Territorial Abbey of Tokwon
+Q124607838	천주교 군종교구장	en=Bishop of the Military Ordinariate of Korea
+Q124613685	조선대목구장	en=Vicar Apostolic of Corea (1831~1911)
+Q124613757	경성대목구장	en=Vicar Apostolic of Seoul (1911~1962)
+Q124615051	왜관수도원장	en=abbot of Waegwan
+Q128212331	국제올림픽위원회 위원	ja=国際オリンピック委員会委員
+Q1300660	명예회장	ja=名誉会長
+Q131720477	CERN 평의회	en=CERN Council
+Q135185192	주소련 북한 대사	en=ambassador of North Korea to the Soviet Union
+Q136825075	폴란드 주교회의 부의장	en=Vice-President of the Polish Episcopal Conference
+Q141720	유럽항공수송사령부	ja=欧州航空輸送司令部
+Q15253909	대목구장	en=vicar apostolic
+Q15391457	세계에스페란토협회 임원	en=board member of UEA
+Q15391460	세계에스페란토협회 위원	en=Universal Esperanto Association committee member
+Q15902465	국제대회대학 학장	en=Director of International Congress University
+Q17375334	크라쿠프 대주교	ja=クラクフ大司教
+Q1993358	교구장 서리	zh=宗座署理
+Q19969187	유니세프 친선대사	ja=ユニセフ親善大使
+Q21064806	비빈	ja=側室 · zh=妃嬪
+Q22132694	박물관장	ja=博物館長
+Q29970783	대한민국 대사	ja=大韓民国の大使
+Q30057182	주필리핀 대사	ja=在フィリピン大使
+Q337352	세계과학아카데미	en=The World Academy of Sciences (TWAS)
+Q3603955	아카데미아 티베리나	it=Accademia Tiberina
+Q3866537	유럽수송조정센터	ja=欧州機動調整センター
+Q388338	재무 담당	zh=司庫
+Q48629921	가톨릭 대주교	ja=カトリック大司教
+Q4917916	천주교 마산교구장	en=Roman Catholic Bishop of Masan
+Q50362553	명의 대주교	en=titular archbishop
+Q521227	군비협력합동기구	zh=軍備合作聯合組織 (OCCAR)
+Q5611262	지구관측그룹	zh=地球观测组织 (GEO)
+Q56375643	공사(公使)	zh=公使 · 대사 아래 외교 직급
+Q627468	독일 그리스도교 교회 협의회	en=Association of Christian Churches in Germany
+Q713223	입주 작가	zh=駐村藝術家
+Q7643464	교육감	ja=教育長
+Q777952	강사	zh=講師
+Q823428	국제홀로코스트추모연맹	zh=国际大屠杀纪念联盟 (IHRA)
+Q948657	명의 주교	zh=領銜主教
+Q953302	산 체사레오 인 팔라티오	it=San Cesareo in Palatio · 명의 본당
+
+### 직위 ------------------------------------------------------------
+Q102722649	주오스트리아 대한민국 대사	zh=大韓民國駐奧地利大使
+Q1055894	의원	ja=国民議会議員
+Q106300005	주오스트리아 북한 대사	ja=在オーストリア朝鮮民主主義人民共和国大使
+Q107452718	주방글라데시 대한민국 대사	zh=韓國駐孟加拉國大使
+Q107469280	주태국 교황대사	en=Apostolic Nuncio to Thailand
+Q107490983	주러시아 대한민국 대사	zh=韓國駐俄羅斯大使
+Q108598410	주미국 대한민국 대사	ja=在アメリカ合衆国大韓民国大使
+Q10871666	중서시랑	zh=中書侍郎
+Q109628214	인사혁신처장	en=Minister of Personnel Management (대한민국)
+Q109628235	법제처장	ja=法制処長
+Q110546064	주독일 교황대사	en=apostolic nuncio to Germany
+Q110549020	주방글라데시 교황대사	en=Apostolic Nuncio to Bangladesh
+Q110549609	주네덜란드 교황대사	en=Apostolic Nuncio to the Netherlands
+Q110594781	주우간다 교황대사	en=Apostolic Nuncio to Uganda
+Q110594839	주캄보디아 교황대사	en=Apostolic Nuncio to Cambodia
+Q110610954	주미얀마 교황대사	en=Apostolic Nuncio to Myanmar
+Q112632328	주스리랑카 대한민국 대사	zh=韓國駐斯里蘭卡大使
+Q113947130	재정상	en=Minister of Finance (북한)
+Q113947137	대외무역상	en=Minister of Foreign Trade of North Korea
+Q113947138	보건상	en=Minister of Public Health of North Korea
+Q113947153	원자력공업상	en=Minister of Atomic Energy Industry (북한)
+Q113947226	임업상	en=Minister of Forestry (북한)
+Q113947249	노동상	en=Minister of Labor (북한)
+Q11435430	오고쇼	ja=大御所
+Q11452903	초빙 부교수	ja=客員准教授
+Q114593268	국토환경보호상	en=Minister of Land and Environment Protection (북한)
+Q114593273	육해운상	en=Minister of Land and Maritime Transport (북한)
+Q114593368	전자공업상	en=Minister of the Electronics Industry of North Korea
+Q114593389	수산상	en=Minister of Fisheries of North Korea
+Q114593402	고등교육상	en=Minister of Higher Education of North Korea
+Q114593410	금속공업상	en=Minister of Metal Industry (북한)
+Q114593420	기계공업상	en=Minister of Machine-Building Industry of North Korea
+Q114593431	원유공업상	en=Minister of Crude Oil of North Korea
+Q114593476	조선중앙은행 총재	en=President of the Central Bank (북한)
+Q114593549	교육위원회 위원장	en=President of the Board of Education (북한)
+Q114593575	국가과학기술위원회 위원장	en=Chairperson of the State Science and Technology Commission
+Q114593665	채취공업상	en=Minister of the Extraction Industry of North Korea
+Q114593684	체육상	en=Minister of Sports (북한)
+Q114593691	농업상	en=Minister of Agriculture (북한)
+Q114593693	소비품공업상	en=Minister of Consumer Goods Industry (북한)
+Q114593694	량정상	en=Minister of Food Procurement and Administration (북한)
+Q114593695	지방공업상	en=Minister of Local Industry (북한)
+Q114593697	조선공업상	en=Minister of Shipbuilding (북한)
+Q114594459	국가보위상	en=Minister of State Security (북한)
+Q114595950	국가가격위원회 위원장	en=Chairperson of the State Price Commission
+Q114595955	국가검열위원회 위원장	en=Chairperson of the National Censorship Committee
+Q114595966	수도건설위원회 위원장	en=Chairperson of the Capital Construction Commission
+Q114595971	국가품질감독위원회 위원장	en=Chairperson of the National Quality Management Commission
+Q114595975	조국평화통일위원회 위원장	en=Chairperson of the Committee for the Peaceful Reunification of the Fatherland
+Q114595990	국가우주개발국 국장	ja=国家宇宙開発局局長
+Q115701315	콩고 자유국 국왕	en=Sovereign of the Congo Free State
+Q116158110	주유엔 대한민국 대사	en=Permanent Representative of South Korea to the United Nations
+Q116158116	주슬로베니아 대한민국 대사	en=ambassador of South Korea to Slovenia
+Q117314714	사회부 장관	en=Minister of Social Affairs (대한민국)
+Q117377548	주네팔 북한 대사	en=ambassador of DPR Korea to Nepal
+Q117377552	주네팔 대한민국 대사	en=ambassador of Republic of Korea to Nepal
+Q120792998	북한 최고지도자의 배우자	ja=朝鮮民主主義人民共和国の最高指導者の配偶者
+Q123178661	주체코 북한 대사	en=ambassador of North Korea to the Czech Republic
+Q123938751	주중국 북한 대사	en=ambassador of North Korea to China
+Q132328658	중앙재판소장	ja=中央裁判所長
+Q132329416	내무상	ja=内務相 (북한)
+Q135185077	주러시아 북한 대사	en=ambassador of North Korea to Russia
+Q135827020	FIBA 국제심판	ja=FIBA国際審判員
+Q136682171	FIBA 3x3 국제심판	zh=FIBA3x3國際裁判
+Q136682911	NBA 심판	zh=NBA裁判
+Q1501800	사무총장	zh=總幹事
+Q15143900	유엔 특별보고관	ja=国連特別報告者
+Q16260691	디지털담당 장관	en=Secretary of State for Digital Affairs (프랑스)
+Q18180908	캘리포니아주 하원의원	ja=カリフォルニア州議会下院議員
+Q19698214	인터폴 총재	ja=国際刑事警察機構総裁
+Q2033341	사제급 추기경	ja=司祭枢機卿
+Q20899108	메릴랜드주 주지사 배우자	en=First Spouse of Maryland
+Q21328634	바티칸 시국 교황청 위원회 위원	en=Member of the Pontifical Commission for the Vatican City State
+Q2151172	당연직 상원의원	en=Senator by Right (벨기에)
+Q21519749	도의회 의원	en=provincial council member (벨기에)
+Q2361374	부제급 추기경	ja=助祭枢機卿
+Q26903128	주중화민국 대한민국 대사	zh=韓國駐中華民國大使
+Q26903171	주프랑스 대한민국 대사	zh=韓國駐法國大使
+Q26903172	주캐나다 대한민국 대사	ja=在カナダ大韓民国大使
+Q2824523	이사	zh=理事
+Q29511440	유엔 경제사회이사회 의장	ja=国連経済社会理事会議長
+Q319544	서기	en=secretary · 단체의 집행 직위
+Q3315113	군무대신	ja=戦争大臣
+Q42591216	국제해사기구 사무총장	zh=國際海事組織秘書長
+Q47472704	국제올림픽위원회 윤리위원회 위원장	en=chairperson of the Ethics Commission of the IOC
+Q48136428	주일본 대한민국 대사	ja=駐日大韓民国大使
+Q48300914	조선로동당 선전선동부장	en=Director of the Propaganda and Agitation Department of the WPK
+Q57542435	주국제원자력기구 상주대표	en=Permanent Representative to the IAEA
+Q65083754	일본 추밀원 의장	ja=枢密院議長
+Q6508531	야당 대표	en=Leader of the Opposition (오스트레일리아 수도준주)
+Q6814365	오스트레일리아 수도준주 입법의회 의원	en=member of the ACT Legislative Assembly
+Q7241113	국제형사재판소 소장	ja=国際刑事裁判所所長
+Q965043	국제형사재판소 재판관	ja=国際刑事裁判所裁判官
+Q98704299	최고인민회의 상임위원회 부위원장	en=Vice President of the Presidium of the SPA
+Q98796533	최고인민회의 부의장	en=Vice Chairman of the Supreme People's Assembly
+Q98796817	최고인민회의 상임위원회 서기장	en=Secretary General of the Presidium of the SPA
+Q98803975	황순희 장의위원회 위원	en=member of funeral committee of Hwang Sun-hui
+
+### 장소 ------------------------------------------------------------
+Q10507824	내주(萊州)	ja=莱州 · 중국 주(州)
+Q10825974	탕롱	vi=Thăng Long · 다이비엣 수도
+Q15931753	귀주(貴州)	zh=貴州承宣布政使司 · 명 포정사사
+Q17313809	경조군	zh=京兆郡
+Q11398671	가지야초	ja=加治屋町 (가고시마시)
+Q11447013	묘교지	ja=妙行寺 (나고야)
+Q11466016	야마시타초	ja=山下町 (가고시마시)
+Q11501975	신야시키초	ja=新屋敷町 (가고시마시)
+Q11513510	가스가	ja=春日 (구마모토시)
+Q11524733	도쿄여자의과대학 병원	ja=東京女子医科大学病院
+Q11551221	에바	ja=江波 (히로시마시)
+Q11659550	나니와쓰	ja=難波津 · 고대 일본의 항구
+Q1018575	마르쿠	fr=Marcoux (알프드오트프로방스)
+Q1187224	세위클리	en=Sewickley (펜실베이니아)
+Q124067	젠가	it=Genga (이탈리아)
+Q149059	라바마조비에츠카	pl=Rawa Mazowiecka
+Q1592990	애스터 플레이스	en=Astor Place (맨해튼)
+Q1625887	생장르블랑	fr=Saint-Jean-le-Blanc
+Q1655173	타라이라	es=Taraira (콜롬비아)
+Q1671849	인처스도르프	de=Inzersdorf (빈)
+Q1760484	모코카	pt=Mococa (브라질)
+Q1793482	모르투가바	pt=Mortugaba (브라질)
+Q2003833	마레샬칸지두혼동	pt=Marechal Cândido Rondon
+Q2023296	리치스퀘어	en=Rich Square (노스캐롤라이나)
+Q2027291	다이턴	en=Dighton (캔자스)
+Q20757619	구르자히말	ne=Gurja Himal (네팔)
+Q211121	오브나	fr=Aubenas
+Q259382	뷔시생조르주	fr=Bussy-Saint-Georges
+Q2956357	샹트네쉬르루아르	fr=Chantenay-sur-Loire (낭트)
+Q4116601	셀윈	en=Selwyn (온타리오)
+Q4187759	캄치크	uk=Камчик (오데사주)
+Q429728	마트라이암브레너	de=Matrei am Brenner
+Q5021057	캘리포니아 새크라멘토 주립교도소	en=California State Prison, Sacramento
+Q504854	그레펠핑	de=Gräfelfing
+Q558593	레바흐	de=Lebach
+Q569659	호이젠슈탐	de=Heusenstamm
+Q730506	라컨	nl=Laken · 브뤼셀
+Q829292	샤토뒤루아르	fr=Château-du-Loir
+Q845014	바시	fr=Vassy (칼바도스)
+Q851276	알레그레치	pt=Alegrete (히우그란지두술)
+Q919091	크라스노조르스코예	ru=Краснозёрское
+Q958607	카팡다카노아	pt=Capão da Canoa
+Q995707	로드와르	en=Lodwar (케냐)
+
+### 인물 — 한자 이름 (한국 한자음) ----------------------------------
+Q108276774	서찬	lzh=徐贊 · 원 통사
+Q11095009	박수림	zh=朴秀林
+Q11087790	명빈 김씨	zh=明嬪金氏 (조선 성종)
+Q11451897	종엄	ja=宗厳 · 조선 승려, 1628년 몰
+Q11510262	일라	ja=日羅 · 백제
+Q11647101	김압실	ja=金押実 · 신라
+Q112246639	이정보	en=Yi Chŏngbo · 조선 문신·시조 작가(1693~1766)
+Q118727215	김구진	ja=金仇珍 · 신라
+Q118746975	해구	ja=解丘 · 백제
+Q118746982	지진원	ja=池津媛 · 백제
+Q118746997	과야신라	ja=科野新羅 · 백제 관료
+Q118747068	해수	ja=解須 · 백제
+Q118747081	허세가마	ja=許勢哥麻 · 백제
+Q118747090	사나노아비다	ja=斯那奴阿比多 · 백제
+Q118749634	대회덕	ja=大懐徳
+Q119336243	설복수	ja=偰福寿 · 고려
+Q119343718	왕무	ja=王茂 · 백제
+Q119343720	모유	ja=慕遺 · 백제
+Q119343759	장위	ja=張威 · 백제
+Q119380403	물부마기모	ja=物部麻奇牟 · 백제
+Q119380486	노리사주	ja=努理使主 · 백제
+Q119380489	왕구	ja=王狗 · 백제
+Q119380490	이원	ja=李元 · 고려
+Q119380513	회매	ja=会邁 · 백제
+Q119380514	동리	ja=佟利 · 고구려
+Q119380521	안부견귀	ja=鞍部堅貴 · 백제
+Q119380540	정안나금	ja=定安那錦 · 백제
+Q119380546	물부가비	ja=物部哥非 · 백제
+Q119380547	물부용가다	ja=物部用歌多 · 백제
+Q119380549	귀신(貴信)	ja=貴信 · 백제
+Q119380562	적덕손	ja=嫡徳孫 · 백제
+Q119380563	적막이해	ja=適莫爾解 · 백제
+Q119380629	묘안나	ja=卯安那 · 백제
+Q123270214	김철환	zh=金喆煥 · 조선 유학자
+Q124177953	강현	en=Kang Hyeon · 조선 문신(1650~1733)
+Q128842990	조병창	ja=趙秉昌 · 조선
+Q134264320	배구	ja=裴璆 · 발해
+Q135671837	고식	zh=高植 · 고구려계, 북위
+Q138332371	김일환	zh=金日焕
+Q139494346	양승경	zh=杨承庆 · 발해
+Q139503070	고남용	zh=高南容 · 발해
+Q139503125	왕문구	zh=王文矩 · 발해
+Q139503164	고승조	zh=高承祖 · 발해
+Q139503188	하복연	zh=贺福延 · 발해
+Q139503202	오효신	zh=乌孝慎 · 발해
+Q139503230	이거정	zh=李居正 · 발해
+Q139503259	양성규	zh=杨成规 · 발해
+Q139503262	양중원	zh=杨中远 · 발해
+Q139546436	배정	zh=裴颋 · 발해
+Q139546473	왕구모	zh=王龟谋 · 발해
+Q139669541	의통	zh=義通 · 고려 출신 승려(927~988)
+Q15935143	김흑	zh=金黑 · 조선
+Q16603757	황씨(영락제 후궁)	zh=黄妃
+Q17065208	신광수	zh=申光绥 · 조선
+Q18998408	고형곤	ja=高亨坤
+Q20039717	경동	ja=経東 · 조선 의원(1550년생)
+Q22669111	최석환	en=Ch'oe Sokhwan · 조선 화가(1808년생)
+Q28409203	대일하	zh=大壹夏 · 발해
+Q28519687	비조부	zh=比助夫
+Q28523311	보과공주	zh=寶果公主
+Q28526910	보룡궁주	zh=寶龍宮主 · 신라
+Q28776317	궁인 장씨	zh=宮人張氏
+Q28776969	석명공주	zh=昔明公主 · 신라
+Q38279278	길당	ja=吉唐 · 고려
+Q38279299	나부	ja=羅富 · 고려
+Q38279302	장계	ja=張桂 · 고려
+Q39094770	왕덕수	zh=王德壽
+Q41909310	남병길	zh=南秉吉 · 조선
+Q45361494	강윤	lzh=康允 · 고려
+Q45643302	송유	lzh=宋儒 · 명
+Q45670147	설철독	lzh=偰哲篤 · 원
+Q56345352	오잠	ja=呉岑 · 고려
+Q56739607	최경	en=Ch'oe Kyong · 조선 화원(1484년 몰)
+Q56742600	조속	en=Cho Sok · 조선 화가(1595~1668), 호 창강·취옹
+Q64783956	미마지	ja=味摩之 · 백제 악사
+Q64783967	사택손등	ja=沙宅孫登 · 백제
+Q64783998	길대상	ja=吉大尚 · 백제
+Q65856542	하씨	lzh=何氏 · 송응창의 어머니
+Q65856544	고씨	lzh=顧氏 · 송응창의 부인
+Q67588945	안산군대부인	zh=安山郡大夫人
+Q7317573	임순비	ja=任順妃 · 영락제 후궁
+Q8250236	여첩여	ja=呂婕妤 · 영락제 후궁(1393~1413)
+Q8250397	최혜비	ja=崔恵妃 · 영락제 후궁
+Q8250728	이소의	ja=李昭儀 · 영락제 후궁(1392~1421)
+Q83434603	유택	zh=柳澤 · 고려
+Q84363404	애례부인	zh=愛禮夫人
+Q84511240	마정부인	zh=摩貞夫人
+Q84511282	이리부인	zh=伊利夫人
+Q84511436	장사택	zh=長沙宅
+Q84575461	휴례부인	zh=休禮夫人
+Q84688387	신보왕후	zh=新寶王后
+Q84895344	성목왕후	zh=聖穆王后
+Q84897187	선의태후	zh=宣懿太后
+Q84898301	정계부인	zh=貞繼夫人
+Q88745366	석불가사의	zh=釋不可思議 · 신라 승려
+Q8248683	장수암	zh=张秀岩 · 중국
+Q123243678	이씨 부인	en=Lady Lee · 조선(1811~1897), 김일성의 증조모
+
+### 인물 — 일본 (일본어 발음 음역) ------------------------------------
+Q10379849	엔유인	ja=円融院
+Q10436552	오카메노카타	ja=お亀の方 · 도쿠가와 이에야스의 측실
+Q10502504	에이쇼인	ja=英勝院 · 도쿠가와 이에야스의 측실
+Q10523145	니시노코리노쓰보네	ja=西郡局
+Q10565584	세이조인	ja=清浄院 · 가토 기요마사의 계실
+Q106672357	쇼린인	ja=聖林院 · 가토 기요마사의 어머니
+Q108747110	야마자키 가타이에의 딸	ja=山崎片家の娘 · 가토 기요마사의 정실
+Q109028882	산조도노	ja=三条殿 · 도요토미 히데요시의 측실
+Q10916669	시바 닷토	ja=司馬達等
+Q109658502	마쓰다이라 시게요시의 딸	ja=松平重吉の娘 · 도쿠가와 이에야스의 측실
+Q11360827	시모야마도노	ja=下山殿 · 도쿠가와 이에야스의 측실
+Q11381004	이주인 스가	ja=伊集院須賀
+Q11399392	가토 기요타다	ja=加藤清忠
+Q11407317	미나미노쓰보네	ja=南の局
+Q11458090	데라코시 도모에	ja=寺越友枝
+Q11485492	히로사와노쓰보네	ja=広沢局
+Q11486248	고 요시노리	Wikidata ko 라벨
+Q11516158	겟케이인	ja=月桂院
+Q11520819	혼가쿠인	ja=本覚院 · 가토 기요마사의 측실
+Q11540763	시이하라 마사	ja=椎原政佐
+Q11545468	쇼오인	ja=正応院
+Q11556789	조코인	ja=浄光院 · 가토 기요마사의 측실
+Q11629654	사이고 기치베에	ja=西郷吉兵衛
+Q11666816	요겐인	ja=養儼院 · 도쿠가와 이에야스의 측실
+Q121355551	도쿠가와 요네코	ja=徳川米子
+Q137921489	와타나베 히데코	ja=渡辺秀子
+Q22127641	사이고 이토코	ja=西郷糸子
+Q24865589	산조씨	ja=三条氏
+Q24865819	후쇼인	ja=普照院 · 도쿠가와 이에야스의 측실
+Q24875678	호코인	ja=法光院
+Q24875845	다이에이인	ja=泰栄院
+Q24875863	신주인	ja=信寿院
+Q24875887	쇼에이인	ja=正栄院
+Q24876162	렌게인	ja=蓮華院 · 도쿠가와 이에야스의 측실
+Q24876321	세이운인	ja=清雲院 · 도쿠가와 이에야스의 측실
+Q24877043	아이카나	ja=愛加那
+Q30924817	가와무라 아야나	ja=河村綾奈
+Q50641143	가네다 도모코	ja=金田知子
+Q58139691	히노아시키타노 아리시토	ja=火葦北阿利斯登 · 왜국
+Q6347693	가이히메	ja=甲斐姫
+Q6470026	자아노쓰보네	ja=茶阿局 · 도쿠가와 이에야스의 측실
+Q6993507	요주인	ja=養珠院 · 도쿠가와 이에야스의 측실
+Q9475948	마아히메	ja=摩阿姫 · 마에다 도시이에의 딸
+
+### 인물 — 그 밖 ----------------------------------------------------
+Q10829234	쩐타인	vi=Trấn Thành
+Q104524450	래드퍼드 세크리스트	en=Radford Sechrist
+Q104610498	로이크 장드리	fr=Loïc Gendry
+Q111170877	피에르 샤발	fr=Pierre Chabal
+Q111796389	프랜시스 앤 푸트	en=Frances Anne Foote
+Q112817112	사라웃 라차나꾼	th=Sarawut Rachanakul
+Q113489681	니코스 발사마키스	el=Nikos Valsamakis
+Q117289097	조슈아 캐럿	en=Joshua Carrott
+Q11880945	마리스 고토니	fi=Maris Gothóni
+Q125487412	조애나 박	en=Joana Pak
+Q136700497	니콜 스티븐슨	en=Nicole Stevenson
+Q137883513	줄리아 프라스티니	id=Julia Prastini
+Q3890747	맥스 부트	en=Max Boot
+Q462124	카롤린 라크루아	fr=Caroline Lacroix
+Q475420	파울 자이델	de=Paul Seidel
+Q4506047	세르게이 초이	ru=Сергей Цой
+Q4939946	보로	ja=博洛 · 청 종실 아이신기오로 보로
+Q52041837	헬렌 실빙류	en=Helen Silving-Ryu
+Q705278	올리비에 라트리	fr=Olivier Latry
+Q93428027	프란시스코 카란사 로메로	es=Francisco Carranza Romero
+Q95585442	앤 마리 솔터	en=Anne Marie Salter
+Q97860549	에리크 슈비머	en=Éric Schwimmer
+
+### 인물 — 로마자 표기만 있는 근현대 한국인 --------------------------
+# 한자가 없어 로마자를 음역했다. 음절이 갈릴 수 있는 이름은 적지 않았다.
+Q102176031	김기항	로마자 Ki-hang Kim
+Q103762889	이영자	로마자 Lee Young-ja
+Q106690638	이종곤	zh=李钟坤
+Q107264820	이경령	로마자 Lee Gyeong-ryeong
+Q107264822	육용필	로마자 Yuk Yong-pil
+Q107264826	박영규	로마자 Park Yeong-gyu
+Q108645782	박은경	로마자 Park Eun-kyong
+Q117818404	박진식	로마자 Park Jin-sik
+Q117818436	변금숙	로마자 Byeon Keum-sook
+Q117818588	황옥순	로마자 Hwang Ok-soon
+Q28663892	한성철	로마자 Han Sung-Chul
+Q42418509	고우석	로마자 Go Woo-seok
+Q53679453	김택세	로마자 Kim Thaek-se
+Q76631637	김원주	로마자 Kim Won-ju
+Q76655805	김순금	로마자 Kim Sun-kum

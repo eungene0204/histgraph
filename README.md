@@ -20,12 +20,19 @@ python3 -m histgraph extract --dry-run               # 추출 프롬프트 확�
 python3 -m histgraph extract --min-score 2.0 --limit 50   # 관계 추출 (배치)
 python3 -m histgraph promote --dry-run               # 추출 고아 승격 계획 확인
 python3 -m histgraph promote --prune-orphans         # ex: 노드를 실제 노드로 병합
+python3 -m histgraph relabel                         # 영어로 들어온 이름을 한국어로
 python3 -m histgraph stats                           # 그래프 통계
 python3 -m histgraph show wd:Q37682 --depth 2        # 세종 주변 서브그래프
 python3 -m histgraph serve                           # 브라우저에서 탐색
 ```
 
 **`prune` 은 선택이 아니라 필수입니다.** 아래 "스포츠 오염" 참조.
+
+**`relabel` 은 수집 뒤마다 다시 돌려야 합니다.** `upsert_nodes` 가 라벨을
+통째로 덮어쓰므로, 다시 수집하면 한국어 이름이 영어로 되돌아갑니다. 시대
+그래프는 별도 파일이라 거기에도 한 번 더:
+`python3 -m histgraph --db data/joseon.sqlite relabel`. 아래 "영어로 뜨는
+노드" 참조.
 
 의존성 없음 (Python 3.11+ 표준 라이브러리만 사용).
 
@@ -145,6 +152,41 @@ Wikidata 의 P279* 계층에 직접 물어보는 2차 필터가 필요하다.
 
 인물 28,961명은 기본에서 뺐다 — 배치가 145회라 따로 돌린다
 (`aliases --types person`).
+
+### 영어로 뜨는 노드 (`relabel`)
+
+조선 그래프에서 '왕자의 난'을 따라가면 **`Sayuksin assassination plot`**
+이 나왔다. 한국사 그래프인데 이름이 영어다.
+
+수집 쿼리는 라벨을 `"ko,en"` 으로 물어본다. 한국어 라벨이 없으면 영어가
+오고, 그게 그대로 노드 이름이 된다.
+
+```
+전체 그래프의 영문 노드   1,490개   (인물 1,209 · 직위 98 · 사건 72 · …)
+조선 그래프의 영문 노드      32개   ← 화면이 읽는 것은 이쪽
+```
+
+**다시 수집해도 안 고쳐진다.** 그 1,480개(wd 소스)를 상대로
+`rdfs:label(ko)`·`skos:altLabel(ko)`·한국어 위키백과 사이트링크를 전부 다시
+물어봤더니 새로 한글 이름을 얻을 수 있는 건 **2개**뿐이었다. 나머지는
+Wikidata 에 한국어 이름이 아예 없다.
+
+그래서 이름을 손으로 적은 표(`data/ko_labels.tsv`, 435개)를 두고
+`relabel` 이 덮어쓴다. 표에는 근거 칸이 있다 — 그 이름이 어디서 나왔는지
+(`ja=趙秉昌`, `zh=金喆煥`, `로마자 Kim Won-ju`) 적어 두고, 의심스러우면
+그 칸부터 본다. 한국·중국 인물의 한자는 한국 한자음으로 읽고
+(趙秉昌→조병창), 일본 인물·지명은 일본어 발음을 음역한다
+(加藤清忠→가토 기요타다).
+
+**바꾼 이름이 중복을 드러낸다.** `Cho Sok` 을 조속으로 고치자 1595~1668년
+생몰이 같은 `조속` 노드가 이미 있었다. 이정보·남병길·미마지도 그랬다 —
+Wikidata 에 같은 인물이 두 항목으로 있는 것이다. `relabel` 은 이걸
+**보고만 하고 합치지 않는다**; 합치는 규칙은 `promote` 쪽에 있다.
+
+**남은 1,055개는 적지 않았다.** 대부분 한자 없이 로마자 표기만 있는
+근현대 남북한 인물이라(`Pak Chung-il`) 음절 복원이 갈린다. 근거 없이 적는
+대신 `relabel` 이 끝날 때마다 남은 수를 찍는다. 화면이 읽는 조선 그래프는
+0개다.
 
 ### 물어보고 답을 버리면 없는 것이 된다 (사건의 정체)
 
@@ -774,6 +816,7 @@ src/histgraph/
 ├── promote.py    추출 고아(ex:) 노드 타입 교정 · 병합 · 승격
 ├── timeline.py   연도를 일급 개체로 정규화
 ├── scope.py      시대별 서브그래프 추출
+├── labels.py     한국어 라벨 덮어쓰기 (data/ko_labels.tsv 적용, 멱등)
 ├── server.py     탐색 API + 정적 서빙 (표준 라이브러리만)
 ├── cli.py        doctor / ingest / prune / resolve / extract / promote / serve / …
 └── sources/

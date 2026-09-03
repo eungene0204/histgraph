@@ -11,7 +11,7 @@
 조선 그래프   노드  7,094 · 엣지 13,224 · 별칭 3,153 (data/joseon.sqlite)
 추출 고아     ex: 노드 288 (598에서 감소)
 화면          python3 -m histgraph serve  →  http://127.0.0.1:8100 (이 프로젝트 전용 포트)
-테스트        356/356 통과   PYTHONPATH=src python3 tests/test_pipeline.py
+테스트        371/371 통과   PYTHONPATH=src python3 tests/test_pipeline.py
 ```
 
 엣지 수가 줄어든 것은 **자기순환 1,258건을 지웠기 때문**이다. `timeline`
@@ -28,6 +28,33 @@
 | LLM 추출 (로컬 MLX) | 키 불필요 | 관계 965건 (participated_in 454) |
 | 승격 보강 (`promote`) | 불필요 | 신규 노드 69 · 관계 189건 |
 | 공공데이터포털 / 문화광장 | **활용신청 대기** | 0 |
+
+## 2026-09-03 — 영어로 뜨는 노드 (`relabel`)
+
+조선 그래프의 '왕자의 난' 옆에 `Sayuksin assassination plot` 이 떠 있었다.
+수집 쿼리가 라벨을 `"ko,en"` 으로 물어보기 때문에, 한국어 라벨이 없는
+개체는 영어 이름이 그대로 노드 이름이 된다 (전체 1,490개 · 조선 32개).
+
+**다시 수집하는 것으로는 안 고쳐진다.** 영문 노드 1,480개에 대해
+`rdfs:label(ko)`·`skos:altLabel(ko)`·한국어 위키백과 사이트링크를 다시
+물어봤더니 새 이름을 얻을 수 있는 건 2개뿐이었다.
+
+- `data/ko_labels.tsv` — 손으로 적은 이름 435개. `QID⇥한국어⇥근거` 형식이고
+  **근거 칸을 반드시 채운다**(`ja=趙秉昌`, `zh=金喆煥`, `로마자 Kim Won-ju`).
+  의심스러운 이름은 그 칸부터 볼 것.
+- `histgraph relabel` — 표를 덮어쓰고, 옛 영어 이름은 별칭으로 남긴다
+  (`Sayuksin` 으로도 계속 검색된다). 멱등.
+- **수집·scope 뒤마다 다시 돌릴 것.** `upsert_nodes` 가
+  `label = excluded.label` 로 덮어쓰므로 영어로 되돌아간다.
+
+**부수 효과 — 중복이 드러난다.** `Cho Sok`→조속으로 고치자 생몰(1595~1668)
+이 같은 `조속` 노드가 이미 있었다. 이정보·남병길·미마지·해구·해수도 같다.
+`relabel` 은 보고만 하고 합치지 않는다(합치는 규칙은 `promote` 쪽).
+**24건이 보고돼 있고 아직 아무도 확인하지 않았다.**
+
+**남은 1,055개는 적지 않았다.** 한자 없이 로마자만 있는 근현대 남북한
+인물이라(`Pak Chung-il`) 음절 복원이 갈린다. 조선 그래프는 0개이므로
+화면에서는 보이지 않는다. 다음에 손대려면 `relabel --list-remaining`.
 
 ## 2026-09-03 — 연표 줌: 멀리서는 큰 사건만, 가까이 가면 전부
 
@@ -492,6 +519,8 @@ PYTHONPATH=src python3 tools/backfill_event_polity.py --apply   # 사건의 정�
 python3 -m histgraph aliases                     # 한국어 별칭 (skos:altLabel)
 python3 -m histgraph timeline                    # 연도 정규화 (승격 뒤에)
 python3 -m histgraph scope joseon                # 시대별 서브그래프 (맨 끝)
+python3 -m histgraph relabel                     # 영문 라벨 → 한국어 (표 덮어쓰기)
+python3 -m histgraph --db data/joseon.sqlite relabel     # 시대 그래프에도 한 번 더
 python3 -m histgraph serve                       # 화면 (조선 그래프를 읽는다)
 ```
 

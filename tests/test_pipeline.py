@@ -1526,5 +1526,72 @@ with tempfile.TemporaryDirectory() as tmp:
     check("두 번 돌려도 더 지울 게 없다", not audit_facts(store)["drops"])
     store.close()
 
+# --- 한국어 라벨 덮어쓰기 ------------------------------------------------
+# 실측 회귀: 조선 그래프에 'Sayuksin assassination plot' 이 떠 있었다.
+# 수집이 라벨을 덮어쓰므로 이 단계는 몇 번이고 다시 돈다 — 멱등해야 한다.
+from histgraph import labels as labels_mod  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    table = Path(tmp) / "ko.tsv"
+    table.write_text(
+        "# 주석과 빈 줄은 건너뛴다\n\n"
+        "Q70585589\t사육신의 단종 복위 운동\ten=Sayuksin assassination plot\n"
+        "Q1\t대한제국\n"          # 근거 칸은 없어도 된다
+        "Q404\t없는 노드\t표에만 있는 QID\n",
+        encoding="utf-8",
+    )
+    rows = labels_mod.load_table(table)
+    check("표를 읽는다 (주석·빈 줄 제외)", len(rows) == 3, str(len(rows)))
+    check("근거 칸은 없어도 된다", rows[1].label == "대한제국")
+
+    for broken, why in [
+        ("Q1\t\n", "라벨이 비었다"),
+        ("wd:Q1\t라벨\n", "QID 형식이 아니다"),
+        ("Q1\tlabel\n", "한글이 없다"),
+        ("Q1\t가\nQ1\t나\n", "같은 QID 가 두 번"),
+    ]:
+        bad = Path(tmp) / "bad.tsv"
+        bad.write_text(broken, encoding="utf-8")
+        try:
+            labels_mod.load_table(bad)
+            check(f"깨진 표를 거른다 ({why})", False, "예외가 안 났다")
+        except labels_mod.LabelTableError:
+            check(f"깨진 표를 거른다 ({why})", True)
+
+    store = GraphStore(Path(tmp) / "lb.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q70585589", type="event", label="Sayuksin assassination plot",
+             source="wd", start_date="1456"),
+        Node(id="wd:Q1", type="period", label="Q1", source="wd"),
+        Node(id="wd:Q9", type="event", label="사육신의 단종 복위 운동", source="wd"),
+    ])
+    report = labels_mod.apply_overrides(store.conn, rows, dry_run=True)
+    check("dry-run 은 라벨을 건드리지 않는다",
+          store.conn.execute("SELECT label FROM nodes WHERE id='wd:Q70585589'")
+          .fetchone()[0] == "Sayuksin assassination plot")
+    check("dry-run 도 적용 뒤에 남는 것을 센다", report.remaining == [], str(report.remaining))
+
+    report = labels_mod.apply_overrides(store.conn, rows)
+    labels = dict(store.conn.execute("SELECT id, label FROM nodes"))
+    check("영문 라벨을 한국어로 바꾼다",
+          labels["wd:Q70585589"] == "사육신의 단종 복위 운동", str(labels))
+    check("옛 이름은 별칭으로 남는다",
+          ("wd:Q70585589", "Sayuksin assassination plot") in
+          {tuple(r) for r in store.conn.execute("SELECT node_id, alias FROM aliases")})
+    check("QID 가 라벨이던 노드는 별칭을 남기지 않는다",
+          not store.conn.execute(
+              "SELECT 1 FROM aliases WHERE node_id='wd:Q1'").fetchone())
+    check("표에만 있고 그래프에 없는 QID 는 보고한다", report.absent == ["Q404"])
+    check("같은 이름이 이미 있으면 중복으로 보고한다",
+          report.collisions == [("wd:Q70585589", "사육신의 단종 복위 운동", "wd:Q9")],
+          str(report.collisions))
+
+    again = labels_mod.apply_overrides(store.conn, rows)
+    check("두 번째부터는 바꿀 게 없다 (멱등)",
+          again.applied == [] and again.already == 2, str(again.already))
+    check("두 번째에는 중복 경고도 다시 뜨지 않는다", again.collisions == [])
+    store.close()
+
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
