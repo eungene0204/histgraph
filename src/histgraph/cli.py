@@ -1024,6 +1024,81 @@ def cmd_links(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_precision(args: argparse.Namespace) -> int:
+    """연도만 아는 날짜에서 지어낸 1월 1일을 걷어낸다 (P585 등의 자릿수).
+
+    **Wikidata 는 '1592년'을 '1592-01-01' 로 준다.** 자릿수(9=연)는 값이
+    아니라 문장에 붙어 있는데 `wdt:` 로 긁는 우리 수집은 값만 가져왔다.
+    그래서 DB 에는 연도만 아는 날이 전부 1월 1일로 앉아 있다 (실측: 전체
+    그래프에서 시작일이 1월 1일인 노드 7,117개).
+
+    연표가 몰린 해를 늘려 세우기 전에는 티가 안 났다. 늘려 세우고 나니
+    그 안의 **차례가 곧 시간 순으로 읽히는데**, 지어낸 1월 1일이 4월의
+    동래성 전투보다 앞에 서면 없는 날짜로 순서를 말한 것이 된다.
+
+    자릿수만큼 잘라 부분 날짜로 되돌린다 — '1592', '1592-09'. 스키마는
+    처음부터 부분 날짜를 허용하고(`ontology.Node`), 연도를 읽는 쪽은 전부
+    앞 네 자리만 보므로 나머지 파이프라인은 그대로다.
+
+    **수집 뒤에 다시 돌릴 것.** `upsert_nodes` 의 날짜 칸은 새 값이 있으면
+    덮어쓰므로, 다시 수집하면 1월 1일이 되돌아온다 (`reigns` 와 같다)."""
+    with GraphStore(args.db) as store:
+        # 날이 01 인 것만 후보다. 다른 날짜는 이미 일 단위로 아는 값이다.
+        rows = store.conn.execute(
+            """SELECT id, label, start_date, end_date FROM nodes
+                WHERE id LIKE 'wd:%'
+                  AND (start_date LIKE '%-01' OR end_date LIKE '%-01')"""
+        ).fetchall()
+        if not rows:
+            print("  1월 1일로 앉은 날짜가 없습니다.")
+            return 0
+        print(f"  날이 01 인 노드 {len(rows):,}개 — 자릿수 조회 중...")
+
+        fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.5))
+        failures: list[str] = []
+        precision = wikidata.fetch_date_precision(
+            fetcher, [r["id"][len("wd:"):] for r in rows], failures=failures
+        )
+
+        # 고칠 것을 다 모아 한 번에 쓴다. 원본 DB 에는 다른 세션의 `extract`
+        # 가 붙어 있을 수 있어, 쓰기 잠금을 오래 쥐고 있으면 그쪽이 죽는다.
+        updates: list[tuple[str | None, str | None, str]] = []
+        shown = 0
+        for r in rows:
+            known = precision.get(r["id"][len("wd:"):], {})
+            start = wikidata.trim_to_precision(
+                r["start_date"], known.get(r["start_date"])
+            )
+            end = wikidata.trim_to_precision(r["end_date"], known.get(r["end_date"]))
+            if (start, end) == (r["start_date"], r["end_date"]):
+                continue
+            updates.append((start, end, r["id"]))
+            if shown < 12:
+                shown += 1
+                # 시작만 적으면 끝만 줄어든 줄이 '안 바뀐 것'처럼 보인다
+                print(f"    {r['label'][:18]:20}"
+                      f" {r['start_date'] or '?'}~{r['end_date'] or '?'}"
+                      f"  ->  {start or '?'}~{end or '?'}")
+        if not args.dry_run and updates:
+            store.conn.executemany(
+                "UPDATE nodes SET start_date = ?, end_date = ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                updates,
+            )
+            store.conn.commit()
+
+        trimmed = len(updates)
+        head = "줄일 날짜" if args.dry_run else "줄인 날짜"
+        # 자릿수를 못 받은 노드도 센다. 조용히 넘어가면 '고칠 게 없었다'와
+        # '못 물어봤다'가 같은 얼굴로 나온다.
+        unknown = sum(1 for r in rows if r["id"][len("wd:"):] not in precision)
+        print(f"\n  {head} {trimmed:,}건 / 후보 {len(rows):,}건"
+              f" · 자릿수를 못 받은 노드 {unknown:,}개")
+        if failures:
+            print(f"  실패한 쿼리 {len(failures)}건: " + " · ".join(failures[:5]))
+    return 0
+
+
 def cmd_reigns(args: argparse.Namespace) -> int:
     """왕의 재위 기간을 held_position 엣지에 채운다.
 
@@ -1470,6 +1545,13 @@ def main(argv: list[str] | None = None) -> int:
     p_rg.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_rg.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_rg.set_defaults(func=cmd_reigns)
+
+    p_pr = sub.add_parser(
+        "precision",
+        help="연도만 아는 날짜의 지어낸 1월 1일을 걷어낸다 (수집 뒤마다)")
+    p_pr.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
+    p_pr.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
+    p_pr.set_defaults(func=cmd_precision)
 
     p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
     p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,

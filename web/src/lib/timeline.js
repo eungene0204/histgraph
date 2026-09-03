@@ -7,11 +7,15 @@
 //
 // **자리는 연도에 비례한다.** 목록으로 늘어놓으면 1400년과 1401년 사이가
 // 1400년과 1500년 사이와 똑같이 벌어져, 연표라고 부를 수 없게 된다.
-// 다만 라벨은 겹치면 못 읽으므로 밀어서 떨어뜨리고, 실제 자리와 밀린
-// 자리는 가는 실선으로 이어 둔다 — 어긋난 만큼이 눈에 보여야 속지 않는다.
-// 그 선에 노드 색을 쓰지 않는 이유는 관계선으로 읽히기 때문이다 (실측:
-// 1398년에 나란히 선 '왕자의 난'과 '제1차 왕자의 난'이 이어진 것으로
-// 보였는데, 그때 그래프에는 둘 사이에 엣지가 하나도 없었다).
+//
+// **몰린 해는 라벨이 아니라 자가 양보한다.** 라벨은 겹치면 못 읽으니 한
+// 해에 사건이 수십이면 어딘가는 물러나야 한다. 예전에는 라벨을 밀어냈는데,
+// 그러면 밀린 라벨만 제 해를 떠나고 왼쪽 재위 띠는 제 해에 남아 둘이
+// 갈라진다 (실측: 임진왜란 한 해에 사건이 38건이라 1594~1597년 전투들이
+// 1700px — 그 눈금으로 73년치 — 아래로 밀려, 효종(1649~1659)의 막대 옆에
+// 섰다). 그래서 미는 대신 **그 해를 늘린다**: 1592년이 1140px 를 차지하고,
+// 재위 띠도 같은 자를 쓰니 선조의 막대가 그 1140px 를 함께 지난다.
+// 밀어낼 것이 없으므로 축과 라벨의 어긋남은 0 이다 (buildScale).
 //
 // **눈금은 하나다 — 가장 촘촘한 자리에 고정한다.** 줌은 걷어냈고, 남긴
 // 쪽은 '전부 세우는' 눈금이다. 연대를 아는 사건은 하나도 물러나지 않는다
@@ -38,12 +42,11 @@ const LANE_GAP = 26;
 const PANEL_W = 252;  // 띠를 뺀 연표 패널의 너비 (style.css 와 같은 값)
 
 const AXIS_X = 46;    // 세로축이 서는 자리 (왼쪽은 연도 칸) — 띠 너비만큼 밀린다
-const DOT_X = 58;     // 라벨이 시작하는 자리
 const PAD_TOP = 18;   // 첫 표시가 머리에 붙지 않게
 // 아래는 넉넉히 둔다. 마지막 사건이 축 끝에 딱 붙으면 스크롤을 끝까지
 // 내려도 패널 바닥과 '더 있다'는 그림자(28px)에 눌려 반쯤 지워진다.
 const PAD_BOTTOM = 64;
-const GAP = 30;       // 라벨 두 줄이 서로를 가리지 않는 최소 간격
+const GAP = 30;       // 라벨 한 줄이 먹는 높이 — 몰린 해는 이만큼씩 늘어난다
 
 // 눈금. 시대 전체가 한 화면에 들어오는 배율의 16배다 — 줌이 있던 시절의
 // 마지막 단계와 같은 촘촘함이고, 조선(567년)이면 패널 760px 기준 약 19px/년.
@@ -51,6 +54,70 @@ const ZOOM = 16;
 // 안전판. 시대를 나누지 않은 전체 그래프는 기원전까지 걸쳐 있어 이 눈금에서
 // 끝없이 길어진다.
 const MAX_HEIGHT = 40000;
+
+// 눈금 — 해를 픽셀로 옮기는 자. **띠도 라벨도 이 자 하나만 쓴다.**
+//
+// 한 해에 내주는 높이는 `max(rate, 그 해의 라벨 수 x GAP)` 이다. 사건이
+// 없는 해는 rate 만큼(조선~근현대 900년이면 11px 남짓) 비례해서 지나가고,
+// 몰린 해만 라벨이 다 설 만큼 늘어난다. 그래서 100년이 1년처럼 보이는 일도
+// 없고, 라벨이 제 해를 떠나는 일도 없다.
+//
+// DOM 을 안 쓰는 순수 함수다 — 축과 라벨이 어긋나는지는 브라우저 없이
+// 재야 한다 (tests/layout.test.mjs).
+export function buildScale(marks, { from, to, base }) {
+  const span = Math.max(to - from, 1);
+  // 그 해가 라벨에 내줘야 할 높이. 라벨은 이 안에서만 선다.
+  const need = new Float64Array(span + 1);
+  for (const m of marks) need[clamp(m.year, from, to) - from] += GAP;
+
+  const total = (rate) => {
+    let sum = PAD_TOP + PAD_BOTTOM;
+    for (let i = 0; i < span; i++) sum += Math.max(rate, need[i]);
+    return sum;
+  };
+  // 늘리다 보면 끝없이 길어질 수 있다 (기원전까지 걸친 전체 그래프).
+  // 라벨 자리는 줄일 수 없으니 **빈 해의 몫**만 깎아 상한에 맞춘다.
+  let rate = base / span;
+  if (total(rate) > MAX_HEIGHT) {
+    let lo = 0;
+    let hi = rate;
+    for (let k = 0; k < 40; k++) {
+      const mid = (lo + hi) / 2;
+      if (total(mid) > MAX_HEIGHT) hi = mid;
+      else lo = mid;
+    }
+    rate = lo;
+  }
+
+  const pos = new Float64Array(span + 1);
+  pos[0] = PAD_TOP;
+  for (let i = 0; i < span; i++) pos[i + 1] = pos[i] + Math.max(rate, need[i]);
+  return { from, to, H: pos[span] + PAD_BOTTOM, pos };
+}
+
+// 라벨 자리. marks 는 sortMarks 로 세운 차례여야 한다 — 같은 해는 그
+// 차례대로 GAP 씩 내려 선다. 그 해에 내준 높이가 곧 라벨 수 x GAP 이라
+// 다음 해를 침범하지 않는다.
+export function placeMarks(marks, { from, to, pos }) {
+  let year = null;
+  let nth = 0;
+  return marks.map((m) => {
+    const y = clamp(m.year, from, to);
+    if (y !== year) { year = y; nth = 0; }
+    return { m, y: pos[y - from] + nth++ * GAP };
+  });
+}
+
+// 한 해가 늘어나면 그 안의 **차례가 곧 시간 순으로 읽힌다.** 그러니 같은
+// 해는 가나다가 아니라 날짜로 세운다 (실측: 1592년 38건이 가나다순이라
+// 부산진 전투(5월)가 한산도 대첩(7월)보다 아래에 섰다). 날짜를 모르는
+// 것은 앞에 둔다 — 위키데이터는 연도만 아는 날을 1월 1일로 적어 보내므로
+// 달을 따로 적어 주지는 않는다.
+export function sortMarks(marks) {
+  return [...marks].sort((a, b) => a.year - b.year
+    || String(a.date || '').localeCompare(String(b.date || ''))
+    || a.label.localeCompare(b.label, 'ko'));
+}
 
 export class TimelineRail {
   constructor(root, { onPick } = {}) {
@@ -66,8 +133,8 @@ export class TimelineRail {
       this.showReigns = localStorage.getItem('tl-reigns') !== '0';
     } catch { /* 비공개 창 등 */ }
     this.focusPy = 0;
-    // 지금 배치의 축 — 연도 <-> 픽셀 환산에 쓴다
-    this.axis = { from: 0, to: 1, H: 1 };
+    // 지금 배치의 축 — 연도 <-> 픽셀 환산에 쓴다 (pos: 해마다의 y)
+    this.axis = { from: 0, to: 1, H: 1, pos: new Float64Array([0, 1]) };
 
     // 재위 막대와 띠 라벨도 노드다 — 누르면 그 임금으로 옮긴다.
     this.body.addEventListener('click', (ev) => {
@@ -171,14 +238,23 @@ export class TimelineRail {
     this.layout({ keepView: true });
   }
 
+  // 해 -> 픽셀. 재위 띠도 사건 점도 이걸 쓴다 (buildScale 주석 참고).
   yOf(year) {
-    const { from, to, H } = this.axis;
-    return PAD_TOP + (clamp(year, from, to) - from) / Math.max(to - from, 1) * (H - PAD_TOP - PAD_BOTTOM);
+    const { from, to, pos } = this.axis;
+    return pos[clamp(Math.round(year), from, to) - from];
   }
 
+  // 픽셀 -> 해. 눈금이 고르지 않으니 나누기가 아니라 표를 되짚는다.
   yearAt(y) {
-    const { from, to, H } = this.axis;
-    return from + (y - PAD_TOP) / Math.max(H - PAD_TOP - PAD_BOTTOM, 1) * (to - from);
+    const { from, to, pos } = this.axis;
+    let lo = 0;
+    let hi = to - from;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (pos[mid] <= y) lo = mid;
+      else hi = mid - 1;
+    }
+    return from + lo;
   }
 
   // --- 몸통: 비례 배치 --------------------------------------------------
@@ -198,36 +274,22 @@ export class TimelineRail {
     const lane = this.lane = this.showReigns && reigns.length ? LANE_W : 0;
     this.root.style.width = `${PANEL_W + lane}px`;
     const AX = lane + AXIS_X;
-    const DX = lane + DOT_X;
 
     const { from, to } = d.axis;
-    const span = Math.max(to - from, 1);
     const bodyH = this.body.clientHeight || 600;
-    const scale = (bodyH - PAD_TOP - PAD_BOTTOM) / span * ZOOM;
-    let H = Math.min(MAX_HEIGHT, span * scale + PAD_TOP + PAD_BOTTOM);
-    // 전부 세우므로 라벨이 다 들어갈 만큼은 늘린다. 안 그러면 밀어낼
-    // 자리가 없어 끝에서 겹친다.
-    H = Math.max(H, marks.length * GAP + PAD_TOP + PAD_BOTTOM);
-    this.axis = { from, to, H };
-    const at = (year) => this.yOf(year);
 
     // --- 누가 서는가 ---------------------------------------------------
     // 전부 선다. 고른 노드도 왕조도 이웃도 배경이 된 큰 사건도 가리지
-    // 않는다 — 눈금을 가장 촘촘한 자리에 고정했으므로 자리를 다툴 일이
-    // 없고, 그래도 겹치면 아래에서 밀어서 떨어뜨린다.
-    const visible = [...marks]
-      .sort((a, b) => a.year - b.year || a.label.localeCompare(b.label, 'ko'));
+    // 않는다 — 몰린 해는 그 해가 늘어나 자리를 내주므로 다툴 일이 없다.
+    const visible = sortMarks(marks);
 
-    // 실제 자리(ty)를 잡고, 겹치면 아래로 민다. 끝에서 넘치면 위로 되민다.
-    const place = visible.map((m) => ({ m, ty: at(m.year), py: 0 }));
-    let prev = -Infinity;
-    for (const p of place) p.py = prev = Math.max(p.ty, prev + GAP);
-    let next = H - PAD_BOTTOM + GAP;
-    for (let i = place.length - 1; i >= 0; i--) {
-      place[i].py = next = Math.max(PAD_TOP, Math.min(place[i].py, next - GAP));
-    }
+    // 시대 전체가 한 화면에 드는 높이의 ZOOM 배가 '빈 해'의 몫이다.
+    this.axis = buildScale(visible, { from, to, base: (bodyH - PAD_TOP - PAD_BOTTOM) * ZOOM });
+    const H = this.axis.H;
+    const at = (year) => this.yOf(year);
+    const place = placeMarks(visible, this.axis).map(({ m, y }) => ({ m, ty: y }));
 
-    const wires = place.map(({ m, ty, py }) => {
+    const wires = place.map(({ m, ty }) => {
       const c = nodeColor(m.type, m.group);
       // 구간 막대는 고른 노드와 왕조에만 그린다. 이웃까지 그리면 축
       // 위에서 서로 겹쳐 한 덩어리가 되고, 정작 점이 어디에 찍혔는지
@@ -243,23 +305,22 @@ export class TimelineRail {
         ? `<line x1="${AX - 6}" y1="${ty}" x2="${AX - 6}" y2="${at(m.end)}"
                  stroke="${c}" stroke-width="2" stroke-linecap="round" opacity=".5"/>`
         : '';
-      // 라벨이 제 해에서 밀렸을 때만 잇는다. **관계선처럼 보이면 안 된다** —
-      // 실측: 1398년에 '왕자의 난'과 '제1차 왕자의 난'이 함께 서서 한 줄이
-      // 밀렸는데, 노드 색으로 그은 선이라 둘이 이어진 것으로 읽혔다
-      // (그때 그래프에는 둘 사이에 엣지가 하나도 없었다). 갈리는 것은 색이다 —
-      // 회색 실선은 글자를 제자리에 데려다 놓는 안내선이지 관계가 아니다.
-      const off = Math.abs(py - ty) > 1.5
-        ? `<path d="M${AX} ${ty} C${AX + 7} ${ty}, ${DX - 9} ${py}, ${DX - 2} ${py}"
-                 fill="none" stroke="var(--text-3)" stroke-width="1" opacity=".45"/>`
-        : '';
-      return `${bar}${off}
+      // 밀린 자리와 제자리를 잇던 안내선은 걷어냈다 — 이제 라벨이 제 해를
+      // 떠나지 않으므로 이을 것이 없다.
+      return `${bar}
         <circle cx="${AX}" cy="${ty}" r="${m.kind === 'self' ? 4 : 2.6}" fill="${c}"/>`;
     }).join('');
 
-    const items = place.map(({ m, py }) => `
-      <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${py.toFixed(1)}px"
-              title="${esc(m.label)}">
-        <span class="tl-y">${esc(shortYear(m.year))}</span>
+    // 연도 칸은 **그 해의 첫 줄에만** 해를 적고, 나머지 줄에는 달을 적는다.
+    // 늘어난 해에서 같은 숫자를 서른여덟 번 되풀이해 봐야 읽을 것이 없고,
+    // 달은 그 안의 차례를 실제로 설명한다. 달을 모르는 줄은 **비운다** —
+    // 위키데이터가 연도만 아는 날을 1월 1일로 적어 보내는 것을 `precision`
+    // 이 걷어냈으므로, 빈 칸은 '1월'이 아니라 '모른다'는 뜻이다.
+    const items = place.map(({ m, ty }, i) => `
+      <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${ty.toFixed(1)}px"
+              title="${esc(m.label)} · ${esc(whenText(m))}">
+        <span class="tl-y">${i && place[i - 1].m.year === m.year
+          ? esc(monthOf(m.date)) : esc(shortYear(m.year))}</span>
         <span class="tl-name">${esc(m.label)}</span>
         ${m.rel ? `<span class="tl-rel">${esc(relHead(m.rel))}</span>` : ''}
       </button>`).join('');
@@ -299,9 +360,7 @@ export class TimelineRail {
     const self_ = place.find((p) => p.m.kind === 'self');
     const focus = self_ || place.find((p) => p.m.kind === 'near')
       || place[Math.floor(place.length / 2)];
-    this.focusPy = focus.py;
-    // 훑기 막대의 표식은 **밀리기 전 제자리**를 쓴다. 라벨이 밀린 자리를
-    // 찍으면 막대가 축과 다른 해를 가리킨다.
+    this.focusPy = focus.ty;
     this.hereFrac = self_ ? self_.ty / H : null;
     this.hereEndFrac = self_ && self_.m.end != null && self_.m.end !== self_.m.year
       ? at(self_.m.end) / H : null;
@@ -438,6 +497,23 @@ function yr(y) {
 // 축 옆 칸은 좁다. 기원전은 접두어를 줄여 쓴다.
 function shortYear(y) {
   return y < 0 ? `전${-y}` : String(y);
+}
+
+// 부분 날짜에서 달만. '1592-04-15' -> '4월', '1592' -> '' (달을 모른다).
+// 기원전은 앞에 부호가 붙어 한 칸 밀린다 ('-0400-04').
+function monthOf(date) {
+  const m = /^-?\d{1,4}-(\d{2})/.exec(String(date || ''));
+  return m ? `${Number(m[1])}월` : '';
+}
+
+// 도구말에 적는 날. 아는 만큼만 적는다 — 날을 모르면 달까지, 달도 모르면
+// 해까지다. 없는 자리를 1월 1일로 채워 말하지 않는다.
+function whenText(m) {
+  const d = /^(-?\d{1,4})-(\d{2})(?:-(\d{2}))?/.exec(String(m.date || ''));
+  const head = yr(m.year);
+  if (!d) return head;
+  return d[3] ? `${head} ${Number(d[2])}월 ${Number(d[3])}일`
+    : `${head} ${Number(d[2])}월`;
 }
 
 function clamp(v, lo, hi) {

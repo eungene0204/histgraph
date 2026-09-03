@@ -6,6 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
+import { buildScale, placeMarks, sortMarks } from '../src/lib/timeline.js';
 
 let pass = 0;
 let fail = 0;
@@ -170,6 +171,64 @@ console.log('\n배치 (d3-force)');
   ok('뼈대(frame) 노드가 더 작다',
      nodeRadius({ group: 'frame', degree: 4 }) < nodeRadius({ group: 'actor', degree: 4 }));
   ok('차수가 커도 반지름은 묶여 있다', nodeRadius({ group: 'actor', degree: 100000 }) <= 17);
+}
+
+// --- 연표: 축과 라벨이 같은 자를 쓴다 -----------------------------------
+//
+// 임진왜란처럼 한 해에 사건이 수십이면 라벨을 겹칠 수 없다. 예전에는
+// 라벨을 밀어냈고, 그러면 밀린 라벨만 제 해를 떠나 왼쪽 재위 띠와 갈라졌다
+// (1597년 전투들이 효종 1649~1659 막대 옆에 섰다). 지금은 몰린 해가
+// 늘어나므로 어긋남이 0 이어야 한다.
+{
+  const marks = [];
+  for (let y = 1100; y < 1592; y += 6) marks.push({ year: y, label: `사건${y}`, date: `${y}-01-01` });
+  for (let i = 0; i < 38; i++) marks.push({ year: 1592, label: `전투${i}`, date: `1592-${String(i % 12 + 1).padStart(2, '0')}-01` });
+  for (let y = 1600; y <= 1980; y += 6) marks.push({ year: y, label: `사건${y}`, date: `${y}-01-01` });
+
+  const from = 1097;
+  const to = 1997;
+  const scale = buildScale(sortMarks(marks), { from, to, base: (700 - 18 - 64) * 16 });
+  const place = placeMarks(sortMarks(marks), scale);
+  const yOf = (year) => scale.pos[year - from];
+
+  // 재위 띠가 쓰는 자와 라벨이 쓰는 자가 같다: 라벨은 제 해의 칸 안에 선다.
+  const stray = place.filter((p) => p.y < yOf(p.m.year) - 0.001 || p.y >= yOf(p.m.year + 1) - 0.001);
+  ok('라벨은 언제나 제 해의 칸 안에 선다', stray.length === 0,
+     stray.length ? `${stray[0].m.label} ${stray[0].m.year}년이 칸 밖` : '');
+
+  // 몰린 해 앞뒤는 그대로다 — 1592년이 삼켜서는 안 된다.
+  ok('몰린 해가 이웃한 해를 밀어내지 않는다',
+     Math.abs(yOf(1591) - yOf(1590) - (yOf(1502) - yOf(1501))) < 0.001);
+
+  const gaps = place.slice(1).map((p, i) => p.y - place[i].y);
+  ok('라벨끼리 30px 아래로 붙지 않는다', Math.min(...gaps) >= 30 - 0.001,
+     `최소 ${Math.min(...gaps).toFixed(1)}px`);
+
+  ok('마지막 라벨이 연표 안에 있다', place[place.length - 1].y <= scale.H - 64 + 0.001);
+
+  // 빈 구간은 비례를 지킨다 — 100년이 1년처럼 보이면 연표가 아니다.
+  ok('사건 없는 100년이 사건 하나 있는 해보다 길다',
+     yOf(1300) - yOf(1200) > yOf(1101) - yOf(1100));
+
+  // 한 해가 늘어나면 그 안의 차례가 시간 순으로 읽힌다.
+  const y92 = place.filter((p) => p.m.year === 1592);
+  ok('같은 해는 날짜 순으로 선다',
+     y92.every((p, i) => i === 0 || y92[i - 1].m.date <= p.m.date));
+}
+
+// 상한에 걸려도 라벨 자리는 줄지 않는다 — 깎이는 것은 빈 해의 몫이다.
+{
+  const marks = [];
+  for (let y = -2333; y <= 1980; y += 2) marks.push({ year: y, label: `${y}`, date: '' });
+  const scale = buildScale(sortMarks(marks), { from: -2336, to: 1983, base: (700 - 82) * 16 });
+  const place = placeMarks(sortMarks(marks), scale);
+  const gaps = place.slice(1).map((p, i) => p.y - place[i].y);
+  ok('MAX_HEIGHT 에 걸려도 라벨은 겹치지 않는다', Math.min(...gaps) >= 30 - 0.001,
+     `최소 ${Math.min(...gaps).toFixed(1)}px`);
+  // 라벨 자리는 못 깎으므로 상한을 넘을 수는 있다. 깎이는 것은 빈 해의
+  // 몫이고, 남은 높이가 라벨 자리(N x GAP)뿐이면 더 줄일 데가 없다.
+  ok('빈 해의 몫이 0 까지 깎인다', scale.H <= marks.length * 30 + 82 + 0.5,
+     `${scale.H.toFixed(0)}px, 라벨 자리만 ${marks.length * 30 + 82}px`);
 }
 
 console.log('\n==============================================');

@@ -956,6 +956,82 @@ def _year_num(date: str) -> int:
     return -int(date.lstrip("-").split("-", 1)[0]) if neg else int(date.split("-", 1)[0])
 
 
+# Wikidata 는 날짜의 **자릿수**를 값과 따로 적는다 (wikibase:timePrecision).
+# 9=연, 10=월, 11=일. 그런데 `wdt:` 로 긁으면 값만 오고, 연도만 아는 날은
+# 1월 1일로 채워져서 온다 — 우리 DB 의 '1592-01-01' 이 그것이다.
+
+# 날짜가 붙는 술어. 인물(생몰)·조직(설립/해체)·사건(시작/종료/시점).
+DATE_PROPS = ("P569", "P570", "P571", "P576", "P580", "P582", "P585")
+
+
+def fetch_date_precision(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 200,
+    failures: list[str] | None = None,
+) -> dict[str, dict[str, int]]:
+    """QID -> {ISO 날짜: 자릿수}. 그 QID 가 적고 있는 날짜마다 몇 자리까지
+    아는 값인지.
+
+    **값이 아니라 문장을 물어야 나온다.** `wdt:P585` 는 값만 주므로 여기서는
+    `p:` 로 문장을 잡고 `psv:` 로 값 마디까지 내려가 `wikibase:timePrecision`
+    을 읽는다. 같은 날짜가 여러 문장에 서로 다른 자릿수로 적혀 있으면 가장
+    **정밀한** 쪽을 남긴다 — 아는 것을 버리지 않는 쪽이 안전하다 (실측:
+    선조 Q484359 는 생년을 1552-11-21(일)과 1552-01-01(연) 둘로 갖고 있다)."""
+    out: dict[str, dict[str, int]] = {}
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    prop_values = " ".join(f"(p:{p} psv:{p})" for p in DATE_PROPS)
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?item ?t ?prec WHERE {{
+                  VALUES ?item {{ {values} }}
+                  VALUES (?p ?psv) {{ {prop_values} }}
+                  ?item ?p ?st . ?st ?psv ?vn .
+                  ?vn wikibase:timeValue ?t ; wikibase:timePrecision ?prec .
+                }}""",
+            f"날짜자릿수/{i}",
+            failures if failures is not None else [],
+        )
+        for qid, dates in precision_from_rows(rows).items():
+            for date, prec in dates.items():
+                cur = out.setdefault(qid, {})
+                cur[date] = max(cur.get(date, 0), prec)
+    return out
+
+
+def precision_from_rows(rows: list[dict]) -> dict[str, dict[str, int]]:
+    """SPARQL 결과 -> QID 별 {날짜: 자릿수}. 네트워크 없이 시험할 수 있게 뗀다."""
+    out: dict[str, dict[str, int]] = {}
+    for r in rows:
+        uri = _val(r, "item")
+        date, prec = _iso_date(_val(r, "t")), _val(r, "prec")
+        if not (uri and is_real_qid(uri) and date and prec and prec.isdigit()):
+            continue
+        cur = out.setdefault(_qid(uri), {})
+        cur[date] = max(cur.get(date, 0), int(prec))
+    return out
+
+
+def trim_to_precision(date: str | None, precision: int | None) -> str | None:
+    """'1592-01-01' + 자릿수 9 -> '1592'. 모르는 자릿수는 건드리지 않는다.
+
+    **연도만 아는 날을 1월 1일이라고 말하지 않기 위한 것이다.** 화면이 몰린
+    해를 늘려 세우면 그 안의 차례가 곧 시간 순으로 읽히는데, 채워 넣은
+    1월 1일이 4월의 동래성 전투보다 앞에 서면 그건 없는 날짜를 지어낸
+    것이 된다. 스키마는 처음부터 부분 날짜를 허용한다 (ontology.Node).
+
+    기원전은 앞에 부호가 붙어 한 글자 길다 ('-0400-01-01')."""
+    if not date or precision is None:
+        return date
+    # 9=연 10=월 11=일. 그보다 성긴 값(8=십년대)도 연까지는 줄인다 —
+    # 파이프라인이 어차피 앞 네 자리를 해로 읽으니, 없는 달과 날을
+    # 달고 있는 것보다 낫다.
+    keep = 10 if precision >= 11 else 7 if precision == 10 else 4
+    return date[: keep + 1] if date.startswith("-") else date[:keep]
+
+
 def fetch_aliases(
     fetcher: Fetcher, qids: list[str], chunk: int = 200
 ) -> dict[str, list[str]]:

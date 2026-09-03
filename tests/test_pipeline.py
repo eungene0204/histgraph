@@ -1687,6 +1687,62 @@ with tempfile.TemporaryDirectory() as tmp:
     check("두 번 돌려도 늘지 않는다", link_event_periods(store) == 0)
     store.close()
 
+# --- 날짜의 자릿수 -------------------------------------------------------
+# 실측 회귀: Wikidata 는 '1592년'을 '1592-01-01' 로 준다. 자릿수는 값이
+# 아니라 문장에 붙어 있어서 `wdt:` 로 긁는 수집이 못 가져왔고, DB 에는
+# 연도만 아는 날이 전부 1월 1일로 앉아 있었다(전체 그래프 7,117개).
+# 연표가 몰린 해를 늘려 세우면서 그 안의 차례가 시간 순으로 읽히게 되자,
+# 지어낸 1월 1일이 4월의 동래성 전투 앞에 서는 것이 거짓말이 됐다.
+from histgraph.server import _year as _server_year  # noqa: E402
+from histgraph.promote import _year_of as _promote_year  # noqa: E402
+from histgraph.sources.wikidata import (  # noqa: E402
+    precision_from_rows, trim_to_precision,
+)
+
+
+def _pv(qid, t, prec):
+    return {"item": {"value": f"http://www.wikidata.org/entity/{qid}"},
+            "t": {"value": t}, "prec": {"value": str(prec)}}
+
+
+pv = precision_from_rows([
+    _pv("Q12615813", "1592-01-01T00:00:00Z", 9),     # 정암진 전투 — 연도만
+    _pv("Q497348", "1592-04-15T00:00:00Z", 11),      # 동래성 전투 — 날까지
+    # 같은 날짜가 두 문장에 서로 다른 자릿수로 (선조의 생년)
+    _pv("Q484359", "1552-11-21T00:00:00Z", 11),
+    _pv("Q484359", "1552-11-21T00:00:00Z", 9),
+    # 값 불명은 blank node 로 온다 — 날짜가 아니면 담지 않는다
+    _pv("Q1", "http://www.wikidata.org/.well-known/genid/abc", 9),
+])
+check("문장에서 날짜 자릿수를 읽는다", pv["Q12615813"]["1592-01-01"] == 9, str(pv))
+check("날까지 아는 날은 자릿수 11", pv["Q497348"]["1592-04-15"] == 11, str(pv))
+check("같은 날짜가 여러 자릿수면 정밀한 쪽을 남긴다",
+      pv["Q484359"]["1552-11-21"] == 11, str(pv))
+check("날짜로 읽히지 않는 값은 담지 않는다", "Q1" not in pv, str(pv))
+
+check("연도만 아는 날은 해까지 줄인다", trim_to_precision("1592-01-01", 9) == "1592")
+check("달까지 아는 날은 달까지 줄인다",
+      trim_to_precision("1592-09-01", 10) == "1592-09")
+check("날까지 아는 날은 그대로 둔다",
+      trim_to_precision("1919-03-01", 11) == "1919-03-01")
+# 3·1 운동은 진짜 3월 1일이다. 날이 01 이라고 지어낸 값으로 볼 수 없다.
+check("날이 01 이어도 자릿수가 11 이면 지어낸 값이 아니다",
+      trim_to_precision("1919-03-01", 11) == "1919-03-01")
+check("기원전은 부호 한 칸을 더 센다",
+      trim_to_precision("-0037-01-01", 9) == "-0037")
+check("십년대처럼 성긴 값도 해까지는 줄인다",
+      trim_to_precision("1590-01-01", 8) == "1590")
+check("자릿수를 모르면 건드리지 않는다",
+      trim_to_precision("1592-01-01", None) == "1592-01-01")
+check("날짜가 없으면 없는 대로", trim_to_precision(None, 9) is None)
+
+# 줄인 부분 날짜를 연도로 읽는 쪽이 그대로 돌아야 한다 — 파이프라인은
+# 전부 앞 네 자리를 해로 본다.
+check("화면이 부분 날짜에서도 해를 읽는다", _server_year("1592") == 1592)
+check("승격이 부분 날짜에서도 해를 읽는다", _promote_year("1592") == 1592)
+check("기원전 부분 날짜에서도 해를 읽는다", _server_year("-0037") == -37)
+
+
 # --- 왕의 재위 띠 --------------------------------------------------------
 # 실측 회귀: held_position 엣지 552개가 전부 날짜 없음이었다. 재위는
 # P39 문장의 한정어(pq:P580/P582)에만 있어서 `wdt:` 로 긁는 수집이 한 번도

@@ -575,9 +575,8 @@ class GraphAPI:
         (조선 그래프 실측: 사건 297개 중 연도가 잡히는 것은 76개다.)
 
         **솎지 않는다.** 연대를 아는 사건은 다 세운다 — 연표에서 빠진
-        사건은 그 시대에 없었던 일이 된다. 몰린 곳(1590년대에 20건)은
-        라벨이 서로를 밀어내지만, 밀린 만큼은 가는 실선으로 제자리와
-        이어 둔다."""
+        사건은 그 시대에 없었던 일이 된다. 몰린 곳(1592년 한 해에 38건)은
+        화면이 그 해를 늘려 세우므로, 라벨이 제 해를 떠나지 않는다."""
         cached = getattr(self._local, "anchors", None)
         if cached is not None:
             return cached
@@ -629,6 +628,9 @@ class GraphAPI:
                 "id": r["id"], "label": r["label"], "type": r["type"],
                 "group": TYPE_GROUP.get(r["type"], "thing"),
                 "year": start, "end": end, "degree": r["d"],
+                # 화면이 몰린 해를 늘려 세운다. 그 안의 차례가 시간 순으로
+                # 읽히므로 연도만으로는 모자라다 (1592년 사건이 38건이다).
+                "date": r["start_date"] or "",
             })
         out.sort(key=lambda a: a["year"])
         self._local.anchors = out
@@ -713,6 +715,7 @@ class GraphAPI:
                 "id": row["id"], "label": row["label"], "type": row["type"],
                 "group": TYPE_GROUP.get(row["type"], "thing"),
                 "year": start, "end": end, "kind": "self",
+                "date": row["start_date"] or "",
             })
 
         # --- 연도를 아는 직접 이웃 -------------------------------------
@@ -757,6 +760,7 @@ class GraphAPI:
                 "id": nid, "label": v["row"]["label"], "type": v["row"]["type"],
                 "group": TYPE_GROUP.get(v["row"]["type"], "thing"),
                 "year": y, "end": y_end, "kind": "near",
+                "date": v["row"]["start_date"] or "",
                 # 화면이 관계 이름을 붙여 부를 수 있게 그대로 넘긴다
                 "rel": {"type": v["rel"], "dir": v["dir"],
                         "label": EDGE_TYPES[v["rel"]][0]},
@@ -805,6 +809,7 @@ class GraphAPI:
                         "type": row_root["type"],
                         "group": TYPE_GROUP.get(row_root["type"], "thing"),
                         "year": r_start, "end": r_end, "kind": "era",
+                        "date": row_root["start_date"] or "",
                     })
 
         marks.sort(key=lambda m: (m["year"], m["label"]))
