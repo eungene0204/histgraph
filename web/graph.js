@@ -11,6 +11,27 @@ const TAU = Math.PI * 2;
 // 한 틱에 노드가 움직일 수 있는 최대 거리(px)
 const MAX_STEP = 34;
 
+// **시뮬레이션은 화면 주사율과 무관하게 초당 60틱으로 돈다.** 아래 힘
+// 계수는 전부 "한 틱당"으로 잡혀 있어서, 프레임마다 한 번 돌리면
+// 120Hz 화면(ProMotion)에서는 같은 그래프에 힘이 두 배로 들어간다.
+// 그러면 가까운 노드 쌍이 아래 MIN_REPEL_DIST 로 막아둔 진동 영역까지
+// 다시 밀려 들어간다.
+const TICK_MS = 1000 / 60;
+
+// **반발력을 잴 때 이 거리보다 가깝게는 보지 않는다.**
+//
+// 반발력은 1/d² 이라 근거리에서 강성(=|dF/dd|=2C/d³)이 폭발한다. 감쇠
+// 0.82 의 준음함수 오일러가 견디는 한계는 강성 3.6 근처인데, 큰 노드
+// 두 개가 18px 안으로 들어가면 5를 넘긴다(계산: d=15 에서 5.5). 그때부터
+// 두 노드는 서로를 밀고 되돌아오기를 반복하는 진동에 갇히고, 그게 배치
+// 전체를 흔드는 떨림으로 보인다. 이 아래로는 힘을 **일정하게** 준다 —
+// 여전히 밀어내지만 강성이 0이라 진동하지 않는다.
+const MIN_REPEL_DIST = 32;
+
+// 이보다 작은 한 틱 이동은 아예 하지 않는다. 0.1px 는 눈에 보이는 이동이
+// 아니라 화면에서 미세한 떨림으로만 읽힌다.
+const SETTLE_STEP = 0.1;
+
 // 색은 큰 갈래만 말한다. 세부 타입은 모양이 말한다 — 9색을 한 화면에
 // 쓰면 색약에서 구분이 무너진다(검증 실측: 8색 전체 조합 최악 ΔE 1.6).
 export const GROUP_COLOR = {
@@ -58,10 +79,14 @@ export class GraphView {
     this.onHover = opts.onHover || (() => {});
     this.showLabels = true;
 
+    this._acc = 0;
+    this._prev = 0;
+    this._shownLabels = new Set();
+
     this._bindEvents();
     this._resize();
     new ResizeObserver(() => this._resize()).observe(canvas.parentElement);
-    requestAnimationFrame(() => this._frame());
+    requestAnimationFrame((t) => this._frame(t));
   }
 
   // --- 데이터 ---------------------------------------------------------
@@ -174,7 +199,8 @@ export class GraphView {
         // 반발이 용수철보다 약하면 그래프가 가운데로 뭉쳐 라벨이 전부
         // 겹친다. 거리 100px 에서 용수철과 비슷한 크기가 되도록 잡았다.
         // 큰 노드일수록 더 넓은 자리를 요구한다.
-        const force = (5200 + (a.r + b.r) * 120) / d2;
+        const dq = d < MIN_REPEL_DIST ? MIN_REPEL_DIST * MIN_REPEL_DIST : d2;
+        const force = (5200 + (a.r + b.r) * 120) / dq;
         const fx = (dx / d) * force;
         const fy = (dy / d) * force;
         a.vx -= fx; a.vy -= fy;
@@ -210,8 +236,9 @@ export class GraphView {
       // 한 틱에 움직일 수 있는 거리를 묶어둔다. 이게 없으면 초반 한 번의
       // 큰 힘으로 노드가 수천 px 밖으로 나가고, 돌아오는 속도는 alpha 에
       // 비례해 줄어들어 영영 못 돌아온다.
-      const step = Math.min(MAX_STEP, Math.hypot(node.vx, node.vy) * this.alpha);
-      const v = Math.hypot(node.vx, node.vy) || 1;
+      const v = Math.hypot(node.vx, node.vy);
+      const step = Math.min(MAX_STEP, v * this.alpha);
+      if (step < SETTLE_STEP) continue;
       node.x += (node.vx / v) * step;
       node.y += (node.vy / v) * step;
     }
@@ -254,16 +281,34 @@ export class GraphView {
       this.k = k; this.tx = tx; this.ty = ty;
       return;
     }
+    // **목표가 코앞이면 손대지 않는다.** 배치가 거의 다 식어도 경계 노드
+    // 하나가 1px 씩 움직이면 목표 배율과 이동량이 계속 조금씩 바뀌고,
+    // 카메라가 그걸 8%씩 따라가면 가만히 있는 노드까지 같이 떤다.
+    if (Math.abs(k - this.k) < 0.003
+        && Math.abs(tx - this.tx) < 1.5
+        && Math.abs(ty - this.ty) < 1.5) return;
     this.k += (k - this.k) * ease;
     this.tx += (tx - this.tx) * ease;
     this.ty += (ty - this.ty) * ease;
   }
 
   // --- 렌더 -----------------------------------------------------------
-  _frame() {
-    this._tick();
+  _frame(now = 0) {
+    // 지난 프레임 이후 흐른 시간만큼만 시뮬레이션을 돌린다. 탭이 뒤로
+    // 갔다 오면 dt 가 수 초로 튀므로 위에서 잘라둔다 — 안 자르면 돌아온
+    // 순간 수백 틱이 한 번에 돌아 배치가 폭발한다.
+    const dt = this._prev ? Math.min(now - this._prev, 100) : TICK_MS;
+    this._prev = now;
+    this._acc += dt;
+    // 0.9 여유를 둔다. 60Hz 화면에서 dt 가 16.6 과 16.7 을 오가면 어떤
+    // 프레임은 0틱, 다음은 2틱이 되어 눈에 띄게 덜컹거린다.
+    for (let i = 0; i < 3 && this._acc >= TICK_MS * 0.9; i++) {
+      this._tick();
+      this._acc -= TICK_MS;
+    }
+    if (this._acc < 0) this._acc = 0;
     this._draw();
-    requestAnimationFrame(() => this._frame());
+    requestAnimationFrame((t) => this._frame(t));
   }
 
   _draw() {
@@ -341,6 +386,8 @@ export class GraphView {
       // 없는 파란 점이 되고 만다. 실제로 겹치는지를 재서 정하면 확대할
       // 때마다 더 많은 이름이 저절로 드러난다.
       const placed = [];
+      const shown = this._shownLabels;
+      const next = new Set();
       const rank = (n) => (n.id === focus ? 3 : n.id === this.center ? 2 : 0) + Math.min(n.degree / 40, 1);
       const candidates = this.nodes
         .filter((n) => lit(n.id))
@@ -349,11 +396,18 @@ export class GraphView {
       for (const node of candidates) {
         const strong = node.id === focus || node.id === this.center;
         const box = labelBox(ctx, node, strong, this.k);
+        // **지난 프레임에 떠 있던 이름은 조금 더 버틴다.** 겹침 판정은
+        // 예/아니오라서, 노드가 1px 움직일 때마다 판정이 뒤집히면 이름이
+        // 초당 몇 번씩 깜빡인다. 배치는 멈췄는데 화면은 떠는 것처럼 보이는
+        // 나머지 절반이 이것이었다. 한 번 뜬 이름은 3px 더 겹쳐야 물러난다.
+        const test = shown.has(node.id) ? inset(box, 3 / this.k) : box;
         // 중심과 가리킨 노드의 이름은 무슨 일이 있어도 그린다
-        if (!strong && placed.some((p) => overlaps(p, box))) continue;
+        if (!strong && placed.some((p) => overlaps(p, test))) continue;
         placed.push(box);
+        next.add(node.id);
         drawLabel(ctx, node, strong, this.k);
       }
+      this._shownLabels = next;
     }
     ctx.restore();
   }
@@ -598,6 +652,13 @@ function labelBox(ctx, n, strong, k) {
   const w = ctx.measureText(n.label).width + 6 / k;
   const y = n.y + n.r + 4 / k;
   return { x: n.x - w / 2, y, w, h: size * 1.25 };
+}
+
+function inset(b, m) {
+  return {
+    x: b.x + m, y: b.y + m,
+    w: Math.max(b.w - m * 2, 1), h: Math.max(b.h - m * 2, 1),
+  };
 }
 
 function overlaps(a, b) {
