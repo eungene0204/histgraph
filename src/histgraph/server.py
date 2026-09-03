@@ -28,7 +28,19 @@ from .store import GraphStore
 
 log = logging.getLogger(__name__)
 
-WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+
+def _web_root() -> Path:
+    """정적 파일을 어디서 읽을지.
+
+    `npm run build` 를 돌렸으면 web/dist/ 가 생긴다. 배포는 그쪽을 봐야 하고,
+    아무것도 안 빌드한 상태에서는 web/ 의 원본이 그대로 돌아야 한다 — 빌드
+    단계는 선택이지 전제가 아니다."""
+    web = Path(__file__).resolve().parents[2] / "web"
+    dist = web / "dist"
+    return dist if (dist / "index.html").is_file() else web
+
+
+WEB_ROOT = _web_root()
 
 # 화면이 견디는 노드 수. 이보다 많으면 힘기반 배치가 수렴하기 전에
 # 사람이 먼저 포기한다.

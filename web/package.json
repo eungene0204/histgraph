@@ -1,0 +1,14 @@
+{
+  "name": "histgraph-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "cd .. && PYTHONPATH=src python3 -m histgraph serve",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^7.1.5"
+  }
+}

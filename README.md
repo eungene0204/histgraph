@@ -891,8 +891,29 @@ QID 를 직접 지정하는 `fetch_edges_for` 가 따로 필요했다.
 python3 -m histgraph serve          # http://127.0.0.1:8100  (data/joseon.sqlite)
 ```
 
-의존성 없다. 표준 라이브러리 HTTP 서버 + 순수 JS 캔버스 — 그래프 라이브러리도
-빌드 도구도 쓰지 않는다.
+런타임 의존성은 없다. 표준 라이브러리 HTTP 서버 + 순수 JS 캔버스 — 그래프
+라이브러리를 쓰지 않는다. `/api/*` 는 JSON, 나머지는 정적 파일이다.
+
+### 화면만 따로 고칠 때 (`npm run dev`)
+
+빌드 없이도 돌지만, 화면을 고치는 동안에는 새로고침 대신 HMR 이 낫다.
+터미널 둘로 나눠 띄운다 — API 는 파이썬이 그대로 맡고 Vite 는 `/api` 를
+8100 으로 넘긴다.
+
+```bash
+cd web && npm install     # 처음 한 번
+
+npm run dev:api           # 8100 — 그래프 API (파이썬)
+npm run dev               # 5173 — 화면 (HMR)
+```
+
+브라우저는 **5173 하나만** 본다. 프록시 설정은 `web/vite.config.js`.
+
+`npm run build` 를 돌리면 `web/dist/` 가 생기고, 그때부터 `serve` 는 원본
+대신 **번들을 내준다** (`server._web_root`). 빌드 단계는 선택이지 전제가
+아니어서, `dist/` 가 없으면 `web/` 의 원본이 그대로 돌아간다. 화면을 고친
+뒤 8100 에서 옛날 것이 보인다면 `dist/` 가 낡은 것이다 — 다시 빌드하거나
+지우면 된다.
 
 ### 중심은 왕조다
 
