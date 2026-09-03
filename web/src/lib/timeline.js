@@ -13,11 +13,11 @@
 // 1398년에 나란히 선 '왕자의 난'과 '제1차 왕자의 난'이 이어진 것으로
 // 보였는데, 그때 그래프에는 둘 사이에 엣지가 하나도 없었다).
 //
-// **눈금은 하나다 — 시대 전체가 늘 한 화면에 들어온다.** 줌은 걷어냈다.
-// 그래서 자리가 모자랄 때는 밀도로 거른다. 무엇이 '큰' 사건인지는 그래프가
-// 정한다 — 많이 연결된 사건이 먼저 자리를 얻고, 겹치는 자리에 오는 작은
-// 사건은 물러난다. 물러난 수는 머리에 숫자로 남는다: 안 보이는 사건이
-// 없는 셈이 되면 안 된다.
+// **눈금은 하나다 — 가장 촘촘한 자리에 고정한다.** 줌은 걷어냈고, 남긴
+// 쪽은 '전부 세우는' 눈금이다. 연대를 아는 사건은 하나도 물러나지 않는다
+// — 무엇이 빠졌는지 세어 보게 만드느니 다 세우고 스크롤하게 둔다.
+// 대신 연표는 화면보다 길어지므로, 훑기 막대와 '고른 자리로 돌아가기'가
+// 길을 잃지 않게 받쳐 준다.
 
 import { nodeColor, TYPE_COLOR } from './graph-view.js';
 
@@ -44,6 +44,13 @@ const PAD_TOP = 18;   // 첫 표시가 머리에 붙지 않게
 // 내려도 패널 바닥과 '더 있다'는 그림자(28px)에 눌려 반쯤 지워진다.
 const PAD_BOTTOM = 64;
 const GAP = 30;       // 라벨 두 줄이 서로를 가리지 않는 최소 간격
+
+// 눈금. 시대 전체가 한 화면에 들어오는 배율의 16배다 — 줌이 있던 시절의
+// 마지막 단계와 같은 촘촘함이고, 조선(567년)이면 패널 760px 기준 약 19px/년.
+const ZOOM = 16;
+// 안전판. 시대를 나누지 않은 전체 그래프는 기원전까지 걸쳐 있어 이 눈금에서
+// 끝없이 길어진다.
+const MAX_HEIGHT = 40000;
 
 export class TimelineRail {
   constructor(root, { onPick } = {}) {
@@ -196,29 +203,20 @@ export class TimelineRail {
     const { from, to } = d.axis;
     const span = Math.max(to - from, 1);
     const bodyH = this.body.clientHeight || 600;
-    // 시대 전체가 한 화면. 눈금은 이것 하나다.
-    const scale = (bodyH - PAD_TOP - PAD_BOTTOM) / span;
-    const H = span * scale + PAD_TOP + PAD_BOTTOM;
+    const scale = (bodyH - PAD_TOP - PAD_BOTTOM) / span * ZOOM;
+    let H = Math.min(MAX_HEIGHT, span * scale + PAD_TOP + PAD_BOTTOM);
+    // 전부 세우므로 라벨이 다 들어갈 만큼은 늘린다. 안 그러면 밀어낼
+    // 자리가 없어 끝에서 겹친다.
+    H = Math.max(H, marks.length * GAP + PAD_TOP + PAD_BOTTOM);
     this.axis = { from, to, H };
     const at = (year) => this.yOf(year);
 
     // --- 누가 서는가 ---------------------------------------------------
-    // 고른 노드·왕조·이웃은 늘 선다 — 그 노드의 이야기이지 배경이 아니다.
-    // 뼈대(큰 사건)는 많이 연결된 것부터 자리를 잡고, 이미 선 것과 겹치면
-    // 물러난다 — 겹쳐 세우면 둘 다 못 읽는다.
-    const always = marks.filter((m) => m.kind !== 'anchor');
-    const bones = marks.filter((m) => m.kind === 'anchor')
-      .sort((a, b) => (b.degree || 0) - (a.degree || 0) || a.year - b.year);
-    const taken = always.map((m) => at(m.year));
-    const visible = [...always];
-    let hidden = 0;
-    for (const m of bones) {
-      const ty = at(m.year);
-      if (taken.some((y) => Math.abs(y - ty) < GAP)) { hidden++; continue; }
-      taken.push(ty);
-      visible.push(m);
-    }
-    visible.sort((a, b) => a.year - b.year || a.label.localeCompare(b.label, 'ko'));
+    // 전부 선다. 고른 노드도 왕조도 이웃도 배경이 된 큰 사건도 가리지
+    // 않는다 — 눈금을 가장 촘촘한 자리에 고정했으므로 자리를 다툴 일이
+    // 없고, 그래도 겹치면 아래에서 밀어서 떨어뜨린다.
+    const visible = [...marks]
+      .sort((a, b) => a.year - b.year || a.label.localeCompare(b.label, 'ko'));
 
     // 실제 자리(ty)를 잡고, 겹치면 아래로 민다. 끝에서 넘치면 위로 되민다.
     const place = visible.map((m) => ({ m, ty: at(m.year), py: 0 }));
@@ -282,13 +280,11 @@ export class TimelineRail {
         ${items}
       </div>`;
 
-    // 몇 개가 물러나 있는지 늘 말한다. 안 보이는 사건이 없는 셈이 되면
-    // 안 되므로, 숫자로라도 '더 있다'를 남긴다.
+    // 몇 개가 서 있는지 적는다. 물러난 것이 없으므로 분모는 없다 —
+    // 'N / N' 은 늘 같은 두 수를 나란히 보여줄 뿐이다.
     const shown = visible.filter((m) => m.kind === 'anchor').length;
     const count = this.head.querySelector('.tl-count');
-    if (count) {
-      count.innerHTML = `큰 사건 <b>${shown}</b> / ${bones.length}`;
-    }
+    if (count) count.innerHTML = `큰 사건 <b>${shown}</b>`;
     const chip = this.head.querySelector('.tl-kings');
     if (chip) {
       const all = reigns.length;
