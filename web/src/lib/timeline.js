@@ -133,6 +133,8 @@ export class TimelineRail {
       this.showReigns = localStorage.getItem('tl-reigns') !== '0';
     } catch { /* 비공개 창 등 */ }
     this.focusPy = 0;
+    // 고른 자리로 가는 중인가. show() 가 켜고, 도착하거나 사람이 훑으면 꺼진다.
+    this.seeking = false;
     // 지금 배치의 축 — 연도 <-> 픽셀 환산에 쓴다 (pos: 해마다의 y)
     this.axis = { from: 0, to: 1, H: 1, pos: new Float64Array([0, 1]) };
 
@@ -149,6 +151,10 @@ export class TimelineRail {
     });
 
     this.body.addEventListener('scroll', () => this.syncMap(), { passive: true });
+    // 사람이 직접 훑기 시작하면 '고른 자리로 가는 중'은 끝난 것이다.
+    for (const ev of ['wheel', 'pointerdown', 'touchstart']) {
+      this.body.addEventListener(ev, () => { this.seeking = false; }, { passive: true });
+    }
 
     // 훑기 막대를 누르거나 끌면 그 해로 옮긴다.
     this.head.addEventListener('pointerdown', (ev) => {
@@ -266,8 +272,18 @@ export class TimelineRail {
       this.body.innerHTML = '<p class="tl-empty">연도를 아는 이웃이 없어 자리를 잡을 수 없습니다.</p>';
       return;
     }
-    // 창 크기가 바뀌어 다시 그리는 경우엔 보던 해를 지킨다
-    const viewYear = keepView ? this.yearAt(this.body.scrollTop + this.body.clientHeight / 2) : null;
+    // 창 크기가 바뀌어 다시 그리는 경우엔 보던 해를 지킨다.
+    //
+    // **단, 고른 자리로 가는 중이면 그리로 마저 간다.** 새 노드의 머리글이
+    // 이전과 다르면 (연도 미상 힌트가 생기거나 '연결된 연도' 줄이 사라지면)
+    // 몸통 높이가 몇 px 바뀌고, 그 순간 ResizeObserver 가 이 길로 들어온다.
+    // 그때 '보던 해'는 아직 옛 노드의 자리라, 지키면 방금 시작한 스크롤을
+    // 도로 끊는 셈이 된다 (실측: 갑자사화에서 한양을 검색하면 연표가 1504년에
+    // 그대로 서 있었다. 그래프에서 누를 때는 비슷한 노드끼리 오가 머리글이
+    // 안 바뀌니 드러나지 않았을 뿐이다).
+    const seeking = this.seeking;
+    const viewYear = keepView && !seeking
+      ? this.yearAt(this.body.scrollTop + this.body.clientHeight / 2) : null;
 
     // 재위 띠가 왼쪽 칸을 먹고, 축과 라벨은 그만큼 오른쪽으로 밀린다.
     const reigns = (d.reigns || []);
@@ -364,7 +380,7 @@ export class TimelineRail {
     this.hereFrac = self_ ? self_.ty / H : null;
     this.hereEndFrac = self_ && self_.m.end != null && self_.m.end !== self_.m.year
       ? at(self_.m.end) / H : null;
-    if (recenter) this.recenter();
+    if (recenter || seeking) this.recenter();
     else if (viewYear !== null) this.body.scrollTop = this.yOf(viewYear) - this.body.clientHeight / 2;
     this.syncMap();
   }
@@ -447,7 +463,24 @@ export class TimelineRail {
   }
 
   recenter() {
-    this.body.scrollTo({ top: this.focusPy - this.body.clientHeight / 2, behavior: 'smooth' });
+    const top = Math.max(0, Math.min(
+      this.focusPy - this.body.clientHeight / 2,
+      this.body.scrollHeight - this.body.clientHeight));
+    this.seeking = true;
+    this.body.scrollTo({ top, behavior: 'smooth' });
+    // 도착하면 '가는 중'을 내린다. 그 뒤로는 창 크기가 바뀌어도 보던 해를 지킨다.
+    // 가는 도중 다시 부르면 이전 목적지의 감시는 걷는다 — 남겨 두면 지나가는
+    // 길에 옛 자리를 스치는 순간 '도착'으로 잘못 읽는다.
+    if (this._arrive) this.body.removeEventListener('scroll', this._arrive);
+    const arrived = () => {
+      if (Math.abs(this.body.scrollTop - top) > 1) return;
+      this.seeking = false;
+      this.body.removeEventListener('scroll', arrived);
+      if (this._arrive === arrived) this._arrive = null;
+    };
+    this._arrive = arrived;
+    this.body.addEventListener('scroll', arrived, { passive: true });
+    arrived();
   }
 
   // 지금 보이는 구간이 연표 어디쯤인지. 스크롤이 없으면 막대도 없다.
