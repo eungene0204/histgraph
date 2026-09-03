@@ -19,7 +19,7 @@
 // 연결된 사건이 먼저 자리를 얻고, 겹치는 자리에 오는 작은 사건은 다음
 // 단계에서야 나타난다. 마지막 단계는 전부 세운다.
 
-import { nodeColor, TYPE_COLOR } from '/graph.js';
+import { nodeColor, TYPE_COLOR } from './graph-view.js';
 
 // **왼쪽에는 왕의 재위 띠가 선다.** 조선의 시간을 사람은 절대 연도가
 // 아니라 임금으로 읽는다 — '1456년'보다 '세조 때'가 먼저 온다. 재위는
@@ -125,7 +125,13 @@ export class TimelineRail {
 
     // 패널 폭·높이가 바뀌면 비례 배치를 다시 잡는다. 0단계 눈금은 패널
     // 높이에서 나오므로 창을 줄이면 눈금도 따라 줄어야 한다.
-    new ResizeObserver(() => this.layout({ keepView: true })).observe(this.body);
+    this._ro = new ResizeObserver(() => this.layout({ keepView: true }));
+    this._ro.observe(this.body);
+  }
+
+  // React 가 언마운트할 때 부른다 — 안 부르면 죽은 노드를 붙잡고 관찰을 이어간다.
+  destroy() {
+    this._ro?.disconnect();
   }
 
   hide() {

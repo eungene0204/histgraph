@@ -1,6 +1,6 @@
 """팔레트 검증 — 화면의 색이 서로 구별되는가, 색약에서도 그런가.
 
-`web/graph.js` 의 TYPE_COLOR·GROUP_COLOR 를 **파일에서 직접 읽어** 잰다.
+`web/src/lib/graph-view.js` 의 TYPE_COLOR·GROUP_COLOR 를 **파일에서 직접 읽어** 잰다.
 값을 여기 베껴 두면 색을 고칠 때 한쪽만 바뀌어, 검증기가 이미 없는 색을
 합격시킨다.
 
@@ -28,7 +28,7 @@ import re
 import sys
 from pathlib import Path
 
-GRAPH_JS = Path(__file__).resolve().parents[1] / "web" / "graph.js"
+GRAPH_JS = Path(__file__).resolve().parents[1] / "web" / "src" / "lib" / "graph-view.js"
 
 # 이 아래로 떨어지면 색만으로는 못 가른다고 본다. 절대 기준이 아니라
 # 눈금이다 — 낮다고 곧바로 실패가 아니라, 색 말고 다른 단서가 있어야 한다.

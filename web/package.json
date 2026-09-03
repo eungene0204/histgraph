@@ -4,11 +4,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "cd .. && PYTHONPATH=src python3 -m histgraph serve",
+    "dev:api": "cd .. && uv run histgraph serve",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/layout.test.mjs && node tests/relations.test.mjs && node tests/render.test.mjs"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
     "vite": "^7.1.5"
+  },
+  "dependencies": {
+    "d3-force": "^3.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }

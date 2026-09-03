@@ -1,36 +1,19 @@
-// 힘기반 배치 + 캔버스 렌더러.
+// 캔버스 렌더러.
 //
-// 라이브러리를 쓰지 않는다 — 수집 파이프라인이 표준 라이브러리만 쓰듯,
-// 화면도 브라우저가 이미 가진 것만 쓴다.
+// 배치는 d3-force 가 맡고(layout.js), 이 파일은 **그리기와 상호작용만**
+// 한다. 색·노드·이름표·화살촉은 손대지 않았다 — 팔레트는 색약 검증기
+// (tools/check_palette.py)가 이 파일의 값을 직접 읽어 잰다.
 //
-// 노드 200개 수준에서는 O(n²) 반발력으로 충분하다 (틱당 4만 회). 그보다
-// 커지면 화면에서 읽히지 않으므로 서버가 먼저 잘라서 보낸다.
+// React 가 감싸긴 하지만 이 클래스는 React 를 모른다. 캔버스는 매 프레임
+// 60번 다시 그려지는 곳이라 가상 DOM 을 통과시킬 이유가 없다.
+import { buildSimulation, retarget, nodeRadius } from './layout.js';
 
 const TAU = Math.PI * 2;
 
-// 한 틱에 노드가 움직일 수 있는 최대 거리(px)
-const MAX_STEP = 34;
-
-// **시뮬레이션은 화면 주사율과 무관하게 초당 60틱으로 돈다.** 아래 힘
-// 계수는 전부 "한 틱당"으로 잡혀 있어서, 프레임마다 한 번 돌리면
-// 120Hz 화면(ProMotion)에서는 같은 그래프에 힘이 두 배로 들어간다.
-// 그러면 가까운 노드 쌍이 아래 MIN_REPEL_DIST 로 막아둔 진동 영역까지
-// 다시 밀려 들어간다.
+// **시뮬레이션은 화면 주사율과 무관하게 초당 60틱으로 돈다.** 힘 계수가
+// 전부 "한 틱당"으로 잡혀 있어서, 프레임마다 한 번 돌리면 120Hz 화면
+// (ProMotion)에서 같은 그래프에 힘이 두 배로 들어간다.
 const TICK_MS = 1000 / 60;
-
-// **반발력을 잴 때 이 거리보다 가깝게는 보지 않는다.**
-//
-// 반발력은 1/d² 이라 근거리에서 강성(=|dF/dd|=2C/d³)이 폭발한다. 감쇠
-// 0.82 의 준음함수 오일러가 견디는 한계는 강성 3.6 근처인데, 큰 노드
-// 두 개가 18px 안으로 들어가면 5를 넘긴다(계산: d=15 에서 5.5). 그때부터
-// 두 노드는 서로를 밀고 되돌아오기를 반복하는 진동에 갇히고, 그게 배치
-// 전체를 흔드는 떨림으로 보인다. 이 아래로는 힘을 **일정하게** 준다 —
-// 여전히 밀어내지만 강성이 0이라 진동하지 않는다.
-const MIN_REPEL_DIST = 32;
-
-// 이보다 작은 한 틱 이동은 아예 하지 않는다. 0.1px 는 눈에 보이는 이동이
-// 아니라 화면에서 미세한 떨림으로만 읽힌다.
-const SETTLE_STEP = 0.1;
 
 // 모양은 하나(원)로 두고, 색이 타입을 말한다.
 //
@@ -97,7 +80,7 @@ export class GraphView {
     this.tx = 0;
     this.ty = 0;
     this.k = 1;
-    this.alpha = 0;
+    this.sim = null;
     this.onSelect = opts.onSelect || (() => {});
     this.onExpand = opts.onExpand || (() => {});
     this.onHover = opts.onHover || (() => {});
@@ -105,13 +88,27 @@ export class GraphView {
 
     this._acc = 0;
     this._prev = 0;
+    this._raf = 0;
     this._shownLabels = new Set();
+    this._stopped = false;
 
     this._bindEvents();
     this._resize();
-    new ResizeObserver(() => this._resize()).observe(canvas.parentElement);
-    requestAnimationFrame((t) => this._frame(t));
+    this._ro = new ResizeObserver(() => this._resize());
+    this._ro.observe(canvas.parentElement);
+    this._raf = requestAnimationFrame((t) => this._frame(t));
   }
+
+  // React 가 언마운트할 때 부른다. 안 부르면 RAF 루프와 ResizeObserver 가
+  // 죽은 캔버스를 붙잡고 계속 돈다.
+  destroy() {
+    this._stopped = true;
+    cancelAnimationFrame(this._raf);
+    this._ro?.disconnect();
+    this.sim?.stop();
+  }
+
+  get alpha() { return this.sim ? this.sim.alpha() : 0; }
 
   // --- 데이터 ---------------------------------------------------------
 
@@ -144,7 +141,7 @@ export class GraphView {
           ...n,
           x: (anchor ? anchor.x : w / 2) + Math.cos(a) * d,
           y: (anchor ? anchor.y : h / 2) + Math.sin(a) * d,
-          vx: 0, vy: 0, fixed: false,
+          vx: 0, vy: 0,
         };
         this.byId.set(n.id, node);
         this.nodes.push(node);
@@ -177,13 +174,31 @@ export class GraphView {
       c.y = h / 2;
     }
     this.adjacency = null;
-    this.alpha = 1;
+    this._rebuildSim(w, h);
     this.autoFit = true;   // 사용자가 화면을 움직이기 전까지는 카메라가 따라간다
     // 첫 맞춤은 즉시. 처음부터 서서히 따라가면 그래프가 화면 밖에서
     // 반 초 동안 날아 들어온다.
     this._fitted = false;
     if (!merge) this.resetView();
     return incoming;
+  }
+
+  // d3 의 forceLink 는 링크 배열을 자기 것으로 삼아 source/target 을 노드
+  // 객체로 바꿔 끼운다. 그리기는 여전히 e.s / e.t 를 쓰므로 서로 밟지 않는다.
+  _rebuildSim(w, h) {
+    this.sim?.stop();
+    for (const e of this.edges) {
+      e.source = e.s;
+      e.target = e.t;
+    }
+    this.sim = buildSimulation({
+      nodes: this.nodes,
+      edges: this.edges,
+      center: this.center,
+      width: w,
+      height: h,
+    });
+    this.sim.alpha(1);
   }
 
   neighborsOf(id) {
@@ -199,93 +214,12 @@ export class GraphView {
     return this.adjacency.get(id) || new Set();
   }
 
-  // --- 시뮬레이션 -----------------------------------------------------
-  _tick() {
-    const nodes = this.nodes;
-    const n = nodes.length;
-    if (!n || this.alpha < 0.005) return;
-
-    const w = this.canvas.clientWidth || 800;
-    const h = this.canvas.clientHeight || 600;
-    const cx = w / 2;
-    const cy = h / 2;
-
-    for (let i = 0; i < n; i++) {
-      const a = nodes[i];
-      for (let j = i + 1; j < n; j++) {
-        const b = nodes[j];
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 === 0) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
-        if (d2 > 640000) continue; // 800px 밖은 서로 밀 이유가 없다
-        const d = Math.sqrt(d2);
-        // 반발이 용수철보다 약하면 그래프가 가운데로 뭉쳐 라벨이 전부
-        // 겹친다. 거리 100px 에서 용수철과 비슷한 크기가 되도록 잡았다.
-        // 큰 노드일수록 더 넓은 자리를 요구한다.
-        const dq = d < MIN_REPEL_DIST ? MIN_REPEL_DIST * MIN_REPEL_DIST : d2;
-        const force = (5200 + (a.r + b.r) * 120) / dq;
-        const fx = (dx / d) * force;
-        const fy = (dy / d) * force;
-        a.vx -= fx; a.vy -= fy;
-        b.vx += fx; b.vy += fy;
-      }
-    }
-
-    for (const e of this.edges) {
-      const a = this.byId.get(e.s);
-      const b = this.byId.get(e.t);
-      if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const d = Math.hypot(dx, dy) || 1;
-      // 같은 실체(same_as)는 붙여 놓는다 — 한 개체가 둘로 보이면 안 된다
-      const rest = e.kind === 'same_as' ? 34 : 112 + a.r + b.r;
-      const k = e.kind === 'same_as' ? 0.06 : 0.02;
-      const f = (d - rest) * k;
-      const fx = (dx / d) * f;
-      const fy = (dy / d) * f;
-      a.vx += fx; a.vy += fy;
-      b.vx -= fx; b.vy -= fy;
-    }
-
-    for (const node of nodes) {
-      if (node.fixed) { node.vx = 0; node.vy = 0; continue; }
-      // 중심 노드는 화면 가운데를 지킨다 — 무엇을 보고 있는지 잃지 않게
-      const pull = node.id === this.center ? 0.06 : 0.016;
-      node.vx += (cx - node.x) * pull;
-      node.vy += (cy - node.y) * pull;
-      node.vx *= 0.82;
-      node.vy *= 0.82;
-      // 한 틱에 움직일 수 있는 거리를 묶어둔다. 이게 없으면 초반 한 번의
-      // 큰 힘으로 노드가 수천 px 밖으로 나가고, 돌아오는 속도는 alpha 에
-      // 비례해 줄어들어 영영 못 돌아온다.
-      const v = Math.hypot(node.vx, node.vy);
-      const step = Math.min(MAX_STEP, v * this.alpha);
-      if (step < SETTLE_STEP) continue;
-      node.x += (node.vx / v) * step;
-      node.y += (node.vy / v) * step;
-    }
-
-    this.alpha *= 0.985;
-
-    // **식을 때까지 카메라가 따라간다.** 한 번만 맞추면 그 뒤로도 배치가
-    // 계속 퍼져서 결국 화면 밖으로 나간다 (실측: 노드 117개에서 6초에
-    // 화면의 16%를 채우던 그래프가 20초에는 1%만 남았다). 사용자가
-    // 직접 움직이기 시작하면 그때부터 손을 뗀다.
-    if (this.autoFit && this.alpha > 0.02) {
-      this.fitView(70, this._fitted ? 0.08 : 0);
-      this._fitted = true;
-    }
-  }
-
   // `ease` 를 주면 목표로 **서서히** 따라간다.
   //
   // 매 프레임 목표값을 그대로 대입하면 배치 전체가 떨린다. 카메라는 노드
   // 좌표의 최소/최대로 정해지는데, 경계값은 가장 흔들리는 통계라서 바깥
   // 노드 하나가 몇 픽셀 움직이면 배율과 이동량이 같이 흔들리고, 그러면
-  // **가만히 있는 노드까지 화면에서 떨린다.** 시뮬레이션이 식는 4초 내내
-  // 그래프가 진동하는 것처럼 보였던 원인이다.
+  // **가만히 있는 노드까지 화면에서 떨린다.**
   fitView(pad = 70, ease = 0) {
     if (!this.nodes.length) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -318,6 +252,7 @@ export class GraphView {
 
   // --- 렌더 -----------------------------------------------------------
   _frame(now = 0) {
+    if (this._stopped) return;
     // 지난 프레임 이후 흐른 시간만큼만 시뮬레이션을 돌린다. 탭이 뒤로
     // 갔다 오면 dt 가 수 초로 튀므로 위에서 잘라둔다 — 안 자르면 돌아온
     // 순간 수백 틱이 한 번에 돌아 배치가 폭발한다.
@@ -327,12 +262,21 @@ export class GraphView {
     // 0.9 여유를 둔다. 60Hz 화면에서 dt 가 16.6 과 16.7 을 오가면 어떤
     // 프레임은 0틱, 다음은 2틱이 되어 눈에 띄게 덜컹거린다.
     for (let i = 0; i < 3 && this._acc >= TICK_MS * 0.9; i++) {
-      this._tick();
+      if (this.sim && this.sim.alpha() > 0.005) this.sim.tick();
       this._acc -= TICK_MS;
     }
     if (this._acc < 0) this._acc = 0;
+
+    // **식을 때까지 카메라가 따라간다.** 한 번만 맞추면 그 뒤로도 배치가
+    // 계속 퍼져서 결국 화면 밖으로 나간다. 사용자가 직접 움직이기
+    // 시작하면 그때부터 손을 뗀다.
+    if (this.autoFit && this.alpha > 0.02) {
+      this.fitView(70, this._fitted ? 0.08 : 0);
+      this._fitted = true;
+    }
+
     this._draw();
-    requestAnimationFrame((t) => this._frame(t));
+    this._raf = requestAnimationFrame((t) => this._frame(t));
   }
 
   _draw() {
@@ -420,8 +364,7 @@ export class GraphView {
         const box = labelBox(ctx, node, strong, this.k);
         // **지난 프레임에 떠 있던 이름은 조금 더 버틴다.** 겹침 판정은
         // 예/아니오라서, 노드가 1px 움직일 때마다 판정이 뒤집히면 이름이
-        // 초당 몇 번씩 깜빡인다. 배치는 멈췄는데 화면은 떠는 것처럼 보이는
-        // 나머지 절반이 이것이었다. 한 번 뜬 이름은 3px 더 겹쳐야 물러난다.
+        // 초당 몇 번씩 깜빡인다. 한 번 뜬 이름은 3px 더 겹쳐야 물러난다.
         const test = shown.has(node.id) ? inset(box, 3 / this.k) : box;
         // 중심과 가리킨 노드의 이름은 무슨 일이 있어도 그린다
         if (!strong && placed.some((p) => overlaps(p, test))) continue;
@@ -448,7 +391,10 @@ export class GraphView {
     this.dpr = dpr;
     this.canvas.width = pw;
     this.canvas.height = ph;
-    this.alpha = Math.max(this.alpha, 0.35);
+    if (this.sim) {
+      retarget(this.sim, { center: this.center, width: w, height: h });
+      this.sim.alpha(Math.max(this.sim.alpha(), 0.35));
+    }
   }
 
   resetView() {
@@ -484,16 +430,17 @@ export class GraphView {
       last = { x: ev.offsetX, y: ev.offsetY };
       moved = false;
       const hit = this.nodeAt(ev.offsetX, ev.offsetY);
-      if (hit) { dragNode = hit; hit.fixed = true; } else { panning = true; }
+      // d3 는 fx/fy 로 노드를 못박는다. 옛 `fixed` 플래그가 하던 일이다.
+      if (hit) { dragNode = hit; hit.fx = hit.x; hit.fy = hit.y; } else { panning = true; }
       this.autoFit = false;
     });
 
     c.addEventListener('pointermove', (ev) => {
       if (dragNode) {
         const p = this.toWorld(ev.offsetX, ev.offsetY);
-        dragNode.x = p.x;
-        dragNode.y = p.y;
-        this.alpha = Math.max(this.alpha, 0.4);
+        dragNode.fx = p.x;
+        dragNode.fy = p.y;
+        if (this.sim) this.sim.alpha(Math.max(this.sim.alpha(), 0.4));
         moved = true;
         return;
       }
@@ -514,7 +461,12 @@ export class GraphView {
     });
 
     const release = (ev) => {
-      if (dragNode && !moved) this._select(dragNode);
+      if (dragNode && !moved) {
+        // 끌지 않고 눌렀다 뗀 것은 고르기다 — 못을 도로 뽑는다
+        dragNode.fx = null;
+        dragNode.fy = null;
+        this._select(dragNode);
+      }
       // 빈 곳 클릭(끌지 않은 팬)은 선택 해제 — 조명이 여기서 꺼진다
       if (!dragNode && !moved) this.selected = null;
       dragNode = null;
@@ -555,8 +507,6 @@ export class GraphView {
   // load() → … 한 번 클릭할 때마다 요청이 끝없이 이어지고, load 마다
   // setData 가 alpha 를 1 로 되돌려 배치가 영영 식지 않는다. 상세 패널도
   // 매 바퀴 다시 그려져 여러 노드가 번갈아 나오는 것처럼 보인다.
-  //
-  // 호출부(app.js)는 이미 자기가 showDetail 을 부르므로 알림이 필요 없다.
   select(id) {
     const node = this.byId.get(id);
     if (node) this.selected = node.id;
@@ -572,11 +522,6 @@ export class GraphView {
 }
 
 // --- 그리기 도구 -------------------------------------------------------
-
-function nodeRadius(n) {
-  const base = n.group === 'frame' ? 4 : 6;
-  return base + Math.min(11, Math.sqrt(n.degree || 0) * 1.7);
-}
 
 function drawNode(ctx, n, { dim, focused, center, selected }) {
   const color = nodeColor(n.type, n.group);
@@ -619,11 +564,31 @@ function labelFont(ctx, strong, k) {
 
 // 라벨이 차지할 자리 (월드 좌표). 좌우로 조금 여유를 둬서 글자끼리
 // 스치듯 붙는 것도 겹침으로 본다.
+// 또 하나의 이름(`names[1]`)은 **아랫줄에** 작게 쓴다. 옆에 이어 붙이면
+// '기축옥사 · 정여립의 난' 이 한 줄로 길어져 이웃 라벨을 밀어낸다.
+function coName(n) {
+  return n.names && n.names.length > 1 ? n.names[1] : null;
+}
+
 function labelBox(ctx, n, strong, k) {
   const size = labelFont(ctx, strong, k);
-  const w = ctx.measureText(n.label).width + 6 / k;
+  let w = ctx.measureText(n.label).width + 6 / k;
+  let h = size * 1.25;
+  const co = coName(n);
+  if (co) {
+    coFont(ctx, k);
+    w = Math.max(w, ctx.measureText(co).width + 6 / k);
+    h += size * 1.05;
+    labelFont(ctx, strong, k);
+  }
   const y = n.y + n.r + 4 / k;
-  return { x: n.x - w / 2, y, w, h: size * 1.25 };
+  return { x: n.x - w / 2, y, w, h };
+}
+
+function coFont(ctx, k) {
+  const size = 9.5;
+  ctx.font = `400 ${size / k}px "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif`;
+  return size / k;
 }
 
 function inset(b, m) {
@@ -649,6 +614,16 @@ function drawLabel(ctx, n, strong, k) {
   ctx.strokeText(n.label, n.x, y);
   ctx.fillStyle = strong ? TEXT : TEXT_DIM;
   ctx.fillText(n.label, n.x, y);
+
+  const co = coName(n);
+  if (!co) return;
+  const size = labelFont(ctx, strong, k);
+  const y2 = y + size * 1.1;
+  coFont(ctx, k);
+  ctx.strokeStyle = SURFACE;
+  ctx.strokeText(co, n.x, y2);
+  ctx.fillStyle = TEXT_DIM;
+  ctx.fillText(co, n.x, y2);
 }
 
 function drawEdgeLabel(ctx, a, b, text, k) {

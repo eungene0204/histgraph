@@ -4,6 +4,7 @@
 
 node_modules/
 web/dist/
+web/.render-test-*.mjs
 __pycache__/
 *.py[cod]
 .venv/
@@ -14,3 +15,4 @@ data/cache/
 *.sqlite
 *.duckdb
 .DS_Store
+.vercel

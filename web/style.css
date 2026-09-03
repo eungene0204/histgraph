@@ -34,6 +34,12 @@ html, body {
 
 body { display: flex; flex-direction: column; overflow: hidden; }
 
+/* **React 는 #root 안에 붙는다.** body 가 하던 세로 배치를 여기서 이어받지
+   않으면 .layout 의 flex:1 이 기댈 곳을 잃는다 — 높이가 내용만큼으로
+   쪼그라들어 연표(.tl-body)는 스크롤할 것이 없어지고 캔버스도 크기를 못
+   받는다. 실제로 노드 클릭과 연표 스크롤이 한꺼번에 죽었다. */
+#root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
 /* --- 상단 --- */
 .top {
   display: flex;
