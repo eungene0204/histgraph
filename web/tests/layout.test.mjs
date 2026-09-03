@@ -6,7 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount } from '../src/lib/timeline.js';
 
 let pass = 0;
 let fail = 0;
@@ -229,6 +229,21 @@ console.log('\n배치 (d3-force)');
   // 몫이고, 남은 높이가 라벨 자리(N x GAP)뿐이면 더 줄일 데가 없다.
   ok('빈 해의 몫이 0 까지 깎인다', scale.H <= marks.length * 30 + 82 + 0.5,
      `${scale.H.toFixed(0)}px, 라벨 자리만 ${marks.length * 30 + 82}px`);
+}
+
+// --- 띠의 칩: 왕과 대통령을 따로 센다 ------------------------------------
+// 1948년 뒤에는 대통령이 같은 띠에 선다. 칩이 '왕 27' 로만 세면 대통령
+// 14명이 왕으로 세어진다. 없는 쪽은 적지 않는다 — 조선 그래프에 '대통령 0'
+// 이 뜨면 안 된다.
+{
+  const kings = Array.from({ length: 3 }, (_, i) => ({ id: `k${i}`, kind: 'monarch' }));
+  const presidents = Array.from({ length: 2 }, (_, i) => ({ id: `p${i}`, kind: 'president' }));
+  ok('왕만 있으면 왕만 센다', seatCount(kings) === '왕 3', seatCount(kings));
+  ok('둘 다 있으면 따로 센다', seatCount([...kings, ...presidents]) === '왕 3 · 대통령 2',
+     seatCount([...kings, ...presidents]));
+  ok('대통령만 있으면 대통령만 센다', seatCount(presidents) === '대통령 2');
+  // 종류를 안 적은 예전 데이터는 왕이다
+  ok('종류가 없으면 왕으로 센다', seatCount([{ id: 'x' }]) === '왕 1');
 }
 
 console.log('\n==============================================');

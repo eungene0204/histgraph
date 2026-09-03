@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import mimetypes
@@ -651,14 +652,23 @@ class GraphAPI:
         **사망은 재위의 끝이 아니다.** 태조는 1398년에 물러나 1408년에
         죽었고, 고종은 1907년에 물러나 1919년에 죽었다. 둘을 한 점으로
         합치면 상왕으로 산 10년이 사라진다. 그래서 재위 구간과 몰년을
-        따로 넘긴다."""
+        따로 넘긴다.
+
+        **대통령도 같은 띠다.** 1948년 뒤의 시간은 '박정희 때'로 읽힌다.
+        표식의 값이 자리의 종류(`monarch`·`president`)라 화면이 '재위'와
+        '재임'을 갈라 부른다. 예전 표식 `true` 는 군주다.
+
+        **재임 중인 사람은 끝이 없다.** 끝을 모르는 것과 아직 안 끝난 것은
+        다르다 — 살아 있고 끝 날짜가 없으면 오늘까지 긋고 `ongoing` 으로
+        밝힌다. 죽은 사람의 빈 끝은 전처럼 몰년으로 닫는다."""
         cached = getattr(self._local, "reigns", None)
         if cached is not None:
             return cached
         rows = self.store.conn.execute(
             """SELECT e.src AS id, e.start_date AS r_start, e.end_date AS r_end,
                       n.label, n.type, n.start_date, n.end_date,
-                      p.label AS position
+                      p.label AS position,
+                      json_extract(e.props, '$.reign') AS seat
                  FROM edges e
                  JOIN nodes n ON n.id = e.src
                  JOIN nodes p ON p.id = e.dst
@@ -668,21 +678,32 @@ class GraphAPI:
              ORDER BY e.start_date"""
         ).fetchall()
 
+        this_year = datetime.date.today().year
         out: list[dict] = []
         for r in rows:
             start = _year(r["r_start"])
             if start is None:
                 continue
             # 재위 끝이 비어 있으면(재위 중 죽은 임금 일부) 몰년으로 닫는다.
-            # 그것도 없으면 한 점으로 둔다 — 없는 끝을 오늘로 늘리지 않는다.
+            # 그것도 없고 살아 있으면 재임 중이다. 죽었는데 몰년도 없으면
+            # 한 점으로 둔다 — 모르는 끝을 오늘로 늘리지 않는다.
             death = _year(r["end_date"])
             end = _year(r["r_end"])
+            ongoing = False
             if end is None:
-                end = death if death is not None and death >= start else start
+                if death is not None:
+                    end = death if death >= start else start
+                elif r["end_date"]:
+                    end = start
+                else:
+                    end = max(this_year, start)
+                    ongoing = True
             out.append({
                 "id": r["id"], "label": r["label"],
                 "position": r["position"],
+                "kind": "president" if r["seat"] == "president" else "monarch",
                 "start": start, "end": end,
+                "ongoing": ongoing,
                 # 몰년이 재위 끝보다 앞서면 둘 중 하나가 틀린 것이다.
                 # 화면이 거꾸로 된 꼬리를 그리지 않게 여기서 뗀다.
                 "death": death if death is not None and death >= end else None,

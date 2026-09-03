@@ -1130,7 +1130,7 @@ def cmd_precision(args: argparse.Namespace) -> int:
 
 
 def cmd_reigns(args: argparse.Namespace) -> int:
-    """왕의 재위 기간을 held_position 엣지에 채운다.
+    """왕의 재위·대통령의 재임 기간을 held_position 엣지에 채운다.
 
     **재위는 노드가 아니라 엣지의 값이다.** 인물 노드의 P569/P570 은
     생몰이고, 직위 노드(조선 임금)에 적을 수도 없다 — '언제부터 언제까지
@@ -1160,18 +1160,38 @@ def cmd_reigns(args: argparse.Namespace) -> int:
         monarch = wikidata.fetch_monarch_positions(
             fetcher, positions, failures=failures
         )
-        if not monarch:
-            print("  군주 자리에 해당하는 직위가 없습니다.")
-            return 0
-        print(f"  군주 자리 {len(monarch)}종: "
-              + " · ".join(sorted(monarch.values()))[:150])
-
-        wanted = [r for r in pairs if r["dst"][len("wd:"):] in monarch]
-        persons = sorted({r["src"][len("wd:"):] for r in wanted})
-        print(f"  그 자리에 앉은 인물 {len(persons):,}명 — 재위 조회 중...")
-        reigns = wikidata.fetch_reigns(
-            fetcher, persons, list(monarch), failures=failures
+        # **대통령도 같은 띠에 선다.** 1948년 뒤의 시간은 '박정희 때'로
+        # 읽힌다. 자리를 고르는 규칙은 wikidata.fetch_president_positions.
+        president = wikidata.fetch_president_positions(
+            fetcher, positions, failures=failures
         )
+        seats = {**monarch, **president}
+        if not seats:
+            print("  군주·대통령 자리에 해당하는 직위가 없습니다.")
+            return 0
+        if monarch:
+            print(f"  군주 자리 {len(monarch)}종: "
+                  + " · ".join(sorted(monarch.values()))[:150])
+        if president:
+            print(f"  대통령 자리 {len(president)}종: "
+                  + " · ".join(sorted(president.values()))[:150])
+
+        wanted = [r for r in pairs if r["dst"][len("wd:"):] in seats]
+        persons = sorted({r["src"][len("wd:"):] for r in wanted})
+        print(f"  그 자리에 앉은 인물 {len(persons):,}명 — 재위·재임 조회 중...")
+        reigns = wikidata.fetch_reigns(
+            fetcher, persons, list(seats), failures=failures
+        )
+        # 남의 임기 한가운데서 시작하는 임기는 대행이다 (황교안). **대통령
+        # 자리에만 건다** — 군주 자리는 '왕'·'여왕' 같은 일반 항목이라
+        # 여러 나라의 임금이 한 자리를 나눠 쓰고, 겹침이 곧 정상이다
+        # (실측: 고려 우왕·진덕여왕이 걸렸다).
+        pres_terms = {k: v for k, v in reigns.items() if k[1] in president}
+        pres_terms, nested = wikidata.drop_nested_terms(pres_terms)
+        reigns = {k: v for k, v in reigns.items() if k[1] not in president} | pres_terms
+        for p_qid, pos_qid in nested:
+            print(f"  겹치는 임기라 뺌 (권한대행으로 봄): "
+                  f"{labels.get(f'wd:{p_qid}', p_qid)} — {seats[pos_qid]}")
 
         filled = 0
         seated: set[str] = set()      # 재위를 하나라도 채운 인물
@@ -1182,28 +1202,31 @@ def cmd_reigns(args: argparse.Namespace) -> int:
                 continue
             filled += 1
             seated.add(r["src"])
+            kind = "president" if key[1] in president else "monarch"
             if filled <= 12:
                 print(f"    {labels.get(r['src'], r['src'])[:16]:18}"
                       f" {start or '?'} ~ {end or '?'}"
-                      f"  ({monarch[key[1]]})")
+                      f"  ({seats[key[1]]})")
             if args.dry_run:
                 continue
             # 날짜만 넣지 않고 '이건 재위다'를 함께 적는다. 나중에 다른
             # 직위(영의정 재임)에도 날짜가 붙으면 화면이 둘을 갈라야 한다.
+            # 값은 자리의 종류다 — 화면이 '재위'와 '재임'을 갈라 부른다.
+            # (예전 표식 `true` 도 군주로 읽는다: server._reigns.)
             store.conn.execute(
                 """UPDATE edges
                       SET start_date = ?, end_date = ?,
                           props = json_set(COALESCE(NULLIF(props, ''), '{}'),
-                                           '$.reign', json('true'))
+                                           '$.reign', ?)
                     WHERE src = ? AND dst = ? AND type = 'held_position'""",
-                (start, end, r["src"], r["dst"]),
+                (start, end, kind, r["src"], r["dst"]),
             )
         if not args.dry_run:
             store.conn.commit()
 
-        head = "채울 재위" if args.dry_run else "채운 재위"
+        head = "채울 재위·재임" if args.dry_run else "채운 재위·재임"
         print(f"\n  {head} {filled:,}건 / 자리 {len(wanted):,}건"
-              f" · 재위를 아는 인물 {len(seated):,}명 / {len(persons):,}명")
+              f" · 기간을 아는 인물 {len(seated):,}명 / {len(persons):,}명")
         # **한 인물이 같은 자리를 두 항목으로 갖기도 한다.** 정종은
         # '조선 임금'과 일반 '왕' 둘에 걸려 있고 날짜는 앞의 것에만 있다.
         # 빠진 자리를 세면 정종이 '재위를 모르는 왕'이 되므로, 못 채운
@@ -1611,7 +1634,7 @@ def main(argv: list[str] | None = None) -> int:
     p_lk.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_lk.set_defaults(func=cmd_links)
 
-    p_rg = sub.add_parser("reigns", help="왕의 재위 기간을 직위 엣지에 채운다 (P39 한정어)")
+    p_rg = sub.add_parser("reigns", help="왕의 재위·대통령의 재임 기간을 직위 엣지에 채운다 (P39 한정어)")
     p_rg.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_rg.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_rg.set_defaults(func=cmd_reigns)

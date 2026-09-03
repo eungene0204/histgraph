@@ -66,8 +66,22 @@ class Era:
     # 걸리고 유관순·김좌진·이완용·홍범도·신채호·이육사·여운형이 전부
     # 들어온다.
     person_window: tuple[int, int] | None = None
+    # 국적으로 인물 씨앗을 고를 것인가. **대한민국은 아니다** — 전체 인물의
+    # 65%(18,471명)가 이 국적이고 그 대부분은 역사가 아니라 명단이다
+    # (운동선수·연예인). 끄면 인물은 사건의 이웃과 `seed_positions` 로만
+    # 들어온다: 사건에 참여한 사람, 그리고 그 자리에 앉았던 사람.
+    seed_by_polity: bool = True
+    # 이 자리에 앉았던 인물은 씨앗이다 (`held_position` 의 도착 QID).
+    # 대한민국의 씨앗 인물은 대통령이다 — 연표의 띠가 그들로 선다.
+    seed_positions: list[str] = field(default_factory=list)
+    # 이 해보다 앞선 사건은 정체 태그가 있어도 씨앗이 아니다. Wikidata 의
+    # P17 은 '지금 그 땅의 나라'를 적는 일이 잦다 — 실측: 원종·애노의
+    # 난(889년)이 대한민국의 사건으로 태그돼 있다.
+    since: int | None = None
 
     def seed_polities(self) -> list[str]:
+        if not self.seed_by_polity:
+            return []
         return self.person_polities or [self.polity_label]
 
 
@@ -84,6 +98,16 @@ ERAS: dict[str, Era] = {
         person_polities=["대한제국"],
         person_window=(1910, 1945),
     ),
+    # 대한민국은 왕조가 아니라 지금의 나라다. 정체 노드(Q884)는 그래프에
+    # **장소**로 앉아 있고(출생지 엣지 983건이 가리킨다) 시대 엣지의 도착이
+    # 될 수 없으므로, 씨앗은 사건과 대통령에서 온다. 인물을 국적으로 고르면
+    # 명단이 된다 (`seed_by_polity` 주석).
+    "daehan": Era(
+        "대한민국", "Q884", "대한민국", ["대한민국"],
+        seed_by_polity=False,
+        seed_positions=["Q6296418"],   # 대한민국 대통령
+        since=1945,
+    ),
 }
 
 # 한 화면에 담을 시대 묶음. **시대를 고르는 기준(ERAS)과 다른 것이다** —
@@ -91,12 +115,12 @@ ERAS: dict[str, Era] = {
 # 어디에도 없다. 사람도 이어진다: 대한제국에서 벼슬한 사람이 일제강점기에
 # 의병이 되고, 조선의 마지막 왕이 일제강점기의 이왕(李王)이다.
 BUNDLES: dict[str, tuple[str, ...]] = {
-    "korea": ("joseon", "ilje"),
+    "korea": ("joseon", "ilje", "daehan"),
 }
 
 # 묶음의 이름. 화면 머리에 뜨는 글자라 한국어여야 한다.
 BUNDLE_LABEL: dict[str, str] = {
-    "korea": "조선~일제강점기",
+    "korea": "조선~대한민국",
 }
 
 
@@ -133,7 +157,17 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
                  AND json_extract(props,'$.polity') IN ({marks})""",
             polities,
         )
-    ]
+    ] if polities else []
+    # 그 자리에 앉았던 사람 (Era.seed_positions 주석 참고).
+    by_seat: list[str] = []
+    for pos in era.seed_positions:
+        by_seat += [
+            r["src"]
+            for r in c.execute(
+                """SELECT src FROM edges WHERE type='held_position' AND dst=?""",
+                (f"wd:{pos}",),
+            )
+        ]
     # **국적 태그가 없는 인물이 3,390명이고 거기에 왕들이 들어 있다.**
     # '조선 정종'은 라벨에 시대가 적혀 있는데도 씨앗이 아니어서, 다른
     # 인물의 이웃으로만 딸려 들어왔다. 그 바람에 그의 어머니(한씨)처럼
@@ -168,7 +202,7 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
                 continue
             by_year.append(r["id"])
 
-    persons = list({*persons, *by_label, *by_year})
+    persons = list({*persons, *by_label, *by_year, *by_seat})
     seeds.update(persons)
 
     events = [
@@ -185,14 +219,18 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
     # 신임사화·경신 대기근과 임진왜란 전투 30여 건이 통째로 빠져 있었다.
     event_polities = [era.polity_label, *era.successor_events]
     marks = ",".join("?" * len(event_polities))
-    events += [
-        r["id"]
-        for r in c.execute(
-            f"""SELECT id FROM nodes WHERE type='event'
-                 AND json_extract(props,'$.polity') IN ({marks})""",
-            event_polities,
-        )
-    ]
+    for r in c.execute(
+        f"""SELECT id, start_date FROM nodes WHERE type='event'
+             AND json_extract(props,'$.polity') IN ({marks})""",
+        event_polities,
+    ):
+        if era.since is not None:
+            from .timeline import _year_of
+
+            year = _year_of(r["start_date"])
+            if year is not None and year < era.since:
+                continue
+        events.append(r["id"])
     # 왕조 노드에 from_period 로 직접 걸린 사건도 포함
     events += [
         r["src"]

@@ -29,6 +29,11 @@ import { nodeColor, TYPE_COLOR } from './graph-view.js';
 // 아니라 임금으로 읽는다 — '1456년'보다 '세조 때'가 먼저 온다. 재위는
 // 구간이므로 점이 아니라 막대로 긋고, 사망은 재위의 끝이 아니라서
 // (태조는 1398년에 물러나 1408년에 죽었다) 따로 찍어 점선으로 잇는다.
+//
+// **대통령도 같은 띠, 같은 모양이다.** 1948년 뒤의 시간은 '박정희 때'로
+// 읽힌다 — 왕이 하던 일을 대통령이 이어받았다. 서버가 자리의 종류(kind)를
+// 주고, 여기서는 말만 가른다: 재위/재임. 재임 중인 사람은 끝 해 대신
+// '~' 만 적는다 (ongoing).
 const LANE_W = 104;   // 재위 띠 칸의 너비 (끄면 0)
 const BAR_X = 11;     // 재위 막대가 서는 자리 (칸 안에서)
 const BAR_W = 6;
@@ -204,6 +209,7 @@ export class TimelineRail {
   renderHead() {
     const d = this.data;
     const kings = (d.reigns || []).length;
+    const chipText = seatCount(d.reigns || []);
     const when = d.year === null ? '연도 미상'
       : d.end !== null && d.end !== d.year ? `${yr(d.year)} ~ ${yr(d.end)}`
       : yr(d.year);
@@ -227,7 +233,7 @@ export class TimelineRail {
       <button class="tl-when" title="고른 자리로 돌아가기">${esc(when)}${via}</button>
       <div class="tl-count"></div>
       ${kings ? `<button class="tl-kings" aria-pressed="${this.showReigns}"
-            title="왼쪽에 왕의 재위 기간을 막대로 세웁니다">왕 ${kings}</button>` : ''}
+            title="${esc(seatHint(d.reigns))}">${esc(chipText)}</button>` : ''}
       <div class="tl-map" hidden title="누르거나 끌어서 연표를 옮깁니다">
         <span>${d.axis.from}</span>
         <div class="tl-map-bar"><i class="tl-map-view"></i><b class="tl-map-here" hidden></b></div>
@@ -365,12 +371,13 @@ export class TimelineRail {
     const chip = this.head.querySelector('.tl-kings');
     if (chip) {
       const all = reigns.length;
-      chip.textContent = !lane || band.named >= all ? `왕 ${all}` : `왕 ${band.named}/${all}`;
+      chip.textContent = !lane || band.named >= all
+        ? seatCount(reigns) : `${seatCount(reigns)} (이름 ${band.named}/${all})`;
       chip.title = !lane
-        ? '왼쪽에 왕의 재위 기간을 막대로 세웁니다'
+        ? seatHint(reigns)
         : band.named >= all
-        ? '막대가 재위, 동그라미가 몰년입니다'
-        : `이름을 세울 자리가 모자란 임금 ${all - band.named}명은 막대만 있습니다`
+        ? '막대가 재위·재임, 동그라미가 몰년입니다'
+        : `이름을 세울 자리가 모자란 ${all - band.named}명은 막대만 있습니다`
           + ' — 막대에 마우스를 올리면 이름이 나옵니다';
     }
     const self_ = place.find((p) => p.m.kind === 'self');
@@ -403,7 +410,8 @@ export class TimelineRail {
       const y1 = at(r.start);
       const y2 = Math.max(at(r.end), y1 + 2);
       const dy = r.death != null ? at(r.death) : null;
-      const tip = `${r.label} · ${r.position} 재위 ${yr(r.start)}~${yr(r.end)}`
+      const tip = `${r.label} · ${r.position} ${seatWord(r)} ${yr(r.start)}~`
+        + (r.ongoing ? '' : yr(r.end))
         + (r.death != null ? ` · ${yr(r.death)} 사망` : '');
       // 이웃한 재위는 끝과 시작이 맞닿는다. 한 칸씩 걸러 진하게 칠해야
       // 어디서 갈리는지 보인다.
@@ -424,7 +432,7 @@ export class TimelineRail {
       labels.push({
         y: y1, prio: 0,
         html: `<button class="tl-reign${on ? ' k-on' : ''}" data-id="${esc(r.id)}" style="top:${y1.toFixed(1)}px"
-                 title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${shortYear(r.start)}~${shortYear(r.end)}</i></button>`,
+                 title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${shortYear(r.start)}~${r.ongoing ? '' : shortYear(r.end)}</i></button>`,
       });
       // 퇴위 뒤에도 산 임금만 몰년을 따로 적는다. 재위 중에 죽었으면
       // 위 막대 라벨의 뒷 숫자가 이미 몰년이라 두 번 적는 셈이 된다.
@@ -521,6 +529,28 @@ const DYNASTY_HEAD = /^(고구려|백제|신라|가야|발해|후백제|태봉|�
 
 function shortName(label) {
   return String(label || '').replace(DYNASTY_HEAD, '');
+}
+
+// 왕은 재위하고 대통령은 재임한다. 서버가 자리의 종류를 준다.
+function seatWord(r) {
+  return r.kind === 'president' ? '재임' : '재위';
+}
+
+// 칩의 글자 — '왕 27' 또는 '왕 29 · 대통령 14'. 없는 쪽은 적지 않는다.
+export function seatCount(reigns) {
+  const kings = reigns.filter((r) => r.kind !== 'president').length;
+  const presidents = reigns.length - kings;
+  const parts = [];
+  if (kings) parts.push(`왕 ${kings}`);
+  if (presidents) parts.push(`대통령 ${presidents}`);
+  return parts.join(' · ');
+}
+
+function seatHint(reigns) {
+  const hasP = (reigns || []).some((r) => r.kind === 'president');
+  const hasK = (reigns || []).some((r) => r.kind !== 'president');
+  const who = hasP && hasK ? '왕의 재위와 대통령의 재임' : hasP ? '대통령의 재임' : '왕의 재위';
+  return `왼쪽에 ${who} 기간을 막대로 세웁니다`;
 }
 
 function yr(y) {

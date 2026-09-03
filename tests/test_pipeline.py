@@ -2596,10 +2596,10 @@ with tempfile.TemporaryDirectory() as tmp:
     from histgraph import resolve as rs  # noqa: E402
     from histgraph import scope as sc  # noqa: E402
 
-    check("묶음은 시대 여럿으로 풀린다", sc.eras_of("korea") == ("joseon", "ilje"))
+    check("묶음은 시대 여럿으로 풀린다", sc.eras_of("korea") == ("joseon", "ilje", "daehan"))
     check("시대 이름은 자기 자신으로 풀린다", sc.eras_of("joseon") == ("joseon",))
     # 화면 머리말은 서버가 준다. 모르는 키에 영어를 내보내면 안 된다.
-    check("묶음 이름은 한국어다", sc.label_of("korea") == "조선~일제강점기")
+    check("묶음 이름은 한국어다", sc.label_of("korea") == "조선~대한민국")
     check("모르는 시대는 빈 이름", sc.label_of("없는시대") == "")
 
     store = GraphStore(Path(tmp) / "era.sqlite")
@@ -2843,6 +2843,112 @@ picked = namu.pick_from_search(
      ("태조 왕건/평가", "분류:한국 드라마/평가")],
     "태조 왕건 (영화)", "1970", "film")
 check("검색 결과에서 연도·갈래가 맞는 제목을 앞세운다", picked == ["태조 왕건(영화)"], str(picked))
+
+
+# --- 대통령의 재임 띠 ------------------------------------------------------
+# 1948년 뒤의 시간은 '박정희 때'로 읽힌다 — 왕이 하던 일을 대통령이
+# 이어받았다. 같은 띠, 같은 모양이고 말만 재위/재임으로 갈린다.
+from histgraph.sources.wikidata import drop_nested_terms  # noqa: E402
+
+terms = {
+    ("Q138048", "Q6296418"): ("2013-02-25", "2017-03-10"),   # 박근혜
+    # 황교안 — Wikidata 에 대통령으로 적혀 있고 권한대행 표식이 없다.
+    # 박근혜의 임기 한가운데서 시작한다.
+    ("Q12625765", "Q6296418"): ("2016-12-09", "2017-05-10"),
+    ("Q21001", "Q6296418"): ("2017-05-10", "2022-05-09"),    # 문재인
+    # 같은 날 넘겨받는 것은 겹침이 아니다 (박정희 사망일에 최규하 시작)
+    ("Q14356", "Q6296418"): ("1962-03-24", "1979-10-26"),
+    ("Q313350", "Q6296418"): ("1979-10-26", "1980-08-16"),
+    # 재임 중 — 끝이 없다. 남의 임기 판정에 쓰이지 않고, 자기도 남는다.
+    ("Q12612463", "Q6296418"): ("2025-06-04", None),
+    # 다른 자리의 겹침은 상관없다 (고종: 조선 임금 → 대한제국 황제)
+    ("Q9", "Q1"): ("1863-01-01", "1897-10-12"),
+    ("Q9", "Q2"): ("1897-10-12", "1907-07-19"),
+}
+kept, dropped = drop_nested_terms(terms)
+check("남의 임기 한가운데서 시작하는 임기는 대행이라 뺀다",
+      dropped == [("Q12625765", "Q6296418")], str(dropped))
+check("같은 날 넘겨받는 것은 겹침이 아니다",
+      ("Q313350", "Q6296418") in kept and ("Q14356", "Q6296418") in kept)
+check("재임 중인 임기도 남는다", ("Q12612463", "Q6296418") in kept)
+check("뺀 것 말고는 그대로다", len(kept) == len(terms) - 1, str(kept))
+
+with tempfile.TemporaryDirectory() as tmp:
+    import datetime as _dt
+
+    store = GraphStore(Path(tmp) / "pres.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:K1", type="person", label="조선 고종", source="wd",
+             start_date="1852", end_date="1919"),
+        Node(id="wd:P1", type="person", label="이승만", source="wd",
+             start_date="1875-03-26", end_date="1965-07-19"),
+        Node(id="wd:P2", type="person", label="이재명", source="wd",
+             start_date="1963-12-08"),
+        Node(id="wd:POS", type="role", label="조선 임금", source="wd"),
+        Node(id="wd:Q6296418", type="role", label="대한민국 대통령", source="wd"),
+        Node(id="wd:E1", type="event", label="4·19 혁명", source="wd",
+             start_date="1960-04-19"),
+    ])
+    store.upsert_edges([
+        # 예전 표식 `true` — 군주로 읽어야 한다
+        Edge(src="wd:K1", dst="wd:POS", type="held_position", source="wd",
+             start_date="1863-12-13", end_date="1897-10-12", props={"reign": True}),
+        Edge(src="wd:P1", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="1948-07-24", end_date="1960-04-27", props={"reign": "president"}),
+        # 재임 중 — 끝이 없고 살아 있다
+        Edge(src="wd:P2", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="2025-06-04", props={"reign": "president"}),
+    ])
+    api = GraphAPI(store, era="korea")
+    band = {r["id"]: r for r in api.timeline("wd:E1")["reigns"]}
+    check("대통령이 왕과 같은 띠에 선다", set(band) == {"wd:K1", "wd:P1", "wd:P2"}, str(band))
+    check("자리의 종류를 갈라 넘긴다",
+          band["wd:K1"]["kind"] == "monarch" and band["wd:P1"]["kind"] == "president")
+    check("물러난 대통령의 몰년은 재임 끝과 따로 간다",
+          (band["wd:P1"]["end"], band["wd:P1"]["death"]) == (1960, 1965), str(band["wd:P1"]))
+    check("재임 중이면 오늘까지 긋고 그렇다고 밝힌다",
+          band["wd:P2"]["ongoing"] and band["wd:P2"]["end"] == _dt.date.today().year,
+          str(band["wd:P2"]))
+    check("물러난 사람은 재임 중이 아니다", not band["wd:P1"]["ongoing"] and not band["wd:K1"]["ongoing"])
+    check("축이 재임 중인 대통령의 오늘까지 담는다",
+          api.timeline("wd:E1")["axis"]["to"] >= _dt.date.today().year)
+    store.close()
+
+# --- 대한민국 시대의 씨앗 ---------------------------------------------------
+# 인물 18,471명이 대한민국 국적이다 — 국적으로 고르면 명단이 된다. 씨앗은
+# 사건과 대통령 자리에서 오고, 사람은 그 이웃으로만 들어온다.
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import scope as sc2  # noqa: E402
+
+    store = GraphStore(Path(tmp) / "daehan.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q884", type="place", label="대한민국", source="wd"),
+        Node(id="wd:Q6296418", type="role", label="대한민국 대통령", source="wd"),
+        Node(id="wd:P1", type="person", label="박정희", source="wd",
+             start_date="1917-11-14", end_date="1979-10-26", props={"polity": "대한민국"}),
+        # 국적만 대한민국인 사람 — 씨앗이 아니다
+        Node(id="wd:P2", type="person", label="어느 운동선수", source="wd",
+             start_date="1990-01-01", props={"polity": "대한민국"}),
+        Node(id="wd:E1", type="event", label="5·16 군사정변", source="wd",
+             start_date="1961-05-16", props={"polity": "대한민국"}),
+        # P17 이 '지금 그 땅의 나라'를 적은 옛 사건 — 씨앗이 아니다
+        Node(id="wd:E2", type="event", label="원종·애노의 난", source="wd",
+             start_date="0889", props={"polity": "대한민국"}),
+        Node(id="wd:E3", type="event", label="6·29 선언", source="wd",
+             props={"seed_era": "대한민국"}),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:P1", dst="wd:Q6296418", type="held_position", source="wd"),
+    ])
+    seeds = sc2.select_seeds(store, sc2.ERAS["daehan"])
+    check("대통령 자리에 앉았던 사람은 씨앗이다", "wd:P1" in seeds, str(seeds))
+    check("국적만 대한민국인 사람은 씨앗이 아니다", "wd:P2" not in seeds, str(seeds))
+    check("정체 태그가 대한민국인 사건은 씨앗이다", "wd:E1" in seeds)
+    check("시대보다 앞선 사건은 태그가 있어도 씨앗이 아니다", "wd:E2" not in seeds)
+    check("시드 표에서 온 사건은 날짜가 없어도 씨앗이다", "wd:E3" in seeds)
+    check("조선~대한민국이 한 묶음이다",
+          sc2.eras_of("korea") == ("joseon", "ilje", "daehan") and sc2.label_of("korea") == "조선~대한민국")
+    store.close()
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
