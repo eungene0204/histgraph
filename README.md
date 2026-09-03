@@ -902,12 +902,24 @@ python3 -m histgraph serve          # http://127.0.0.1:8100  (data/joseon.sqlite
 
 ```bash
 npm install               # 처음 한 번
-
-npm run dev:api           # 8100 — 그래프 API (파이썬)
-npm run dev               # 5173 — 화면 (HMR)
+npm run dev               # API(8100) + 화면(5173) 을 함께
 ```
 
-브라우저는 **5173 하나만** 본다. 프록시 설정은 `web/vite.config.js`.
+브라우저는 **5173 하나만** 본다 (`/api` 는 8100 으로 프록시된다 —
+`web/vite.config.js`). Ctrl+C 로 둘 다 접힌다.
+
+`serve` 에 줄 인자는 그대로 넘어간다:
+
+```bash
+npm run dev -- --db data/histgraph.sqlite    # 전체 그래프로
+```
+
+한쪽만 따로 띄우려면 `npm run dev:api` (8100) · `npm run dev:web` (5173).
+
+배선은 `tools/dev.sh` 다. 두 가지를 지킨다 — **8100 이 이미 떠 있으면 그대로
+쓴다** (남의 터미널 것을 뺏지도, 끄면서 죽이지도 않는다). 그리고 **이 셸이
+끝나면 자기가 띄운 API 도 접는다** — 5173 을 닫았는데 8100 이 남아 다음
+실행을 막는 걸 본다.
 
 저장소 루트에서 친다. 프론트 설정의 본체는 `web/package.json` 이고 루트의
 것은 `--prefix web` 으로 넘기기만 한다 — 화면 파일이 `web/` 에 모여 있는
