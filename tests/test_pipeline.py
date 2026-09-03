@@ -2203,7 +2203,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     store = GraphStore(Path(tmp) / "rc.sqlite")
     store.upsert_nodes([
-        Node(id="wd:W1", type="media", label="영화", source="wd"),
+        Node(id="wd:W1", type="media", label="영화", source="wd",
+             props={"form": "film"}),
         # 주제 자리에만 있는 노드 — 다른 관계도 연대도 없다
         Node(id="wd:T1", type="event", label="조직범죄", source="wd"),
         # 주제끼리만 이어진 섬 — 엣지가 있어도 사실층에 닿지 않는다
@@ -2254,9 +2255,66 @@ with tempfile.TemporaryDirectory() as tmp:
     check("depicts 대상 타입을 센다", report["by_type"].get("event") == 5, str(report))
     store.close()
 
+print("[작품 명단 — 분류에서 관계 읽기]")
+from histgraph.sources import works  # noqa: E402
+
+check("제목의 괄호가 매체를 말한다", works.form_of("대조영 (드라마)", set()) == "series")
+check("괄호가 분류보다 앞선다",
+      works.form_of("한산 (영화)", {"분류:조선 역사 드라마"}) == "film")
+check("분류로도 매체를 읽는다",
+      works.form_of("한산: 용의 출현", {"분류:조선을 배경으로 한 영화"}) == "film")
+check("모르면 모른다고 한다", works.form_of("칼의 노래", {"분류:임진왜란을 소재로 한 작품"}) is None)
+check("소재 분류에서 이름을 뽑는다",
+      works.subject_of("분류:이순신을 소재로 한 작품") == "이순신")
+check("배경 분류에서 이름을 뽑는다",
+      works.setting_of("분류:조선을 배경으로 한 영화") == "조선")
+check("소재와 배경을 섞지 않는다",
+      works.subject_of("분류:조선을 배경으로 한 영화") is None
+      and works.setting_of("분류:이순신을 소재로 한 작품") is None)
+check("왕대는 왕조로 물러난다", works.polity_of("조선 세종 시기") == "조선")
+check("왕조로 시작하지 않으면 물러날 곳이 없다", works.polity_of("한성부") is None)
+
+pages = {
+    "대조영 (드라마)": {"분류:고구려를 배경으로 한 작품", "분류:대조영을 소재로 한 작품"},
+    "대한민국의 역사 드라마 목록": {"분류:조선 역사 드라마"},
+    "칼의 노래": {"분류:임진왜란을 소재로 한 작품"},
+}
+nodes, skipped = works.build_nodes(pages, {"대조영 (드라마)": "Q1"}, {})
+check("작품 노드는 QID 를 id 로 쓴다", [n.id for n in nodes] == ["wd:Q1"], str([n.id for n in nodes]))
+check("매체를 모르면 노드를 만들지 않는다",
+      ("칼의 노래", "매체를 모름") in skipped, str(skipped))
+check("목록 문서는 작품이 아니다",
+      ("대한민국의 역사 드라마 목록", "작품이 아님") in skipped, str(skipped))
+
+def fake_resolve(name, allowed):
+    table = {("대조영", ("person", "event", "place", "org")): "wd:Q100",
+             ("고구려", ("period", "org", "place")): "wd:Q200"}
+    return table.get((name, allowed))
+
+edges, counts, unresolved = works.build_edges(nodes, fake_resolve)
+check("소재 분류가 depicts 가 된다", counts["depicts"] == 1, str(counts))
+check("배경 분류가 set_in 이 된다", counts["set_in"] == 1, str(counts))
+check("엣지에 분류 이름을 남긴다",
+      all(e.label and e.label.startswith("분류: ") for e in edges), str([e.label for e in edges]))
+
 check("작품이 주제를 가리키는 엣지가 있다", "about" in EDGE_TYPES)
 check("about 의 도착은 개념뿐", EDGE_TYPES["about"][2] == ("concept",))
 check("depicts 의 도착에 개념이 없다", "concept" not in EDGE_TYPES["depicts"][2])
+
+try:
+    Node(id="kw:x", type="media", label="어떤 작품", source="kowiki")
+    check("매체 구분 없는 작품 거부", False)
+except OntologyError:
+    check("매체 구분 없는 작품 거부", True)
+try:
+    Node(id="kw:x", type="media", label="어떤 작품", source="kowiki",
+         props={"form": "브이로그"})
+    check("모르는 매체 구분 거부", False)
+except OntologyError:
+    check("모르는 매체 구분 거부", True)
+check("아는 매체 구분은 통과",
+      Node(id="kw:y", type="media", label="한산", source="kowiki",
+           props={"form": "film"}).props["form"] == "film")
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

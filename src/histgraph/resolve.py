@@ -17,7 +17,7 @@ import logging
 import re
 import sqlite3
 
-from .ontology import Edge
+from .ontology import EDGE_TYPES, Edge
 from .store import GraphStore
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,14 @@ PERIOD_TO_POLITY: dict[str, str] = {
     "고려": "Q28208",
     "조선": "Q28179",
     "대한제국": "Q28233",
+    "일제강점기": "Q503585",
 }
+
+# 시대를 대표하는 노드의 **타입**. 한국사의 시대 구분은 대개 왕조와 같아서
+# (§ontology 의 from_period 주석) org 로 세우지만, 일제강점기는 왕조가 아니라
+# 기간이다. 통치 주체인 일본 제국을 시대 이름으로 쓸 수는 없으므로 —
+# '일제강점기의 사건'과 '일본 제국의 사건'은 다른 말이다 — period 로 세운다.
+POLITY_NODE_TYPE: dict[str, str] = {"일제강점기": "period"}
 
 
 def normalize_place(label: str) -> str:
@@ -155,6 +162,81 @@ def link_event_periods(store: GraphStore) -> int:
         store.upsert_edges(edges)
     log.info("사건 시대 엣지 %d건 추가 (대상 사건 %d개)", len(edges), len(rows))
     return len(edges)
+
+
+# 시대 노드로 잘못 향한 엣지들. '어디서'를 묻는 엣지인데 대답이 시대다.
+_PLACE_EDGES_TO_PERIOD = ("born_in", "died_in", "occurred_at", "located_in")
+
+
+def fix_period_nodes(store: GraphStore) -> dict[str, object]:
+    """시대가 장소·다른 무엇으로 앉아 있는 것을 바로잡는다.
+
+    **실측으로 드러난 것.** `wd:Q503585 일제강점기` 가 **장소** 노드였고,
+    인물 44명의 출생지와 2명의 사망지가 거기로 가 있었다. Wikidata 의
+    P19(출생지)가 '일제강점기 조선'을 답으로 주는데, 우리는 그걸 그대로
+    장소로 받아 적었다. 화면은 "나운규는 일제강점기에서 죽었다"고 말한다.
+
+    고치는 방법은 지우는 것이 아니다 — **'언제'를 '어디서' 칸에 적은 것뿐**
+    이므로 `from_period` 로 옮긴다. 그러면 44명이 그 시대 사람이라는,
+    원래 맞는 사실로 남는다.
+
+    `upsert_nodes` 가 type 을 덮어쓰지 않기 때문에 이 어긋남은 다시
+    수집해도 저절로 낫지 않는다. resolve 단계가 매번 확인한다."""
+    conn = store.conn
+    retyped: list[tuple[str, str, str]] = []
+    moved = dropped = 0
+
+    for name, qid in PERIOD_TO_POLITY.items():
+        nid = f"wd:{qid}"
+        row = conn.execute("SELECT type FROM nodes WHERE id=?", (nid,)).fetchone()
+        if row is None:
+            continue
+        want = POLITY_NODE_TYPE.get(name, "org")
+        # org 도 period 도 시대의 자리다 (from_period 의 도착 타입 둘).
+        # 이미 둘 중 하나면 건드리지 않는다 — 조선은 org 가 맞다.
+        if row["type"] not in ("period", "org"):
+            conn.execute(
+                "UPDATE nodes SET type=?, updated_at=datetime('now') WHERE id=?",
+                (want, nid),
+            )
+            retyped.append((nid, row["type"], want))
+
+        marks = ",".join("?" * len(_PLACE_EDGES_TO_PERIOD))
+        rows = conn.execute(
+            f"""SELECT e.src, e.dst, e.type, e.source, n.type AS src_type
+                  FROM edges e JOIN nodes n ON n.id = e.src
+                 WHERE e.dst = ? AND e.type IN ({marks})""",
+            (nid, *_PLACE_EDGES_TO_PERIOD),
+        ).fetchall()
+        allowed = EDGE_TYPES["from_period"][1]
+        for r in rows:
+            if r["src_type"] in allowed:
+                store.upsert_edges(
+                    [
+                        Edge(
+                            src=r["src"], dst=nid, type="from_period",
+                            source=r["source"],
+                            # 어디서 온 엣지인지 남긴다. 원래 born_in 이었다는
+                            # 사실이 지워지면 이 교정을 되짚을 수 없다.
+                            props={"was": r["type"]},
+                        )
+                    ]
+                )
+                moved += 1
+            else:
+                dropped += 1
+            conn.execute(
+                "DELETE FROM edges WHERE src=? AND dst=? AND type=? AND source=?",
+                (r["src"], nid, r["type"], r["source"]),
+            )
+
+    conn.commit()
+    if retyped or moved or dropped:
+        log.info(
+            "시대 노드 교정: 타입 %d개, 장소→시대 엣지 %d건 (버림 %d건)",
+            len(retyped), moved, dropped,
+        )
+    return {"retyped": retyped, "moved": moved, "dropped": dropped}
 
 
 def link_places(store: GraphStore) -> int:

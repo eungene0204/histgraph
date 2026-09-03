@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .backends import build_backend
 from .http import Fetcher
-from .ontology import EDGE_TYPES, NODE_TYPES, Edge, Node, validate_edge_endpoints
+from .ontology import EDGE_TYPES, FORMS, NODE_TYPES, Edge, Node, validate_edge_endpoints
 from .sources import culture, datagokr, heritage, wikidata
 from .store import GraphStore
 
@@ -162,18 +162,53 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def cmd_events(args: argparse.Namespace) -> int:
-    """한국사 주요 사건을 이름으로 직접 수집한다.
+    """한국사 주요 사건·단체·개념을 이름으로 직접 수집한다.
 
-    차수 상위순으로 고르는 enrich 로는 임진왜란·병자호란이 잡히지 않는다."""
+    차수 상위순으로 고르는 enrich 로는 임진왜란·병자호란이 잡히지 않는다.
+
+    **세 표를 갈라 둔 이유는 타입이다.** 의열단을 사건 표에 넣으면 사건
+    노드가 되고, 창씨개명을 넣으면 개념이 사건 행세를 한다."""
     from .sources import wikipedia
 
+    tables = {
+        "event": ("kowiki:event", wikipedia.EVENT_SEEDS),
+        "org": ("kowiki:org", wikipedia.ORG_SEEDS),
+        "concept": ("kowiki:concept", wikipedia.CONCEPT_SEEDS),
+    }
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
     with GraphStore(args.db) as store:
-        before = store.stats()["by_node_type"].get("event", 0)
-        nodes, edges = wikipedia.ingest_events(fetcher, store, full=not args.intro_only)
-        _persist(store, "kowiki:event", nodes, edges)
-        after = store.stats()["by_node_type"].get("event", 0)
-        print(f"  사건 노드: {before:,} → {after:,}")
+        before = store.stats()["by_node_type"]
+        for kind in args.kinds:
+            source, seeds = tables[kind]
+            if args.eras:
+                seeds = {e: t for e, t in seeds.items() if e in args.eras}
+            if not seeds:
+                continue
+            nodes, edges = wikipedia.ingest_seeds(
+                fetcher, store, seeds, kind, full=not args.intro_only
+            )
+            # **시드 표는 타입을 말하지만 upsert 는 타입을 덮어쓰지 않는다.**
+            # 이미 다른 타입으로 앉아 있던 노드는 그대로 남으므로, 조용히
+            # 어긋나지 않게 반드시 보고한다. 바꾸는 것은 사람이 정한다 —
+            # 타입을 바꾸면 그 노드에 걸린 엣지가 스키마와 어긋난다.
+            stale = [
+                (n.id, n.label, row["type"])
+                for n in nodes
+                if n.type == kind
+                and (row := store.conn.execute(
+                    "SELECT type FROM nodes WHERE id=?", (n.id,)
+                ).fetchone())
+                and row["type"] != kind
+            ]
+            _persist(store, source, nodes, edges)
+            for nid, label, was in stale:
+                print(
+                    f"  ⚠ 시드는 {NODE_TYPES[kind]}이라 하는데 그래프에는"
+                    f" {NODE_TYPES[was]}으로 있음: {label} ({nid})"
+                )
+        after = store.stats()["by_node_type"]
+        for kind in args.kinds:
+            print(f"  {NODE_TYPES[kind]} 노드: {before.get(kind, 0):,} → {after.get(kind, 0):,}")
     return 0
 
 
@@ -282,6 +317,121 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_works(args: argparse.Namespace) -> int:
+    """역사를 다룬 작품 명단 — 한국어 위키백과 분류에서.
+
+    분류 이름이 곧 관계다: '이순신을 소재로 한'은 `depicts`, '조선을
+    배경으로 한'은 `set_in`, '역사 드라마'는 매체 구분이 된다."""
+    from .sources import works
+
+    fetcher = Fetcher(Path(args.db).parent / "cache", min_interval=args.interval)
+
+    with GraphStore(args.db) as store:
+        print(f"→ 분류 나무를 훑는 중 ({works.ROOT_CATEGORY})...")
+        pages = works.crawl(fetcher, args.root or works.ROOT_CATEGORY,
+                            args.depth or works.MAX_DEPTH)
+        print(f"  문서 {len(pages):,}건")
+
+        titles = sorted(pages)
+        qids = works.page_qids(fetcher, titles)
+        print(f"  그중 QID 있는 것 {len(qids):,}건 ({len(qids) * 100 // max(len(titles), 1)}%)")
+
+        # 제목·분류로 매체를 못 읽은 것만 Wikidata 에 물어본다.
+        need = [
+            qids[t] for t in titles
+            if t in qids and not works.form_of(t, pages[t])
+        ]
+        extra = works.forms_from_wikidata(fetcher, need) if need else {}
+        if need:
+            print(f"  제목·분류로 매체를 못 읽은 {len(need):,}건 중 {len(extra):,}건을 P31 로 읽음")
+
+        nodes, skipped = works.build_nodes(pages, qids, extra)
+        by_form: dict[str, int] = {}
+        for n in nodes:
+            by_form[n.props["form"]] = by_form.get(n.props["form"], 0) + 1
+        print(
+            "  작품 노드 {:,}개 — {}".format(
+                len(nodes),
+                " · ".join(f"{FORMS[k]} {v:,}" for k, v in sorted(by_form.items(), key=lambda kv: -kv[1])),
+            )
+        )
+
+        resolver = _label_resolver(store)
+        edges, counts, unresolved = works.build_edges(nodes, resolver)
+        print(f"  분류에서 나온 엣지 — 소재 {counts['depicts']:,}건 · 배경 {counts['set_in']:,}건")
+
+        if args.dry_run:
+            print("\n  --dry-run 입니다. 저장하지 않았습니다.")
+        else:
+            store.upsert_nodes(nodes)
+            store.upsert_edges(edges)
+            store.log_ingest("kowiki-works", len(nodes), len(edges))
+            print(f"\n  ✓ 노드 {len(nodes):,}개 · 엣지 {len(edges):,}개 저장")
+
+        if not args.dry_run:
+            filled, left = works.backfill_forms(store, fetcher)
+            if filled or left:
+                print(f"  매체 구분이 비어 있던 기존 작품 {filled + len(left):,}개 중 {filled:,}개를 채움")
+            for node_id, label in left[: args.show]:
+                print(f"    · 못 채움: {label} ({node_id})", file=sys.stderr)
+
+        if skipped:
+            print(f"\n  만들지 않은 문서 {len(skipped):,}건 (매체를 모르면 노드로 만들지 않는다):")
+            for title, why in skipped[: args.show]:
+                print(f"    · {title} — {why}")
+        if unresolved:
+            print(f"\n  그래프에서 하나로 찾지 못한 이름 {len(unresolved):,}개 (엣지를 잇지 않음):")
+            print("    " + ", ".join(unresolved[: args.show * 2]))
+    return 0
+
+
+def _label_resolver(store: GraphStore):
+    """이름 -> 노드 id. 하나로 찾아지지 않으면 None.
+
+    라벨을 먼저 보고 없으면 별칭을 본다. **후보가 둘이면 잇지 않는다** —
+    '허준'·'김유신'은 동명이인이 있고 '임진왜란'은 노드가 둘이다. 자동으로
+    고르면 틀린 곳에 붙는다."""
+
+    def same_entity(ids: list[str]) -> bool:
+        """이미 same_as 로 이어 둔 후보들은 둘이 아니라 하나다.
+
+        실측: '조선'은 `wd:Q28179`(왕조)와 `kr:period:조선`(시대) 둘로
+        나오는데, `resolve` 가 이미 같은 실체로 이어 두었다. 이걸 '후보가
+        둘'로 세면 조선을 배경으로 한 작품 수십 편이 배경을 잃는다."""
+        for a in ids:
+            for b in ids:
+                if a == b:
+                    continue
+                linked = store.conn.execute(
+                    "SELECT 1 FROM same_as WHERE (a=? AND b=?) OR (a=? AND b=?)",
+                    (a, b, b, a),
+                ).fetchone()
+                if not linked:
+                    return False
+        return True
+
+    def resolve(name: str, allowed: tuple[str, ...]) -> str | None:
+        rows = store.conn.execute(
+            "SELECT id, type FROM nodes WHERE label = ?", (name,)
+        ).fetchall()
+        if not rows:
+            rows = store.conn.execute(
+                "SELECT n.id, n.type FROM aliases a JOIN nodes n ON n.id = a.node_id "
+                "WHERE a.alias = ?",
+                (name,),
+            ).fetchall()
+        hits = [r["id"] for r in rows if r["type"] in allowed]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1 and same_entity(hits):
+            # 같은 실체라면 Wikidata 쪽을 대표로 쓴다 — 다른 소스가 붙을 때
+            # 기준이 되는 것이 QID 다.
+            return sorted(hits, key=lambda i: (not i.startswith("wd:"), i))[0]
+        return None
+
+    return resolve
+
+
 def cmd_reclassify(args: argparse.Namespace) -> int:
     """개념을 사건에서 갈라낸다 — 화면의 '이 사건을 다룬 작품'이 서려면 먼저.
 
@@ -357,6 +507,18 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     from . import resolve as resolve_mod
 
     with GraphStore(args.db) as store:
+        # 시대가 장소로 앉아 있으면 그 뒤의 모든 연결이 그 위에 쌓인다.
+        # 맨 앞에 둔다.
+        print("→ 시대 노드 점검 중...")
+        fixed = resolve_mod.fix_period_nodes(store)
+        for nid, was, now in fixed["retyped"]:
+            print(f"  타입 교정: {nid}  {NODE_TYPES[was]} → {NODE_TYPES[now]}")
+        if fixed["moved"] or fixed["dropped"]:
+            print(
+                f"  '어디서' 칸에 적힌 시대 {fixed['moved']}건을 from_period 로 옮김"
+                + (f" (옮길 수 없어 버림 {fixed['dropped']}건)" if fixed["dropped"] else "")
+            )
+
         print("→ 시대 연결 중...")
         periods = resolve_mod.link_periods(store)
         print(f"  ✓ {periods}건")
@@ -598,11 +760,15 @@ def cmd_promote(args: argparse.Namespace) -> int:
 
 
 def cmd_scope(args: argparse.Namespace) -> int:
-    """한 시대만 뽑아 별도 그래프로 만든다. 원본은 그대로 둔다."""
+    """시대를 뽑아 별도 그래프로 만든다. 원본은 그대로 둔다."""
     from . import scope as scope_mod
 
+    # 이름을 인자로 두 번 적게 하지 않는다. 시대 하나면 그 이름, 묶음이면
+    # 묶음 이름이 곧 파일 이름이다 (serve --era 가 같은 규칙으로 찾는다).
+    out = args.out or str(ROOT / "data" / f"{'+'.join(args.era)}.sqlite")
+
     with GraphStore(args.db) as store:
-        result = scope_mod.extract(store, args.era, args.out, hops=args.hops,
+        result = scope_mod.extract(store, args.era, out, hops=args.hops,
                                    drop_isolated=not args.keep_isolated)
     print(f"\n=== {result['era']} 서브그래프 ===")
     print(f"  출력: {result['out']}")
@@ -1117,9 +1283,14 @@ def main(argv: list[str] | None = None) -> int:
     p_ing.add_argument("--reset", action="store_true", help="수집 전 DB 삭제 (정규화 로직 변경 후 필수)")
     p_ing.set_defaults(func=cmd_ingest)
 
-    p_ev = sub.add_parser("events", help="한국사 주요 사건을 이름으로 직접 수집")
+    p_ev = sub.add_parser("events", help="한국사 주요 사건·단체·개념을 이름으로 직접 수집")
     p_ev.add_argument("--interval", type=float, default=1.0)
     p_ev.add_argument("--intro-only", action="store_true", help="본문 전체 대신 도입부만 (빠름, 서사 얕음)")
+    p_ev.add_argument("--kinds", nargs="+", default=["event", "org", "concept"],
+                      choices=["event", "org", "concept"],
+                      help="수집할 시드 표 (기본: 셋 다)")
+    p_ev.add_argument("--eras", nargs="*", default=None,
+                      help="이 시대만 (예: 일제강점기 대한제국). 기본은 전부")
     p_ev.set_defaults(func=cmd_events)
 
     p_ib = sub.add_parser("infobox", help="위키백과 인포박스에서 관계 추출 (LLM 불필요)")
@@ -1148,6 +1319,14 @@ def main(argv: list[str] | None = None) -> int:
     p_prune = sub.add_parser("prune", help="스포츠 이벤트 노드 제거")
     p_prune.add_argument("--labels-only", action="store_true", help="Wikidata 클래스 조회 생략 (빠름)")
     p_prune.set_defaults(func=cmd_prune)
+    p_wk = sub.add_parser("works", help="역사를 다룬 작품 명단 (위키백과 분류)")
+    p_wk.add_argument("--dry-run", action="store_true", help="저장하지 않고 계획만 출력")
+    p_wk.add_argument("--root", default=None, help="시작 분류 (기본: 한국의 역사를 소재로 한 작품)")
+    p_wk.add_argument("--depth", type=int, default=None, help="분류를 따라 내려갈 깊이")
+    p_wk.add_argument("--show", type=int, default=15, help="출력할 예시 수")
+    p_wk.add_argument("--interval", type=float, default=0.3)
+    p_wk.set_defaults(func=cmd_works)
+
     p_rc = sub.add_parser("reclassify", help="개념을 사건에서 갈라낸다 (Wikidata 클래스 계층)")
     p_rc.add_argument("--dry-run", action="store_true", help="바꾸지 않고 계획만 출력")
     p_rc.add_argument("--limit", type=int, default=None, help="검사할 사건 노드 수")
@@ -1205,9 +1384,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="비운 설명을 전부 나열")
     p_rd.set_defaults(func=cmd_redescribe)
 
-    p_sc = sub.add_parser("scope", help="한 시대만 별도 그래프로 추출")
-    p_sc.add_argument("era", choices=["joseon", "goryeo", "silla", "goguryeo", "baekje"])
-    p_sc.add_argument("--out", default=str(ROOT / "data" / "joseon.sqlite"))
+    p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")
+    p_sc.add_argument("era", nargs="+",
+                      choices=["joseon", "goryeo", "silla", "goguryeo", "baekje",
+                               "ilje", "korea"],
+                      help="시대 여럿을 주면 한 DB 에 담는다. 'korea' 는 "
+                           "조선~일제강점기 묶음")
+    p_sc.add_argument("--out", default=None,
+                      help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
     p_sc.add_argument("--keep-isolated", action="store_true", help="엣지 없는 노드도 유지")
     p_sc.set_defaults(func=cmd_scope)
@@ -1249,7 +1433,9 @@ def main(argv: list[str] | None = None) -> int:
     p_rl.set_defaults(func=cmd_relabel)
 
     p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
-    p_sv.add_argument("--era", default="joseon", help="띄울 시대 그래프 (data/{era}.sqlite)")
+    p_sv.add_argument("--era", default="korea",
+                      help="띄울 시대 그래프 (data/{era}.sqlite). 'korea' 는 "
+                           "조선~일제강점기 묶음")
     p_sv.add_argument("--host", default="127.0.0.1")
     p_sv.add_argument("--port", type=int, default=8100)
     p_sv.set_defaults(func=cmd_serve)

@@ -72,18 +72,83 @@ EVENT_SEEDS: dict[str, list[str]] = {
         # 넣으면 from_period 가 자기 자신을 가리키는 자기순환이 된다.
         "임오군란", "갑신정변", "동학 농민 혁명", "갑오개혁", "을미사변",
         "아관파천", "을사조약", "헤이그 특사", "정미의병",
-        "국채보상운동", "한일병합조약", "안중근",
+        "국채보상운동", "한일병합조약",
+        # 구한말은 조약과 의병으로 끝난다. 조약만 넣으면 당한 쪽이 없고,
+        # 의병만 넣으면 무엇에 맞선 것인지가 없다.
+        "거문도 사건", "방곡령", "만민공동회", "광무개혁",
+        "청일 전쟁", "러일 전쟁", "가쓰라-태프트 밀약",
+        "제1차 한일 협약", "한일신협약", "기유각서",
+        "을미의병", "서울 진공 작전",
+        "대한제국군 해산", "남한 대토벌 작전", "이토 히로부미 저격 사건",
     ],
+    # 일제강점기 35년의 사건 노드가 13개였다. 씨앗이 11개였기 때문이고,
+    # 그중 이봉창·윤봉길은 사람이라 사건 노드로 앉아 있었다 (reclassify 가
+    # 나중에 인물로 옮겼다). **사람과 단체는 이 표에 넣지 않는다** —
+    # 아래 ORG_SEEDS 로 갔다.
     "일제강점기": [
-        "3·1 운동", "대한민국 임시정부", "봉오동 전투", "청산리 전투",
-        "6·10 만세운동", "광주학생항일운동", "물산장려운동", "신간회",
-        "이봉창", "윤봉길", "조선어학회 사건",
+        "3·1 운동", "2·8 독립 선언", "105인 사건", "제암리 학살 사건",
+        "6·10 만세 운동", "광주 학생 항일 운동", "물산장려운동",
+        "민립대학설립운동", "브나로드 운동", "형평사 운동",
+        "암태도 소작쟁의", "원산 총파업", "조선어학회 사건",
+        # 무장 투쟁
+        "봉오동 전투", "청산리 전투", "훈춘 사건", "간도참변", "자유시 참변",
+        "대전자령 전투", "보천보 습격",
+        "훙커우 공원 사건", "종로경찰서 폭탄투척 사건",
+        # 통치와 수탈 — 정책이되 기간과 주체가 있는 '사업'이다.
+        # 통치 방식 자체(무단 통치·창씨개명)는 사건이 아니라 개념이다.
+        "조선 토지 조사 사업", "산미증식계획",
+        # 밖에서 온 사건. 이것들이 없으면 왜 하필 그 해에 그 일이
+        # 일어났는지가 그래프에서 사라진다.
+        "만보산 사건", "만주사변", "중일 전쟁", "태평양 전쟁",
+        "간토 대학살", "국민대표회의", "카이로 회담", "일본의 항복",
     ],
     "대한민국": [
         "8·15 광복", "제주 4·3 사건", "여수·순천 사건", "한국 전쟁",
         "인천 상륙 작전", "4·19 혁명", "5·16 군사 정변", "10월 유신",
         "부마민주항쟁", "10·26 사건", "12·12 군사 반란",
         "5·18 광주 민주화 운동", "6월 항쟁", "6·29 선언",
+    ],
+}
+
+# 단체 시드. **사건 표와 갈라 둔 이유는 타입이 다르기 때문이다.**
+# `upsert_nodes` 는 type 을 덮어쓰지 않으므로 이미 org 로 앉은 신간회는
+# 안전하지만, 처음 들어오는 단체를 사건 표에 넣으면 그대로 사건 노드가
+# 된다 — 화면의 '이 시대의 사건'이 단체 목록으로 채워진다.
+#
+# 일제강점기는 특히 단체의 시대다. 무장 투쟁도 외교도 개인이 아니라
+# 조직 이름으로 남아 있어서, 단체를 빼면 인물과 사건 사이가 끊긴다.
+ORG_SEEDS: dict[str, list[str]] = {
+    "대한제국": [
+        "독립협회", "신민회", "대한자강회", "황국협회", "보안회",
+        # 의병 부대는 사건이 아니라 조직이다 — 서울 진공 작전을
+        # 벌인 쪽이 13도 창의군이고, 둘을 한 노드로 두면 누가
+        # 무엇을 했는지가 사라진다.
+        "13도 창의군",
+    ],
+    "일제강점기": [
+        # 임시정부와 그 군대
+        "대한민국 임시정부", "대한민국 임시의정원", "한국 광복군",
+        # 무장 단체
+        "북로군정서", "서로군정서", "대한독립군", "신흥무관학교",
+        "한국독립군", "조선혁명군정부", "조선의용대", "조선의용군",
+        # 의열 투쟁
+        "의열단", "한인애국단", "대한광복단", "대한애국청년당",
+        # 국내 운동과 정당
+        "신간회", "근우회", "조선공산당", "한국독립당", "조선민족혁명당",
+        "조선노농총동맹", "조선청년총동맹", "건국동맹",
+        # 통치 기구 — 맞선 쪽만 넣으면 무엇에 맞섰는지가 없다
+        "조선총독부", "동양척식주식회사", "조선사편수회", "경성제국대학",
+    ],
+}
+
+# 개념 시드. 무단 통치·창씨개명은 사건이 아니다 — 시작한 날도 끝난 날도
+# 하나로 적을 수 없고, '누가 참여했나'를 물을 수 없다. concept 타입이
+# 생긴 자리가 여기다 (README '개념이 사건 행세를 하고 있었다').
+CONCEPT_SEEDS: dict[str, list[str]] = {
+    "일제강점기": [
+        "무단 통치", "문화 통치", "민족말살통치",
+        "창씨개명", "황국신민서사", "국가총동원법", "회사령",
+        "징용", "일본군 위안부",
     ],
 }
 
@@ -287,25 +352,30 @@ def fetch_articles(
     return found, missing
 
 
-def ingest_events(
+def ingest_seeds(
     fetcher: Fetcher,
     store: GraphStore,
-    seeds: dict[str, list[str]] | None = None,
+    seeds: dict[str, list[str]],
+    node_type: str = "event",
     full: bool = True,
 ) -> tuple[list[Node], list[Edge]]:
-    """시드 목록의 사건 문서를 수집해 사건 노드로 만든다.
+    """시드 목록의 문서를 수집해 `node_type` 노드로 만든다.
 
     차수 상위순으로 고르는 `enrich` 로는 임진왜란·병자호란 같은 핵심
     사건이 잡히지 않는다 — Wikidata 상에서 연결이 적기 때문이다. 이름으로
-    직접 지정하는 경로가 따로 필요한 이유다."""
-    from ..ontology import Edge, Node
-    from ..resolve import PERIOD_TO_POLITY
+    직접 지정하는 경로가 따로 필요한 이유다.
 
-    seeds = seeds or EVENT_SEEDS
+    **타입을 인자로 받는 이유.** 시드는 사건만이 아니다. 일제강점기를
+    넣으면서 단체(의열단·조선총독부)와 개념(창씨개명)이 같은 방식으로
+    필요해졌는데, 한 표에 몰아넣으면 전부 사건 노드가 된다. 표를 갈라
+    두고 타입을 여기서 정한다."""
+    from ..ontology import Edge, Node
+    from ..resolve import PERIOD_TO_POLITY, POLITY_NODE_TYPE
+
     all_titles = [t for titles in seeds.values() for t in titles]
     title_to_era = {t: era for era, titles in seeds.items() for t in titles}
 
-    log.info("사건 문서 %d건 조회 중 (full=%s)...", len(all_titles), full)
+    log.info("%s 문서 %d건 조회 중 (full=%s)...", node_type, len(all_titles), full)
     found, missing = fetch_articles(fetcher, all_titles, full=full)
     if missing:
         # 문서명이 틀렸는지 실제로 없는지 구분이 안 되므로 반드시 보고한다
@@ -319,7 +389,7 @@ def ingest_events(
         era = title_to_era.get(requested, "")
         nodes[nid] = Node(
             id=nid,
-            type="event",
+            type=node_type,
             label=info["title"],
             source="wd",  # QID 공간을 공유해야 기존 노드와 합쳐진다
             description=info["extract"],
@@ -338,14 +408,30 @@ def ingest_events(
             # 자기 자신을 가리키는 엣지가 된다. 방어해둔다.
             if pid != nid:
                 nodes.setdefault(
-                    pid, Node(id=pid, type="org", label=era, source="wd")
+                    pid,
+                    Node(
+                        id=pid,
+                        type=POLITY_NODE_TYPE.get(era, "org"),
+                        label=era,
+                        source="wd",
+                    ),
                 )
                 edges.append(
                     Edge(src=nid, dst=pid, type="from_period", source="kowiki")
                 )
 
-    log.info("사건 노드 %d개, 시대 엣지 %d개", len(nodes), len(edges))
+    log.info("%s 노드 %d개, 시대 엣지 %d개", node_type, len(nodes), len(edges))
     return list(nodes.values()), edges
+
+
+def ingest_events(
+    fetcher: Fetcher,
+    store: GraphStore,
+    seeds: dict[str, list[str]] | None = None,
+    full: bool = True,
+) -> tuple[list[Node], list[Edge]]:
+    """사건 시드. `ingest_seeds` 의 사건 전용 입구."""
+    return ingest_seeds(fetcher, store, seeds or EVENT_SEEDS, "event", full=full)
 
 
 # 그래프에 있는 wd 노드 타입 전부. 예전 기본값은 ('person','event') 였고,

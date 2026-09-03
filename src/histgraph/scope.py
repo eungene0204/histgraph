@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from .store import GraphStore
@@ -44,6 +45,30 @@ class Era:
     # **인물에는 적용하지 않는다.** 대한제국 국적 인물까지 씨앗으로 삼으면
     # 근현대로 끌려간다 (전체 인물 28,471명 중 65%가 대한민국이다).
     successor_events: list[str] = field(default_factory=list)
+    # 인물 씨앗으로 삼을 국적 라벨. 비우면 자기 이름 하나다.
+    #
+    # **일제강점기 때문에 생긴 칸이다.** 이 시대에는 나라가 없어서 사람의
+    # 국적이 한 이름으로 모이지 않는다 — Wikidata 는 같은 시기 사람을
+    # '일제강점기'(2,082명)와 '대한제국'(626명)에 갈라 적어 뒀다. 한쪽만
+    # 씨앗으로 삼으면 안중근과 윤봉길이 다른 그래프에 산다.
+    person_polities: list[str] = field(default_factory=list)
+    # 인물을 **연대로** 고르는 창 (시대 시작연도, 끝연도).
+    #
+    # **국적으로는 이 시대 사람이 모이지 않는다.** 실측: 유관순은
+    # '일제강점기', 이완용은 '조선', 김좌진은 태그 없음, 박은식은
+    # '대한민국', 김원봉은 '조선민주주의인민공화국'이다. 나라가 없던
+    # 시대라 P27 이 한 이름으로 모이지 않고, 그나마 '일제강점기'로 적힌
+    # 1,339명은 81%가 1960년 이후에 죽은 **해방 후 인물**이다 —
+    # 그 시대에 태어났을 뿐인 명단이다.
+    #
+    # 갈리는 것은 연대다. 이 창을 주면 '시대가 시작할 때 이미 태어나
+    # 있었고, 그때까지 살아 있던 사람'을 씨앗으로 삼는다. 실측 2,187명이
+    # 걸리고 유관순·김좌진·이완용·홍범도·신채호·이육사·여운형이 전부
+    # 들어온다.
+    person_window: tuple[int, int] | None = None
+
+    def seed_polities(self) -> list[str]:
+        return self.person_polities or [self.polity_label]
 
 
 ERAS: dict[str, Era] = {
@@ -52,7 +77,40 @@ ERAS: dict[str, Era] = {
     "silla": Era("신라", "Q28456", "신라", ["신라", "통일신라"]),
     "goguryeo": Era("고구려", "Q28370", "고구려", ["고구려"]),
     "baekje": Era("백제", "Q28428", "백제", ["백제"]),
+    "ilje": Era(
+        "일제강점기", "Q503585", "일제강점기", ["일제강점기"],
+        # 국적 태그는 대한제국만 믿는다 — 627명 중 생년이 1919년 이후인
+        # 사람이 한 명뿐이라, 이 이름은 실제로 그 시대를 가리킨다.
+        person_polities=["대한제국"],
+        person_window=(1910, 1945),
+    ),
 }
+
+# 한 화면에 담을 시대 묶음. **시대를 고르는 기준(ERAS)과 다른 것이다** —
+# 조선은 1910년에 끝나지만 화면에서 1910년에 끊기면 그 다음 35년이
+# 어디에도 없다. 사람도 이어진다: 대한제국에서 벼슬한 사람이 일제강점기에
+# 의병이 되고, 조선의 마지막 왕이 일제강점기의 이왕(李王)이다.
+BUNDLES: dict[str, tuple[str, ...]] = {
+    "korea": ("joseon", "ilje"),
+}
+
+# 묶음의 이름. 화면 머리에 뜨는 글자라 한국어여야 한다.
+BUNDLE_LABEL: dict[str, str] = {
+    "korea": "조선~일제강점기",
+}
+
+
+def eras_of(key: str) -> tuple[str, ...]:
+    """묶음 이름이면 그 구성 시대들, 시대 이름이면 자기 자신."""
+    return BUNDLES.get(key, (key,))
+
+
+def label_of(key: str) -> str:
+    """화면에 쓸 이름. 모르는 이름이면 빈 문자열 — 영어 키를 내보내지 않는다."""
+    if key in BUNDLE_LABEL:
+        return BUNDLE_LABEL[key]
+    era = ERAS.get(key)
+    return era.name if era else ""
 
 
 def select_seeds(store: GraphStore, era: Era) -> set[str]:
@@ -66,11 +124,14 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
     c = store.conn
     seeds: set[str] = set()
 
+    polities = era.seed_polities()
+    marks = ",".join("?" * len(polities))
     persons = [
         r["id"]
         for r in c.execute(
-            "SELECT id FROM nodes WHERE type='person' AND json_extract(props,'$.polity')=?",
-            (era.polity_label,),
+            f"""SELECT id FROM nodes WHERE type='person'
+                 AND json_extract(props,'$.polity') IN ({marks})""",
+            polities,
         )
     ]
     # **국적 태그가 없는 인물이 3,390명이고 거기에 왕들이 들어 있다.**
@@ -84,7 +145,30 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
             (f"{era.polity_label} %",),
         )
     ]
-    persons = list({*persons, *by_label})
+    # 연대로 고르는 인물 (Era.person_window 주석 참고).
+    by_year: list[str] = []
+    if era.person_window:
+        from .timeline import _year_of
+
+        start = era.person_window[0]
+        for r in c.execute(
+            """SELECT id, start_date, end_date FROM nodes
+                WHERE type='person' AND start_date IS NOT NULL AND start_date != ''"""
+        ):
+            born = _year_of(r["start_date"])
+            if born is None or born > start:
+                continue
+            died = _year_of(r["end_date"])
+            if died is None:
+                # 몰년을 모르면 사람의 한 생애만큼 거슬러 인정한다. 이 선이
+                # 없으면 몰년 없는 고대 인물이 통째로 딸려 온다.
+                if born < start - 60:
+                    continue
+            elif died < start:
+                continue
+            by_year.append(r["id"])
+
+    persons = list({*persons, *by_label, *by_year})
     seeds.update(persons)
 
     events = [
@@ -99,14 +183,14 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
     # `?e wdt:P17 wd:{polity}` 로 물어 놓고 답을 버리고 있어서, 여기 걸릴
     # 사건이 하나도 없었다. 실측: 조선 P17 사건 73건 — 진주민란·갑오개혁·
     # 신임사화·경신 대기근과 임진왜란 전투 30여 건이 통째로 빠져 있었다.
-    polities = [era.polity_label, *era.successor_events]
-    marks = ",".join("?" * len(polities))
+    event_polities = [era.polity_label, *era.successor_events]
+    marks = ",".join("?" * len(event_polities))
     events += [
         r["id"]
         for r in c.execute(
             f"""SELECT id FROM nodes WHERE type='event'
                  AND json_extract(props,'$.polity') IN ({marks})""",
-            polities,
+            event_polities,
         )
     ]
     # 왕조 노드에 from_period 로 직접 걸린 사건도 포함
@@ -224,26 +308,64 @@ def _dated_events(store: GraphStore, ids: set[str]) -> set[str]:
 
 def extract(
     store: GraphStore,
-    era_key: str,
+    era_keys: str | Sequence[str],
     out_path: str,
     hops: int = 1,
     drop_isolated: bool = True,
 ) -> dict[str, object]:
-    """시대 서브그래프를 별도 DB 로 뽑는다."""
+    """시대 서브그래프를 별도 DB 로 뽑는다. 시대를 여럿 주면 한 DB 에 담는다.
+
+    **여럿을 한 DB 에 담는 이유.** 조선을 1910년에서 자르면 그 다음 35년이
+    화면 어디에도 없다. 씨앗은 시대별로 따로 고르고 — 기준이 시대마다
+    다르다 — 그 다음 확장·고립정리·복사는 합집합에 한 번만 한다. 시대별로
+    뽑아 나중에 합치면 시대를 걸치는 엣지(대한제국의 관료가 일제강점기의
+    의병이 되는)가 양쪽 어디에도 안 남는다."""
     from pathlib import Path
 
-    era = ERAS.get(era_key)
-    if era is None:
-        raise ValueError(f"알 수 없는 시대: {era_key} (가능: {', '.join(ERAS)})")
+    keys = [era_keys] if isinstance(era_keys, str) else list(era_keys)
+    eras = []
+    for key in keys:
+        for sub in eras_of(key):
+            era = ERAS.get(sub)
+            if era is None:
+                raise ValueError(
+                    f"알 수 없는 시대: {sub} (가능: {', '.join(ERAS)}"
+                    f" · 묶음: {', '.join(BUNDLES)})"
+                )
+            if era not in eras:
+                eras.append(era)
 
-    seeds = select_seeds(store, era)
+    seeds: set[str] = set()
+    for era in eras:
+        seeds |= select_seeds(store, era)
     if not seeds:
-        raise ValueError(f"{era.name} 씨앗 노드가 없습니다 — 먼저 수집·해소가 필요합니다")
+        names = " · ".join(e.name for e in eras)
+        raise ValueError(f"{names} 씨앗 노드가 없습니다 — 먼저 수집·해소가 필요합니다")
 
     keep = expand(store, seeds, hops=hops)
     # 왕조 노드 자신도 그래프의 중심으로 포함한다
-    keep.add(f"wd:{era.polity_qid}")
+    keep.update(f"wd:{e.polity_qid}" for e in eras)
     keep = close_places(store, keep)
+
+    # **노드 행이 없는 id 를 걸러낸다.** `expand` 는 엣지의 양끝을 모으는데,
+    # 원본 그래프에도 이미 댕글링인 엣지가 있어서 노드가 없는 id 가 섞여
+    # 들어온다. 그대로 복사하면 시대 그래프에 '없는 곳을 가리키는 엣지'가
+    # 생긴다 (실측 19건 — 전부 child_of 라, 화면에서 부모 자리가 빈
+    # 자녀 관계로 보인다).
+    real: set[str] = set()
+    ordered_keep = sorted(keep)
+    for i in range(0, len(ordered_keep), 500):
+        batch = ordered_keep[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        real.update(
+            r["id"]
+            for r in store.conn.execute(
+                f"SELECT id FROM nodes WHERE id IN ({marks})", batch
+            )
+        )
+    if len(real) != len(keep):
+        log.info("노드 행이 없는 끝점 %d개 제외", len(keep) - len(real))
+    keep = real
 
     isolated: set[str] = set()
     if drop_isolated:
@@ -343,7 +465,7 @@ def extract(
     stats = dest.stats()
     dest.close()
     return {
-        "era": era.name,
+        "era": " · ".join(e.name for e in eras),
         "out": str(out),
         "seeds": len(seeds),
         "isolated_dropped": len(isolated),

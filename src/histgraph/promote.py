@@ -675,9 +675,12 @@ def fetch_entity_info(
         ):
             qid, cat = _qid(_val(row, "item") or ""), _qid(_val(row, "cat") or "")
             if cat in CATEGORY_TO_TYPE:
-                info.setdefault(qid, {"types": set()})["types"].add(
-                    CATEGORY_TO_TYPE[cat]
-                )
+                entry = info.setdefault(qid, {"types": set()})
+                entry["types"].add(CATEGORY_TO_TYPE[cat])
+                # 어떤 클래스로 걸렸는지도 남긴다. 작품은 매체 구분 없이
+                # 노드가 될 수 없는데(ontology.Node), 그 구분을 알 수 있는
+                # 것이 여기서 맞은 클래스뿐이다.
+                entry.setdefault("cats", set()).add(cat)
 
         for row in _safe_query(
             fetcher,
@@ -772,6 +775,27 @@ def _ensure_target(store: GraphStore, item: dict, node_type: str) -> None:
         return
     info = item.get("info") or {}
     qid = target.split(":", 1)[1]
+    props: dict[str, object] = {
+        "kowiki_url": "https://ko.wikipedia.org/wiki/"
+        + urllib.parse.quote(item["label"]),
+        "promoted": True,
+    }
+    if node_type == "media":
+        # 작품은 매체 구분이 있어야 노드가 된다. 걸린 클래스에서 읽고,
+        # 못 읽으면 **만들지 않는다** — 관계 상대로 딸려 온 노드라
+        # 판정할 근거가 그것뿐이다.
+        from .sources.wikidata import MEDIA_CLASS_TO_FORM
+
+        forms = {
+            MEDIA_CLASS_TO_FORM[c]
+            for c in info.get("cats", ())
+            if c in MEDIA_CLASS_TO_FORM
+        }
+        if len(forms) != 1:
+            log.info("매체 구분을 몰라 작품 노드를 만들지 않음: %s (%s)",
+                     target, item["label"])
+            return
+        props["form"] = forms.pop()
     store.upsert_nodes([
         Node(
             id=target,
@@ -781,11 +805,7 @@ def _ensure_target(store: GraphStore, item: dict, node_type: str) -> None:
             start_date=info.get("birth"),
             end_date=info.get("death"),
             url=f"https://www.wikidata.org/entity/{qid}",
-            props={
-                "kowiki_url": "https://ko.wikipedia.org/wiki/"
-                + urllib.parse.quote(item["label"]),
-                "promoted": True,
-            },
+            props=props,
         )
     ])
 

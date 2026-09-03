@@ -6,7 +6,8 @@ import { SidePanel } from './components/SidePanel.jsx';
 import { DetailPanel } from './components/DetailPanel.jsx';
 import { Search } from './components/Search.jsx';
 
-const ERA_LABEL = { joseon: '조선', goryeo: '고려', silla: '신라', goguryeo: '고구려', baekje: '백제' };
+// 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
+// 더할 때마다 두 곳을 고쳐야 하고, 빠뜨린 하나가 화면에 영어로 뜬다.
 
 function hashId() {
   return location.hash ? decodeURIComponent(location.hash.slice(1)) : '';
@@ -135,7 +136,7 @@ export default function App() {
       const m = await api.meta();
       if (!alive) return;
       setMeta(m);
-      document.title = `histgraph — ${ERA_LABEL[m.era] || m.era || '전체'}`;
+      document.title = `histgraph — ${m.era_label || '전체'}`;
       const s = await api.seeds(12);
       if (!alive) return;
       setSeeds(s);
@@ -192,7 +193,7 @@ export default function App() {
     });
   }, [load, showTimeline]);
 
-  const era = ERA_LABEL[meta?.era] || meta?.era || '전체';
+  const era = meta?.era_label || '전체';
   const prev = trail[trail.length - 1] || null;
 
   return (

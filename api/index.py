@@ -27,8 +27,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from histgraph.server import GraphAPI, dispatch  # noqa: E402
 
 # 화면이 띄우는 것은 시대 그래프다 — 전체 그래프(38,654 노드)가 아니라
-# data/joseon.sqlite. cli.py 의 serve 가 고르는 것과 같은 파일을 고른다.
-ERA = os.environ.get("HISTGRAPH_ERA", "joseon")
+# data/korea.sqlite. cli.py 의 serve 가 고르는 것과 같은 파일을 고른다.
+# korea 는 시대 하나가 아니라 묶음이다 (scope.BUNDLES): 조선에서 일제강점기까지.
+ERA = os.environ.get("HISTGRAPH_ERA", "korea")
 DB = Path(os.environ.get("HISTGRAPH_DB") or ROOT / "data" / f"{ERA}.sqlite")
 
 # 모듈 수준에 둔다. 함수가 따뜻할 때 재사용되어 요청마다 DB 를 다시 열지 않는다.

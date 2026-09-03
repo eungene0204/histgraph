@@ -15,6 +15,9 @@ data/cache/
 *.sqlite
 # 화면이 띄우는 시대 그래프만 예외로 저장소에 둔다. 이게 없으면 Vercel 이
 # 클론해서 빌드할 때 DB 가 없어 /api 가 전부 죽는다 — push 자동배포의 조건이다.
+# korea = 조선~일제강점기 묶음 (scope 가 만든다). joseon 은 그 앞 단계라
+# 아직 남겨 둔다 — 묶음이 잘못 만들어졌을 때 되돌아갈 자리다.
+!data/korea.sqlite
 !data/joseon.sqlite
 *.duckdb
 .DS_Store

@@ -33,6 +33,26 @@ NODE_TYPES: dict[str, str] = {
     "concept": "개념·주제",
 }
 
+# --- 매체 구분 -------------------------------------------------------------
+# 영화·드라마·책·음악·다큐·게임을 **노드 타입으로 쪼개지 않는다.** 쪼개면
+# EDGE_TYPES 의 출발·도착 목록이 여섯 배로 늘고, 화면의 색이 아홉에서
+# 열다섯이 된다. 사용자가 하는 질의는 "이 사건을 다룬 **작품**"이지
+# "이 사건을 다룬 **게임**"이 아니다. 매체별 필터는 화면의 토글로 충분하다.
+#
+# 대신 media 노드는 form 을 **반드시** 갖는다 (아래 Node.__post_init__).
+# 나중에 채울 수 있는 값이 아니다 — 비면 화면에서 영영 구분이 안 된다.
+FORMS: dict[str, str] = {
+    "film": "영화",
+    "series": "드라마",
+    "documentary": "다큐멘터리",
+    "animation": "애니메이션",
+    "book": "책",
+    "comic": "만화",
+    "game": "게임",
+    "music": "음악",
+    "stage": "무대",
+}
+
 # --- 엣지 타입 -------------------------------------------------------------
 # (키, 라벨, 출발 노드 타입, 도착 노드 타입)
 # 그래프의 가치는 엣지에 있다. 소스별로 어떤 엣지를 채울 수 있는지가
@@ -57,11 +77,21 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     # 한국사에서 시대 구분은 왕조와 같다 — '조선시대'는 '조선'이라는 정체가
     # 정의한다. 따라서 org(왕조)도 도착 타입으로 허용한다. 별도 period 노드를
     # 만들면 같은 대상이 둘로 갈라진다.
-    "from_period": ("시대", ("heritage", "artwork", "person", "event", "period"), ("period", "org")),
+    # 출발 타입에 org·concept 이 있는 이유: 일제강점기를 넣으면서 드러났다.
+    # 신흥무관학교·조선총독부(org)와 창씨개명·무단 통치(concept)는 그 시대를
+    # 빼고 말할 수 없는데, 시대에 걸 길이 없으면 엣지가 하나도 없는 노드로
+    # 들어와 `scope` 의 고립 노드 정리에서 통째로 사라진다.
+    "from_period": (
+        "시대",
+        ("heritage", "artwork", "person", "event", "period", "org", "concept"),
+        ("period", "org"),
+    ),
     # 작품의 **배경**. 개봉연도(start_date)와 다른 축이다 — 『한산』은
     # 2022년에 나왔고 1592년을 다룬다. 연표가 어느 자리에 세울지는 이
     # 엣지가 정한다. 채우는 일은 아직 하지 않았고, 타입만 세워 둔다.
-    "set_in": ("배경", ("media", "artwork"), ("period", "place")),
+    # 도착에 org 를 허용하는 이유는 from_period 와 같다 — 한국사에서 시대
+    # 구분은 왕조와 같아서, '조선을 배경으로 한 영화'의 배경은 조선이다.
+    "set_in": ("배경", ("media", "artwork"), ("period", "place", "org")),
     # 시간축. 인물·사건은 연도와 '같은 실체'가 아니므로 same_as 가 아니라
     # 엣지로 잇는다. 출생/사망/시작/종료는 엣지 label 로 구분한다.
     "dated_to": ("시점", tuple(NODE_TYPES), ("period",)),
@@ -110,6 +140,14 @@ class Node:
         # 안 되기 때문이다.
         if self.description and not has_hangul(self.description):
             self.description = to_korean(self.description)
+        # **작품은 무슨 매체인지 모른 채 들어올 수 없다.** 설명과 달리 이건
+        # 나중에 채울 수 있는 값이 아니다 — 비어 있으면 화면에서 영화와
+        # 드라마와 게임이 한 덩어리가 되고, 그 상태를 알아볼 방법도 없다.
+        # 판정이 안 서는 작품은 노드를 만들지 말고 목록으로 보고할 것.
+        if self.type == "media":
+            form = self.props.get("form")
+            if form not in FORMS:
+                raise OntologyError(f"작품에 매체 구분(form)이 없거나 모름: {self.id} ({form!r})")
 
 
 @dataclass(slots=True)

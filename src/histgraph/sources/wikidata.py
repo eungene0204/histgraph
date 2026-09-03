@@ -37,6 +37,11 @@ POLITIES = {
     "Q28208": "고려",
     "Q28179": "조선",
     "Q28233": "대한제국",
+    # 일제강점기는 왕조가 아니라 통치 기간이지만, Wikidata 는 이 시기의
+    # 사람과 사건에 P27/P17 로 이 QID 를 붙인다 (실측: P27 인물 2,082명 ·
+    # P17 개체 253건). 여기 없으면 35년치가 통째로 수집되지 않는다 —
+    # '근현대는 명단이지 역사가 아니다'의 절반이 이 누락이었다.
+    "Q503585": "일제강점기",
     "Q884": "대한민국",
     "Q423": "조선민주주의인민공화국",
 }
@@ -71,6 +76,13 @@ WD_CLASS_TO_TYPE: dict[str, str] = {
     "Q16261338": "org",
     "Q11424": "media", "Q5398426": "media",
     "Q838948": "artwork", "Q3305213": "artwork",
+}
+
+
+# 작품 클래스 -> 매체 구분(form). 라벨 대조로 확인한 QID 만 쓴다.
+MEDIA_CLASS_TO_FORM: dict[str, str] = {
+    "Q11424": "film",       # 영화
+    "Q5398426": "series",   # 텔레비전 시리즈
 }
 
 
@@ -395,6 +407,8 @@ def _resolve_targets(
     resolved = _labels(fetcher, set(targets))
 
     nodes: list[Node] = []
+    # 매체 구분을 몰라 만들지 못한 작품. 조용히 빠지면 왜 없는지 알 수 없다.
+    unformed: list[tuple[str, str]] = []
     # 노드 id 를 그대로 키로 쓴다. _qid() 는 URI 용('/' 분리)이라
     # 'wd:Q123' 같은 노드 id 에 쓰면 통째로 되돌아와 조회가 전부 빗나간다.
     actual_type: dict[str, str] = {}
@@ -404,6 +418,16 @@ def _resolve_targets(
         # P463(소속) 대상에는 조직뿐 아니라 사건도 섞여 있다.
         node_type = WD_CLASS_TO_TYPE.get(type_qid or "", inferred)
         node_id = f"{SOURCE}:{qid}"
+        props: dict[str, str] = {}
+        if node_type == "media":
+            # 작품은 매체 구분 없이는 노드가 될 수 없다 (ontology.Node).
+            # P31 이 무엇인지 알면 채우고, 모르면 **만들지 않는다** —
+            # 관계 상대로 딸려 온 노드라 판정할 근거가 그것뿐이다.
+            form = MEDIA_CLASS_TO_FORM.get(type_qid or "")
+            if form is None:
+                unformed.append((node_id, label))
+                continue
+            props["form"] = form
         actual_type[node_id] = node_type
         nodes.append(
             Node(
@@ -412,6 +436,7 @@ def _resolve_targets(
                 label=label,
                 source=SOURCE,
                 url=f"http://www.wikidata.org/entity/{qid}",
+                props=props,
             )
         )
 
@@ -426,6 +451,17 @@ def _resolve_targets(
             downgraded += 1
     if downgraded:
         log.info("스키마 불일치 엣지 %d개를 related_to 로 완화", downgraded)
+    if unformed:
+        # 노드를 안 만들었으므로 그 노드로 가는 엣지는 댕글링이 된다.
+        # 함께 버려야 그래프가 없는 곳을 가리키지 않는다.
+        skipped = {nid for nid, _ in unformed}
+        before = len(edges)
+        edges[:] = [e for e in edges if e.dst not in skipped]
+        log.info(
+            "매체 구분을 몰라 만들지 않은 작품 %d개 (엣지 %d건 함께 버림): %s",
+            len(unformed), before - len(edges),
+            ", ".join(label for _, label in unformed[:5]),
+        )
 
     # 중복 엣지 제거 (정체별 조회에서 복수 국적 인물이 겹친다)
     unique = {(e.src, e.dst, e.type): e for e in edges}
@@ -557,7 +593,7 @@ def fetch_media(
     # 한 단계씩 걸어 올라가며 마저 가른다.
     rows = _safe_query(
         fetcher,
-        f"""SELECT ?w ?wLabel ?date ?subj ?subjLabel ?isPerson WHERE {{
+        f"""SELECT ?w ?wLabel ?date ?cls ?subj ?subjLabel ?isPerson WHERE {{
               VALUES ?cls {{ wd:Q11424 wd:Q5398426 }}
               ?w wdt:P31 ?cls ; wdt:P495 wd:Q884 ; wdt:P921 ?subj .
               OPTIONAL {{ ?w wdt:P577 ?date }}
@@ -576,6 +612,9 @@ def fetch_media(
         if not w_uri or not s_uri:
             continue
         wid = _nid(w_uri)
+        # 매체 구분은 질의가 이미 알고 있다 — VALUES 로 고른 클래스가 그것이다.
+        # media 노드는 form 없이는 만들어지지 않는다(ontology 참조).
+        form = MEDIA_CLASS_TO_FORM.get(_qid(_val(r, "cls") or ""), "film")
         nodes[wid] = Node(
             id=wid,
             type="media",
@@ -583,6 +622,7 @@ def fetch_media(
             source=SOURCE,
             start_date=_iso_date(_val(r, "date")),
             url=w_uri,
+            props={"form": form},
         )
         sid = _nid(s_uri)
         # 판정이 안 서면 **개념으로 떨어뜨린다.** 개념을 사건으로 올리기는
@@ -651,8 +691,13 @@ def spans_from_rows(rows: list[dict]) -> dict[str, tuple[str | None, str | None]
         uri = _val(r, "o")
         if not uri or not is_real_qid(uri):
             continue
-        start = _iso_date(_val(r, "inception")) or _iso_date(_val(r, "start"))
-        end = _iso_date(_val(r, "dissolved")) or _iso_date(_val(r, "end"))
+        # P585(시점)는 하루짜리 사건의 유일한 날짜다. 시작과 끝 양쪽에
+        # 같은 값을 넣는다 — 실측: 훙커우 공원 사건·종로경찰서 폭탄투척
+        # 사건처럼 시드로 들어온 사건 상당수가 P580 없이 P585 만 갖고 있어
+        # 연표에 설 자리가 없었다.
+        point = _iso_date(_val(r, "point"))
+        start = _iso_date(_val(r, "inception")) or _iso_date(_val(r, "start")) or point
+        end = _iso_date(_val(r, "dissolved")) or _iso_date(_val(r, "end")) or point
         if start and end and end < start:
             continue
         if not (start or end):
@@ -686,12 +731,13 @@ def fetch_spans(
         values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
         rows = _safe_query(
             fetcher,
-            f"""SELECT ?o ?inception ?dissolved ?start ?end WHERE {{
+            f"""SELECT ?o ?inception ?dissolved ?start ?end ?point WHERE {{
                   VALUES ?o {{ {values} }}
                   OPTIONAL {{ ?o wdt:P571 ?inception }}
                   OPTIONAL {{ ?o wdt:P576 ?dissolved }}
                   OPTIONAL {{ ?o wdt:P580 ?start }}
                   OPTIONAL {{ ?o wdt:P582 ?end }}
+                  OPTIONAL {{ ?o wdt:P585 ?point }}
                 }}""",
             f"존속 기간/{i}",
             failures if failures is not None else [],

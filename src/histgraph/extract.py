@@ -25,6 +25,7 @@ import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from .ontology import EDGE_TYPES, Edge, Node
@@ -148,6 +149,13 @@ class Document:
     total_chunks: int = 1
 
 
+def _overlap_tail(text: str, size: int = CHUNK_OVERLAP) -> str:
+    """다음 조각 앞에 붙일 꼬리. 문장 중간에서 시작하지 않게 앞을 버린다."""
+    tail = text[-size:]
+    m = SENTENCE_END.search(tail)
+    return tail[m.end():].lstrip() if m else tail
+
+
 def split_document(
     node_id: str, label: str, text: str, size: int = CHUNK_CHARS
 ) -> list[Document]:
@@ -165,8 +173,10 @@ def split_document(
     for para in paragraphs:
         if buf and len(buf) + len(para) + 1 > size:
             chunks.append(buf)
-            # 직전 조각 끝부분을 다음 조각 앞에 붙인다
-            buf = buf[-CHUNK_OVERLAP:] + "\n" + para
+            # 직전 조각 끝부분을 다음 조각 앞에 붙인다. **문장 첫머리에
+            # 맞춰 붙인다** — 반토막 문장으로 조각을 열면 모델이 애초에
+            # 온전한 문장을 인용할 수 없다.
+            buf = _overlap_tail(buf) + "\n" + para
         else:
             buf = f"{buf}\n{para}" if buf else para
     if buf.strip():
@@ -330,6 +340,43 @@ def collect_batch(client, batch_id: str, docs: list[Document]) -> dict[str, list
     return out
 
 
+# 근거를 원문에서 찾을 때 쓰는 길잡이 길이. 모델이 뒤를 요약하거나 주석을
+# 붙이는 일이 있어 앞부분만 맞아도 그 자리로 인정한다.
+EVIDENCE_PROBE = 25
+
+
+@lru_cache(maxsize=8)
+def _compact_index(text: str) -> tuple[str, tuple[int, ...]]:
+    """공백을 걷어낸 사본과, 그 글자들이 원문 어디에 있었는지.
+
+    모델의 인용은 원문과 공백·줄바꿈이 다르다. 비교는 공백 없는 사본에서
+    하고, 찾은 자리는 원문 좌표로 되돌려야 문장 경계를 볼 수 있다."""
+    chars: list[str] = []
+    index: list[int] = []
+    for i, ch in enumerate(text):
+        if not ch.isspace():
+            chars.append(ch)
+            index.append(i)
+    return "".join(chars), tuple(index)
+
+
+def locate_evidence(evidence: str, text: str) -> tuple[int, int] | None:
+    """근거 구절이 원문에서 차지하는 범위 (없으면 None).
+
+    길잡이만큼 맞는 자리를 찾은 뒤, 어긋나기 시작하는 데까지 늘린다."""
+    ev = "".join((evidence or "").split())
+    if len(ev) < 8:  # 너무 짧으면 우연히 일치한다
+        return None
+    compact, index = _compact_index(text)
+    pos = compact.find(ev[:EVIDENCE_PROBE])
+    if pos < 0:
+        return None
+    n = 0
+    while n < len(ev) and pos + n < len(compact) and compact[pos + n] == ev[n]:
+        n += 1
+    return index[pos], index[pos + n - 1] + 1
+
+
 def evidence_supported(evidence: str, text: str) -> bool:
     """근거 구절이 원문에 실제로 있는가.
 
@@ -337,13 +384,68 @@ def evidence_supported(evidence: str, text: str) -> bool:
     만들어냈다. 근거 없는 관계는 검증이 불가능하므로 버린다 — 환각을
     통째로 막는 가장 확실한 지점이다.
 
-    공백·줄바꿈 차이는 무시한다. 모델이 요약하거나 주석을 덧붙이는 경우가
-    있어 앞부분 일부만 일치해도 인정한다."""
-    ev = "".join((evidence or "").split())
-    if len(ev) < 8:  # 너무 짧으면 우연히 일치한다
-        return False
-    body = "".join(text.split())
-    return ev[:25] in body
+    **이 검사는 절단을 잡지 못한다.** 진짜 문장의 앞부분만 인용하면
+    정의상 언제나 통과한다. 문장이 끝났는지는 `complete_evidence` 가 본다."""
+    return locate_evidence(evidence, text) is not None
+
+
+# 문장 끝 판정. 한국어 사서 산문에는 `3.1 만세 운동`·`6.25 전쟁`·
+# `1950. 6. 25.` 처럼 숫자에 붙은 마침표가 흔하다. 숫자 바로 뒤의
+# 마침표를 문장 끝으로 보면 `3.1 운동` 한가운데가 경계가 된다.
+SENTENCE_END = re.compile(r"(?<![0-9])[.!?…](?=\s|$)")
+
+# 문장 경계를 못 찾을 때의 폭주 방지. 이 이상은 늘리지 않는다.
+MAX_EXPAND = 1000
+
+
+def sentence_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """`text[start:end]` 를 품는 **완전한 문장**의 범위.
+
+    줄바꿈은 문장 끝과 똑같이 단단한 경계다 — 문단을 넘어가며 늘리면
+    남의 문장을 근거로 끌어온다."""
+    left = 0
+    for m in SENTENCE_END.finditer(text, 0, start):
+        left = m.end()
+    left = max(left, text.rfind("\n", 0, start) + 1, start - MAX_EXPAND)
+    while left < start and text[left].isspace():
+        left += 1
+
+    right = len(text)
+    m = SENTENCE_END.search(text, max(end - 1, left))
+    if m:
+        right = m.end()
+    newline = text.find("\n", end)
+    if newline != -1:
+        right = min(right, newline)
+    right = min(right, end + MAX_EXPAND)
+    return left, max(right, end)
+
+
+def paragraph_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """근거가 놓인 문단의 범위. 뒤집는 절이 다음 문장에 오는 일이 있어
+    판정은 문장 하나가 아니라 최소한 문단을 읽어야 한다."""
+    left = text.rfind("\n", 0, start) + 1
+    right = text.find("\n", end)
+    return left, len(text) if right == -1 else right
+
+
+def complete_evidence(evidence: str, text: str) -> str | None:
+    """모델의 인용을 원문 기준 **문장 단위로 복원**한다 (못 찾으면 None).
+
+    **이것이 이완용 오류를 만든 자리다.** 원문은 "그 역시 민족
+    지도자들로부터 동참을 요청받았으나 오히려 … 탄압 필요성과 그 방안에
+    관한 편지를 수차례 보내기도 했다" 인데, 모델은 역접 어미 `-으나`
+    에서 인용을 끊었다. 뒤집는 절이 사라진 조각만 보면 참여로 읽힌다.
+    화면에 그대로 나가 "이완용은 3·1 운동에 참여했다"가 됐다.
+
+    모델에게 "문장을 끝까지 인용하라"고 시키는 것으로는 못 막는다 —
+    지킬 때도 있고 아닐 때도 있는 규칙이다. 원문이 손에 있으므로
+    경계는 여기서 결정론적으로 되찾는다."""
+    span = locate_evidence(evidence, text)
+    if span is None:
+        return None
+    left, right = sentence_span(text, *span)
+    return " ".join(text[left:right].split())
 
 
 def orient(
@@ -380,6 +482,7 @@ def to_graph(
     dropped_evidence = dropped_schema = flipped = self_loops = 0
     dropped_possessive = dropped_anachronism = dropped_reversed = 0
     dropped_unnamed = dropped_loss = dropped_departure = dropped_kin = 0
+    dropped_denied = completed = 0
 
     # 가제티어 덤프는 낱개로 보면 멀쩡해 보인다. 묶음 단위로 먼저 걸러낸다.
     dumped = gazetteer_dump(relations)
@@ -478,11 +581,20 @@ def to_graph(
             if index in dumped:
                 continue
 
-            if doc_text is not None and not evidence_supported(
-                rel.get("evidence", ""), doc_text
-            ):
-                dropped_evidence += 1
-                continue
+            quote = rel.get("evidence", "") or ""
+            evidence, context = quote, None
+            if doc_text is not None:
+                span = locate_evidence(quote, doc_text)
+                if span is None:
+                    dropped_evidence += 1
+                    continue
+                # 인용이 문장 중간에서 끊겼으면 원문에서 끝까지 되찾는다.
+                # 뒤집는 절이 여기서 되살아난다.
+                evidence = complete_evidence(quote, doc_text) or quote
+                if evidence != " ".join(quote.split()):
+                    completed += 1
+                left, right = paragraph_span(doc_text, *span)
+                context = doc_text[left:right]
 
             if possessive_mismatch(edge_type, rel.get("object", ""),
                                    rel.get("evidence", "")):
@@ -504,6 +616,13 @@ def to_graph(
                 dropped_departure += 1
                 continue
 
+            # 복원된 문장과 문단으로 본다. 잘린 인용에는 뒤집는 절이
+            # 아예 없어서, 이 검사는 위의 복원이 있어야 성립한다.
+            if participation_denied(edge_type, rel.get("object", ""),
+                                    evidence, context):
+                dropped_denied += 1
+                continue
+
             # 이름 자리에 설명구가 온 것. 가리키는 사람을 특정할 수 없으므로
             # 노드를 만들지 않는다 (`양윤순의 따님` → 이름을 모른다).
             if is_descriptive_name(rel.get("object", "")) or is_descriptive_name(
@@ -512,7 +631,6 @@ def to_graph(
                 dropped_possessive += 1
                 continue
 
-            evidence = rel.get("evidence", "")
             src, src_type = resolve(rel["subject"], rel["subject_type"])
             dst, dst_type = resolve(rel["object"], rel["object_type"])
 
@@ -571,7 +689,7 @@ def to_graph(
                     source="extract",
                     confidence=CONFIDENCE.get(rel.get("confidence", ""), 0.5),
                     props={
-                        "evidence": rel.get("evidence", ""),
+                        "evidence": evidence,
                         "extracted_from": source_node,
                         "model": MODEL,
                         **({"flipped": True} if flip else {}),
@@ -584,15 +702,17 @@ def to_graph(
     if (dropped_evidence or dropped_schema or flipped or self_loops
             or dropped_possessive or dropped_anachronism or dropped_reversed
             or dropped_unnamed or dropped_loss or dropped_departure
-            or dropped_kin or dumped):
+            or dropped_kin or dumped or dropped_denied or completed):
         log.info(
             "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 자기순환 %d건 버림"
             " · 소유격오독 %d건 버림 · 소실문형 %d건 버림 · 연대충돌 %d건 버림"
             " · 역방향 %d건 버림 · 근거무지목 %d건 버림 · 가제티어덤프 %d건 버림"
-            " · 떠난자리 %d건 버림 · 친족호칭 %d건 버림 · 방향교정 %d건",
+            " · 떠난자리 %d건 버림 · 친족호칭 %d건 버림 · 참여부인 %d건 버림"
+            " · 방향교정 %d건 · 근거문장복원 %d건",
             dropped_evidence, dropped_schema, self_loops, dropped_possessive,
             dropped_loss, dropped_anachronism, dropped_reversed, dropped_unnamed,
-            len(dumped), dropped_departure, dropped_kin, flipped,
+            len(dumped), dropped_departure, dropped_kin, dropped_denied,
+            flipped, completed,
         )
     return list(nodes.values()), edges
 
@@ -954,6 +1074,58 @@ def loss_context(edge_type: str, evidence: str) -> bool:
     if edge_type != "participated_in" or not evidence:
         return False
     return bool(LOSS_CAUSE.search(evidence) and LOSS_VERB.search(evidence))
+
+
+# 참여를 **뒤집는** 문형. 두 축으로만 본다.
+#
+#   (1) 동참 요청 + 거부 — `동참을 요청받았으나 … 오히려`.
+#       요청을 받은 것은 참여가 아니다. 실측: 이완용이 3·1 운동에
+#       '참여'로 들어왔고, 윤치호는 근거에 `거절했고` 가 그대로 들어
+#       있는데도 통과했다.
+#   (2) 사건 이름 + 반대 — `제2차 요동 정벌에 반대하였으나`.
+#
+# **거부 어휘만으로는 절대 거르지 않는다.** `히데요시는 이를 거절하였다`
+# (울산성 전투)는 지휘관이 건의를 물리친 문장이고, `청나라의 중재제의를
+# 거부한채`(병인양요)는 원정을 강행한 문장이다 — 둘 다 참여가 맞다.
+# 거부는 참여의 반대말이 아니다. **무엇에 대한 거부인지**가 갈린다.
+JOIN_ASK = re.compile(
+    r"(?:동참|참여|참가|가담|합류|서명|거사|봉기|의거)[^.!?]{0,20}"
+    r"(?:요청|권유|제의|제안|권고|부탁|설득|청하)"
+)
+REFUSAL = re.compile(
+    r"거절|거부|사양|불응|반대|오히려|응하지\s*않|받아들여지지\s*않|"
+    r"나서지\s*(?:말|않)|참여하지\s*않|가담하지\s*않|동참하지\s*않"
+)
+# 요청과 거부가 이만큼 떨어져 있으면 같은 이야기로 보지 않는다.
+REFUSAL_NEAR = 120
+
+
+def participation_denied(
+    edge_type: str, obj: str, evidence: str, context: str | None = None
+) -> bool:
+    """근거가 참여가 아니라 **참여하지 않았음**을 말하는가.
+
+    `context` 로 문단을 주면 요청·거부 짝을 문단 안에서 찾는다 — 뒤집는
+    절이 다음 문장으로 넘어가는 일이 있다."""
+    if edge_type != "participated_in":
+        return False
+    text = context or evidence
+    if not text:
+        return False
+
+    # (1) 동참 요청을 받았고, 그 근처에서 물렸다
+    for m in JOIN_ASK.finditer(text):
+        if REFUSAL.search(text, m.end(), m.end() + REFUSAL_NEAR):
+            return True
+
+    # (2) 사건 이름에 곧바로 반대가 붙는다. 이 규칙은 인접성이 전부라
+    #     문단이 아니라 근거 문장 안에서만 본다.
+    if obj and re.search(
+        rf"{re.escape(obj)}[^.!?]{{0,40}}?(?:반대|불참|참여하지\s*않|가담하지\s*않)",
+        evidence or "",
+    ):
+        return True
+    return False
 
 
 # `A를 출발하여 B에 이르렀다` — 지나온 곳이지 일어난 곳이 아니다.

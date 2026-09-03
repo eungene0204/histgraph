@@ -252,22 +252,34 @@ class GraphAPI:
 
         차수 1위 노드로 대신하지 않는다 — 그건 그때그때 병자호란이었다가
         선조였다가 하는 우연이고, 화면을 열었을 때 '무엇의 그래프인가'를
-        말해주지 못한다. 왕조 노드가 실제로 있을 때만 쓴다."""
-        from .scope import ERAS
+        말해주지 못한다. 왕조 노드가 실제로 있을 때만 쓴다.
 
-        era = ERAS.get(self.era)
-        if era is None:
-            return None
-        node_id = f"wd:{era.polity_qid}"
-        found = self.store.conn.execute(
-            "SELECT 1 FROM nodes WHERE id = ?", (node_id,)
-        ).fetchone()
-        return node_id if found else None
+        시대를 묶어 담은 그래프(조선~일제강점기)에서는 **맨 앞 시대**가
+        중심이다. 들어가는 문이 하나여야 하고, 둘을 나란히 놓으면 화면이
+        먼저 '어느 쪽이냐'를 묻게 된다."""
+        from .scope import ERAS, eras_of
+
+        for key in eras_of(self.era):
+            era = ERAS.get(key)
+            if era is None:
+                continue
+            node_id = f"wd:{era.polity_qid}"
+            if self.store.conn.execute(
+                "SELECT 1 FROM nodes WHERE id = ?", (node_id,)
+            ).fetchone():
+                return node_id
+        return None
 
     def meta(self) -> dict:
+        from .scope import label_of
+
         stats = self.store.stats()
         return {
             "era": self.era,
+            # 화면이 영어 키를 한국어로 옮기는 표를 따로 들고 있었다.
+            # 시대가 늘 때마다 그 표를 같이 고쳐야 하고, 빠뜨리면 화면에
+            # 영어가 뜬다 — 이 저장소가 두 번 지적받은 자리다.
+            "era_label": label_of(self.era),
             "root": self.root(),
             "node_types": {
                 k: {"label": v, "group": TYPE_GROUP.get(k, "thing"),
