@@ -15,6 +15,8 @@ uv run histgraph ingest wikidata                 # 인물/사건/영상물 수�
 uv run histgraph prune                           # 스포츠 이벤트 제거 (필수)
 uv run histgraph reclassify                      # 개념을 사건에서 갈라냄 (필수)
 uv run histgraph works                           # 역사를 다룬 작품 명단 (위키백과 분류)
+uv run histgraph enrich --types media --full     # 작품 본문 (works 뒤에)
+uv run histgraph namu                            # 토막글 작품은 나무위키 개요·줄거리로
 uv run histgraph resolve                         # 소스 간 엔티티 연결
 uv run histgraph events                          # 사건·단체·개념 시드 수집 (이름으로 직접)
 uv run histgraph enrich                         # 위키백과 서사로 노드 보강

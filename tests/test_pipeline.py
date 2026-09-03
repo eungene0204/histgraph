@@ -2835,6 +2835,17 @@ check("연도가 다르면 거른다", not namu.matches(cats, "series", "2000"))
 check("갈래가 다르면 거른다 (영화 노드에 드라마 문서)", not namu.matches(cats, "film", "2015"))
 check("연도를 모르면 갈래만 본다", namu.matches(cats, "series", None))
 check("작품 분류가 없으면 거른다", not namu.matches(["동음이의어", "성씨"], None, None))
+check("라벨 괄호의 해가 날짜 칸보다 앞선다", namu.year_for("궁녀 (1972년 영화)", "2007-01-01") == "1972")
+check("괄호에 해가 없으면 날짜 칸을 쓴다", namu.year_for("궁녀", "2007-01-01") == "2007")
+check("등장인물 문서는 작품이 아니다", not namu.matches(["옥중화/등장인물", "한국 드라마 캐릭터"], "series", None))
+check("틀 문구를 걷어낸다", "스포일러" not in namu._clean("<div>이 문서에 스포일러가 포함되어 있습니다.<br>줄거리다.</div>"))
+check("제목 괄호의 갈래가 다르면 거른다 (영화 노드에 '창(만화)')", not namu.paren_fits("창(만화)", "film"))
+check("괄호에 갈래가 없으면 통과", namu.paren_fits("창", "film") and namu.paren_fits("창(1997)", "film"))
+check("'자세한 내용은 … 참고하십시오' 는 본문이 아니다",
+      namu._clean("<div>자세한 내용은 대원군(1966) 문서를 참고하십시오.</div>") == "")
+_LIST = ("<h2><a id='s-1'>1.</a> 1966년 TBC 드라마</h2><div>첫 작품.</div>"
+         "<h2><a id='s-2'>2.</a> 1972년 MBC 드라마</h2><div>1972년 2월부터 방영.</div>")
+check("같은 제목 목록 문서에서는 우리 해의 절만 받는다", namu.year_section(_LIST, "1972") == "1972년 2월부터 방영.")
 check("괄호 앞 띄어쓰기를 없앤 제목이 후보에 든다",
       "간신(영화)" in namu.candidates("간신 (영화)", "film", "2015"))
 picked = namu.pick_from_search(

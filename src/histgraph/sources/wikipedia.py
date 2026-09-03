@@ -599,7 +599,9 @@ def enrich(
         # **소스가 아니라 id 로 고른다.** 문서를 찾는 열쇠는 QID 이고,
         # `works` 가 만든 작품 노드는 id 가 `wd:` 인데 소스는 `kowiki` 다.
         # 소스로 고르면 그 653편이 통째로 빠진다.
-        f"""SELECT n.id, n.label, n.type, COUNT(e.src) AS degree
+        f"""SELECT n.id, n.label, n.type, COUNT(e.src) AS degree,
+                   length(n.description) AS have,
+                   json_extract(n.props, '$.desc_source') AS desc_source
               FROM nodes n
               LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
              WHERE n.id LIKE 'wd:%' AND n.type IN ({marks})
@@ -640,6 +642,14 @@ def enrich(
 
     title_to_qid = {t: q for q, t in titles.items()}
     node_type = {r["id"]: r["type"] for r in rows}
+    # 나무위키로 채운 설명(`namu`)은 위키백과 토막글보다 길다. `--refresh`
+    # 로 다시 받을 때 그걸 '《태조 왕건》은 영화이다.' 로 되돌리지 않는다 —
+    # 새 글이 지금 것보다 길 때만 바꾼다.
+    keep_longer = {
+        r["id"]: r["have"] or 0 for r in rows
+        if r["desc_source"] and "namu" in r["desc_source"]
+    }
+    kept = 0
     updates = []
     redirected = 0
     stripped = 0
@@ -664,6 +674,9 @@ def enrich(
             if cut != text:
                 stripped += 1
             text = cut
+        if node_id in keep_longer and len(text) <= keep_longer[node_id]:
+            kept += 1
+            continue
         updates.append((
             text,
             f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(title)}",
@@ -689,6 +702,8 @@ def enrich(
         log.info("넘겨주기를 따라간 설명 %d건 (desc_via 로 표시)", redirected)
     if stripped:
         log.info("작품 %d건에서 등장인물·시청률 절을 걷어냄", stripped)
+    if kept:
+        log.info("나무위키로 채운 더 긴 설명 %d건은 그대로 둠", kept)
 
     # 사이트링크가 없던 QID = 한국어 위키백과에 문서가 없는 개체.
     # 쿼리가 죽어서 못 물어본 구간(`unresolved`)은 제외한다 — 타임아웃

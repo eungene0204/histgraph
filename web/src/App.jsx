@@ -221,7 +221,8 @@ export default function App() {
           </button>
         </div>
 
-        <Search nodeTypes={meta?.node_types} onPick={(id) => load(id)} />
+        {/* 검색으로 찾은 노드는 그래프만이 아니라 오른쪽 상세도 바로 연다 */}
+        <Search nodeTypes={meta?.node_types} onPick={(id) => { load(id); showDetail(id); }} />
 
         <div className="counts">
           {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
