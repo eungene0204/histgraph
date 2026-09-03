@@ -33,7 +33,11 @@ from .store import GraphStore
 
 log = logging.getLogger(__name__)
 
-MODEL = "claude-opus-5"
+# **배치 API 요청에만 쓴다.** 한때 이 상수가 엣지의 `props.model` 에도
+# 박혔다 — 로컬 Qwen 이 뽑은 3,500여 건이 전부 `claude-opus-5` 로 기록됐고,
+# 그래서 어느 모델이 그 문장을 판정했는지 사후에 가릴 수 없게 됐다.
+# 기록은 상수가 아니라 **실제로 돌린 백엔드**에서 와야 한다.
+BATCH_MODEL = "claude-opus-5"
 
 # 텍스트 추론은 구조화 소스보다 신뢰도가 낮다. 등급을 수치로 옮겨
 # `Edge.confidence` 에 기록하면 나중에 임계값으로 걸러낼 수 있다.
@@ -266,7 +270,7 @@ def build_prompt(doc: Document, gazetteer: dict[str, list[str]]) -> str:
 
 def _request_params(doc: Document, gazetteer: dict[str, list[str]]) -> dict[str, Any]:
     return {
-        "model": MODEL,
+        "model": BATCH_MODEL,
         "max_tokens": 8000,  # thinking 과 응답이 이 한도를 함께 쓴다
         "system": SYSTEM_PROMPT,
         "output_config": {
@@ -363,18 +367,29 @@ def _compact_index(text: str) -> tuple[str, tuple[int, ...]]:
 def locate_evidence(evidence: str, text: str) -> tuple[int, int] | None:
     """근거 구절이 원문에서 차지하는 범위 (없으면 None).
 
-    길잡이만큼 맞는 자리를 찾은 뒤, 어긋나기 시작하는 데까지 늘린다."""
+    **후보가 여럿이면 가장 길게 맞는 자리를 고른다.** 첫 자리를 그냥
+    쓰면 안 된다 — 실측: `영조 50년(1774년)에 세워진 《이지란신도비》에는`
+    으로 시작하는 문장이 한 문서에 둘 있었고, 앞의 것을 집어 엉뚱한
+    문장(선대 가계)을 근거로 붙였다. 길잡이는 같아도 그 뒤가 갈린다."""
     ev = "".join((evidence or "").split())
     if len(ev) < 8:  # 너무 짧으면 우연히 일치한다
         return None
     compact, index = _compact_index(text)
-    pos = compact.find(ev[:EVIDENCE_PROBE])
-    if pos < 0:
+    probe = ev[:EVIDENCE_PROBE]
+    best_pos, best_n = -1, 0
+    pos = compact.find(probe)
+    while pos >= 0:
+        n = 0
+        while n < len(ev) and pos + n < len(compact) and compact[pos + n] == ev[n]:
+            n += 1
+        if n > best_n:
+            best_pos, best_n = pos, n
+        if n == len(ev):  # 통째로 맞으면 더 볼 것 없다
+            break
+        pos = compact.find(probe, pos + 1)
+    if best_pos < 0:
         return None
-    n = 0
-    while n < len(ev) and pos + n < len(compact) and compact[pos + n] == ev[n]:
-        n += 1
-    return index[pos], index[pos + n - 1] + 1
+    return index[best_pos], index[best_pos + best_n - 1] + 1
 
 
 def evidence_supported(evidence: str, text: str) -> bool:
@@ -470,13 +485,18 @@ def to_graph(
     source_node: str,
     store: GraphStore,
     doc_text: str | None = None,
+    model: str | None = None,
+    backend: str | None = None,
 ) -> tuple[list[Node], list[Edge]]:
     """추출 결과를 노드·엣지로 변환.
 
     이름으로 기존 노드를 찾고(별칭도 본다), 없으면 새로 만든다. 새 노드에는
     `ex:` 접두사를 붙여 추출 산물임을 id 만 봐도 알 수 있게 한다.
 
-    doc_text 를 주면 근거가 원문에 없는 관계를 버린다."""
+    doc_text 를 주면 근거가 원문에 없는 관계를 버린다.
+
+    `model`·`backend` 는 **실제로 판정한 모델**을 엣지에 남긴다. 모르면
+    아예 적지 않는다 — 틀린 이름을 적어 두면 없는 것만 못하다."""
     nodes: dict[str, Node] = {}
     edges: list[Edge] = []
     dropped_evidence = dropped_schema = flipped = self_loops = 0
@@ -691,7 +711,8 @@ def to_graph(
                     props={
                         "evidence": evidence,
                         "extracted_from": source_node,
-                        "model": MODEL,
+                        **({"model": model} if model else {}),
+                        **({"backend": backend} if backend else {}),
                         **({"flipped": True} if flip else {}),
                     },
                 )
@@ -1105,23 +1126,37 @@ def participation_denied(
 ) -> bool:
     """근거가 참여가 아니라 **참여하지 않았음**을 말하는가.
 
-    `context` 로 문단을 주면 요청·거부 짝을 문단 안에서 찾는다 — 뒤집는
-    절이 다음 문장으로 넘어가는 일이 있다."""
+    `context` 로 문단을 주면 거부가 다음 문장으로 넘어간 경우까지 읽는다.
+    다만 **요청은 근거 문장 안에 있어야 한다.** 문단 전체에서 짝을 찾으면
+    남의 거절을 끌어온다 — 실측: 이기축의 인조반정 참여가 같은 문단의
+    "이명은 거절했다"(다른 사람) 때문에 지워질 뻔했다."""
     if edge_type != "participated_in":
         return False
     text = context or evidence
     if not text:
         return False
 
-    # (1) 동참 요청을 받았고, 그 근처에서 물렸다
+    # 근거 문장이 문단의 어디인지. 못 찾으면 문단을 쓰지 않는다.
+    span = locate_evidence(evidence, text) if context else None
+    if context and span is None:
+        text = evidence
+    trigger_end = span[1] if span else len(text)
+    trigger_start = span[0] if span else 0
+
+    # (1) 근거 문장에서 동참을 요청받았고, 그 근처에서 물렸다
     for m in JOIN_ASK.finditer(text):
+        if not (trigger_start <= m.start() < trigger_end):
+            continue
         if REFUSAL.search(text, m.end(), m.end() + REFUSAL_NEAR):
             return True
 
-    # (2) 사건 이름에 곧바로 반대가 붙는다. 이 규칙은 인접성이 전부라
-    #     문단이 아니라 근거 문장 안에서만 본다.
+    # (2) 사건 이름에 곧바로 반대가 붙는다. 인접성이 전부라 근거 문장
+    #     안에서만 본다. **반대는 서술어여야 한다** — `신탁통치반대
+    #     국민총동원위원회` 같은 고유명사 속 '반대'까지 세면 안 된다.
     if obj and re.search(
-        rf"{re.escape(obj)}[^.!?]{{0,40}}?(?:반대|불참|참여하지\s*않|가담하지\s*않)",
+        rf"{re.escape(obj)}[^.!?]{{0,40}}?"
+        rf"(?:반대|불참)(?:하|했|한|합|함|였|이)|"
+        rf"{re.escape(obj)}[^.!?]{{0,40}}?(?:참여|가담|동참)하지\s*않",
         evidence or "",
     ):
         return True

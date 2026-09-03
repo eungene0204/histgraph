@@ -376,6 +376,30 @@ def cmd_works(args: argparse.Namespace) -> int:
             for node_id, label in left[: args.show]:
                 print(f"    · 못 채움: {label} ({node_id})", file=sys.stderr)
 
+        if args.harvest:
+            print("\n→ 작품 문서에서 발표일·원작·소재를 읽는 중 (LLM 없이)...")
+            got = works.harvest(store, fetcher, resolver, limit=args.harvest_limit)
+            print(f"  문서 {got['read']:,}건을 읽어"
+                  f" 발표일 {len(got['dates']):,}건 · 엣지 {len(got['edges']):,}건")
+            by_type: dict[str, int] = {}
+            for e in got["edges"]:
+                by_type[e.type] = by_type.get(e.type, 0) + 1
+            if by_type:
+                print("   " + " · ".join(
+                    f"{EDGE_TYPES[k][0]} {v:,}" for k, v in sorted(by_type.items())))
+            if got["dropped"]:
+                print(f"  몰년 관문에서 버린 인물 링크 {len(got['dropped']):,}건"
+                      " (배우·감독을 막는 관문이다)")
+            if not args.dry_run:
+                store.conn.executemany(
+                    "UPDATE nodes SET start_date = ?, updated_at = datetime('now') "
+                    "WHERE id = ? AND start_date IS NULL",
+                    got["dates"],
+                )
+                store.conn.commit()
+                store.upsert_edges(got["edges"])
+                print(f"  ✓ 저장했습니다")
+
         if skipped:
             print(f"\n  만들지 않은 문서 {len(skipped):,}건 (매체를 모르면 노드로 만들지 않는다):")
             for title, why in skipped[: args.show]:
@@ -475,10 +499,21 @@ def cmd_reclassify(args: argparse.Namespace) -> int:
             print("\n  --dry-run 입니다. 실제로 바꾸려면 --dry-run 을 빼고 다시 실행하세요.")
             return 0
         if not plan.changes:
-            print("  바꿀 것이 없습니다.")
+            fixed = rc.repair_edges(store)
+            if any(fixed.values()):
+                print(f"  노드는 그대로 두고 엣지만 바로잡음 — "
+                      f"about → 소재로 다룸 {fixed['about_to_depicts']:,}건, "
+                      f"소재로 다룸 → about {fixed['depicts_to_about']:,}건")
+            else:
+                print("  바꿀 것이 없습니다.")
             return 0
 
         result = rc.apply_plan(store, plan)
+        # 노드를 안 바꿔도 엣지는 어긋나 있을 수 있다 — 수집이 다시 돌면
+        # 새 주제 엣지가 이미 사건인 노드를 가리킨 채 들어온다.
+        fixed = rc.repair_edges(store)
+        for key in ("about_to_depicts", "depicts_to_about"):
+            result[key] = result.get(key, 0) + fixed[key]
         print(
             f"\n  ✓ 노드 {result['nodes']:,}개 재분류,"
             f" depicts → about {result['depicts_to_about']:,}건,"
@@ -514,6 +549,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         fixed = resolve_mod.fix_period_nodes(store)
         for nid, was, now in fixed["retyped"]:
             print(f"  타입 교정: {nid}  {NODE_TYPES[was]} → {NODE_TYPES[now]}")
+        if fixed["stale"]:
+            print(f"  시대가 될 수 없는 노드를 가리키던 시대 엣지 {fixed['stale']:,}건 제거")
         if fixed["moved"] or fixed["dropped"]:
             print(
                 f"  '어디서' 칸에 적힌 시대 {fixed['moved']}건을 from_period 로 옮김"
@@ -589,7 +626,9 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
             all_nodes, all_edges = [], []
             for node_id, relations in results.items():
-                n, e = ex.to_graph(relations, node_id, store, doc_text=texts.get(node_id))
+                n, e = ex.to_graph(relations, node_id, store,
+                                   doc_text=texts.get(node_id),
+                                   model=ex.BATCH_MODEL, backend="anthropic")
                 all_nodes.extend(n)
                 all_edges.extend(e)
             _persist(store, "extract", all_nodes, all_edges)
@@ -609,7 +648,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
         def flush(node_id: str, relations: list[dict]) -> int:
             nodes, edges = ex.to_graph(
-                relations, node_id, store, doc_text=texts.get(node_id)
+                relations, node_id, store, doc_text=texts.get(node_id),
+                model=backend.model, backend=backend.name,
             )
             if not nodes and not edges:
                 return 0  # 빈 결과까지 기록하면 ingest_log 가 문서 수만큼 늘어난다
@@ -1328,6 +1368,10 @@ def main(argv: list[str] | None = None) -> int:
     p_wk.add_argument("--depth", type=int, default=None, help="분류를 따라 내려갈 깊이")
     p_wk.add_argument("--show", type=int, default=15, help="출력할 예시 수")
     p_wk.add_argument("--interval", type=float, default=0.3)
+    p_wk.add_argument("--no-harvest", dest="harvest", action="store_false",
+                      help="작품 문서에서 발표일·원작·소재를 읽는 단계를 건너뜀")
+    p_wk.add_argument("--harvest-limit", type=int, default=None,
+                      help="문서를 읽을 작품 수 (시험용)")
     p_wk.set_defaults(func=cmd_works)
 
     p_rc = sub.add_parser("reclassify", help="개념을 사건에서 갈라낸다 (Wikidata 클래스 계층)")

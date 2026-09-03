@@ -92,6 +92,9 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     # 도착에 org 를 허용하는 이유는 from_period 와 같다 — 한국사에서 시대
     # 구분은 왕조와 같아서, '조선을 배경으로 한 영화'의 배경은 조선이다.
     "set_in": ("배경", ("media", "artwork"), ("period", "place", "org")),
+    # 원작. 작품끼리의 엣지다 — 소설이 드라마가 되고 드라마가 영화가 된다.
+    # 인포박스의 '원작' 칸이 이것을 그대로 준다.
+    "adapted_from": ("원작", ("media", "artwork"), ("media", "artwork")),
     # 시간축. 인물·사건은 연도와 '같은 실체'가 아니므로 same_as 가 아니라
     # 엣지로 잇는다. 출생/사망/시작/종료는 엣지 label 로 구분한다.
     "dated_to": ("시점", tuple(NODE_TYPES), ("period",)),

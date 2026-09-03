@@ -32,6 +32,9 @@ class Backend(Protocol):
     """추출 백엔드 공통 인터페이스."""
 
     name: str
+    # 실제로 돌린 모델. 엣지에 이 값을 남긴다 — 어느 모델이 그 문장을
+    # 판정했는지 모르면 나중에 틀린 엣지의 출처를 가릴 수 없다.
+    model: str
 
     def complete(self, system: str, user: str, schema: dict[str, Any]) -> list[dict]:
         """관계 목록을 돌려준다. 실패 시 빈 목록."""
@@ -236,7 +239,7 @@ class MLXBackend:
         model: str = DEFAULT_MLX_MODEL,
         max_tokens: int = 12000,
     ) -> None:
-        self.model_path = model
+        self.model = model
         self.max_tokens = max_tokens
         self._generator = None
         self._tokenizer = None
@@ -250,8 +253,8 @@ class MLXBackend:
         from mlx_lm import load
         from outlines.types import JsonSchema
 
-        log.info("MLX 모델 로드 중: %s (최초 1회, 수십 초 소요)", self.model_path)
-        model, tokenizer = load(self.model_path)
+        log.info("MLX 모델 로드 중: %s (최초 1회, 수십 초 소요)", self.model)
+        model, tokenizer = load(self.model)
         self._tokenizer = tokenizer
         wrapped = outlines.from_mlxlm(model, tokenizer)
         self._generator = outlines.Generator(wrapped, JsonSchema(schema))

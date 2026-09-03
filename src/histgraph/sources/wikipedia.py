@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.parse
 
 from ..http import Fetcher
@@ -213,6 +214,54 @@ def _api(fetcher: Fetcher, params: dict[str, str]) -> dict:
         # UA 누락이면 JSON 이 아니라 HTML 오류 페이지가 온다
         hint = "User-Agent 문제일 수 있음" if raw.lstrip().startswith("<") else ""
         raise RuntimeError(f"위키백과 응답 파싱 실패: {raw[:150]} {hint}") from err
+
+
+# --- 작품 문서에서 걷어낼 절 --------------------------------------------
+# **배우 이름은 역사 인물이 아니다.** 작품 문서의 '등장 인물' 절은 배역과
+# 배우가 뒤섞인 목록이라, 그대로 추출에 넣으면 배우가 역사 인물로 승격된다.
+# README 의 "족보 목록은 모델을 망가뜨린다 — 지우고 넣는다"와 같은 함정이고,
+# 처방도 같다: 넣기 전에 지운다.
+#
+# 시청률·수상·각주 같은 절도 함께 걷는다. 관계가 없는 글이라 조각 예산만
+# 잡아먹는다. 반대로 '역사적 사실'·'역사와 다른 점'은 **남긴다** — 작품이
+# 무엇을 다루는지, 어디가 고증과 다른지를 그 절이 말한다.
+CUT_SECTIONS = re.compile(
+    r"^(?:등장\s*인물|등장인물|인물\s*소개|주요\s*인물|출연|출연진|캐스팅|배역|"
+    r"제작진|스태프|스탭|촬영|시청률|수상|수상\s*경력|수상\s*목록|방영\s*목록|"
+    r"편성|연장|결방|음반|사운드\s*트랙|OST|삽입곡|주제가|"
+    r"각주|주석|참고\s*자료|참고\s*문헌|참고\s*사항|같이\s*보기|외부\s*링크|"
+    r"관련\s*항목|더\s*보기)$"
+)
+
+_HEADING = re.compile(r"^(=+)[ \t]*(.+?)[ \t]*=+[ \t]*$", re.M)
+
+
+def strip_sections(text: str, cut: re.Pattern[str] = CUT_SECTIONS) -> str:
+    """지정한 절과 그 아래 하위 절을 통째로 걷어낸다.
+
+    같은 수준 이상의 다음 제목이 나올 때까지 자른다 — '등장 인물' 밑에
+    '대조영의 여인' 같은 하위 절이 줄줄이 달려 있어서, 제목 줄만 지우면
+    배우 이름은 그대로 남는다."""
+    heads = [
+        (m.start(), m.end(), len(m.group(1)), m.group(2)) for m in _HEADING.finditer(text)
+    ]
+    keep: list[str] = []
+    cursor = 0
+    i = 0
+    while i < len(heads):
+        start, _end, level, title = heads[i]
+        if not cut.match(title):
+            i += 1
+            continue
+        keep.append(text[cursor:start])
+        # 같은 수준 이상(=숫자가 같거나 작은) 제목이 나오는 곳까지 버린다
+        j = i + 1
+        while j < len(heads) and heads[j][2] > level:
+            j += 1
+        cursor = heads[j][0] if j < len(heads) else len(text)
+        i = j
+    keep.append(text[cursor:])
+    return re.sub(r"\n{3,}", "\n\n", "".join(keep)).strip()
 
 
 def fetch_extracts(
@@ -481,10 +530,13 @@ def enrich(
         have_clause = """AND (n.description IS NULL OR length(n.description) < 100)
                AND json_extract(n.props, '$.no_kowiki') IS NULL"""
     rows = store.conn.execute(
-        f"""SELECT n.id, n.label, COUNT(e.src) AS degree
+        # **소스가 아니라 id 로 고른다.** 문서를 찾는 열쇠는 QID 이고,
+        # `works` 가 만든 작품 노드는 id 가 `wd:` 인데 소스는 `kowiki` 다.
+        # 소스로 고르면 그 653편이 통째로 빠진다.
+        f"""SELECT n.id, n.label, n.type, COUNT(e.src) AS degree
               FROM nodes n
               LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
-             WHERE n.source = 'wd' AND n.type IN ({marks})
+             WHERE n.id LIKE 'wd:%' AND n.type IN ({marks})
                {have_clause}
           GROUP BY n.id
           ORDER BY degree DESC""",
@@ -521,8 +573,10 @@ def enrich(
     )
 
     title_to_qid = {t: q for q, t in titles.items()}
+    node_type = {r["id"]: r["type"] for r in rows}
     updates = []
     redirected = 0
+    stripped = 0
     for title, text in extracts.items():
         requested = resolved_from.get(title, title)
         qid = title_to_qid.get(requested)
@@ -537,6 +591,13 @@ def enrich(
         via = title if title in true_redirects else None
         if via:
             redirected += 1
+        if node_type.get(node_id) == "media":
+            # 배우 이름을 넣지 않는다. 여기서 지우지 않으면 화면에도 남고
+            # 추출에도 들어간다 — 관문은 저장하는 이 자리 하나면 된다.
+            cut = strip_sections(text)
+            if cut != text:
+                stripped += 1
+            text = cut
         updates.append((
             text,
             f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(title)}",
@@ -560,6 +621,8 @@ def enrich(
     store.conn.commit()
     if redirected:
         log.info("넘겨주기를 따라간 설명 %d건 (desc_via 로 표시)", redirected)
+    if stripped:
+        log.info("작품 %d건에서 등장인물·시청률 절을 걷어냄", stripped)
 
     # 사이트링크가 없던 QID = 한국어 위키백과에 문서가 없는 개체.
     # 쿼리가 죽어서 못 물어본 구간(`unresolved`)은 제외한다 — 타임아웃

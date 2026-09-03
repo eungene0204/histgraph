@@ -1,5 +1,7 @@
-"""근거 구절 전수 점검 — 잘린 인용을 문장 단위로 되살리고, 참여를 부인하는
-문장에서 나온 참여 엣지를 지운다.
+"""추출 엣지의 props 를 사실에 맞게 되돌린다.
+
+잘린 인용을 문장 단위로 되살리고, 참여를 부인하는 문장에서 나온 참여
+엣지를 지우고, 거짓 모델 기록을 걷어낸다.
 
 실측 발단: 화면에 "이완용은 3·1 운동에 참여했다"가 떴다. 근거는
 "그 역시 민족 지도자들로부터 동참을 요청받았으나" 였는데, 원문은
@@ -10,13 +12,18 @@
 하는 일 (순서 중요 — 문장을 되살려야 뒤집는 절이 보인다):
   1. 근거 복원: 인용을 원문에서 찾아 문장 끝까지 늘린다
   2. 참여 부인 검사: 복원된 문장과 **그 문단**으로 판정해 위반 삭제
+  3. 거짓 모델 기록 제거: `props.model` 이 `claude-opus-5` 인 것을 지운다.
+     `to_graph` 가 백엔드와 무관하게 그 상수를 박았던 자리다 — 실제
+     판정자는 로컬 Qwen 이었다. 어느 모델이었는지 사후에 가릴 수 없으므로
+     **틀린 이름을 고쳐 적지 않고 비운다.** 없는 것이 거짓말보다 낫다.
   판정 함수는 extract.py 의 것을 그대로 쓴다 — 두 벌로 두면 반드시 갈라진다.
 
 기본은 계획만 출력한다. 목록을 눈으로 확인한 뒤 --apply 로 실행할 것.
 
 사용:
   uv run tools/sweep_evidence.py [--apply] [--verbose] [DB ...]
-  (DB 를 안 주면 data/histgraph.sqlite 와 data/joseon.sqlite 둘 다)
+  (DB 를 안 주면 data/ 아래 sqlite 를 전부 — `scope` 가 만든 파생 그래프도
+   같이 손봐야 한다. 화면이 보는 것은 histgraph.sqlite 가 아니라 그쪽이다.)
 """
 
 from __future__ import annotations
@@ -37,14 +44,19 @@ from histgraph.extract import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# `to_graph` 가 백엔드와 무관하게 박았던 상수. 이 값이면 기록이 아니라 흔적이다.
+FALSE_STAMP = "claude-opus-5"
+
 
 def sweep(path: Path, apply: bool, verbose: bool) -> None:
     if not path.exists():
         print(f"건너뜀 (없음): {path}")
         return
     print(f"\n=== {path} ===")
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(path, timeout=60)
     db.row_factory = sqlite3.Row
+    # 다른 세션의 extract 가 문서마다 커밋한다 — 잠기면 기다린다
+    db.execute("PRAGMA busy_timeout=60000")
 
     docs: dict[str, str] = {}
 
@@ -66,20 +78,30 @@ def sweep(path: Path, apply: bool, verbose: bool) -> None:
 
     repairs: list[tuple[int, str]] = []
     doomed: list[tuple[int, str, str, str]] = []
-    lost = 0
+    lost = unstamped = 0
 
     for e in edges:
         props = json.loads(e["props"])
+        dirty = False
+        # 백엔드와 무관하게 박혔던 상수. 실제 판정자를 가릴 수 없으므로 비운다.
+        if props.get("model") == FALSE_STAMP and "backend" not in props:
+            del props["model"]
+            unstamped += 1
+            dirty = True
         quote = props.get("evidence") or ""
         text = doc_text(props.get("extracted_from") or "")
         if not text:
             lost += 1
+            if dirty:
+                repairs.append((e["rowid"], json.dumps(props, ensure_ascii=False)))
             continue
         span = locate_evidence(quote, text)
         if span is None:
             # 추출 당시엔 조각 본문으로 검증됐다. 지금 못 찾는다고 해서
             # 근거가 없었다는 뜻은 아니므로 지우지 않고 세기만 한다.
             lost += 1
+            if dirty:
+                repairs.append((e["rowid"], json.dumps(props, ensure_ascii=False)))
             continue
 
         full = complete_evidence(quote, text) or quote
@@ -89,6 +111,8 @@ def sweep(path: Path, apply: bool, verbose: bool) -> None:
             continue
         if full != " ".join(quote.split()):
             props["evidence"] = full
+            dirty = True
+        if dirty:
             repairs.append((e["rowid"], json.dumps(props, ensure_ascii=False)))
 
     for _, s, d, ev in doomed:
@@ -98,7 +122,8 @@ def sweep(path: Path, apply: bool, verbose: bool) -> None:
         for rid, raw in repairs:
             print(f"  복원: {json.loads(raw)['evidence'][:150]}")
 
-    print(f"추출 엣지 {len(edges):,}건 · 근거복원 {len(repairs):,}건"
+    print(f"추출 엣지 {len(edges):,}건 · props 수정 {len(repairs):,}건"
+          f" · 거짓 모델기록 제거 {unstamped:,}건"
           f" · 참여부인 삭제 {len(doomed)}건 · 원문에서 못 찾음 {lost:,}건")
 
     if apply:
@@ -114,9 +139,8 @@ def sweep(path: Path, apply: bool, verbose: bool) -> None:
 def main() -> int:
     flags = {"--apply", "--verbose"}
     args = [a for a in sys.argv[1:] if a not in flags]
-    paths = ([Path(a) for a in args] if args
-             else [ROOT / "data" / "histgraph.sqlite",
-                   ROOT / "data" / "joseon.sqlite"])
+    paths = ([Path(a) for a in args]
+             if args else sorted((ROOT / "data").glob("*.sqlite")))
     for p in paths:
         sweep(p, "--apply" in sys.argv[1:], "--verbose" in sys.argv[1:])
     return 0

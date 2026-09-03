@@ -17,7 +17,10 @@ P921(주제)의 값을 타입도 모른 채 `event` 로 만들어 넣은 한 줄
      '6.25 전쟁'·'황산벌 전투'는 P279 가 없다. 이 검사를 먼저 두는 이유가
      그것이다 — 사건 계층 검사만 하면 부류가 사건으로 통과한다.
   2. P31/P279* 가 Q1190554(사건)에 닿으면 **사건**이다.
-  3. P31 이 `WD_CLASS_TO_TYPE` 에 있으면 그 타입 (인물·장소·조직…).
+  3. P31 이 **전부** `WD_CLASS_TO_TYPE` 에 있고 한 타입으로 모이면 그 타입.
+     손으로 확인한 표가 계층 추론보다 앞선다 — 계층은 훈장과 조선소까지
+     사건에 닿게 할 만큼 허술하다. 표 밖의 클래스가 하나라도 섞이면
+     넘어간다 (제2차 세계 대전이 '시대'로 끌려가지 않게).
   4. 아무것도 아니면 **보류한다.** 손대지 않고 목록으로 보고한다.
      여기서 짐작으로 옮기면 진짜 사건을 잃는다.
 
@@ -264,12 +267,30 @@ def _classify(
             held.add(q)
             continue
 
-        # 8. 사건 계층에 닿으면 사건이다.
+        # 8. **P31 이 전부 매핑표에 있고 한 타입으로 모이면 표를 믿는다.**
+        #    표는 라벨을 대조해 손으로 적은 것이고, 아래 계층 추론은
+        #    Wikidata 의 사건 계층을 걸어 올라간 것이다 — 그 계층은 허술해서
+        #    실측으로 **훈장(태극장·자응장·팔괘장·서봉장·금척대수장)과
+        #    조선소(대한조선공사)가 전부 '사건'에 닿는다.** 연대까지 채워지자
+        #    연표가 "1900년에 일어난 일: 대훈위 금척대수장"이라고 말했다.
+        #
+        #    매핑표 **전체**를 앞세우면 반대로 다친다(1번 관문 주석) —
+        #    제2차 세계 대전의 P31 에 '시대'가 섞여 있어 시대 노드가 됐다.
+        #    그래서 조건이 둘이다: 클래스가 **하나도 빠짐없이** 표에 있고,
+        #    그것들이 **한 타입으로 모일 때만**. 제2차 세계 대전은 전쟁(사건)과
+        #    시대로 갈리므로 이 관문을 그냥 지나 계층으로 간다.
+        if mine and mine <= set(WD_CLASS_TO_TYPE):
+            mapped = {WD_CLASS_TO_TYPE[c] for c in mine}
+            if len(mapped) == 1:
+                verdict[q] = mapped.pop()
+                continue
+
+        # 9. 사건 계층에 닿으면 사건이다.
         hit = {ROOTS[root] for root, got in reach.items() if mine & got}
         if len(hit) == 1:
             verdict[q] = hit.pop()
             continue
-        # 9. 마지막으로 매핑표를 본다. 여기까지 왔다는 것은 사건도 주제도
+        # 10. 마지막으로 매핑표를 본다. 여기까지 왔다는 것은 사건도 주제도
         #    아니라는 뜻이라, 표가 말하는 타입을 받아들일 만하다. 둘로
         #    갈리면 고르지 않는다 — 후보가 둘이면 잇지 않는다는 규칙이다.
         mapped = {WD_CLASS_TO_TYPE[c] for c in mine if c in WD_CLASS_TO_TYPE}
@@ -408,6 +429,27 @@ def apply_plan(store: GraphStore, plan: Plan) -> dict[str, int]:
         "about_to_depicts": to_depicts,
         "invalid_edges": len(invalid_edges(store)),
     }
+
+
+def repair_edges(store: GraphStore) -> dict[str, int]:
+    """`about` 과 `depicts` 를 도착 노드의 타입에 맞춘다.
+
+    노드를 하나도 재분류하지 않아도 이 일은 필요하다. 수집이 다시 돌면
+    `fetch_media` 가 새 주제 엣지를 `about` 으로 만들어 넣는데, 그 도착이
+    이미 사건으로 서 있는 노드일 수 있다(실측: '화려한 휴가 → 5·18 광주
+    민주화 운동'이 `about` 으로 들어왔다). 노드 쪽만 보는 재분류는 이걸
+    영영 못 고친다 — 바꿀 노드가 없기 때문이다."""
+    conn = store.conn
+    to_depicts = conn.execute(
+        "UPDATE OR REPLACE edges SET type='depicts' WHERE type='about' AND dst IN "
+        "(SELECT id FROM nodes WHERE type IN ('person','event','place','org'))"
+    ).rowcount
+    to_about = conn.execute(
+        "UPDATE OR REPLACE edges SET type='about' WHERE type='depicts' AND dst IN "
+        "(SELECT id FROM nodes WHERE type='concept')"
+    ).rowcount
+    conn.commit()
+    return {"about_to_depicts": to_depicts, "depicts_to_about": to_about}
 
 
 def invalid_edges(store: GraphStore) -> list[tuple[str, str, str, str, str]]:

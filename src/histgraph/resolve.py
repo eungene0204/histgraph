@@ -143,10 +143,25 @@ def link_event_periods(store: GraphStore) -> int:
     # 왕조 이름 -> 노드. 정체 표(POLITIES)의 QID 가 그래프에 있어야 잇는다.
     from .sources.wikidata import POLITIES
 
+    # **시대 자리에 설 수 있는 노드만 고른다.** 정체 표에는 있지만 그래프에는
+    # 장소로 앉아 있는 노드가 있다 (실측: 조선민주주의인민공화국·대한민국).
+    # 타입을 보지 않고 이으면 `from_period` 가 장소를 가리켜 스키마에
+    # 어긋난 엣지가 500건 만들어진다. 이 둘은 장소인 것이 틀린 게 아니라
+    # — 사람들의 출생지로도 쓰인다 — 시대 노릇을 겸할 수 없을 뿐이다.
     target = {}
+    skipped = []
     for qid, name in POLITIES.items():
-        if store.conn.execute("SELECT 1 FROM nodes WHERE id=?", (f"wd:{qid}",)).fetchone():
+        row = store.conn.execute(
+            "SELECT type FROM nodes WHERE id=?", (f"wd:{qid}",)
+        ).fetchone()
+        if row is None:
+            continue
+        if row["type"] in ("period", "org"):
             target[name] = f"wd:{qid}"
+        else:
+            skipped.append(f"{name}({row['type']})")
+    if skipped:
+        log.warning("시대 자리에 설 수 없는 정체 %s — 그 사건들은 잇지 않는다", ", ".join(skipped))
 
     have = {
         (r[0], r[1])
@@ -230,13 +245,29 @@ def fix_period_nodes(store: GraphStore) -> dict[str, object]:
                 (r["src"], nid, r["type"], r["source"]),
             )
 
+    # 시대 자리에 설 수 없는 노드를 가리키는 `from_period` 를 걷어낸다.
+    # 실측 503건이 조선민주주의인민공화국·대한민국(둘 다 장소 노드)을
+    # 가리키고 있었다. 잃는 것은 없다 — 같은 사실이 노드의 props.polity 에
+    # 남아 있어서, 그 노드가 시대 자리에 서는 순간 link_event_periods 가
+    # 다시 만든다.
+    stale = conn.execute(
+        """SELECT COUNT(*) FROM edges e JOIN nodes n ON n.id = e.dst
+            WHERE e.type='from_period' AND n.type NOT IN ('period','org')"""
+    ).fetchone()[0]
+    if stale:
+        conn.execute(
+            """DELETE FROM edges WHERE type='from_period' AND dst IN (
+                 SELECT id FROM nodes WHERE type NOT IN ('period','org'))"""
+        )
+        log.info("시대가 될 수 없는 노드를 가리키던 from_period %d건 제거", stale)
+
     conn.commit()
     if retyped or moved or dropped:
         log.info(
             "시대 노드 교정: 타입 %d개, 장소→시대 엣지 %d건 (버림 %d건)",
             len(retyped), moved, dropped,
         )
-    return {"retyped": retyped, "moved": moved, "dropped": dropped}
+    return {"retyped": retyped, "moved": moved, "dropped": dropped, "stale": stale}
 
 
 def link_places(store: GraphStore) -> int:

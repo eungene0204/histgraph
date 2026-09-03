@@ -30,6 +30,7 @@ import urllib.parse
 
 from ..http import Fetcher
 from ..ontology import FORMS, Edge, Node
+from .infobox import LINK_SKIP, WIKILINK
 
 log = logging.getLogger(__name__)
 
@@ -333,3 +334,216 @@ def backfill_forms(store, fetcher: Fetcher) -> tuple[int, list[tuple[str, str]]]
         if not forms.get(r["id"].split(":", 1)[1])
     ]
     return filled, left
+
+
+# --- 인포박스와 인트로에서 곧바로 얻는 것 --------------------------------
+# **작품 인포박스에는 소재·배경 칸이 없다.** 실측으로 영화 정보 틀은
+# 제목·장르·감독·제작·각본·출연·배급·개봉·시간·나라·등급이고, 텔레비전
+# 방송 프로그램 정보 틀은 방송명·장르·방송 기간·방송 채널·기획·연출·
+# 극본·출연자·원작이다. "무엇을 다루는가"를 적는 칸이 아예 없다.
+#
+# 그래도 인포박스가 주는 것이 둘 있다: **발표일**과 **원작**. 발표일은
+# 연표의 한 축이고(배경연도와 다른 축이다), 원작은 작품끼리의 엣지다.
+# 감독·출연은 뽑지 않는다 — 역사 그래프가 연예인 그래프가 된다.
+# 순서가 곧 우선순위다. '제작년도'를 먼저 보면 『한산』이 2020년이 된다 —
+# 만든 해와 세상에 나온 해는 다르고, 연표에 서는 것은 나온 해다.
+DATE_FIELDS = ("개봉", "방송 기간", "방영 기간", "발매일", "발매", "출간일",
+               "공개", "초연", "제작년도", "제작 년도")
+ADAPTED_FIELDS = ("원작",)
+
+# 링크 뒤에 이 말이 오면 그 링크는 작품의 소재다. 감독·출연 링크는
+# 이런 말을 달고 오지 않는다 (실측: 이 관문 없이 인트로 링크를 다 받으면
+# 절반 이상이 배우·감독이다 — 김지운·임권택·하희라·이준익).
+SUBJECT_CUE = re.compile(
+    r"(?:을|를|의)?\s*(소재로|다룬|다루었|다룬다|다룹니다|그린|그리고 있|"
+    r"모티브|주인공으로|중심으로|각색|생애|일생|바탕으로|재구성)"
+)
+
+# 링크와 단서 사이에 이 말이 끼면 그 링크는 소재가 아니라 **만든 사람**이다.
+# '[[선우휘]]의 소설을 바탕으로' 에서 선우휘는 원작자이지 다뤄진 인물이
+# 아니다 — 몰년 관문은 이미 죽은 작가를 막지 못한다(실측: 선우휘·박원양).
+CREATOR_NEAR = re.compile(
+    r"(소설|작품|만화|희곡|원작|극본|각본|대본|연출|감독|제작|출연|주연|"
+    r"각색한|번안|시나리오)"
+)
+
+_DATE_FULL = re.compile(r"(\d{4})년[^\d]{0,4}(\d{1,2})월[^\d]{0,4}(\d{1,2})일")
+_DATE_YEAR = re.compile(r"(\d{4})년")
+_FIELD = re.compile(r"^\s*\|\s*([^=|\n]{1,24}?)\s*=\s*(.*)$", re.M)
+
+
+def _first_date(value: str) -> str | None:
+    """'일반판 : 2022년 7월 27일<br/>감독판 : …' -> '2022-07-27'.
+
+    여러 날짜가 적혀 있으면 **처음 것**을 쓴다. 재방송·감독판·해외개봉이
+    뒤에 붙는데, 작품이 세상에 나온 때는 처음 것이다."""
+    m = _DATE_FULL.search(value)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    m = _DATE_YEAR.search(value)
+    return f"{int(m.group(1)):04d}" if m else None
+
+
+def parse_work_infobox(wikitext: str) -> dict[str, object]:
+    """작품 인포박스에서 발표일과 원작을 읽는다.
+
+    틀 전체가 아니라 `|칸 = 값` 줄만 본다. **첫 틀이 인포박스가 아닌
+    경우가 많다** — '{{다른 뜻}}'이 먼저 오는 문서가 실측 60편 중 7편이라,
+    칸 이름으로 찾는 편이 안전하다."""
+    out: dict[str, object] = {"start": None, "adapted": []}
+    dates: dict[str, str] = {}
+    for name, value in _FIELD.findall(wikitext):
+        if name in DATE_FIELDS and name not in dates:
+            found = _first_date(value)
+            if found:
+                dates[name] = found
+        if name in ADAPTED_FIELDS:
+            out["adapted"] = [
+                m.group(1).split("#")[0].strip()
+                for m in WIKILINK.finditer(value)
+                if not LINK_SKIP.match(m.group(1))
+            ]
+    for field in DATE_FIELDS:
+        if field in dates:
+            out["start"] = dates[field]
+            break
+    return out
+
+
+def intro_of(wikitext: str, paragraphs: int = 4) -> str:
+    """틀을 걷어낸 도입부. 인포박스 안의 링크를 소재로 오해하지 않게."""
+    body = re.sub(r"\{\{[^{}]*(\{\{[^{}]*\}\}[^{}]*)*\}\}", " ", wikitext)
+    return "\n".join([p for p in body.split("\n") if p.strip()][:paragraphs])
+
+
+def subject_links(wikitext: str, window: int = 45) -> list[str]:
+    """도입부에서 **소재를 말하는 단서 앞에 붙은** 위키링크만 고른다."""
+    intro = intro_of(wikitext)
+    out: list[str] = []
+    for m in WIKILINK.finditer(intro):
+        name = m.group(1).split("#")[0].strip()
+        if not name or LINK_SKIP.match(name):
+            continue
+        tail = intro[m.end() : m.end() + window]
+        cue = SUBJECT_CUE.search(tail)
+        if not cue:
+            continue
+        # 링크와 단서 사이에 만든 사람을 가리키는 말이 끼어 있으면 버린다
+        if CREATOR_NEAR.search(tail[: cue.start()]):
+            continue
+        out.append(name)
+    return out
+
+
+def harvest(
+    store, fetcher: Fetcher, resolve, limit: int | None = None
+) -> dict[str, object]:
+    """작품 문서에서 발표일·원작·소재를 곧바로 읽는다 (LLM 없이).
+
+    소재 판정에는 관문이 둘 있다:
+
+      1. **단서 어구.** 링크 뒤에 '소재로'·'다룬'·'그린'·'모티브' 같은
+         말이 붙어 있어야 한다. 이게 없으면 인트로 링크의 절반 이상이
+         감독·배우다 (실측: 김지운·임권택·하희라·이준익).
+      2. **몰년.** 사람은 죽은 뒤라야 소재가 된다. 몰년이 없는 인물은
+         잇지 않는다 — 살아 있는 사람이 그 작품에 얽혀 있다면 만든 쪽이지
+         다뤄진 쪽일 가능성이 압도적이다. 작품 발표일을 아는 경우에는
+         몰년이 그보다 앞서는지도 본다.
+
+    사건·장소·정체에는 몰년 관문을 걸지 않는다 — 배우로 오해될 일이 없다."""
+    from .infobox import fetch_wikitext
+
+    rows = store.conn.execute(
+        "SELECT id, label, start_date FROM nodes "
+        "WHERE type='media' AND id LIKE 'wd:%' ORDER BY id"
+    ).fetchall()
+    if limit:
+        rows = rows[:limit]
+
+    parsed: dict[str, dict] = {}
+    for i, r in enumerate(rows, 1):
+        try:
+            wikitext = fetch_wikitext(fetcher, r["label"])
+        except Exception as err:  # noqa: BLE001 — 문서 하나 때문에 멈추지 않는다
+            log.warning("본문 실패 (건너뜀) %s: %s", r["label"], str(err)[:80])
+            continue
+        if not wikitext:
+            continue
+        info = parse_work_infobox(wikitext)
+        info["subjects"] = subject_links(wikitext)
+        parsed[r["id"]] = info
+        if i % 200 == 0:
+            log.info("  작품 %d/%d건 읽음", i, len(rows))
+
+    names = sorted({
+        n for info in parsed.values()
+        for n in list(info["subjects"]) + list(info["adapted"])
+    })
+    qids = _resolve_titles(fetcher, names)
+
+    dated: list[tuple[str, str]] = []
+    edges: list[Edge] = []
+    dropped: list[tuple[str, str, str]] = []
+    have_date = {r["id"]: r["start_date"] for r in rows}
+
+    for node_id, info in parsed.items():
+        if info["start"] and not have_date.get(node_id):
+            dated.append((info["start"], node_id))
+        work_year = _year(info["start"] or have_date.get(node_id))
+
+        for name in info["adapted"]:
+            target = qids.get(name)
+            if target and store.conn.execute(
+                "SELECT 1 FROM nodes WHERE id=? AND type IN ('media','artwork')",
+                (f"wd:{target}",),
+            ).fetchone():
+                edges.append(Edge(src=node_id, dst=f"wd:{target}", type="adapted_from",
+                                  source=SOURCE, label="인포박스: 원작"))
+
+        for name in info["subjects"]:
+            target = qids.get(name)
+            if not target:
+                continue
+            row = store.conn.execute(
+                "SELECT id, type, label, end_date FROM nodes WHERE id=?",
+                (f"wd:{target}",),
+            ).fetchone()
+            if not row or row["type"] not in ("person", "event", "place", "org"):
+                continue
+            if row["id"] == node_id:
+                continue
+            if row["type"] == "person":
+                death = _year(row["end_date"])
+                if death is None:
+                    dropped.append((node_id, row["label"], "몰년 없음"))
+                    continue
+                if work_year is not None and death > work_year:
+                    dropped.append((node_id, row["label"], "작품보다 나중에 죽음"))
+                    continue
+            # **장소는 소재가 아니라 배경이다.** '군함도'가 나가사키를,
+            # '대호'가 지리산을 다루는 것이 아니라 거기를 배경으로 한다.
+            kind = "set_in" if row["type"] == "place" else "depicts"
+            edges.append(Edge(src=node_id, dst=row["id"], type=kind,
+                              source=SOURCE, label=f"도입부: {name}"))
+
+    unique = {(e.src, e.dst, e.type): e for e in edges}
+    return {
+        "read": len(parsed),
+        "dates": dated,
+        "edges": list(unique.values()),
+        "dropped": dropped,
+    }
+
+
+def _year(value: str | None) -> int | None:
+    if not value:
+        return None
+    m = re.match(r"^(-?\d{1,4})", value)
+    return int(m.group(1)) if m else None
+
+
+def _resolve_titles(fetcher: Fetcher, titles: list[str]) -> dict[str, str]:
+    """문서 제목 -> QID. `infobox.resolve_titles` 를 그대로 쓴다."""
+    from .infobox import resolve_titles
+
+    return resolve_titles(fetcher, titles) if titles else {}

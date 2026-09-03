@@ -77,7 +77,8 @@ def main() -> int:
     print(f"\n{'─'*60}\n2) 가제티어 연결률 (기존 노드에 붙는가)\n{'─'*60}")
     nodes, edges = [], []
     for r, doc in all_rels:
-        n, e = to_graph([r], doc.node_id, store, doc_text=doc.text)
+        n, e = to_graph([r], doc.node_id, store, doc_text=doc.text,
+                        model=backend.model, backend=backend.name)
         nodes.extend(n)
         edges.extend(e)
     print(f"  근거 검증 통과 후 남은 관계 {len(edges)}/{len(all_rels)}건")

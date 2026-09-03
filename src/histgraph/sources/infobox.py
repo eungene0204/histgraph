@@ -55,6 +55,19 @@ EVENT_FIELDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "참가자": ("participated_in", ("person", "org"), IN),
     "장소": ("occurred_at", ("place",), OUT),
     "지역": ("occurred_at", ("place",), OUT),
+
+    # `사건 정보` 틀 — 전쟁도 옥사도 아닌 근현대 사건이 쓴다. 10·26 사건,
+    # 제암리 학살, 간토 대학살, 판문점 도끼 살인, 고난의 행군이 여기 있다.
+    # 위 필드가 하나도 없어서 **틀 자체를 못 찾고 있었다** — `위치` 를
+    # 넣는 순간 같은 틀의 `날짜` 도 함께 읽힌다.
+    "위치": ("occurred_at", ("place",), OUT),
+    "가해자": ("participated_in", ("person", "org"), IN),
+
+    # **`사망자`·`생존자` 를 참여로 적으면 안 된다.** 그러면 화면이
+    # "박정희는 10·26 사건에 참여했다"고 말한다 — 그는 그 자리에서
+    # 죽었다. 사건에 얽힌 것은 사실이므로 버리지도 않고 관련으로 남긴다.
+    "사망자": ("related_to", ("person",), IN),
+    "생존자": ("related_to", ("person",), IN),
 }
 
 # 링크가 아니라 **값 그대로** 읽는 필드. 위 표는 `[[링크]]` 를 뽑아 엣지를
@@ -252,6 +265,57 @@ def parse_infobox_values(
     return out
 
 
+# 각주와 괄호 안의 링크는 그 필드의 값이 아니다.
+#
+#   신상옥 `자녀 = … 장녀: 신진환<ref>1956년 [[최은희]]와 재혼하기 이전의
+#   전처와 사이에 얻은 딸.</ref>` -> 최은희가 신상옥의 자녀가 됐다.
+#   은신군 `자녀 = 양자 [[남연군]](생부 [[이병원]])` -> 이병원이
+#   은신군의 자녀가 됐다. 이병원은 남연군의 생부다.
+#
+# 각주는 통째로 지우고, 괄호는 **링크를 가린 뒤에** 찾는다 —
+# `[[최은희 (배우)|최은희]]` 의 괄호는 링크의 일부라 건드리면 안 된다.
+# 자기닫음 태그를 먼저 본다. `<ref[^>]*>` 는 `<ref name="a"/>` 에도 걸려서
+# 거기서부터 **다음 `</ref>` 까지** 통째로 먹는다 — 그 사이의 링크가 사라진다.
+REF = re.compile(r"<ref[^>]*/>|<ref[^>]*>.*?</ref>", re.DOTALL)
+
+# 괄호 속 링크를 버리는 필드. **친족 필드에만 적용한다.**
+# `장소 = 귀주(龜州, 현재의 [[평안북도]] [[구성시]])` 처럼 장소 필드의
+# 괄호는 현재 지명을 담고 있어서, 버리면 발생 장소가 통째로 사라진다.
+PAREN_ASIDE_FIELDS = frozenset({"자녀", "아버지", "어머니", "부모", "배우자"})
+
+# 친족 필드라도 **앞선 링크를 부연하는 괄호**만 버린다.
+#
+#   은신군 `자녀 = 양자 [[남연군]](생부 [[이병원]])`   -> 이병원 버림
+#   심단   `자녀 = [[심득경]](… [[윤선도]]의 증손 …)`  -> 윤선도 버림
+#   김수항 `자녀 = 6남 1녀<br>(그 중 아들 [[김창집]], [[김창협]] …)`
+#          -> **버리면 안 된다.** 목록 전체가 괄호 안에 들어 있다.
+#
+# 여는 괄호 바로 앞이 링크로 끝나면 부연, 아니면 목록으로 본다.
+
+
+def field_links(value: str, drop_parens: bool = False) -> list[str]:
+    """필드 값에서 **그 필드가 실제로 가리키는** 위키링크만 뽑는다."""
+    value = REF.sub("", value)
+    voids: list[tuple[int, int]] = []
+    if drop_parens:
+        # 링크를 같은 길이의 자리표시자로 덮은 뒤 괄호 범위를 찾는다 —
+        # `[[최은희 (배우)|최은희]]` 의 괄호는 링크의 일부다.
+        masked = WIKILINK.sub(lambda m: "\x00" * len(m.group(0)), value)
+        for m in _PAREN.finditer(masked):
+            before = masked[:m.start()].rstrip()
+            if before.endswith("\x00"):   # 링크를 부연하는 괄호일 때만
+                voids.append((m.start(), m.end()))
+
+    out: list[str] = []
+    for m in WIKILINK.finditer(value):
+        if any(a <= m.start() < b for a, b in voids):
+            continue
+        target = m.group(1).strip()
+        if target and not LINK_SKIP.match(target):
+            out.append(target)
+    return out
+
+
 def parse_infobox_links(
     wikitext: str, fields: dict[str, tuple[str, tuple[str, ...], str]] | None = None
 ) -> dict[str, list[str]]:
@@ -274,10 +338,9 @@ def parse_infobox_links(
         field = parts[i].strip()
         if field not in fields:
             continue
-        for target in WIKILINK.findall(parts[i + 1]):
-            target = target.strip()
-            if target and not LINK_SKIP.match(target):
-                out[field].append(target)
+        aside = field in PAREN_ASIDE_FIELDS
+        for target in field_links(parts[i + 1], drop_parens=aside):
+            out[field].append(target)
     return dict(out)
 
 

@@ -2319,6 +2319,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("사건으로 되돌리면 about 이 depicts 로 돌아온다",
           result["about_to_depicts"] == 1, str(result))
 
+    # 노드를 안 바꿔도 엣지는 어긋나 있을 수 있다
+    store.conn.execute("UPDATE edges SET type='about' WHERE src='wd:W1' AND dst='wd:E1'")
+    store.conn.commit()
+    fixed = rc.repair_edges(store)
+    check("사건을 가리키는 about 은 depicts 로 돌아온다",
+          fixed["about_to_depicts"] == 1, str(fixed))
+
     report = rc.depicts_report(store)
     check("depicts 대상 타입을 센다", report["by_type"].get("event") == 5, str(report))
     store.close()
@@ -2365,6 +2372,52 @@ check("배경 분류가 set_in 이 된다", counts["set_in"] == 1, str(counts))
 check("엣지에 분류 이름을 남긴다",
       all(e.label and e.label.startswith("분류: ") for e in edges), str([e.label for e in edges]))
 
+print("[작품 문서에서 곧바로 읽기 — LLM 없이]")
+from histgraph.sources.wikipedia import strip_sections  # noqa: E402
+
+box = """{{영화 정보
+| 제목 = 한산
+| 제작년도 = 2020년
+| 개봉 = 일반판 : 2022년 7월 27일<br/>감독판 : 2022년 11월 16일
+}}"""
+check("개봉을 제작년도보다 앞세운다",
+      works.parse_work_infobox(box)["start"] == "2022-07-27",
+      str(works.parse_work_infobox(box)))
+check("여러 날짜 중 처음 것을 쓴다", works._first_date("2006년 9월 16일 ~ 2007년 12월 23일") == "2006-09-16")
+check("연도만 있어도 읽는다", works._first_date("1975년") == "1975")
+tv = "{{텔레비전 방송 프로그램 정보\n|원작 = [[선우휘]]의 《[[노다지]]》\n}}"
+check("원작 칸의 링크를 뽑는다", works.parse_work_infobox(tv)["adapted"] == ["선우휘", "노다지"],
+      str(works.parse_work_infobox(tv)))
+
+check("단서가 있어야 소재로 본다",
+      works.subject_links("《가》는 [[한산도 대첩]]을 소재로 한 영화이다.") == ["한산도 대첩"])
+check("단서가 없는 링크는 버린다",
+      works.subject_links("《가》는 [[김한민]] 감독의 영화이다.") == [])
+check("원작자는 소재가 아니다",
+      works.subject_links("《가》는 [[선우휘]]의 소설을 바탕으로 만들었다.") == [],
+      str(works.subject_links("《가》는 [[선우휘]]의 소설을 바탕으로 만들었다.")))
+
+article = """도입 문단.
+
+== 역사적 사실 ==
+고증에 관한 글.
+
+== 등장 인물 ==
+=== 주인공 ===
+최수종: 대조영 역
+
+=== 그 외 ===
+배우 이름들.
+
+== 시청률 ==
+표.
+
+== 역사와 다른 점 ==
+남아야 하는 글."""
+cut = strip_sections(article)
+check("등장 인물 절이 하위 절까지 사라진다", "최수종" not in cut and "배우 이름들" not in cut, cut)
+check("역사적 사실은 남는다", "고증에 관한 글" in cut and "남아야 하는 글" in cut, cut)
+
 check("작품이 주제를 가리키는 엣지가 있다", "about" in EDGE_TYPES)
 check("about 의 도착은 개념뿐", EDGE_TYPES["about"][2] == ("concept",))
 check("depicts 의 도착에 개념이 없다", "concept" not in EDGE_TYPES["depicts"][2])
@@ -2383,6 +2436,275 @@ except OntologyError:
 check("아는 매체 구분은 통과",
       Node(id="kw:y", type="media", label="한산", source="kowiki",
            props={"form": "film"}).props["form"] == "film")
+
+# --- 잘린 인용이 사실을 뒤집는다 -----------------------------------------
+# 실측 발단: 화면에 "이완용은 3·1 운동에 참여했다"가 떴다. 근거는 역접 어미
+# `-으나` 에서 끊긴 채였고, 원문의 뒤집는 절은 통째로 사라져 있었다.
+print("\n[근거 문장 복원 · 참여 부인]")
+
+import re  # noqa: E402
+
+from histgraph.extract import (  # noqa: E402
+    complete_evidence,
+    evidence_supported,
+    paragraph_span,
+    participation_denied,
+    sentence_span,
+    split_document,
+)
+
+IWAN = (
+    "1919년 3월 1일, 조선에서는 고종의 승하와 민족자결주의 제창에 호응해 "
+    "3·1 운동이 일어났다. 그 역시 민족 지도자들로부터 동참을 요청받았으나 "
+    "오히려 당시 총독 데라우치 마사타케에게 탄압 필요성과 그 방안에 관한 "
+    "편지를 수차례 보내기도 했다. 이완용은 공식적으로 경고문을 연달아 3회 "
+    "발표하고, 3·1 운동이 불순세력에 의한 난동에 불과하다고 발언했다."
+)
+CUT = "그 역시 민족 지도자들로부터 동참을 요청받았으나"
+
+check("잘린 인용도 근거 검사는 통과한다 (이 검사로는 못 막는다)",
+      evidence_supported(CUT, IWAN))
+full = complete_evidence(CUT, IWAN)
+check("복원하면 뒤집는 절이 돌아온다", "오히려" in full and full.endswith("했다."))
+check("복원이 다음 문장까지 삼키지 않는다", "경고문" not in full)
+check("참여 요청을 받고 물린 것은 참여가 아니다 → 버린다",
+      participation_denied("participated_in", "3·1 운동", full, IWAN))
+check("잘린 인용만 주면 판정할 수 없다 (복원이 선행조건)",
+      not participation_denied("participated_in", "3·1 운동", CUT, None))
+
+# 거부는 참여의 반대말이 아니다 — 무엇에 대한 거부인지가 갈린다
+check("지휘관이 건의를 물린 것은 불참이 아니다",
+      not participation_denied(
+          "participated_in", "울산성 전투",
+          "장수들은 세 성을 포기하자는 건의를 올렸으나, 히데요시는 이를 거절하였다."))
+check("중재 제의를 거부하고 원정을 강행한 것도 참여다",
+      not participation_denied(
+          "participated_in", "병인양요",
+          "로즈는 청나라의 중재제의를 거부한채 군함 세척을 이끌고 나섰다."))
+
+# 실측: 같은 문단에 있는 **남의** 거절을 끌어오면 정상 엣지가 날아간다
+OTHER = (
+    "이기축은 관찰사로 있던 자신의 친족 이명에게 거병 사실을 알리고 참여를 "
+    "권고했으나 이명은 거절했다. 이기축 등은 선봉으로 연서역에 잠입, "
+    "반정군에게 문을 열어주었다."
+)
+check("문단 안 남의 거절로 참여를 지우지 않는다",
+      not participation_denied(
+          "participated_in", "인조반정",
+          "이기축 등은 선봉으로 연서역에 잠입, 반정군에게 문을 열어주었다.",
+          OTHER))
+
+# 실측: `신탁통치반대 국민총동원위원회` 의 '반대'가 사건 반대로 읽혔다
+check("고유명사 속 '반대'는 반대가 아니다",
+      not participation_denied(
+          "participated_in", "모스크바 3상회담",
+          "김구가 모스크바 3상회담에 반발하자 신탁통치반대 국민총동원위원회 "
+          "위원이 되었다."))
+check("사건에 반대한 것은 참여가 아니다 → 버린다",
+      participation_denied(
+          "participated_in", "제2차 요동 정벌",
+          "제1차 요동 정벌(1388년)과 제2차 요동 정벌(1392년)에 반대하였으나"))
+check("다른 관계 타입은 검사 안 함",
+      not participation_denied("related_to", "3·1 운동", full, IWAN))
+
+# 숫자에 붙은 마침표를 문장 끝으로 보면 `3.1 운동` 한가운데가 경계가 된다
+NUM = "1919년 3.1 만세 운동이 일어났다. 그는 6.25 전쟁에도 참전했다."
+check("`3.1`·`6.25` 의 마침표는 문장 끝이 아니다",
+      complete_evidence("3.1 만세 운동이 일어났다", NUM)
+      == "1919년 3.1 만세 운동이 일어났다.")
+
+# 문단은 넘어가지 않는다 — 넘어가면 남의 문장을 근거로 끌어온다
+PARA = "앞 문단의 마지막 문장이다\n뒤 문단이 여기서 시작한다. 그리고 이어진다."
+check("문장 복원이 줄바꿈을 넘지 않는다",
+      complete_evidence("뒤 문단이 여기서 시작한다", PARA)
+      == "뒤 문단이 여기서 시작한다.")
+check("문단 범위도 줄바꿈에서 끊긴다",
+      PARA[slice(*paragraph_span(PARA, 12, 14))] == "앞 문단의 마지막 문장이다")
+check("이미 완결된 문장은 그대로 둔다",
+      complete_evidence("그리고 이어진다.", PARA) == "그리고 이어진다.")
+check("원문에 없는 근거는 복원할 수 없다",
+      complete_evidence("문서에 명시되지 않음", IWAN) is None)
+check("문장 범위는 인용을 반드시 품는다",
+      sentence_span(IWAN, 30, 40)[0] <= 30 and sentence_span(IWAN, 30, 40)[1] >= 40)
+
+# 조각을 반토막 문장으로 열면 모델이 애초에 온전한 인용을 할 수 없다
+LONG = "\n".join([f"{i}번째 문단이다. " + "어떤 일이 벌어졌다. " * 9
+                  for i in range(8)])
+parts = split_document("n", "L", LONG, size=300)
+check("조각이 여럿으로 갈린다", len(parts) > 1)
+check("겹침이 문장 첫머리에서 시작한다",
+      all(re.match(r"(어떤 일이|\d번째 문단)", p.text) for p in parts[1:]))
+
+print("[시대 묶음과 일제강점기]")
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import resolve as rs  # noqa: E402
+    from histgraph import scope as sc  # noqa: E402
+
+    check("묶음은 시대 여럿으로 풀린다", sc.eras_of("korea") == ("joseon", "ilje"))
+    check("시대 이름은 자기 자신으로 풀린다", sc.eras_of("joseon") == ("joseon",))
+    # 화면 머리말은 서버가 준다. 모르는 키에 영어를 내보내면 안 된다.
+    check("묶음 이름은 한국어다", sc.label_of("korea") == "조선~일제강점기")
+    check("모르는 시대는 빈 이름", sc.label_of("없는시대") == "")
+
+    store = GraphStore(Path(tmp) / "era.sqlite")
+    store.upsert_nodes([
+        # 시대가 장소로 앉아 있다 — 실측으로 wd:Q503585 가 그랬다
+        Node(id="wd:Q503585", type="place", label="일제강점기", source="wd"),
+        Node(id="wd:P1", type="person", label="나운규", source="wd",
+             start_date="1902-01-01", end_date="1937-08-09"),
+        # 시대 창 밖 — 시대가 시작할 때 아직 태어나지 않았다
+        Node(id="wd:P2", type="person", label="박정희", source="wd",
+             start_date="1917-11-14", end_date="1979-10-26"),
+        # 시대 창 밖 — 시대가 시작하기 전에 죽었다
+        Node(id="wd:P3", type="person", label="흥선대원군", source="wd",
+             start_date="1820-01-01", end_date="1898-02-22"),
+        Node(id="wd:E1", type="event", label="3·1 운동", source="wd",
+             start_date="1919-03-01"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:P1", dst="wd:Q503585", type="died_in", source="wd"),
+        Edge(src="wd:E1", dst="wd:Q503585", type="from_period", source="kowiki"),
+    ])
+
+    fixed = rs.fix_period_nodes(store)
+    kind = store.conn.execute(
+        "SELECT type FROM nodes WHERE id='wd:Q503585'").fetchone()["type"]
+    check("장소로 앉은 시대를 시대로 되돌린다", kind == "period", kind)
+    moved = store.conn.execute(
+        "SELECT type, json_extract(props,'$.was') AS was FROM edges "
+        "WHERE src='wd:P1' AND dst='wd:Q503585'").fetchone()
+    # 지우지 않는다 — '언제'를 '어디서' 칸에 적은 것뿐이다
+    check("'어디서'가 시대를 가리키면 from_period 가 된다",
+          moved is not None and moved["type"] == "from_period")
+    check("무엇이었는지 남긴다", moved is not None and moved["was"] == "died_in")
+    check("옮긴 건수를 보고한다", fixed["moved"] == 1, str(fixed))
+
+    seeds = sc.select_seeds(store, sc.ERAS["ilje"])
+    check("연대가 겹치는 인물이 씨앗이 된다", "wd:P1" in seeds)
+    check("시대 뒤에 태어난 사람은 아니다", "wd:P2" not in seeds)
+    check("시대 앞에 죽은 사람도 아니다", "wd:P3" not in seeds)
+    check("시대에 걸린 사건도 씨앗이다", "wd:E1" in seeds)
+
+    # 시대 자리에 설 수 없는 노드로는 from_period 를 만들지 않는다
+    store.upsert_nodes([
+        Node(id="wd:Q884", type="place", label="대한민국", source="wd"),
+        Node(id="wd:E2", type="event", label="어떤 현대 사건", source="wd",
+             props={"polity": "대한민국"}),
+    ])
+    rs.link_event_periods(store)
+    check("장소인 정체로는 시대 엣지를 만들지 않는다",
+          store.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE src='wd:E2'").fetchone()[0] == 0)
+    store.close()
+
+# 재위 띠는 엣지의 props 표식으로만 서 있다. upsert 가 props 를 통째로
+# 덮어쓰므로 **다시 수집하면 띠가 사라진다** — `reigns` 를 다시 돌려야 한다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "reign.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:K1", type="person", label="조선 태조", source="wd"),
+        Node(id="wd:R1", type="role", label="조선 임금", source="wd"),
+    ])
+    store.upsert_edges([Edge(src="wd:K1", dst="wd:R1", type="held_position",
+                             source="wd", props={"reign": True})])
+    store.upsert_edges([Edge(src="wd:K1", dst="wd:R1", type="held_position",
+                             source="wd")])   # 다시 수집한 셈
+    props = store.conn.execute(
+        "SELECT props FROM edges WHERE src='wd:K1'").fetchone()["props"]
+    check("다시 수집하면 재위 표식이 지워진다 (reigns 를 다시 돌릴 것)",
+          "reign" not in props, props)
+    store.close()
+
+# 단체·개념은 시대에 걸릴 수 있어야 한다 — 못 걸면 엣지 0개로 들어와
+# scope 의 고립 정리에서 통째로 사라진다
+_, from_src, from_dst = EDGE_TYPES["from_period"]
+check("단체도 시대에 걸린다", "org" in from_src)
+check("개념도 시대에 걸린다", "concept" in from_src)
+check("시대의 도착은 시대와 정체뿐", set(from_dst) == {"period", "org"})
+
+# --- 누가 판정했는지 기록한다 ---------------------------------------------
+# 실측: 추출 엣지 3,534건이 전부 `props.model = claude-opus-5` 였다. Claude 가
+# 뽑아서가 아니라 `to_graph` 가 상수를 박았기 때문이고, 실제 판정자는 로컬
+# Qwen 이었다. 틀린 이름은 없는 것만 못하다 — 모르면 적지 않는다.
+print("\n[추출 모델 기록]")
+
+from histgraph.store import GraphStore  # noqa: E402
+from histgraph.ontology import Node as _N  # noqa: E402
+from histgraph.extract import BATCH_MODEL, to_graph as _to_graph  # noqa: E402
+
+_DOC = "1910년 8월 이완용은 한일 병합 조약에 직접 서명했다."
+_REL = [{"subject": "이완용", "subject_type": "person",
+         "relation": "participated_in", "object": "한일 병합 조약",
+         "object_type": "event", "confidence": "certain", "evidence": _DOC}]
+with GraphStore(":memory:") as _st:
+    _st.upsert_nodes([
+        _N(id="p:이완용", type="person", label="이완용", source="t"),
+        _N(id="e:한일 병합 조약", type="event", label="한일 병합 조약", source="t"),
+    ])
+    _, _with = _to_graph(_REL, "p:이완용", _st, doc_text=_DOC,
+                         model="mlx-community/Qwen3.6-35B-A3B-8bit", backend="mlx")
+    _, _without = _to_graph(_REL, "p:이완용", _st, doc_text=_DOC)
+
+check("돌린 모델을 그대로 남긴다",
+      _with[0].props["model"] == "mlx-community/Qwen3.6-35B-A3B-8bit")
+check("백엔드도 함께 남긴다", _with[0].props["backend"] == "mlx")
+check("모르면 모델을 적지 않는다", "model" not in _without[0].props)
+check("모르면 백엔드도 적지 않는다", "backend" not in _without[0].props)
+check("배치 모델 상수는 요청에만 쓴다",
+      BATCH_MODEL not in str(_with[0].props))
+
+# --- 인포박스 필드가 제 것이 아닌 링크를 삼킨다 --------------------------
+# 실측: 신상옥의 `자녀` 칸에 배우자 최은희가, 은신군의 `자녀` 칸에
+# 남연군의 생부 이병원이 들어왔다. 둘 다 각주와 괄호 속 부연이다.
+print("\n[인포박스 필드 경계]")
+
+from histgraph.sources.infobox import (  # noqa: E402
+    EVENT_FIELDS, PERSON_FIELDS, field_links, parse_infobox_links,
+)
+
+def _box(body: str) -> str:
+    return "{{인물 정보\n" + body + "\n}}"
+
+# 각주 속 링크는 그 필드의 값이 아니다
+SHIN = _box("| 자녀 = 장녀: 신진환<ref>1956년 [[최은희 (배우)|최은희]]와"
+            " 재혼하기 이전에 얻은 딸.</ref><br/>장남: [[신정균]]")
+check("각주 속 링크를 자녀로 읽지 않는다",
+      parse_infobox_links(SHIN, PERSON_FIELDS)["자녀"] == ["신정균"])
+
+# 자기닫음 각주가 다음 `</ref>` 까지 통째로 먹으면 안 된다
+SELF = "가<ref name=\"a\"/>[[김유신]]<br/>[[품일]]<ref>주석 [[관창]]</ref>"
+check("자기닫음 각주가 뒤를 삼키지 않는다",
+      field_links(SELF) == ["김유신", "품일"])
+
+# 앞선 링크를 부연하는 괄호는 버린다
+EUN = _box("| 자녀 = 양자 [[남연군]](생부 [[이병원]])")
+check("링크를 부연하는 괄호 속 링크는 자녀가 아니다",
+      parse_infobox_links(EUN, PERSON_FIELDS)["자녀"] == ["남연군"])
+
+# 목록 전체가 괄호 안에 있으면 버리면 안 된다
+SU = _box("| 자녀 = 6남 1녀<br>(그 중 아들 [[김창집]], [[김창협]], [[김창흡]])")
+check("목록을 감싼 괄호는 버리지 않는다",
+      parse_infobox_links(SU, PERSON_FIELDS)["자녀"]
+      == ["김창집", "김창협", "김창흡"])
+
+# 장소 필드의 괄호는 **현재 지명**을 담는다 — 버리면 발생지가 사라진다
+GUI = "{{전쟁 정보\n| 장소 = 귀주(龜州, 현재의 [[평안북도]] [[구성시]])\n}}"
+check("장소 괄호 속 현재 지명은 살린다",
+      parse_infobox_links(GUI, EVENT_FIELDS)["장소"] == ["평안북도", "구성시"])
+
+# 링크 안의 괄호(동음이의 꼬리표)는 링크의 일부다
+DIS = _box("| 배우자 = [[최은희 (배우)|최은희]]")
+check("링크 안 괄호는 건드리지 않는다",
+      parse_infobox_links(DIS, PERSON_FIELDS)["배우자"] == ["최은희 (배우)"])
+
+# 사건에서 죽은 사람을 참여자로 적으면 화면이 거짓말을 한다
+check("`사망자` 는 참여가 아니라 관련이다",
+      EVENT_FIELDS["사망자"][0] == "related_to")
+check("`생존자` 도 관련이다", EVENT_FIELDS["생존자"][0] == "related_to")
+check("`가해자` 는 참여가 맞다",
+      EVENT_FIELDS["가해자"][0] == "participated_in")
+check("`위치` 로 `사건 정보` 틀을 연다",
+      EVENT_FIELDS["위치"][0] == "occurred_at")
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
