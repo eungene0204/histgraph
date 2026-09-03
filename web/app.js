@@ -8,7 +8,9 @@ const api = (path) => fetch(path).then((r) => r.json());
 const state = { meta: null, depth: 2, limit: 120, includePeriod: false,
                 current: null, detail: null, timeline: null, rail: true };
 
-// 상세에서 관계를 타고 들어간 자취. '←' 로 한 칸씩 되짚어 올라간다.
+// **상세 패널에서** 관계를 타고 들어간 자취. '←' 로 한 칸씩 되짚어
+// 올라간다. 그래프나 연표에서 고른 노드는 여기 쌓이지 않는다 — 그건
+// 이어서 파고든 걸음이 아니라 새로 시작한 걸음이다.
 const trail = [];
 
 // 왼쪽 연표. 그래프는 무엇이 무엇과 이어져 있는지만 말하고 언제인지는
@@ -259,12 +261,26 @@ function descHtml(d) {
           ${long ? '<button class="d-more" id="more">전문 보기</button>' : ''}`;
 }
 
-async function showDetail(id, { back = false } = {}) {
-  // 새로 들어가는 길이면 지금 보던 곳을 되돌아갈 자리에 쌓는다.
-  // ('←' 로 온 걸음은 쌓지 않는다 — 그러면 두 노드 사이를 영영 못 벗어난다)
-  if (!back && state.detail && state.detail.id !== id) {
-    trail.push(state.detail);
-    if (trail.length > 50) trail.shift();
+// `nest` 를 준 걸음만 자취에 쌓인다.
+//
+// **그래프나 연표에서 고른 노드는 그 자체가 뿌리다.** 캔버스에서 아무
+// 노드나 누를 때마다 직전 노드가 상위로 붙으면, 서로 아무 관계도 없는
+// 두 노드가 부모-자식처럼 보인다 — 조선 화면에서 세종을 보다 저쪽 끝
+// 황진이를 누르면 '← 세종' 이 머리에 붙는 식이다. 그건 계보가 아니라
+// 그저 내가 방금 눌렀던 것일 뿐이다.
+//
+// 자취가 뜻을 갖는 곳은 오른쪽 패널뿐이다. 거기서 고른 사건·장소·날짜는
+// **지금 보는 노드가 데리고 있는 것**이라, 그 노드 밑으로 들어가는 게 맞다.
+async function showDetail(id, { back = false, nest = false } = {}) {
+  // ('←' 로 온 걸음은 쌓지도 지우지도 않는다 — 그러면 두 노드 사이를
+  // 영영 못 벗어나거나, 한 칸 올라간 순간 나머지 자취를 잃는다)
+  if (!back) {
+    if (!nest) {
+      trail.length = 0;
+    } else if (state.detail && state.detail.id !== id) {
+      trail.push(state.detail);
+      if (trail.length > 50) trail.shift();
+    }
   }
   const d = await api(`/api/node/${encodeURIComponent(id)}`);
   if (d.error) return;
@@ -387,8 +403,10 @@ async function showDetail(id, { back = false } = {}) {
     more.textContent = $('desc').classList.contains('open') ? '접기' : '전문 보기';
   };
   $('detail-body').querySelectorAll('.rel').forEach((btn) => {
-    // 상세에서 고른 상대가 화면에 없을 수 있다 — 그때는 그 노드로 옮겨간다
-    btn.onclick = () => visit(btn.dataset.id);
+    // 상세에서 고른 상대가 화면에 없을 수 있다 — 그때는 그 노드로 옮겨간다.
+    // 여기서 고른 것만 자취에 쌓인다: 지금 노드가 데리고 있는 것이므로
+    // 그 밑으로 들어가는 것이 맞다.
+    btn.onclick = () => visit(btn.dataset.id, { nest: true });
   });
 }
 
