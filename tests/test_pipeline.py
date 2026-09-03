@@ -1379,6 +1379,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("검색은 차수 높은 쪽을 먼저", hits[0]["id"] == "wd:Q1", str(hits[:2]))
     check("부분 일치도 찾음", any(h["id"] == "wd:Q3" for h in hits))
     check("빈 검색어는 빈 결과", api.search("  ") == [])
+    # 실측 회귀: '1974'를 치면 연표 눈금 time:1974 가 첫 줄로 나와 엔터가 열었다
+    check("연표 눈금 노드는 검색에 안 나온다",
+          all(h["id"] != "wd:Q4" for h in api.search("1443")), str(api.search("1443")))
 
     g = api.graph("wd:Q1", depth=1)
     check("연도 노드는 기본적으로 빼고 그린다",

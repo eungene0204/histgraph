@@ -342,6 +342,12 @@ class GraphAPI:
         # 세종특별자치시와 '세종 비암사 극락보전'이 먼저 나오고 정작 조선
         # 세종(차수 21)은 네 번째로 밀린다 — 실측으로 확인한 순서다.
         # 연도 노드는 검색 대상이 되는 일이 드물어 뒤로 보낸다.
+        #
+        # **연표 눈금(`source='timeline'`)은 아예 뺀다.** '1974'를 치면
+        # `time:1974`('1974년')가 첫 줄이었고, 엔터가 그걸 열어 연표 1974년
+        # 자리에 '1974년'이라는 노드가 앉았다. 눈금은 날짜 없는 사건을
+        # 해에 걸어 두는 뼈대지 사람이 찾을 개체가 아니다 — 그 해를
+        # 찾는 사람에게는 그 해의 사건이 나와야 한다.
         rows = self.store.conn.execute(
             """SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                       COUNT(e.src) AS d,
@@ -350,8 +356,9 @@ class GraphAPI:
                                ELSE 2 END) AS rank
                  FROM nodes n
                  LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
-                WHERE n.label LIKE ?2
-                   OR n.id IN (SELECT node_id FROM aliases WHERE alias LIKE ?2)
+                WHERE (n.label LIKE ?2
+                       OR n.id IN (SELECT node_id FROM aliases WHERE alias LIKE ?2))
+                  AND n.source != 'timeline'
              GROUP BY n.id
              ORDER BY (n.type = 'period'), d DESC, rank, n.label
                 LIMIT ?3""",
