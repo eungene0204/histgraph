@@ -32,27 +32,39 @@ const MIN_REPEL_DIST = 32;
 // 아니라 화면에서 미세한 떨림으로만 읽힌다.
 const SETTLE_STEP = 0.1;
 
-// 색은 큰 갈래만 말한다. 세부 타입은 모양이 말한다 — 9색을 한 화면에
-// 쓰면 색약에서 구분이 무너진다(검증 실측: 8색 전체 조합 최악 ΔE 1.6).
-export const GROUP_COLOR = {
-  actor: '#3987e5', // 인물·단체
-  event: '#d95926', // 사건
-  thing: '#199e70', // 장소·유물·작품
-  frame: '#8b8b84', // 시대·직위 — 뼈대라서 물러나 있어야 한다
+// 모양은 하나(원)로 두고, 색이 타입을 말한다.
+//
+// 갈래(actor/event/thing/frame)는 여전히 **색상 계열**로 남는다 — 인물·단체는
+// 파랑 계열, 사건은 주황, 장소·유물·작품은 초록~청록, 시대·직위는 무채색.
+// 그래서 색이 아홉이어도 화면은 네 덩어리로 먼저 읽히고, 그 안에서 타입이
+// 갈린다. 갈래 안의 두 색은 명도·채도까지 벌려 뒀다.
+//
+// 색만 남았으므로 **색으로만 읽히는 자리를 만들지 않는다**: 범례에는 타입
+// 이름을 함께 적고, 노드를 고르면 상세 패널이 타입을 글자로 말한다.
+export const TYPE_COLOR = {
+  person: '#3987e5',   // 파랑
+  org: '#8f7bef',      // 보라 — 인물과 같은 한기(寒氣), 더 붉은 쪽
+  event: '#e2622a',    // 주황
+  place: '#199e70',    // 초록
+  heritage: '#c9a227', // 금 — 유물
+  artwork: '#d96aa8',  // 분홍 — 작품
+  media: '#2fb4c9',    // 청록 — 기록물
+  period: '#8b8b84',   // 회색 — 뼈대라서 물러나 있어야 한다
+  role: '#a2927e',     // 흙빛 — 뼈대의 다른 한쪽
 };
 
-// 타입별 글리프. 색 하나에 여러 타입이 얹히므로 모양이 실제 구분자다.
-export const TYPE_SHAPE = {
-  person: 'circle',
-  org: 'hexagon',
-  event: 'diamond',
-  place: 'square',
-  heritage: 'triangle',
-  artwork: 'triangle',
-  media: 'square',
-  period: 'ring',
-  role: 'pill',
+// 갈래 색. 타입을 모를 때의 대체값이고, 갈래 단위로 묶어 보일 때 쓴다.
+export const GROUP_COLOR = {
+  actor: '#3987e5', // 인물·단체
+  event: '#e2622a', // 사건
+  thing: '#199e70', // 장소·유물·작품
+  frame: '#8b8b84', // 시대·직위
 };
+
+// 노드 색은 타입이 정한다. 모르는 타입은 갈래로 물러난다.
+export function nodeColor(type, group) {
+  return TYPE_COLOR[type] || GROUP_COLOR[group] || GROUP_COLOR.thing;
+}
 
 const SURFACE = '#141413';
 const EDGE_BASE = 'rgba(198,196,186,0.30)';
@@ -339,11 +351,9 @@ export class GraphView {
       const b = this.byId.get(e.t);
       if (!a || !b) continue;
       const active = spot && (e.s === spot || e.t === spot);
-      // 선은 출발 노드의 갈래 색을 입는다 — 사람이 건 관계인지 사건이
+      // 선은 출발 노드의 색을 그대로 입는다 — 사람이 건 관계인지 사건이
       // 건 관계인지가 한눈에 갈린다.
-      const color = e.kind === 'same_as'
-        ? EDGE_BASE
-        : (GROUP_COLOR[a.group] || EDGE_BASE);
+      const color = e.kind === 'same_as' ? EDGE_BASE : nodeColor(a.type, a.group);
       if (spot && !active) {
         ctx.globalAlpha = 1;
         ctx.strokeStyle = EDGE_SOFT;
@@ -556,84 +566,34 @@ function nodeRadius(n) {
   return base + Math.min(11, Math.sqrt(n.degree || 0) * 1.7);
 }
 
-function shapePath(ctx, shape, x, y, r) {
-  ctx.beginPath();
-  switch (shape) {
-    case 'square':
-      ctx.rect(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76);
-      break;
-    case 'diamond':
-      ctx.moveTo(x, y - r * 1.25);
-      ctx.lineTo(x + r * 1.25, y);
-      ctx.lineTo(x, y + r * 1.25);
-      ctx.lineTo(x - r * 1.25, y);
-      ctx.closePath();
-      break;
-    case 'triangle':
-      ctx.moveTo(x, y - r * 1.2);
-      ctx.lineTo(x + r * 1.1, y + r * 0.85);
-      ctx.lineTo(x - r * 1.1, y + r * 0.85);
-      ctx.closePath();
-      break;
-    case 'hexagon':
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * TAU - Math.PI / 2;
-        const px = x + Math.cos(a) * r * 1.12;
-        const py = y + Math.sin(a) * r * 1.12;
-        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
-      }
-      ctx.closePath();
-      break;
-    case 'pill':
-      roundRect(ctx, x - r * 1.3, y - r * 0.66, r * 2.6, r * 1.32, r * 0.66);
-      break;
-    default:
-      ctx.arc(x, y, r, 0, TAU);
-  }
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
 function drawNode(ctx, n, { dim, focused, center, selected }) {
-  const color = GROUP_COLOR[n.group] || GROUP_COLOR.thing;
-  const shape = TYPE_SHAPE[n.type] || 'circle';
+  const color = nodeColor(n.type, n.group);
 
   ctx.globalAlpha = dim ? 0.22 : 1;
 
   // 배경색 링 — 노드가 겹쳐도 서로 먹히지 않는다
   ctx.lineWidth = 2;
   ctx.strokeStyle = SURFACE;
-  shapePath(ctx, shape, n.x, n.y, n.r + 1);
+  ctx.beginPath();
+  ctx.arc(n.x, n.y, n.r + 1, 0, TAU);
   ctx.stroke();
 
-  if (shape === 'ring') {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.r, 0, TAU);
-    ctx.stroke();
-  } else {
-    ctx.fillStyle = color;
-    shapePath(ctx, shape, n.x, n.y, n.r);
-    ctx.fill();
-  }
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(n.x, n.y, n.r, 0, TAU);
+  ctx.fill();
 
   if (selected || center) {
     ctx.strokeStyle = selected ? TEXT : 'rgba(240,239,236,0.5)';
     ctx.lineWidth = selected ? 2 : 1.5;
-    shapePath(ctx, shape, n.x, n.y, n.r + 4.5);
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r + 4.5, 0, TAU);
     ctx.stroke();
   } else if (focused) {
     ctx.strokeStyle = 'rgba(240,239,236,0.35)';
     ctx.lineWidth = 1.5;
-    shapePath(ctx, shape, n.x, n.y, n.r + 3.5);
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r + 3.5, 0, TAU);
     ctx.stroke();
   }
   ctx.globalAlpha = 1;

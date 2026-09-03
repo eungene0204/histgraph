@@ -19,7 +19,7 @@
 // 연결된 사건이 먼저 자리를 얻고, 겹치는 자리에 오는 작은 사건은 다음
 // 단계에서야 나타난다. 마지막 단계는 전부 세운다.
 
-import { GROUP_COLOR } from '/graph.js';
+import { nodeColor, TYPE_COLOR } from '/graph.js';
 
 // **왼쪽에는 왕의 재위 띠가 선다.** 조선의 시간을 사람은 절대 연도가
 // 아니라 임금으로 읽는다 — '1456년'보다 '세조 때'가 먼저 온다. 재위는
@@ -284,7 +284,7 @@ export class TimelineRail {
     }
 
     const wires = place.map(({ m, ty, py }) => {
-      const c = GROUP_COLOR[m.group];
+      const c = nodeColor(m.type, m.group);
       // 구간 막대는 고른 노드와 왕조에만 그린다. 이웃까지 그리면 축
       // 위에서 서로 겹쳐 한 덩어리가 되고, 정작 점이 어디에 찍혔는지
       // 안 보인다.
@@ -385,7 +385,7 @@ export class TimelineRail {
   // 고종 1907 퇴위 · 1919 사망). 재위 중에 죽은 임금은 막대 끝과 동그라미가
   // 같은 자리에 겹치고, 그때 몰년은 막대 라벨의 뒷 숫자가 곧 몰년이다.
   reignBand(reigns, at, self = {}) {
-    const c = GROUP_COLOR.actor;
+    const c = TYPE_COLOR.person;
     const svg = [];
     const labels = [];       // {y, prio, html}
     // **고른 노드가 누구 때의 일인지 띠에서 바로 보이게 한다.** 연표가

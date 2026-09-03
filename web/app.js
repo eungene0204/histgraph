@@ -1,5 +1,5 @@
 // 화면 조립 — 검색·시작점·상세 패널을 그래프 뷰에 붙인다.
-import { GraphView, GROUP_COLOR, TYPE_SHAPE } from '/graph.js';
+import { GraphView, nodeColor } from '/graph.js';
 import { TimelineRail } from '/timeline.js';
 
 const $ = (id) => document.getElementById(id);
@@ -69,7 +69,8 @@ $('menu-toggle').onclick = () => {
 };
 
 // --- 범례 --------------------------------------------------------------
-// 색은 갈래, 모양은 타입. 둘 다 범례에 있어야 색만으로 읽지 않게 된다.
+// 모양은 다 원이고 색이 타입을 말한다. 색만으로 읽히지 않게 타입 이름을
+// 늘 옆에 붙이고, 갈래별로 묶어 색상 계열이 눈에 잡히게 둔다.
 const GROUP_LABEL = { actor: '인물·단체', event: '사건', thing: '장소·유물', frame: '시대·직위' };
 
 function renderLegend() {
@@ -81,8 +82,7 @@ function renderLegend() {
   }
   const li = [];
   for (const [group, entries] of Object.entries(groups)) {
-    li.push(`<li style="margin-top:6px"><span style="color:${GROUP_COLOR[group]};font-weight:600">■</span>
-             <span style="color:var(--text-2)">${GROUP_LABEL[group]}</span></li>`);
+    li.push(`<li class="legend-group">${GROUP_LABEL[group]}</li>`);
     for (const [key, info] of entries.sort((a, b) => b[1].count - a[1].count)) {
       li.push(`<li style="padding-left:14px">${glyph(key, group)}
                <span>${info.label}</span><span class="count">${info.count.toLocaleString()}</span></li>`);
@@ -92,19 +92,10 @@ function renderLegend() {
 }
 
 function glyph(type, group, size = 13) {
-  const c = GROUP_COLOR[group];
-  const s = TYPE_SHAPE[type] || 'circle';
+  const c = nodeColor(type, group);
   const h = size / 2;
-  const shapes = {
-    circle: `<circle cx="${h}" cy="${h}" r="${h - 2}" fill="${c}"/>`,
-    square: `<rect x="2" y="2" width="${size - 4}" height="${size - 4}" fill="${c}"/>`,
-    diamond: `<path d="M${h} 1 L${size - 1} ${h} L${h} ${size - 1} L1 ${h}Z" fill="${c}"/>`,
-    triangle: `<path d="M${h} 1.5 L${size - 1} ${size - 2} L1 ${size - 2}Z" fill="${c}"/>`,
-    hexagon: `<path d="M${h} 1 L${size - 1.5} ${h * 0.55} L${size - 1.5} ${h * 1.45} L${h} ${size - 1} L1.5 ${h * 1.45} L1.5 ${h * 0.55}Z" fill="${c}"/>`,
-    ring: `<circle cx="${h}" cy="${h}" r="${h - 2.5}" fill="none" stroke="${c}" stroke-width="1.6"/>`,
-    pill: `<rect x="1" y="${h - 3}" width="${size - 2}" height="6" rx="3" fill="${c}"/>`,
-  };
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex:none">${shapes[s] || shapes.circle}</svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex:none">
+    <circle cx="${h}" cy="${h}" r="${h - 2}" fill="${c}"/></svg>`;
 }
 
 // --- 시작점 ------------------------------------------------------------
@@ -350,7 +341,7 @@ async function showDetail(id, { back = false, nest = false } = {}) {
         return `
         <button class="rel" data-id="${esc(r.other.id)}">
           <span class="rel-line">
-            <span class="rel-dot" style="background:${GROUP_COLOR[r.other.group]}"></span>
+            <span class="rel-dot" style="background:${nodeColor(r.other.type, r.other.group)}"></span>
             <span class="rel-name">${esc(r.other.label)}</span>
           </span>
           ${own.map((ev) => `<div class="rel-ev">“${esc(ev)}”</div>`).join('')}
@@ -371,7 +362,7 @@ async function showDetail(id, { back = false, nest = false } = {}) {
     <div class="d-via">
       ${via.map((r) => `
         <div class="d-via-line">
-          <span class="rel-dot" style="background:${GROUP_COLOR[r.other.group]}"></span>
+          <span class="rel-dot" style="background:${nodeColor(r.other.type, r.other.group)}"></span>
           <span>${esc(sentence(r, d))}</span>
         </div>
         ${[...new Set(r.evidence || [])].map((ev) => `<div class="rel-ev">“${esc(ev)}”</div>`).join('')}

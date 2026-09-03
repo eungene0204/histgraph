@@ -129,6 +129,12 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   padding: 3px 0; font-size: 12.5px; color: var(--text-2);
 }
 .legend .count { margin-left: auto; color: var(--text-3); font-size: 11px; }
+/* 갈래 머리 — 색 견본을 두지 않는다. 색은 아래 타입들이 나눠 가졌다. */
+.legend-group {
+  margin-top: 8px; font-size: 11px; letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.legend li.legend-group:first-child { margin-top: 0; }
 .legend.lines svg { flex: none; }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-2); }
