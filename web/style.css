@@ -196,23 +196,9 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--text-3);
 }
-/* 줌 — 멀리서는 큰 사건만, 가까이 가면 더 많이. 지도와 같은 몸짓이다. */
-.tl-zoom { display: flex; align-items: center; gap: 2px; }
-.tl-zoom button {
-  width: 22px; height: 22px; padding: 0;
-  background: none; border: 1px solid var(--line); border-radius: 6px;
-  color: var(--text-2); font: inherit; font-size: 14px; line-height: 1; cursor: pointer;
-}
-.tl-zoom button:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
-.tl-zoom button:disabled { opacity: .35; cursor: default; }
-.tl-level {
-  min-width: 30px; text-align: center;
-  font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
-}
 /* 몇 개가 물러나 있는지. 안 보이는 사건이 없는 셈이 되면 안 된다. */
 .tl-count { margin-top: 4px; font-size: 11px; color: var(--text-3); }
 .tl-count b { color: var(--text-2); font-weight: 600; }
-.tl-more { color: var(--accent); }
 /* 연표는 화면보다 길어서 훑다 보면 고른 자리를 잃는다. 누르면 돌아온다. */
 .tl-when {
   display: block; width: 100%; padding: 0; text-align: left;

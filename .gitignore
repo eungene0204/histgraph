@@ -24,3 +24,4 @@ data/cache/
 # 인데 Vercel 런타임은 3.12 이상만 받아서, 이 파일이 올라가면 빌드가 죽는다.
 # 이식성 있는 제약은 pyproject.toml 의 requires-python 이 이미 적고 있다.
 .python-version
+web/.vite/

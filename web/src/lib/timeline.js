@@ -13,11 +13,11 @@
 // 1398년에 나란히 선 '왕자의 난'과 '제1차 왕자의 난'이 이어진 것으로
 // 보였는데, 그때 그래프에는 둘 사이에 엣지가 하나도 없었다).
 //
-// **줌은 자리가 아니라 밀도를 바꾼다.** 지도가 멀리서는 큰 도시만, 가까이
-// 가면 동네까지 보여주듯이, 연표도 멀리서는 큰 사건만 세우고 가까이 갈수록
-// 더 많은 사건을 세운다. 무엇이 '큰' 사건인지는 그래프가 정한다 — 많이
-// 연결된 사건이 먼저 자리를 얻고, 겹치는 자리에 오는 작은 사건은 다음
-// 단계에서야 나타난다. 마지막 단계는 전부 세운다.
+// **눈금은 하나다 — 시대 전체가 늘 한 화면에 들어온다.** 줌은 걷어냈다.
+// 그래서 자리가 모자랄 때는 밀도로 거른다. 무엇이 '큰' 사건인지는 그래프가
+// 정한다 — 많이 연결된 사건이 먼저 자리를 얻고, 겹치는 자리에 오는 작은
+// 사건은 물러난다. 물러난 수는 머리에 숫자로 남는다: 안 보이는 사건이
+// 없는 셈이 되면 안 된다.
 
 import { nodeColor, TYPE_COLOR } from './graph-view.js';
 
@@ -45,14 +45,6 @@ const PAD_TOP = 18;   // 첫 표시가 머리에 붙지 않게
 const PAD_BOTTOM = 64;
 const GAP = 30;       // 라벨 두 줄이 서로를 가리지 않는 최소 간격
 
-// 줌 단계. 0단계는 시대 전체가 한 화면에 들어오는 눈금이고, 한 단계마다
-// 눈금이 두 배가 된다. 조선(567년)은 패널 높이 760px 에서 1.3 → 2.7 → 5.4
-// → 11 → 21px/년. 마지막 단계는 밀도 상한을 풀고 전부 세운다.
-const MAX_LEVEL = 4;
-// 안전판. 시대를 나누지 않은 전체 그래프는 기원전까지 걸쳐 있어 마지막
-// 단계에서 끝없이 길어진다.
-const MAX_HEIGHT = 40000;
-
 export class TimelineRail {
   constructor(root, { onPick } = {}) {
     this.root = root;
@@ -60,13 +52,10 @@ export class TimelineRail {
     this.data = null;
     this.body = root.querySelector('.tl-body');
     this.head = root.querySelector('.tl-head');
-    // 새로고침해도 들여다보던 배율을 지킨다. 못 읽으면 0단계.
-    this.level = 0;
     this.lane = 0;
     // 재위 띠는 기본으로 켠다. 끈 사람은 그 선택을 기억한다.
     this.showReigns = true;
     try {
-      this.level = clamp(+localStorage.getItem('tl-zoom') || 0, 0, MAX_LEVEL);
       this.showReigns = localStorage.getItem('tl-reigns') !== '0';
     } catch { /* 비공개 창 등 */ }
     this.focusPy = 0;
@@ -82,27 +71,10 @@ export class TimelineRail {
     // 연도를 누르면 그 자리로 돌아온다 (머리는 스크롤을 타지 않는다).
     this.head.addEventListener('click', (ev) => {
       if (ev.target.closest('.tl-when')) this.recenter();
-      const z = ev.target.closest('.tl-zoom button');
-      if (z) this.zoom(+z.dataset.dir);
       if (ev.target.closest('.tl-kings')) this.toggleReigns();
     });
 
     this.body.addEventListener('scroll', () => this.syncMap(), { passive: true });
-
-    // ⌘/Ctrl+휠, 트랙패드 핀치는 줌. 그냥 휠은 스크롤이어야 한다 — 연표를
-    // 훑는 몸짓이 그것이라, 줌으로 가로채면 위아래로 못 움직인다.
-    let wheelAcc = 0;
-    this.body.addEventListener('wheel', (ev) => {
-      if (!(ev.ctrlKey || ev.metaKey)) return;
-      ev.preventDefault();
-      wheelAcc += ev.deltaY;
-      // 핀치는 한 번에 몇 픽셀씩 잘게 온다. 모아서 한 단계씩 넘긴다.
-      if (Math.abs(wheelAcc) < 40) return;
-      const dir = wheelAcc < 0 ? 1 : -1;
-      wheelAcc = 0;
-      const rect = this.body.getBoundingClientRect();
-      this.zoom(dir, ev.clientY - rect.top);
-    }, { passive: false });
 
     // 훑기 막대를 누르거나 끌면 그 해로 옮긴다.
     this.head.addEventListener('pointerdown', (ev) => {
@@ -171,11 +143,6 @@ export class TimelineRail {
     this.head.innerHTML = `
       <div class="tl-top">
         <div class="tl-kicker">연표</div>
-        <div class="tl-zoom" role="group" aria-label="연표 줌">
-          <button data-dir="-1" title="줌아웃 — 큰 사건만 (⌘+휠)">−</button>
-          <span class="tl-level" aria-live="polite"></span>
-          <button data-dir="1" title="줌인 — 더 많은 사건 (⌘+휠)">+</button>
-        </div>
       </div>
       <button class="tl-when" title="고른 자리로 돌아가기">${esc(when)}${via}</button>
       <div class="tl-count"></div>
@@ -187,27 +154,6 @@ export class TimelineRail {
         <span>${d.axis.to}</span>
       </div>
       ${hint ? `<p class="tl-hint">${esc(hint)}</p>` : ''}`;
-  }
-
-  // --- 줌 --------------------------------------------------------------
-  // anchorY: 패널 안에서 제자리를 지킬 픽셀 위치. 휠은 커서 아래를, 버튼은
-  // 고른 노드(화면 안에 있으면)를 고정한다 — 들여다보던 해가 달아나면 줌이
-  // 아니라 점프다.
-  zoom(dir, anchorY = null) {
-    const next = clamp(this.level + dir, 0, MAX_LEVEL);
-    if (next === this.level) return;
-    const b = this.body;
-    if (anchorY === null) {
-      // 버튼 줌: 고른 노드가 화면 안에 있으면 그 노드를, 아니면 가운데를 지킨다
-      const selfY = this.focusPy - b.scrollTop;
-      anchorY = selfY >= 0 && selfY <= b.clientHeight ? selfY : b.clientHeight / 2;
-    }
-    const year = this.yearAt(b.scrollTop + anchorY);
-    this.level = next;
-    try { localStorage.setItem('tl-zoom', String(next)); } catch { /* 저장 못 해도 동작한다 */ }
-    this.layout();
-    b.scrollTop = this.yOf(year) - anchorY;
-    this.syncMap();
   }
 
   // 재위 띠를 켜고 끈다. 패널이 그만큼 넓어졌다 좁아진다.
@@ -250,22 +196,16 @@ export class TimelineRail {
     const { from, to } = d.axis;
     const span = Math.max(to - from, 1);
     const bodyH = this.body.clientHeight || 600;
-    // 0단계 = 시대 전체가 한 화면. 단계마다 두 배.
-    const fit = (bodyH - PAD_TOP - PAD_BOTTOM) / span;
-    const scale = fit * 2 ** this.level;
-    const full = this.level === MAX_LEVEL;   // 마지막 단계는 전부 세운다
-    let H = Math.min(MAX_HEIGHT, span * scale + PAD_TOP + PAD_BOTTOM);
-    // 전부 세울 때는 라벨이 다 들어갈 만큼은 늘린다. 안 그러면 밀어낼
-    // 자리가 없어 끝에서 겹친다.
-    if (full) H = Math.max(H, marks.length * GAP + PAD_TOP + PAD_BOTTOM);
+    // 시대 전체가 한 화면. 눈금은 이것 하나다.
+    const scale = (bodyH - PAD_TOP - PAD_BOTTOM) / span;
+    const H = span * scale + PAD_TOP + PAD_BOTTOM;
     this.axis = { from, to, H };
     const at = (year) => this.yOf(year);
 
-    // --- 이 단계에서 누가 서는가 ---------------------------------------
+    // --- 누가 서는가 ---------------------------------------------------
     // 고른 노드·왕조·이웃은 늘 선다 — 그 노드의 이야기이지 배경이 아니다.
     // 뼈대(큰 사건)는 많이 연결된 것부터 자리를 잡고, 이미 선 것과 겹치면
-    // 이 단계에서는 물러난다. 눈금이 두 배가 되면 겹치던 자리가 벌어져
-    // 다음 사건이 들어온다.
+    // 물러난다 — 겹쳐 세우면 둘 다 못 읽는다.
     const always = marks.filter((m) => m.kind !== 'anchor');
     const bones = marks.filter((m) => m.kind === 'anchor')
       .sort((a, b) => (b.degree || 0) - (a.degree || 0) || a.year - b.year);
@@ -274,7 +214,7 @@ export class TimelineRail {
     let hidden = 0;
     for (const m of bones) {
       const ty = at(m.year);
-      if (!full && taken.some((y) => Math.abs(y - ty) < GAP)) { hidden++; continue; }
+      if (taken.some((y) => Math.abs(y - ty) < GAP)) { hidden++; continue; }
       taken.push(ty);
       visible.push(m);
     }
@@ -347,8 +287,7 @@ export class TimelineRail {
     const shown = visible.filter((m) => m.kind === 'anchor').length;
     const count = this.head.querySelector('.tl-count');
     if (count) {
-      count.innerHTML = `큰 사건 <b>${shown}</b> / ${bones.length}`
-        + (hidden ? ` <span class="tl-more">· 더 보려면 +</span>` : '');
+      count.innerHTML = `큰 사건 <b>${shown}</b> / ${bones.length}`;
     }
     const chip = this.head.querySelector('.tl-kings');
     if (chip) {
@@ -359,18 +298,8 @@ export class TimelineRail {
         : band.named >= all
         ? '막대가 재위, 동그라미가 몰년입니다'
         : `이름을 세울 자리가 모자란 임금 ${all - band.named}명은 막대만 있습니다`
-          + ' — 줌인하거나 막대에 마우스를 올리면 이름이 나옵니다';
+          + ' — 막대에 마우스를 올리면 이름이 나옵니다';
     }
-    const lvl = this.head.querySelector('.tl-level');
-    if (lvl) {
-      lvl.textContent = full ? '전부' : `${this.level + 1}/${MAX_LEVEL + 1}`;
-      lvl.title = full ? '연대를 아는 사건을 다 세웠습니다' : `줌 ${this.level + 1}단계`;
-    }
-    for (const b of this.head.querySelectorAll('.tl-zoom button')) {
-      b.disabled = (+b.dataset.dir < 0 && this.level === 0)
-                || (+b.dataset.dir > 0 && this.level === MAX_LEVEL);
-    }
-
     const self_ = place.find((p) => p.m.kind === 'self');
     const focus = self_ || place.find((p) => p.m.kind === 'near')
       || place[Math.floor(place.length / 2)];
