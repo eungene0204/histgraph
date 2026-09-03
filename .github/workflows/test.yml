@@ -1,0 +1,80 @@
+# push 마다 테스트를 돌린다.
+#
+# **배포와는 별개다.** 배포는 Vercel 이 GitHub 앱으로 직접 하고 있고, 이
+# 워크플로는 그걸 막지 못한다 — 여기가 빨개져도 빌드만 되면 배포는 나간다.
+# 그래서 이 파일이 하는 일은 '나간 다음에야 알게 되는 것'을 커밋 옆에
+# 미리 띄워 두는 것이다.
+
+name: 테스트
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  python:
+    name: 파이썬
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          # Vercel 이 함수를 띄우는 버전과 같게 맞춘다. 로컬은 3.11 이라
+          # (mlx 환경이 물려 있다) 여기가 배포 버전을 재는 유일한 자리다.
+          python-version: '3.12'
+
+      # **일부러 아무것도 설치하지 않는다.** 이 프로젝트의 본체는 표준
+      # 라이브러리만 쓰기로 되어 있고, pyproject 의 dependencies 가 빈 채로
+      # 남아 있는 것이 정상이다. 맨 파이썬으로 도는 이 줄이 그 규칙의
+      # 자물쇠다 — 누가 본체에 의존성을 하나 들이면 여기서 먼저 깨진다.
+      - name: 파이프라인 테스트
+        run: python tests/test_pipeline.py
+
+  web:
+    name: 화면
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # 루트의 postinstall 이 web/ 까지 받아온다.
+      - run: npm install
+
+      - name: 화면 테스트
+        run: npm test
+
+      # Vercel 이 치는 것과 같은 명령이다. 테스트가 잡지 못하는 문법·import
+      # 오류는 여기서 걸린다.
+      - name: 빌드
+        run: npm run build
+
+  deploy-inputs:
+    name: 배포 입력
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # 아래 둘은 실제로 겪은 것이다. 배포가 보는 것은 작업 트리가 아니라
+      # 저장소이고, 그 둘이 어긋나면 증상이 조용해서 늦게 알아챈다.
+
+      - name: .python-version 이 저장소에 없어야 한다
+        run: |
+          if [ -e .python-version ]; then
+            echo "::error file=.python-version::저장소에 .python-version 이 있습니다. Vercel 런타임은 3.12 이상만 받아서, 이게 올라가면 빌드가 그 버전으로 venv 를 만들다 죽습니다. 로컬 인터프리터 핀은 .gitignore 에 둡니다."
+            exit 1
+          fi
+          echo "  없음 — Vercel 이 기본값 3.12 를 씁니다"
+
+      - name: 화면이 띄울 DB 가 저장소에 있어야 한다
+        run: |
+          if [ ! -f data/joseon.sqlite ]; then
+            echo "::error::data/joseon.sqlite 가 없습니다. Vercel 은 저장소를 클론해서 빌드하므로, 이 파일이 빠지면 함수가 DB 없이 떠서 /api 가 전부 죽습니다 (화면은 멀쩡히 뜹니다)."
+            exit 1
+          fi
+          printf "  있음 — %s\n" "$(du -h data/joseon.sqlite | cut -f1)"
