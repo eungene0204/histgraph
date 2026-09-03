@@ -391,6 +391,16 @@ def cmd_promote(args: argparse.Namespace) -> int:
             # 먼저 달아야 이어지는 매칭이 같은 노드를 찾는다.
             print(f"→ 왕조 접두 별칭 {pr.add_bare_name_aliases(store)}개 추가")
 
+        # 그래프가 스스로 모순인 관계(남편이 부모, 죽은 뒤의 참여…)를 보수
+        facts = pr.repair_facts(store, dry_run=args.dry_run)
+        print(
+            f"\n→ 모순 관계 {len(facts['drops']):,}건 정리"
+            f" · 옳은 인물로 옮김 {len(facts['moves'])}"
+            f" · 사람 손 필요 {len(facts['holds'])}"
+        )
+        for d in facts["drops"][:5]:
+            print(f"    - {d['text']} ({d['reason']})")
+
         # 이름으로 붙은 엣지가 옳은 노드에 갔는지 전수 조사
         audit = pr.repair_links(store, dry_run=args.dry_run)
         print(

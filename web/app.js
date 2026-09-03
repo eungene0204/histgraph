@@ -4,7 +4,10 @@ import { GraphView, GROUP_COLOR, TYPE_SHAPE } from '/graph.js';
 const $ = (id) => document.getElementById(id);
 const api = (path) => fetch(path).then((r) => r.json());
 
-const state = { meta: null, depth: 2, limit: 120, includePeriod: false, current: null };
+const state = { meta: null, depth: 2, limit: 120, includePeriod: false, current: null, detail: null };
+
+// 상세에서 관계를 타고 들어간 자취. '←' 로 한 칸씩 되짚어 올라간다.
+const trail = [];
 
 const view = new GraphView($('canvas'), {
   // **클릭하면 그 사람의 세계가 열려야 한다.** 고르기만 하면 화면에는
@@ -158,7 +161,13 @@ document.addEventListener('click', (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === '/' && document.activeElement !== $('q')) { ev.preventDefault(); $('q').focus(); }
+  // Esc 는 패널을 닫는다 — 깊이 들어갔다고 한 칸씩만 나가야 하면 답답하다
   if (ev.key === 'Escape') closeDetail();
+  // 브라우저의 뒤로가기 몸짓은 상세 안에서 상위로 올라가는 뜻으로 받는다
+  if (ev.key === 'ArrowLeft' && (ev.altKey || ev.metaKey) && trail.length) {
+    ev.preventDefault();
+    backDetail();
+  }
 });
 
 function hideResults() { $('results').hidden = true; cursor = -1; }
@@ -168,7 +177,6 @@ $('depth').onchange = (ev) => { state.depth = +ev.target.value; reload(); };
 $('limit').onchange = (ev) => { state.limit = +ev.target.value; reload(); };
 $('show-period').onchange = (ev) => { state.includePeriod = ev.target.checked; reload(); };
 $('show-labels').onchange = (ev) => { view.showLabels = ev.target.checked; };
-
 function reload() { if (state.current) load(state.current); }
 
 // --- 그래프 적재 -------------------------------------------------------
@@ -199,20 +207,61 @@ function note(html) {
 }
 
 // --- 상세 패널 ---------------------------------------------------------
-async function showDetail(id) {
+async function showDetail(id, { back = false } = {}) {
+  // 새로 들어가는 길이면 지금 보던 곳을 되돌아갈 자리에 쌓는다.
+  // ('←' 로 온 걸음은 쌓지 않는다 — 그러면 두 노드 사이를 영영 못 벗어난다)
+  if (!back && state.detail && state.detail.id !== id) {
+    trail.push(state.detail);
+    if (trail.length > 50) trail.shift();
+  }
   const d = await api(`/api/node/${encodeURIComponent(id)}`);
   if (d.error) return;
+  state.detail = { id, label: d.label };
 
   const dates = [fmtDate(d.start), fmtDate(d.end)].filter(Boolean).join(' ~ ');
   // 관계는 종류·방향별로 묶는다. 방향까지 키에 넣어야 부모와 자식이
   // 한 덩어리로 뒤섞이는 일이 없다.
   const groups = new Map();
-  for (const r of d.relations) {
-    if (!groups.has(relHead(r))) groups.set(relHead(r), []);
-    groups.get(relHead(r)).push(r);
-  }
 
-  const relHtml = [...groups.entries()].map(([head, rels]) => {
+  // 한 묶음 안에서 같은 상대는 카드 하나다. 황진이의 1506년에는 시대·시점
+  // 엣지가 둘 다 걸려 있어 같은 해가 두 번 나왔다 — 근거만 합쳐 하나로 둔다.
+  const add = (r) => {
+    const head = relHead(r);
+    if (!groups.has(head)) groups.set(head, new Map());
+    // 배우자·관련은 방향에 뜻이 없다. 방향까지 키에 넣으면 양쪽에 다 적힌
+    // 엣지가 카드 두 장이 된다 — 신사임당의 배우자 이원수가 두 번 나왔다
+    // (실측: 조선 그래프에서 배우자 206건, 관련 44건).
+    const key = `${r.other.id}\u0000${SYMMETRIC.has(r.type) ? '' : r.dir}`;
+    const seen = groups.get(head).get(key);
+    if (seen) { mergeEvidence(seen, r); return seen; }
+    const card = { ...r, evidence: [...new Set(r.evidence || [])] };
+    groups.get(head).set(key, card);
+    return card;
+  };
+
+  // 구체 관계를 먼저 세운다. 그러면 '관련'은 이미 자리 잡은 카드로 접힌다.
+  const cardOf = new Map();   // 상대 id -> 그 상대와의 구체 관계 카드 (첫 장)
+  for (const r of d.relations) {
+    if (r.type === 'related_to') continue;
+    const card = add(r);
+    if (!cardOf.has(r.other.id)) cardOf.set(r.other.id, card);
+  }
+  // 구체 관계가 있는 상대에게 붙은 '관련'은 아무 말도 더하지 않는다 — 정약용
+  // 상세에 정약전이 부모로 한 번, 관련으로 또 한 번 나왔다(실측 192건).
+  // 카드는 접고 근거 구절만 구체 카드로 옮긴다. '관련'은 방향에 뜻이 없어
+  // 상대만 같으면 같은 사실로 본다.
+  for (const r of d.relations) {
+    if (r.type !== 'related_to') continue;
+    const card = cardOf.get(r.other.id);
+    if (card) mergeEvidence(card, r);
+    else add(r);
+  }
+  const relCount = [...groups.values()].reduce((n, bucket) => n + bucket.size, 0);
+
+  const relHtml = [...groups.entries()].map(([head, bucket]) => {
+    const rels = [...bucket.values()];
+    // 시대와 시점을 한 묶음으로 받으면 해가 뒤죽박죽 들어온다 — 연도순으로 세운다.
+    if (TIME_TYPES.has(rels[0].type)) rels.sort(byYear);
     // 열거문("시조 작품으로는 A, B, C 등이 있다") 하나가 관계 여럿을 낳는다.
     // 카드마다 같은 문장을 찍으면 다른 작품인데 내용이 같아 보인다 —
     // 여럿이 공유하는 근거는 묶음 머리에 한 번만 둔다.
@@ -234,7 +283,6 @@ async function showDetail(id) {
           <span class="rel-line">
             <span class="rel-dot" style="background:${GROUP_COLOR[r.other.group]}"></span>
             <span class="rel-name">${esc(r.other.label)}</span>
-            ${r.dir === 'in' ? '<span class="rel-dir">←</span>' : ''}
           </span>
           ${own.map((ev) => `<div class="rel-ev">“${esc(ev)}”</div>`).join('')}
         </button>`;
@@ -242,7 +290,29 @@ async function showDetail(id) {
     </div>`;
   }).join('');
 
+  const prev = trail[trail.length - 1];
+  // 타고 들어온 관계를 맨 위에 한 줄로 적는다. 조선시대 중기에는 개체가 37개
+  // 달려 있어, 방금 누른 황진이가 목록 어디에 있는지 다시 찾아야 했다.
+  // 합쳐진 카드에서 가져온다 — 아래 목록과 다른 말을 하면 안 된다.
+  const via = prev
+    ? [...groups.values()].flatMap((bucket) => [...bucket.values()])
+        .filter((c) => c.other.id === prev.id)
+    : [];
+  const viaHtml = via.length ? `
+    <div class="d-via">
+      ${via.map((r) => `
+        <div class="d-via-line">
+          <span class="rel-dot" style="background:${GROUP_COLOR[r.other.group]}"></span>
+          <span>${esc(sentence(r, d))}</span>
+        </div>
+        ${[...new Set(r.evidence || [])].map((ev) => `<div class="rel-ev">“${esc(ev)}”</div>`).join('')}
+      `).join('')}
+    </div>` : '';
+
   $('detail-body').innerHTML = `
+    ${prev ? `<button class="d-back" id="detail-back" title="${esc(prev.label)}(으)로 돌아가기">
+       <span aria-hidden="true">←</span> ${esc(prev.label)}</button>` : ''}
+    ${viaHtml}
     <span class="d-type">${glyph(d.type, d.group, 11)} ${esc(d.type_label)}</span>
     <h2 class="d-title">${esc(d.label)}</h2>
     ${dates ? `<div class="d-dates">${esc(dates)}</div>` : ''}
@@ -250,10 +320,14 @@ async function showDetail(id) {
        <button class="d-more" id="more">전문 보기</button>` : ''}
     ${d.aliases.length ? `<div class="d-section-title">다른 이름</div>
       <div class="d-aliases">${d.aliases.map((a) => `<span>${esc(a)}</span>`).join('')}</div>` : ''}
-    <div class="d-section-title">관계 ${d.relations.length}</div>
+    <div class="d-section-title">관계 ${relCount}</div>
     ${relHtml || '<p class="hint">연결된 관계가 없습니다.</p>'}
   `;
   $('detail').hidden = false;
+  $('detail').scrollTop = 0;   // 옮겨간 곳은 머리부터 읽는다
+
+  const backBtn = $('detail-back');
+  if (backBtn) backBtn.onclick = backDetail;
 
   const more = $('more');
   if (more) more.onclick = () => {
@@ -262,14 +336,25 @@ async function showDetail(id) {
   };
   $('detail-body').querySelectorAll('.rel').forEach((btn) => {
     // 상세에서 고른 상대가 화면에 없을 수 있다 — 그때는 그 노드로 옮겨간다
-    btn.onclick = () => (view.byId.has(btn.dataset.id)
-      ? (view.select(btn.dataset.id), view.focusOn(btn.dataset.id), showDetail(btn.dataset.id))
-      : load(btn.dataset.id));
+    btn.onclick = () => visit(btn.dataset.id);
   });
 }
 
 $('detail-close').onclick = closeDetail;
-function closeDetail() { $('detail').hidden = true; }
+function closeDetail() { $('detail').hidden = true; trail.length = 0; state.detail = null; }
+
+// 되짚어 올라가기 — 그래프에도 그 노드가 다시 보여야 '돌아왔다'가 된다.
+function backDetail() {
+  const prev = trail.pop();
+  if (prev) visit(prev.id, { back: true });
+}
+
+// 화면에 있는 노드면 그리로 옮기고, 없으면 그 주변을 새로 편다.
+function visit(id, opts = {}) {
+  if (view.byId.has(id)) { view.select(id); view.focusOn(id); }
+  else load(id, { merge: true });
+  showDetail(id, opts);
+}
 
 // 엣지 라벨은 출발 노드 기준이라 그대로 쓰면 방향이 뒤집힌다.
 // child_of 는 'A → B = A가 B의 자녀' — 나가는 상대는 부모, 들어오는
@@ -279,7 +364,85 @@ const DIR_HEAD = {
   part_of: { out: '상위', in: '하위' },
 };
 
+// 시대(from_period)와 시점(dated_to)은 둘 다 '언제'를 가리킨다. 따로 세우면
+// 한 해가 양쪽에 한 번씩 나온다 — 황진이의 1506년이 그랬다. 한 묶음으로 받는다.
+const TIME_TYPES = new Set(['from_period', 'dated_to']);
+
+// 방향이 뜻을 갖지 않는 관계. A의 배우자가 B면 B의 배우자도 A다.
+const SYMMETRIC = new Set(['spouse_of', 'related_to']);
+
+// 'time:1506' 은 해, 'kr:period:조선시대' 는 이름뿐인 시대다. 해를 먼저 오름차순으로,
+// 이름 붙은 시대는 뒤에 묶어 둔다.
+function byYear(a, b) {
+  const year = (r) => { const m = /^time:(-?\d+)/.exec(r.other.id); return m ? +m[1] : null; };
+  const [ya, yb] = [year(a), year(b)];
+  if (ya === null || yb === null) {
+    if (ya === yb) return a.other.label.localeCompare(b.other.label, 'ko');
+    return ya === null ? 1 : -1;
+  }
+  return ya - yb;
+}
+
+// --- 관계를 문장으로 --------------------------------------------------
+// 받침이 있으면 앞말, 없으면 뒷말. '황진이는' / '김시민은'.
+function pt(word, withBatchim, without) {
+  const code = String(word).trim().slice(-1).charCodeAt(0) - 0xac00;
+  if (code < 0 || code > 11171) return without;   // 한글이 아니면 받침 없는 쪽으로
+  return code % 28 ? withBatchim : without;
+}
+
+// 엣지 방향 그대로 주어와 목적어를 놓는다. src -> dst 순서다.
+const SENTENCE = {
+  participated_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 참여했다`,
+  occurred_at: (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 일어났다`,
+  occurred_during: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 일어났다`,
+  born_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 태어났다`,
+  died_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 죽었다`,
+  created: (a, b) => `${a}${pt(a, '이', '가')} ${b}${pt(b, '을', '를')} 만들었다`,
+  located_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 있다`,
+  depicts: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 다룬다`,
+  spouse_of: (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 부부다`,
+  member_of: (a, b) => `${a}${pt(a, '은', '는')} ${b} 소속이다`,
+  held_position: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지냈다`,
+  part_of: (a, b) => `${a}${pt(a, '은', '는')} ${b}의 일부다`,
+  related_to: (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다`,
+  // 엣지에 '아버지'·'어머니'가 적혀 있으면 그대로 부른다 (실측 479건)
+  child_of: (a, b, o) => {
+    const role = o.label === '어머니' ? '어머니' : o.label === '아버지' ? '아버지' : '부모';
+    return `${a}의 ${role}는 ${b}${pt(b, '이다', '다')}`;
+  },
+  // 인물은 연도와 같은 실체가 아니다 — '출생'·'사망'이 적힌 엣지만 그렇게 읽는다
+  dated_to: (a, b, o) => (o.label === '출생' ? `${a}${pt(a, '은', '는')} ${b}에 태어났다`
+                        : o.label === '사망' ? `${a}${pt(a, '은', '는')} ${b}에 죽었다`
+                        : `${a}의 연표에 ${b}${pt(b, '이', '가')} 있다`),
+  // 주어가 무엇이냐에 따라 시대를 부르는 말이 다르다 — 사람은 '사람이다',
+  // 사건은 '일이다', 유물·작품은 '것이다'. ('진산사건은 1791년 것이다'가 나왔다)
+  from_period: (a, b, o) => {
+    if (o.label === '출생' || o.label === '사망') return SENTENCE.dated_to(a, b, o);
+    if (o.srcType === 'person') return `${a}${pt(a, '은', '는')} ${b} 사람이다`;
+    if (o.srcType === 'event') return `${a}${pt(a, '은', '는')} ${b}에 일어난 일이다`;
+    return `${a}${pt(a, '은', '는')} ${b}의 것이다`;
+  },
+};
+
+// 지금 보는 노드(self)와 상대 사이의 관계 하나를 문장으로 만든다.
+function sentence(r, self) {
+  const me = { label: self.label, type: self.type };
+  const [src, dst] = r.dir === 'out' ? [me, r.other] : [r.other, me];
+  const make = SENTENCE[r.type];
+  return make
+    ? make(src.label, dst.label, { label: r.edge_label, srcType: src.type })
+    : `${src.label} → ${dst.label} · ${r.label}`;
+}
+
+function mergeEvidence(card, r) {
+  card.evidence = [...new Set([...card.evidence, ...(r.evidence || [])])];
+  // 시대 엣지에 접힌 '출생'·'사망'까지 챙겨야 "1506년에 태어났다"를 말할 수 있다
+  if (!card.edge_label && r.edge_label) card.edge_label = r.edge_label;
+}
+
 function relHead(r) {
+  if (TIME_TYPES.has(r.type)) return r.dir === 'out' ? '시기' : '이 시기의 개체';
   return DIR_HEAD[r.type]?.[r.dir] || r.label;
 }
 

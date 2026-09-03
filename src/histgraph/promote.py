@@ -31,7 +31,7 @@ import logging
 import re
 import urllib.parse
 
-from .extract import HANJA_TAIL, orient
+from .extract import HANJA_TAIL, kin_title_mismatch, name_variants, orient
 from .http import Fetcher
 from .ontology import EDGE_TYPES, Node
 from .store import GraphStore
@@ -1043,3 +1043,372 @@ def prune_orphans(store: GraphStore) -> int:
     store.conn.commit()
     log.info("고립 ex 노드 %d개 제거", cur.rowcount)
     return cur.rowcount
+
+
+# --- 사실 정합성 보수 -------------------------------------------------------
+#
+# 그래프는 자기 안에서 이미 모순을 드러낸다. "정현왕후는 윤호의 딸이자
+# 아내", "소현세자와 효종이 서로의 부모", "소혜왕후의 부모가 33명",
+# "김종직이 죽은 지 7년 뒤 무오사화에 참여" 같은 것들이다. 화면은 이걸
+# 그대로 문장으로 읽어 준다 — 틀린 역사를 단정해서 말하는 셈이다.
+#
+# 판정 기준은 하나다. **파싱으로 얻은 관계(Wikidata·인포박스)가
+# 추출(LLM)보다 세다.** 구조화 소스가 한쪽을 지지하면 반대쪽 추출 엣지를
+# 버린다. 양쪽 다 추출이면 근거 문장이 어느 쪽을 말하는지 본다.
+STRUCTURED = ("wd", "kowiki:infobox", "khs")
+
+# --- 사람이 판정한 예외 -----------------------------------------------------
+#
+# 규칙으로는 가릴 수 없는 자리가 있다. 출처끼리 엇갈리거나, 출처가 맞아도
+# 화면에 올리면 사건의 정의가 바뀌는 관계다. 사실 확인을 거쳐 거짓이라고
+# 판정한 것을 여기 적어 두면 다시 들어와도 보수 단계에서 지운다.
+#
+# (id, 관계, id, 왜 거짓인가) — 이유를 함께 적는다. 근거 없이 지운 자리는
+# 나중에 아무도 되돌릴 수 없다.
+REJECTED: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "wd:Q488995", "occurred_at", "wd:Q109079",
+        "위화도 회군은 압록강 하류 위화도에서 군을 돌린 사건이다. 개경(개성)은"
+        " 회군이 끝난 뒤 정변이 벌어진 곳이라, '일어난 곳'으로 세우면 사건의"
+        " 정의가 바뀐다. 위키백과 정보상자는 장소를 '위화도 및 개경',"
+        " Wikidata 는 P276=Kaesong 으로 적지만 화면은 그 둘을 구분해 주지"
+        " 못한다 — 개성시 상세에 '위화도 회군은 개성시에서 일어났다'가 뜬다.",
+    ),
+    (
+        "wd:Q490348", "occurred_at", "wd:Q109079",
+        "정묘호란의 후금군은 의주-정주-안주를 거쳐 평양까지 내려왔고 개성은"
+        " 방어 거점으로 군병을 조발한 곳이지 전장이 아니다. 위키백과 정보상자의"
+        " 장소도 '평안도·황해도·경기도'다. 이 엣지의 근거는 배천·강음 약탈"
+        " 문장으로 개성을 지목하지도 않는다.",
+    ),
+    (
+        "wd:Q490348", "occurred_at", "ex:place:경덕궁",
+        "근거가 '인조가 강화도를 출발해 경덕궁으로 돌아왔다' 이다. 전쟁이 끝난"
+        " 뒤 임금이 돌아간 자리이지 전쟁이 일어난 곳이 아니다.",
+    ),
+    (
+        "wd:Q64506", "located_in", "ex:place:양화나루 옆의 잠두봉",
+        "'양화나루 옆의 잠두봉'은 지명이 아니라 설명구다. 유적이 자기 자신을"
+        " 설명한 구절 안에 있다고 말하는 엣지다.",
+    ),
+)
+
+
+# 부모와 자식의 최소 나이차. 열세 살에 아이를 얻은 기록은 없다고 보는 것이
+# 아니라, 이보다 좁으면 형제·사돈·동학을 부모로 읽은 것이라고 본다.
+MIN_GENERATION = 13
+
+# `정성근의 아들`·`아버지 전창혁` — 근거가 누가 부모인지 말해 주는 꼴
+# 자식을 가리키는 말. 산문은 `여섯째 딸로`, `5남 해양군` 처럼 순서를 붙인다.
+_PARENT_OF = (
+    r"(?:[가-힣]{1,3}째\s*)?(?:아들|딸)|자녀|소생|\d+남|\d+녀"
+    r"|장남|차남|삼남|사남|장녀|차녀|삼녀|막내|맏이"
+)
+_PARENT_WORD = (
+    "아버지|어머니|부친|모친|아비|어미|부왕|모후|생부|생모|친부|친모"
+    "|친정아버지|친정어머니|양부|양모|계모|적모|서모"
+)
+
+
+def _year_of(value) -> int | None:
+    m = re.match(r"^(-?)(\d{1,4})", str(value or ""))
+    if not m:
+        return None
+    return -int(m.group(2)) if m.group(1) else int(m.group(2))
+
+
+def life_of(node: dict) -> tuple[int | None, int | None]:
+    """노드의 생몰 연도. **인물의 믿을 수 없는 값은 없는 셈 친다.**
+
+    실측: 서장옥의 생몰이 둘 다 1900-01-01 이다(몰년만 아는 인물).
+    이걸 생년으로 읽으면 동학농민혁명 참여가 연대 모순으로 잡힌다.
+    사건은 다르다 — 하루짜리 사건은 시작과 끝이 같은 게 정상이다."""
+    start, end = _year_of(node.get("start_date")), _year_of(node.get("end_date"))
+    if node.get("type") == "person" and start is not None and start == end:
+        return None, None
+    return start, end
+
+
+def _supports_parent(edge: dict, child: str, parent: str, parent_id: str,
+                     lenient: bool = False) -> bool:
+    """근거 문장이 '{parent} 가 {child} 의 부모'라고 말하는가.
+
+    `lenient` 는 부모어와 이름 사이에 관직·수식이 끼는 꼴까지 인정한다
+    (`아버지는 생원 김하중이며`, `아버지 거창부원군 신승선과`). 방향을
+    가릴 때는 쓰지 않는다 — 느슨하면 양쪽이 다 참이 되어 못 가린다."""
+    evidence = _evidence(edge)
+    if not evidence or not child or not parent:
+        return False
+    p, c = re.escape(parent), re.escape(child)
+    patterns = (
+        rf"{p}\s*(?:\([^)]*\))?\s*의\s*(?:{_PARENT_OF})",       # 정성근의 아들
+        rf"(?:{_PARENT_WORD})\s*(?:인\s*)?{p}",                  # 아버지 전창혁
+        rf"{c}[^.]{{0,30}}의\s*(?:{_PARENT_WORD})\s*(?:인|는|가)?\s*{p}",
+        # `정윤겸과 ... 남씨(南氏)사이에서 태어난 2남 3녀 중`
+        rf"{p}[^.]{{0,10}}사이에서\s*태어",
+        # `인빈 김씨 소생의 의창군`
+        rf"{p}\s*(?:\([^)]*\))?\s*소생",
+        # `인성군 이공의 5남 해양군 이희`
+        rf"{p}[^.]{{0,15}}의\s*(?:{_PARENT_OF})\s*(?:인\s*)?{c}",
+        # `남양부부인 홍씨(南陽府夫人 洪氏) 여섯째 딸로`
+        rf"{p}\s*(?:\([^)]*\))?[^.]{{0,8}}(?:{_PARENT_OF})\s*(?:로|으로)",
+        # `이희택(李羲宅)과 밀양 박씨의 아들로 출생하였으며` — 부모 이름이
+        # `~의 아들로` 바로 앞에 붙어 있어야 한다. 사이를 넉넉히 열어 두면
+        # 문장 맨 앞의 **자식 이름**까지 부모로 읽힌다("이상재는 … 아들로").
+        rf"{p}\s*(?:\([^)]*\))?\s*(?:과|와|,)?\s*[^.]{{0,12}}의\s*"
+        rf"(?:{_PARENT_OF})\s*(?:로|으로)\s*(?:출생|태어)",
+    )
+    if any(re.search(x, evidence) for x in patterns):
+        return True
+    # `아버지는 생원 김하중(金夏重)이며` — 부모어와 이름 사이의 관직·수식
+    if lenient and re.search(
+        rf"(?:{_PARENT_WORD})\s*(?:는|은|이|가|인)?\s*[-–:·]?\s*"
+        rf"(?:[^,.·]{{0,10}}\s)?{p}", evidence
+    ):
+        return True
+    # 문서 주인이 곧 부모인 글에서 `셋째 아들 이경보` 라고 하면 그가 자식이다.
+    # 이름을 한 번만 적는 산문에서는 이 단서가 유일할 때가 많다.
+    if json.loads(edge.get("props") or "{}").get("extracted_from") == parent_id:
+        return bool(re.search(rf"(?:{_PARENT_OF})\s*(?:인\s*)?{c}", evidence))
+    return False
+
+
+def _evidence(edge: dict) -> str:
+    return json.loads(edge.get("props") or "{}").get("evidence") or ""
+
+
+def audit_facts(store: GraphStore) -> dict[str, object]:
+    """그래프가 스스로 모순인 관계를 **전수 조사**한다.
+
+    지우자고 판정한 엣지는 `drops`, 사람 손이 필요한 것은 `holds` 로
+    나온다. 되돌릴 수 없는 판단은 하지 않는다 — 옮길 곳이 분명한
+    엣지만 옮기고(`moves`), 나머지는 지우거나 남긴다."""
+    conn = store.conn
+    nodes = {
+        r["id"]: dict(r)
+        for r in conn.execute(
+            "SELECT id, label, type, start_date, end_date FROM nodes"
+        )
+    }
+    edges = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT rowid, src, dst, type, source, label, props FROM edges"
+        )
+    ]
+    label = lambda i: nodes.get(i, {}).get("label", i)  # noqa: E731
+
+    by_pair: dict[tuple[str, str], list[dict]] = {}
+    for e in edges:
+        by_pair.setdefault((e["src"], e["dst"]), []).append(e)
+
+    drops: list[dict] = []
+    moves: list[dict] = []
+    holds: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    def kind(pair, edge_type):
+        return [e for e in by_pair.get(pair, ()) if e["type"] == edge_type]
+
+    def drop(edge, reason, detail=""):
+        drops.append({"rowid": edge["rowid"], "reason": reason,
+                      "text": f"{label(edge['src'])} -{edge['type']}({edge['source']})→"
+                              f" {label(edge['dst'])}" + (f" · {detail}" if detail else "")})
+
+    for (a, b) in list(by_pair):
+        key = (a, b) if a < b else (b, a)
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        child = kind((a, b), "child_of") + kind((b, a), "child_of")
+        spouse = kind((a, b), "spouse_of") + kind((b, a), "spouse_of")
+
+        # 1) 부모이자 배우자 — 둘 중 하나는 반드시 거짓이다
+        if child and spouse:
+            c_struct = any(e["source"] in STRUCTURED for e in child)
+            s_struct = any(e["source"] in STRUCTURED for e in spouse)
+            if c_struct and not s_struct:
+                for e in spouse:
+                    drop(e, "부모 관계가 구조화 소스에 있다 — 배우자 쪽이 오독")
+            elif s_struct and not c_struct:
+                for e in child:
+                    drop(e, "배우자 관계가 구조화 소스에 있다 — 부모 쪽이 오독")
+            else:
+                holds.append({"text": f"{label(a)} ↔ {label(b)}",
+                              "reason": "부모이자 배우자인데 양쪽 다 같은 급의 소스"})
+
+        # 2) 서로가 서로의 부모 — 한쪽은 반드시 거짓이다
+        fwd = kind((a, b), "child_of")
+        rev = kind((b, a), "child_of")
+        if fwd and rev:
+            f_struct = any(e["source"] in STRUCTURED for e in fwd)
+            r_struct = any(e["source"] in STRUCTURED for e in rev)
+            if f_struct and not r_struct:
+                for e in rev:
+                    drop(e, "반대 방향이 구조화 소스에 있다")
+            elif r_struct and not f_struct:
+                for e in fwd:
+                    drop(e, "반대 방향이 구조화 소스에 있다")
+            elif f_struct and r_struct:
+                holds.append({"text": f"{label(a)} ↔ {label(b)}",
+                              "reason": "양방향 부모인데 양쪽 다 구조화 소스"})
+            else:
+                # 근거 문장이 어느 쪽을 말하는가. 아무 쪽도 아니면 둘 다 버린다 —
+                # 형제를 부모로 읽은 경우가 여기 걸린다(이시애와 그 아우 이시합).
+                f_ok = any(_supports_parent(e, label(a), label(b), b) for e in fwd)
+                r_ok = any(_supports_parent(e, label(b), label(a), a) for e in rev)
+                if f_ok and not r_ok:
+                    for e in rev:
+                        drop(e, "근거는 반대 방향을 말한다")
+                elif r_ok and not f_ok:
+                    for e in fwd:
+                        drop(e, "근거는 반대 방향을 말한다")
+                else:
+                    for e in fwd + rev:
+                        drop(e, "서로가 서로의 부모 — 근거가 어느 쪽도 지지하지 않는다")
+
+    # 3) 부모가 셋 이상 — 구조화 소스가 이미 둘을 주면 나머지는 군더더기
+    parents: dict[str, dict[str, list[dict]]] = {}
+    for e in edges:
+        if e["type"] == "child_of":
+            parents.setdefault(e["src"], {}).setdefault(e["dst"], []).append(e)
+    for person, cand in parents.items():
+        struct = {p for p, es in cand.items()
+                  if any(e["source"] in STRUCTURED for e in es)}
+        if len(struct) < 2:
+            continue
+        for p, es in cand.items():
+            if p in struct:
+                continue
+            for e in es:
+                drop(e, "구조화 소스가 이미 부모를 준다",
+                     f"{label(person)}의 부모 {len(struct)}명이 이미 있다")
+
+    # 3-b) 부모가 자식보다 어리다 — 형·아우·사돈을 부모로 읽은 자리다.
+    #
+    # **추출 엣지만 본다.** 삼국·고려 왕들의 생몰은 즉위년이나 전승 연대가
+    # 섞여 있어(산상왕 몰 179 < 아들 동천왕 생 200) 구조화 소스까지 걸면
+    # 참인 계보가 통째로 날아간다.
+    for e in edges:
+        if e["type"] != "child_of" or e["source"] in STRUCTURED:
+            continue
+        c, p = nodes.get(e["src"]), nodes.get(e["dst"])
+        if not c or not p:
+            continue
+        c_birth, _ = life_of(c)
+        p_birth, p_death = life_of(p)
+        if c_birth is None:
+            continue
+        if p_birth is not None and p_birth > c_birth - MIN_GENERATION:
+            drop(e, "부모가 한 세대 위가 아니다", f"부모 생 {p_birth} · 자식 생 {c_birth}")
+        elif p_death is not None and p_death < c_birth - 1:
+            drop(e, "부모가 자식보다 먼저 죽었다", f"부모 몰 {p_death} · 자식 생 {c_birth}")
+
+    # 3-c) 근거가 상대를 부모가 아닌 친족으로 부른다 (할아버지·숙부·사돈…)
+    for e in edges:
+        if e["type"] != "child_of" or e["source"] in STRUCTURED:
+            continue
+        obj = label(e["dst"])
+        if kin_title_mismatch("child_of", obj, _evidence(e), name_variants(obj)):
+            drop(e, "근거는 부모가 아닌 친족이라 말한다")
+
+    # 3-d) 근거가 부모라고 말하지 않는다.
+    #
+    # 남은 추출 부모의 대부분이 여기 걸린다 — `한씨를 왕비로 추숭해야
+    # 한다고 주장한 대신들은 하동부원군 정인지` 같은 열거문이 소혜왕후의
+    # 부모를 열둘로 만들었다. 구조화 소스는 검사하지 않는다.
+    for e in edges:
+        if e["type"] != "child_of" or e["source"] in STRUCTURED:
+            continue
+        if not _supports_parent(e, label(e["src"]), label(e["dst"]), e["dst"],
+                                lenient=True):
+            drop(e, "근거가 부모라고 말하지 않는다")
+
+    # 0) 사람이 거짓이라고 판정해 둔 관계
+    rejected = {(a, t, b) for a, t, b, _ in REJECTED}
+    for e in edges:
+        if (e["src"], e["type"], e["dst"]) in rejected:
+            drop(e, "사실 확인 결과 거짓으로 판정한 관계")
+
+    # 3-e) 서로 살아 있던 적이 없는 부부 (태종과 1598년생 흥안군)
+    for e in edges:
+        if e["type"] != "spouse_of" or e["source"] in STRUCTURED:
+            continue
+        a, b = nodes.get(e["src"]), nodes.get(e["dst"])
+        if not a or not b:
+            continue
+        (ab, ad), (bb, bd) = life_of(a), life_of(b)
+        if (ad is not None and bb is not None and bb > ad) or (
+            bd is not None and ab is not None and ab > bd
+        ):
+            drop(e, "한쪽이 죽은 뒤에 태어난 부부")
+
+    # 4) 죽은 뒤(또는 태어나기 전) 사건 참여
+    by_label: dict[str, list[str]] = {}
+    for n in nodes.values():
+        if n["type"] == "person":
+            by_label.setdefault(n["label"], []).append(n["id"])
+    for e in edges:
+        if e["type"] != "participated_in" or e["source"] in STRUCTURED:
+            continue
+        person, event = nodes.get(e["src"]), nodes.get(e["dst"])
+        if not person or not event:
+            continue
+        birth, death = life_of(person)
+        start, end = life_of(event)
+        why = None
+        if death is not None and start is not None and start > death:
+            why = f"몰년 {death} < 사건 {start}"
+        elif birth is not None and end is not None and end < birth:
+            why = f"사건 {end} < 생년 {birth}"
+        if not why:
+            continue
+        conflict = why
+        # 같은 이름의 다른 인물이 그 사건을 살았다면 엣지를 그리로 옮긴다
+        fits = []
+        for other in by_label.get(person["label"], ()):
+            if other == person["id"]:
+                continue
+            ob, od = life_of(nodes[other])
+            if od is not None and start is not None and start > od:
+                continue
+            if ob is not None and end is not None and end < ob:
+                continue
+            if ob is None and od is None:
+                continue
+            fits.append(other)
+        if len(fits) == 1:
+            moves.append({"rowid": e["rowid"], "to": fits[0], "reason": why,
+                          "text": f"{label(e['src'])} → {label(e['dst'])}"
+                                  f" · 같은 이름의 {label(fits[0])}({fits[0]})로"})
+        else:
+            drop(e, "죽은 뒤(태어나기 전)의 사건 참여", conflict)
+
+    # 같은 엣지가 두 규칙에 걸릴 수 있다. 한 번만 지운다.
+    unique: dict[int, dict] = {}
+    for d in drops:
+        unique.setdefault(d["rowid"], d)
+    moved = {m["rowid"] for m in moves}
+    drops = [d for r, d in unique.items() if r not in moved]
+    return {"drops": drops, "moves": moves, "holds": holds,
+            "checked": len(edges)}
+
+
+def repair_facts(store: GraphStore, dry_run: bool = False) -> dict[str, object]:
+    """`audit_facts` 판정대로 그래프를 고친다."""
+    report = audit_facts(store)
+    if dry_run:
+        return report
+    conn = store.conn
+    for m in report["moves"]:
+        conn.execute("UPDATE edges SET src = ? WHERE rowid = ?", (m["to"], m["rowid"]))
+    ids = [d["rowid"] for d in report["drops"]]
+    for i in range(0, len(ids), 500):
+        batch = ids[i : i + 500]
+        conn.execute(
+            f"DELETE FROM edges WHERE rowid IN ({','.join('?' * len(batch))})", batch
+        )
+    conn.commit()
+    log.info("모순 관계 %d건 삭제 · %d건 재연결 · 보류 %d건",
+             len(ids), len(report["moves"]), len(report["holds"]))
+    return report

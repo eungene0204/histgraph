@@ -379,7 +379,7 @@ def to_graph(
     edges: list[Edge] = []
     dropped_evidence = dropped_schema = flipped = self_loops = 0
     dropped_possessive = dropped_anachronism = dropped_reversed = 0
-    dropped_unnamed = dropped_loss = 0
+    dropped_unnamed = dropped_loss = dropped_departure = dropped_kin = 0
 
     # 가제티어 덤프는 낱개로 보면 멀쩡해 보인다. 묶음 단위로 먼저 걸러낸다.
     dumped = gazetteer_dump(relations)
@@ -489,8 +489,19 @@ def to_graph(
                 dropped_possessive += 1
                 continue
 
+            if kin_title_mismatch(edge_type, rel.get("object", ""),
+                                  rel.get("evidence", ""),
+                                  name_variants(rel.get("object", "") or " ")):
+                dropped_kin += 1
+                continue
+
             if loss_context(edge_type, rel.get("evidence", "")):
                 dropped_loss += 1
+                continue
+
+            if movement_origin(edge_type, rel.get("object", ""),
+                               rel.get("evidence", "")):
+                dropped_departure += 1
                 continue
 
             # 이름 자리에 설명구가 온 것. 가리키는 사람을 특정할 수 없으므로
@@ -572,15 +583,16 @@ def to_graph(
 
     if (dropped_evidence or dropped_schema or flipped or self_loops
             or dropped_possessive or dropped_anachronism or dropped_reversed
-            or dropped_unnamed or dropped_loss or dumped):
+            or dropped_unnamed or dropped_loss or dropped_departure
+            or dropped_kin or dumped):
         log.info(
             "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 자기순환 %d건 버림"
             " · 소유격오독 %d건 버림 · 소실문형 %d건 버림 · 연대충돌 %d건 버림"
             " · 역방향 %d건 버림 · 근거무지목 %d건 버림 · 가제티어덤프 %d건 버림"
-            " · 방향교정 %d건",
+            " · 떠난자리 %d건 버림 · 친족호칭 %d건 버림 · 방향교정 %d건",
             dropped_evidence, dropped_schema, self_loops, dropped_possessive,
             dropped_loss, dropped_anachronism, dropped_reversed, dropped_unnamed,
-            len(dumped), flipped,
+            len(dumped), dropped_departure, dropped_kin, flipped,
         )
     return list(nodes.values()), edges
 
@@ -871,6 +883,49 @@ def pick_candidate(rows: list, doc_span: tuple[int, int] | None):
     return compatible[0] if compatible else rows[0]
 
 
+# 이름 **앞에** 붙어 관계를 말해 주는 호칭 중 부모가 아닌 것.
+#
+# 실측: 윤임의 부모가 20명이었다 — 할아버지 윤보, 숙부 윤여해, 외삼촌
+# 박원종, 이복 여동생 윤옥춘, 사돈 월산대군까지 전부 부모로 들어왔다.
+# 산문은 이름 앞에 관계를 적어 두는데(`숙부 윤여해도 연좌되어`) 추출이
+# 그 호칭을 버리고 이름만 가져간 자리다.
+#
+# `친정아버지`·`양아버지` 처럼 부모를 가리키는 호칭은 넣지 않는다.
+NON_PARENT_TITLE = (
+    r"할아버지|할머니|조부|조모|증조부|증조모|증조할아버지|고조부|외조부|외조모"
+    r"|외할아버지|외할머니|시아버지|시어머니|장인|장모|사돈|삼촌|숙부|백부|계부"
+    r"|외숙|당숙|족숙|고모부|이모부|고모|이모|조카|생질|사촌|재종|종형|종제|종손"
+    r"|처남|매부|매형|형부|제부|올케|며느리|사위|손자|손녀|외손|후손|방계"
+    r"|이복\s*여동생|이복\s*동생|여동생|남동생|동생|아우|누이|누나|언니|오빠"
+    r"|형님|맏형|둘째\s*형|셋째\s*형|외조카|외삼촌|처조카|스승|제자|문인"
+)
+# 호칭 뒤에 조사가 붙는다: `동생은 신상으로`, `사돈 윤근수`, `할아버지:신숙권`
+_TITLE_BEFORE = re.compile(
+    rf"(?:{NON_PARENT_TITLE})\s*[:·,]?\s*(?:은|는|이|가|인|이며|이자|되는)?\s*$"
+)
+
+
+def kin_title_mismatch(edge_type: str, obj: str, evidence: str,
+                       names: set[str] | None = None) -> bool:
+    """근거가 상대를 **부모가 아닌 친족**으로 부르고 있는가.
+
+    이름 바로 앞의 호칭만 본다. 한 문장에 친족어가 여럿 나오는 것은
+    흔한 일이라(`아버지 신명화의 6촌 동생은 신상으로`) 문장 전체에서
+    찾으면 옳은 부모까지 날아간다."""
+    if edge_type != "child_of" or not obj or not evidence:
+        return False
+    for name in (names or {obj}):
+        start = 0
+        while True:
+            pos = evidence.find(name, start)
+            if pos < 0:
+                break
+            if _TITLE_BEFORE.search(evidence[max(0, pos - 14):pos]):
+                return True
+            start = pos + 1
+    return False
+
+
 def possessive_mismatch(edge_type: str, obj: str, evidence: str) -> bool:
     """근거가 `<대상>의 딸` 꼴이면 대상은 상대가 아니라 그 윗대다."""
     kin = POSSESSIVE_SKIP.get(edge_type)
@@ -899,6 +954,31 @@ def loss_context(edge_type: str, evidence: str) -> bool:
     if edge_type != "participated_in" or not evidence:
         return False
     return bool(LOSS_CAUSE.search(evidence) and LOSS_VERB.search(evidence))
+
+
+# `A를 출발하여 B에 이르렀다` — 지나온 곳이지 일어난 곳이 아니다.
+# 실측: '위화도 회군'의 발생 장소가 평양시로 들어왔다. 근거는 "출정군은
+# 5월 24일 평양을 출발하여 ... 위화도에 진주하였다" 로, 평양은 떠난
+# 자리다. 화면은 그걸 "위화도 회군은 평양시에서 일어났다"고 읽는다.
+#
+# **떠남 어휘만 본다.** '~로 회군하여'·'~로 향하여' 같은 이동 문형까지
+# 걸면 도착지에서 실제로 벌어진 사건(개경 정변)까지 날아간다.
+DEPARTURE = "(?:출발|떠나|떠났|떠난)"
+
+
+def movement_origin(edge_type: str, obj: str, evidence: str) -> bool:
+    """근거에서 그 장소가 '떠나온 곳'으로만 나오는가."""
+    if edge_type not in ("occurred_at", "born_in", "died_in", "located_in"):
+        return False
+    if not obj or not evidence:
+        return False
+    # '평양시'가 본문에는 '평양'으로 나온다 — 행정 접미사는 떼고 찾는다
+    stem = re.sub(r"(시|군|구|현|성|부|도)$", "", obj) if len(obj) > 2 else obj
+    for name in {obj, stem}:
+        pattern = rf"{re.escape(name)}(?:\([^)]*\))?\s*(?:을|를|에서)\s*{DEPARTURE}"
+        if re.search(pattern, evidence):
+            return True
+    return False
 
 
 def narrative_score(text: str) -> float:

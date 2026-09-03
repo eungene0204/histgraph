@@ -272,6 +272,7 @@ class GraphAPI:
         ]
         rows = self.store.conn.execute(
             """SELECT e.src, e.dst, e.type, e.source, e.confidence, e.props,
+                      e.label AS edge_label,
                       n.id AS other_id, n.label AS other_label, n.type AS other_type
                  FROM edges e
                  JOIN nodes n
@@ -293,6 +294,9 @@ class GraphAPI:
                 fact = by_fact[key] = {
                     "type": r["type"],
                     "label": EDGE_TYPES[r["type"]][0],
+                    # 엣지 자신의 이름('출생'·'사망'·'아버지'). 타입 라벨보다
+                    # 구체적이라 화면이 "1506년에 태어났다"까지 말할 수 있다.
+                    "edge_label": r["edge_label"] or None,
                     "dir": direction,
                     "other": {
                         "id": r["other_id"],
@@ -308,6 +312,8 @@ class GraphAPI:
                     "original_type": edge_props.get("original_type"),
                 }
             fact["confidence"] = max(fact["confidence"], r["confidence"])
+            if not fact["edge_label"] and r["edge_label"]:
+                fact["edge_label"] = r["edge_label"]
             if r["source"] not in fact["sources"]:
                 fact["sources"].append(r["source"])
             if edge_props.get("evidence"):

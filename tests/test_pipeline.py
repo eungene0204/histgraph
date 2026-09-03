@@ -453,6 +453,7 @@ from histgraph.extract import (  # noqa: E402
     label_year,
     lifespan_conflict,
     loss_context,
+    movement_origin,
 )
 
 check("`~로 인해 실전` 은 참여가 아니다 → 버린다",
@@ -465,6 +466,49 @@ check("원인 문형만으로는 안 버린다",
       not loss_context("participated_in", "임진왜란으로 인해 의병을 일으켰다"))
 check("다른 관계 타입은 검사 안 함",
       not loss_context("related_to", "병자호란으로 인해 소실되었고"))
+
+# 실측 회귀: 윤임의 부모가 20명이었다 — 할아버지·숙부·외삼촌·사돈이 전부
+# 부모로 들어왔다. 산문은 이름 앞에 관계를 적어 두는데 추출이 그 호칭을
+# 버리고 이름만 가져간 자리다.
+from histgraph.extract import kin_title_mismatch, name_variants  # noqa: E402
+
+check("`숙부 윤여해` 는 부모가 아니다",
+      kin_title_mismatch("child_of", "윤여해", "숙부 윤여해도 연좌되어 유배당했다."))
+check("`할아버지:신숙권` 처럼 붙여 쓴 것도 잡는다",
+      kin_title_mismatch("child_of", "신숙권", "할아버지:신숙권"))
+check("`이복 여동생 : 윤옥춘`",
+      kin_title_mismatch("child_of", "윤옥춘", "이복 여동생 : 윤옥춘(尹玉春, 1518 ~ ?)"))
+# 한 문장에 친족어가 여럿 나오는 건 흔하다. 이름 **바로 앞**만 봐야
+# 옳은 부모가 안 날아간다.
+check("`아버지 신명화의 6촌 동생은 신상으로` 에서 아버지는 살린다",
+      not kin_title_mismatch("child_of", "신명화",
+                             "아버지 신명화의 6촌 동생은 신상으로"))
+check("같은 문장에서 동생 쪽은 버린다",
+      kin_title_mismatch("child_of", "신상", "아버지 신명화의 6촌 동생은 신상으로"))
+check("성을 뗀 표기도 찾는다",
+      kin_title_mismatch("child_of", "윤 여해", "숙부 여해도 연좌되어",
+                         name_variants("윤 여해")))
+check("다른 관계 타입은 검사 안 함",
+      not kin_title_mismatch("spouse_of", "윤여해", "숙부 윤여해도"))
+
+# 실측 회귀: '위화도 회군'의 발생 장소로 평양시가 들어왔다. 근거는 군대가
+# 평양을 **떠난** 문장이다 — 화면은 "위화도 회군은 평양시에서 일어났다"고 읽었다.
+check("`평양을 출발하여` 는 일어난 곳이 아니다 → 버린다",
+      movement_origin("occurred_at", "평양시",
+                      "출정군은 5월 24일 평양을 출발하여 6월 11일 압록강 하류"
+                      " 위화도에 진주하였다."))
+check("행정 접미사가 붙은 라벨도 본문 표기로 찾는다",
+      movement_origin("occurred_at", "강화도", "인조가 강화도를 출발해 경덕궁으로 돌아왔다."))
+# `~로 회군하여 정변을 일으킨` — 도착지에서 실제로 사건이 벌어졌다.
+# 이동 문형까지 걸면 개경 정변이 통째로 날아간다.
+check("도착지는 살린다",
+      not movement_origin("occurred_at", "개성시",
+                          "이성계가 개경(開京)으로 회군(回軍)하여 정변을 일으킨 사건이다."))
+check("사건이 실제로 일어난 곳은 살린다",
+      not movement_origin("occurred_at", "위화도",
+                          "압록강 하류의 위화도까지 이른 우군 도통사 이성계가"))
+check("장소 관계가 아니면 검사 안 함",
+      not movement_origin("participated_in", "평양시", "평양을 출발하여"))
 
 check("죽은 뒤의 사건 참여 → 연대 충돌",
       lifespan_conflict("participated_in", ("1506", "1544"), ("1636-12-09", None)))
@@ -1116,7 +1160,7 @@ with tempfile.TemporaryDirectory() as tmp:
         Edge(src="wd:Q1", dst="wd:Q2", type="participated_in", source="extract",
              confidence=0.9, props={"evidence": "세종은 훈민정음을 반포하였다"}),
         Edge(src="wd:Q1", dst="wd:Q5", type="child_of", source="wd"),
-        Edge(src="wd:Q1", dst="wd:Q4", type="dated_to", source="timeline"),
+        Edge(src="wd:Q1", dst="wd:Q4", type="dated_to", source="timeline", label="출생"),
     ])
     api = GraphAPI(store, era="joseon")
 
@@ -1142,6 +1186,12 @@ with tempfile.TemporaryDirectory() as tmp:
     ev = [r for r in d["relations"] if r["evidence"]]
     check("추출 관계는 근거 구절을 함께 준다",
           len(ev) == 1 and ev[0]["evidence"][0].startswith("세종은"))
+    # 화면은 타고 들어온 관계를 문장으로 적는다 ("세종은 1443년에 태어났다").
+    # 타입 라벨('시점')만으로는 출생인지 사망인지 말할 수 없다.
+    dated = [r for r in d["relations"] if r["type"] == "dated_to"]
+    check("엣지 자신의 이름이 상세에 실림", dated[0]["edge_label"] == "출생", str(dated))
+    check("이름 없는 엣지는 None",
+          [r for r in d["relations"] if r["type"] == "child_of"][0]["edge_label"] is None)
     check("관계에 출처가 실림",
           {s for r in d["relations"] for s in r["sources"]} == {"extract", "wd", "timeline"})
     check("없는 노드 상세는 None", api.node("wd:없음") is None)
@@ -1177,6 +1227,105 @@ with tempfile.TemporaryDirectory() as tmp:
     empty_api = GraphAPI(store, era="joseon")
     check("왕조 노드가 없으면 중심도 없음", empty_api.root() is None)
     check("그래도 시작점은 나온다", isinstance(empty_api.seeds(5), list))
+    store.close()
+
+# --- 시대 서브그래프: 장소 보강 -----------------------------------------
+# 실측 회귀: '위화도 회군'이 이성계의 이웃으로 서브그래프에 들어왔는데
+# 위화도는 두 홉 밖이라 잘려 나갔다. 남은 발생 장소가 개경뿐이어서
+# 화면이 "위화도 회군은 개성시에서 일어났다"고 말했다.
+from histgraph.scope import close_places  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "sc.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:E", type="event", label="위화도 회군", source="wd"),
+        Node(id="wd:P1", type="place", label="위화도", source="wd"),
+        Node(id="wd:P2", type="place", label="개성시", source="wd"),
+        Node(id="wd:H", type="person", label="이성계", source="wd"),
+        Node(id="wd:X", type="place", label="상관없는 곳", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:E", dst="wd:P1", type="occurred_at", source="kowiki:infobox"),
+        Edge(src="wd:E", dst="wd:P2", type="occurred_at", source="wd"),
+        Edge(src="wd:H", dst="wd:E", type="participated_in", source="wd"),
+        Edge(src="wd:X", dst="wd:P1", type="located_in", source="wd"),
+    ])
+    kept = close_places(store, {"wd:H", "wd:E", "wd:P2"})
+    check("사건이 남으면 그 사건이 일어난 곳도 데려온다", "wd:P1" in kept)
+    check("이미 있던 노드는 그대로", {"wd:H", "wd:E", "wd:P2"} <= kept)
+    check("사건과 무관한 노드는 안 딸려온다", "wd:X" not in kept)
+    check("장소가 없으면 아무것도 안 는다",
+          close_places(store, {"wd:H"}) == {"wd:H"})
+    store.close()
+
+# --- 사실 정합성 보수 ----------------------------------------------------
+# 실측 회귀: "신사임당의 부모는 이원수다"(남편), "정약용의 부모는 정약전이다"
+# (형), "김종직이 죽은 지 7년 뒤 무오사화에 참여" 를 화면이 단정해서 말했다.
+from histgraph.promote import audit_facts, repair_facts, life_of  # noqa: E402
+
+check("몰년만 아는 인물의 생몰은 없는 셈 친다",
+      life_of({"type": "person", "start_date": "1900-01-01",
+               "end_date": "1900-01-01"}) == (None, None))
+check("하루짜리 사건은 시작=끝이 정상",
+      life_of({"type": "event", "start_date": "1919-03-01",
+               "end_date": "1919-03-01"}) == (1919, 1919))
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "fx.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:W", type="person", label="신사임당", source="wd",
+             start_date="1504", end_date="1551"),
+        Node(id="wd:H", type="person", label="이원수", source="wd", start_date="1501"),
+        Node(id="wd:B1", type="person", label="정약용", source="wd", start_date="1762"),
+        Node(id="wd:B2", type="person", label="정약전", source="wd", start_date="1758"),
+        Node(id="wd:D", type="person", label="김종직", source="wd",
+             start_date="1431", end_date="1492"),
+        Node(id="wd:E", type="event", label="무오사화", source="wd",
+             start_date="1498", end_date="1498"),
+        Node(id="wd:S", type="person", label="이상재", source="wd", start_date="1850"),
+        Node(id="wd:F", type="person", label="이희택", source="wd"),
+    ])
+    store.upsert_edges([
+        # 남편을 부모로 (배우자는 구조화 소스에 있다)
+        Edge(src="wd:W", dst="wd:H", type="spouse_of", source="wd"),
+        Edge(src="wd:W", dst="wd:H", type="child_of", source="extract",
+             props={"evidence": "이율곡의 어머니요, 이원수의 아내로서"}),
+        # 형을 부모로 (네 살 위)
+        Edge(src="wd:B1", dst="wd:B2", type="child_of", source="extract",
+             props={"evidence": "둘째 형 정약전도"}),
+        # 죽은 뒤의 사건 참여
+        Edge(src="wd:D", dst="wd:E", type="participated_in", source="extract",
+             props={"evidence": "무오사화의 원인의 하나가 된다"}),
+        # 서로가 서로의 부모 — 근거는 한쪽만 말한다
+        Edge(src="wd:S", dst="wd:F", type="child_of", source="extract",
+             props={"evidence": "이상재는 이희택(李羲宅)과 밀양 박씨의 아들로 출생하였으며",
+                    "extracted_from": "wd:S"}),
+        Edge(src="wd:F", dst="wd:S", type="child_of", source="extract",
+             props={"evidence": "이상재는 이희택(李羲宅)과 밀양 박씨의 아들로 출생하였으며",
+                    "extracted_from": "wd:S"}),
+    ])
+    report = audit_facts(store)
+    dropped = {d["text"].split(" -")[0] + "|" + d["text"].split("→ ")[1].split(" ·")[0]
+               for d in report["drops"]}
+    check("남편을 부모로 읽은 엣지를 버린다", "신사임당|이원수" in dropped, str(dropped))
+    check("네 살 위인 형은 부모가 될 수 없다", "정약용|정약전" in dropped, str(dropped))
+    check("죽은 뒤의 사건 참여를 버린다", "김종직|무오사화" in dropped, str(dropped))
+    check("근거가 말하는 방향은 살린다", "이상재|이희택" not in dropped, str(dropped))
+    check("반대 방향은 버린다", "이희택|이상재" in dropped, str(dropped))
+    check("배우자 관계 자체는 건드리지 않는다",
+          not any(d["text"].startswith("신사임당 -spouse_of") for d in report["drops"]))
+
+    # 사람이 판정해 둔 거짓은 다시 들어와도 지운다
+    from histgraph.promote import REJECTED  # noqa: E402
+    check("판정 표에 이유가 함께 적혀 있다",
+          all(len(row) == 4 and row[3].strip() for row in REJECTED))
+
+    repair_facts(store)
+    left = {(r["src"], r["dst"], r["type"]) for r in
+            store.conn.execute("SELECT src, dst, type FROM edges")}
+    check("보수 뒤 남는 건 참인 관계뿐",
+          left == {("wd:W", "wd:H", "spouse_of"), ("wd:S", "wd:F", "child_of")}, str(left))
+    check("두 번 돌려도 더 지울 게 없다", not audit_facts(store)["drops"])
     store.close()
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")

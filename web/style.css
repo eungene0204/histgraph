@@ -169,11 +169,26 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   position: relative;
 }
 .detail .close {
-  position: absolute; top: 12px; right: 12px;
+  position: absolute; top: 12px; right: 12px; z-index: 3;   /* 뒤로 막대 위로 */
   background: none; border: none; color: var(--text-3);
   font-size: 14px; cursor: pointer; padding: 4px;
 }
 .detail .close:hover { color: var(--text); }
+
+/* 관계를 타고 깊이 들어가면 어디서 왔는지 잊는다 — 되돌아갈 자리를 이름째 들고 있는다.
+   관계 목록이 길어 스크롤을 내려도 사라지면 안 되므로 위에 붙여 둔다. */
+.d-back {
+  position: sticky; top: -16px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  width: calc(100% + 32px); margin: -16px -16px 6px; padding: 13px 40px 9px 16px;
+  background: var(--surface-2);
+  border: none; border-bottom: 1px solid var(--line);
+  color: var(--text-3); font: inherit; font-size: 12px; text-align: left;
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.d-back:hover { color: var(--text); background: var(--surface-3); }
+.d-back span { flex: none; font-size: 13px; }
 
 .d-type {
   display: inline-flex; align-items: center; gap: 6px;
@@ -213,12 +228,24 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .rel:hover { border-color: var(--line); background: #2c2c29; }
 .rel-line { display: flex; align-items: center; gap: 7px; font-size: 13px; min-width: 0; }
 .rel-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.rel-dir { color: var(--text-3); font-size: 11px; flex: none; }
 .rel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rel-ev {
   margin-top: 6px; font-size: 11.5px; line-height: 1.6; color: var(--text-3);
   border-left: 2px solid var(--line); padding-left: 8px;
 }
+/* 타고 들어온 관계. 목록 어딘가에 또 있지만, 방금 누른 그 한 줄을
+   다시 찾게 하지 않으려고 맨 위에 세운다. */
+.d-via {
+  background: var(--surface-3); border-radius: 8px;
+  padding: 9px 11px; margin: 0 0 14px;
+}
+.d-via-line {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 13px; line-height: 1.5; color: var(--text);
+}
+.d-via-line .rel-dot { position: relative; top: -1px; }
+.d-via .rel-ev { border-left-color: #3a3a35; }
+
 /* 여러 관계가 함께 딛고 선 근거. 카드 밖에 한 번만 둔다. */
 .rel-ev.shared { margin: 0 0 7px; }
 

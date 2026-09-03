@@ -147,6 +147,58 @@ def expand(store: GraphStore, seeds: set[str], hops: int = 1) -> set[str]:
     return seen
 
 
+# 장소는 사건·인물을 설명하는 자리다. 한쪽만 남으면 그래프가 거짓말을 한다.
+PLACE_EDGES = ("occurred_at", "born_in", "died_in")
+
+
+def close_places(store: GraphStore, keep: set[str]) -> set[str]:
+    """포함된 노드가 '어디서'를 가리키면 그 장소도 데려온다.
+
+    **실측.** '위화도 회군'은 이성계의 이웃으로 들어왔는데, 정작 이름이
+    된 위화도는 두 홉 밖이라 잘려 나갔다. 남은 발생 장소는 개경과
+    평양뿐이어서 화면이 "위화도 회군은 개성시에서 일어났다"고 말했다.
+    장소를 다 못 데려올 바에는 하나도 없는 편이 낫지만, 22개만 더
+    담으면 되는 일이다 (조선 그래프 기준 사건 10개의 장소 25건).
+    """
+    added: set[str] = set()
+    ordered = sorted(keep)
+    marks_type = ",".join("?" * len(PLACE_EDGES))
+    for i in range(0, len(ordered), 500):
+        batch = ordered[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        for r in store.conn.execute(
+            f"""SELECT dst FROM edges
+                 WHERE src IN ({marks}) AND type IN ({marks_type})""",
+            (*batch, *PLACE_EDGES),
+        ):
+            if r["dst"] not in keep:
+                added.add(r["dst"])
+    if added:
+        log.info("장소 보강: +%d 노드", len(added))
+    return keep | added
+
+
+def _dated_events(store: GraphStore, ids: set[str]) -> set[str]:
+    """그 가운데 연대를 아는 사건만. 연표에 놓을 자리가 있는 것들이다."""
+    if not ids:
+        return set()
+    out: set[str] = set()
+    ordered = sorted(ids)
+    for i in range(0, len(ordered), 500):
+        batch = ordered[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        out.update(
+            r["id"]
+            for r in store.conn.execute(
+                f"""SELECT id FROM nodes
+                     WHERE id IN ({marks}) AND type='event'
+                       AND start_date IS NOT NULL AND start_date != ''""",
+                batch,
+            )
+        )
+    return out
+
+
 def extract(
     store: GraphStore,
     era_key: str,
@@ -168,6 +220,7 @@ def extract(
     keep = expand(store, seeds, hops=hops)
     # 왕조 노드 자신도 그래프의 중심으로 포함한다
     keep.add(f"wd:{era.polity_qid}")
+    keep = close_places(store, keep)
 
     isolated: set[str] = set()
     if drop_isolated:
