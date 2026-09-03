@@ -1100,13 +1100,27 @@ def load_documents(
     max_chunks: int = 0,
     node_types: tuple[str, ...] | None = None,
     skip_extracted: bool = True,
+    max_participants: int | None = None,
+    min_chars: int = 0,
 ) -> list[Document]:
     """추출 가치가 높은 순으로 문서를 고른다.
 
     min_score=1.0 은 인물이나 사건 표지 중 하나 이상을 요구한다.
     2.0 으로 올리면 둘 다 있는 글만 남는다.
 
-    scope_ids 를 주면 그 노드들의 산문만 대상으로 한다."""
+    scope_ids 를 주면 그 노드들의 산문만 대상으로 한다.
+
+    **`max_participants` 는 이미 채워진 사건을 다시 묻지 않게 한다.**
+    조각당 수 분이 드는 로컬 추출에서 병자호란(참여자 65명)을 다시 읽는
+    것은 낭비다. 비어 있는 쪽이 훨씬 많다 — 실측: 사건 420개 중 322개가
+    참여자 0~1명이고, 그 사건들의 공통점은 자료가 없는 것이 아니라
+    **산문이 도입부뿐이었다**는 것이다.
+
+    **`min_chars` 는 값을 못 낼 글을 뺀다.** 400자짜리 토막글에서 참여자
+    스무 명이 나올 수는 없는데 비용은 긴 글과 같다.
+
+    둘 다 `scope_ids` 와 달리 **가제티어는 건드리지 않는다** — 대상을
+    좁히면서 아는 개체 목록까지 좁히면 인물 이름이 전부 고아가 된다."""
     # **넘겨받은 글은 추출에 쓰지 않는다.** `enrich` 가 위키백과 넘겨주기를
     # 따라가면 다른 개체의 문서가 붙는다 — '무관랑'의 설명은 '사다함'
     # 문서이고, '이유'의 설명은 '엠파이어 (음악 그룹)' 문서다. 화면에서는
@@ -1133,6 +1147,29 @@ def load_documents(
         before = len(rows)
         rows = [r for r in rows if r["id"] in scope_ids]
         log.info("범위 한정: 산문 %d건 → %d건", before, len(rows))
+
+    if min_chars:
+        before = len(rows)
+        rows = [r for r in rows if len(r["description"]) >= min_chars]
+        log.info("본문 %d자 미만 제외: %d건 → %d건", min_chars, before, len(rows))
+
+    if max_participants is not None:
+        filled = {
+            r["id"]
+            for r in store.conn.execute(
+                """SELECT e.dst AS id, COUNT(*) AS n
+                     FROM edges e JOIN nodes s ON s.id = e.src
+                    WHERE e.type = 'participated_in' AND s.type = 'person'
+                 GROUP BY e.dst HAVING n > ?""",
+                (max_participants,),
+            )
+        }
+        before = len(rows)
+        rows = [r for r in rows if r["id"] not in filled]
+        log.info(
+            "참여자 %d명 초과인 문서 제외: %d건 → %d건",
+            max_participants, before, len(rows),
+        )
 
     # 이미 추출한 문서는 건너뛴다. **`--limit` 으로 나눠 돌리려면 필수다** —
     # 없으면 두 번째 배치가 첫 배치와 같은 문서를 다시 처리한다 (조각당

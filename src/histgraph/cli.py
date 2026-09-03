@@ -322,7 +322,9 @@ def cmd_extract(args: argparse.Namespace) -> int:
                                  scope_ids=scope_ids, skip_covered=not args.no_skip_covered,
                                  max_chunks=args.max_chunks,
                                  node_types=tuple(args.types) if args.types else None,
-                                 skip_extracted=not args.redo)
+                                 skip_extracted=not args.redo,
+                                 max_participants=args.max_participants,
+                                 min_chars=args.min_chars)
         if not docs:
             print(
                 "  추출할 산문이 없습니다. 먼저 `ingest heritage` 로 content 를 수집하세요.",
@@ -1095,6 +1097,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="추출 대상 노드 타입 (기본: 사건·조직)")
     p_ex.add_argument("--max-chunks", type=int, default=3,
                       help="문서당 사용할 조각 수 (밀도 상위순, 0=제한없음)")
+    p_ex.add_argument("--max-participants", type=int, default=None,
+                      help="참여자가 이만큼 넘게 붙은 사건은 건너뛴다 (비어 있는 쪽부터)")
+    p_ex.add_argument("--min-chars", type=int, default=0,
+                      help="본문이 이보다 짧은 문서는 건너뛴다")
     p_ex.add_argument("--redo", action="store_true",
                       help="이미 추출한 문서도 다시 처리 (기본은 건너뜀). "
                            "--limit 으로 나눠 돌릴 때 기본값을 유지할 것")

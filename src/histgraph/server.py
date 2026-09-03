@@ -126,10 +126,54 @@ def _span(row) -> tuple[int | None, int | None]:
     return start, end
 
 
+def co_names(label: str, props: str | None) -> list[str]:
+    """이 노드의 **또 하나의 이름**. 표기 변형이 아니라 진짜 다른 이름.
+
+    실측으로 필요해진 구분이다. 기축옥사의 별칭은 셋인데 무게가 다르다.
+
+        기축사화 · 정여립의 옥사   표기가 조금 다른 같은 말
+        정여립의 난              이 사건을 부르는 **또 하나의 이름**
+
+    셋을 '다른 이름' 한 더미에 넣으면 정여립의 난이 별명처럼 읽힌다.
+    화면에서 사건을 열었을 때 그 이름이 어디에도 안 보이는 것은 틀렸다 —
+    그 이름으로 이 사건을 아는 사람이 더 많다.
+
+    **가르는 기준은 점수가 아니라 출신이다.** `merged_from` 에 있는 이름은
+    우리 그래프에서 **자기 노드를 갖고 있던** 이름이다. 어떤 소스가 그
+    대상의 이름으로 그렇게 적었다는 뜻이라, 위키데이터가 곁다리로 적어 둔
+    altLabel 과는 격이 다르다.
+
+    한쪽이 다른 쪽에 통째로 들어 있으면 뺀다 — '조선 세조 · 세조' 처럼
+    길고 짧은 같은 이름을 두 번 쓸 이유가 없다."""
+    if not props:
+        return []
+    try:
+        merged = json.loads(props).get("merged_from") or []
+    except (ValueError, TypeError):
+        return []
+    out: list[str] = []
+    for item in merged:
+        name = (item or {}).get("label") if isinstance(item, dict) else None
+        if not name or name == label:
+            continue
+        if name in label or label in name:
+            continue
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def _names(row) -> list[str]:
+    """대표 이름을 앞에 두고 또 하나의 이름을 잇는다."""
+    props = row["props"] if "props" in row.keys() else None
+    return [row["label"], *co_names(row["label"], props)]
+
+
 def _node_brief(row, degree: int = 0) -> dict:
     return {
         "id": row["id"],
         "label": row["label"],
+        "names": _names(row),
         "type": row["type"],
         "group": TYPE_GROUP.get(row["type"], "thing"),
         "degree": degree,
@@ -213,7 +257,7 @@ class GraphAPI:
         root = self.root()
         if root:
             row = self.store.conn.execute(
-                "SELECT id, type, label, start_date, end_date FROM nodes WHERE id = ?",
+                "SELECT id, type, label, start_date, end_date, props FROM nodes WHERE id = ?",
                 (root,),
             ).fetchone()
             if row:
@@ -222,7 +266,7 @@ class GraphAPI:
 
         for node_type, take in (("person", limit - limit // 3), ("event", limit // 3)):
             rows = self.store.conn.execute(
-                """SELECT n.id, n.type, n.label, n.start_date, n.end_date,
+                """SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                           COUNT(e.src) AS d
                      FROM nodes n
                      LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
@@ -249,7 +293,7 @@ class GraphAPI:
         # 세종(차수 21)은 네 번째로 밀린다 — 실측으로 확인한 순서다.
         # 연도 노드는 검색 대상이 되는 일이 드물어 뒤로 보낸다.
         rows = self.store.conn.execute(
-            """SELECT n.id, n.type, n.label, n.start_date, n.end_date,
+            """SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                       COUNT(e.src) AS d,
                       MIN(CASE WHEN n.label = ?1 THEN 0
                                WHEN n.label LIKE ?1 || '%' THEN 1
@@ -321,11 +365,15 @@ class GraphAPI:
             return None
 
         props = json.loads(row["props"] or "{}")
+        # 또 하나의 이름은 제목 줄에 세운다. '다른 이름' 더미에 같이 두면
+        # 표기 변형과 구별되지 않아 별명처럼 읽힌다 (`co_names` 참고).
+        names = _names(row)
         aliases = [
             r["alias"]
             for r in self.store.conn.execute(
                 "SELECT alias FROM aliases WHERE node_id = ? ORDER BY alias", (node_id,)
             )
+            if r["alias"] not in names
         ]
         rows = self.store.conn.execute(
             """SELECT e.src, e.dst, e.type, e.source, e.confidence, e.props,
@@ -392,6 +440,7 @@ class GraphAPI:
         return {
             "id": row["id"],
             "label": row["label"],
+            "names": names,
             "type": row["type"],
             "group": TYPE_GROUP.get(row["type"], "thing"),
             "type_label": NODE_TYPES.get(row["type"], row["type"]),

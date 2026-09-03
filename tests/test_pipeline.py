@@ -378,6 +378,41 @@ with tempfile.TemporaryDirectory() as tmp:
     check("min_score=2.0 도 서사만 통과", len(load_documents(store, min_score=2.0)) == 1)
     store.close()
 
+# 조각당 수 분이 드는 로컬 추출에서는 **대상을 좁히는 것이 유일한 비용 조절**
+# 이다. 이미 참여자 65명이 붙은 병자호란을 다시 읽어도 나올 것이 없다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "pick.sqlite")
+    store.upsert_nodes([
+        Node(id="ev:full", type="event", label="채워진 사건", source="t",
+             description=narrative),
+        Node(id="ev:empty", type="event", label="빈 사건", source="t",
+             description=narrative),
+        Node(id="ev:stub", type="event", label="토막 사건", source="t",
+             description=narrative[:120]),
+        Node(id="p:1", type="person", label="갑돌", source="t"),
+        Node(id="p:2", type="person", label="을순", source="t"),
+    ])
+    store.upsert_edges([
+        Edge(src="p:1", dst="ev:full", type="participated_in", source="t"),
+        Edge(src="p:2", dst="ev:full", type="participated_in", source="t"),
+        Edge(src="p:1", dst="ev:empty", type="participated_in", source="t"),
+    ])
+    picked = lambda **kw: {d.node_id for d in load_documents(store, min_score=1.0, **kw)}
+    check("참여자 상한 없으면 셋 다", picked() == {"ev:full", "ev:empty", "ev:stub"})
+    check("참여자 1명 초과는 제외", picked(max_participants=1) == {"ev:empty", "ev:stub"})
+    check("참여자 0명만 남기기", picked(max_participants=0) == {"ev:stub"})
+    check("짧은 본문 제외", picked(min_chars=150) == {"ev:full", "ev:empty"})
+    check("둘을 같이 걸기",
+          picked(max_participants=1, min_chars=150) == {"ev:empty"})
+
+    # **대상을 좁혀도 가제티어는 그대로다.** 좁히면서 아는 개체 목록까지
+    # 좁히면 인물 이름이 전부 ex: 고아가 된다 (`--scope` 는 둘 다 좁힌다).
+    from histgraph.extract import build_gazetteer  # noqa: E402
+
+    check("가제티어는 대상 축소와 무관",
+          set(build_gazetteer(store)["person"]) == {"갑돌", "을순"})
+    store.close()
+
 print("\n[족보 목록 제거]")
 # 실측(안방준): '증손부 : 창녕조씨' 꼴 목록을 그대로 주면 모델이 방계
 # 인물을 본인의 배우자로 붙이고, 같은 관계를 4번 반복하는 루프에 빠진다.
@@ -1222,6 +1257,27 @@ print("\n[탐색 서버]")
 from histgraph.server import GraphAPI, TYPE_GROUP, safe_static_path  # noqa: E402
 
 check("모든 노드 타입에 색 갈래가 있음", set(TYPE_GROUP) == set(NODE_TYPES))
+
+# 기축옥사의 별칭은 셋인데 무게가 다르다. '정여립의 난' 은 이 사건을 부르는
+# **또 하나의 이름**이고 나머지 둘은 표기 변형이다. 셋을 한 더미에 넣으면
+# 그 이름이 별명처럼 읽힌다 — 화면에서 안 보였고, 지적받은 자리다.
+from histgraph.server import co_names  # noqa: E402
+
+check("병합해 들인 이름은 또 하나의 이름",
+      co_names("기축옥사", _json.dumps({"merged_from": [{"label": "정여립의 난"}]}))
+      == ["정여립의 난"])
+check("길고 짧은 같은 이름은 세우지 않음",
+      co_names("조선 세조", _json.dumps({"merged_from": [{"label": "세조"}]})) == [])
+check("라벨과 같은 이름은 빼기",
+      co_names("기축옥사", _json.dumps({"merged_from": [{"label": "기축옥사"}]})) == [])
+check("병합 이력이 없으면 없음", co_names("아무개", None) == []
+      and co_names("아무개", "{}") == [])
+check("깨진 props 에도 죽지 않음", co_names("아무개", "{not json") == [])
+check("같은 이름이 두 번 들어와도 한 번",
+      co_names("진주대첩", _json.dumps({"merged_from": [
+          {"label": "제1차 진주성 전투"}, {"label": "제1차 진주성 전투"}]}))
+      == ["제1차 진주성 전투"])
+
 # 색은 갈래만 말하고 타입은 모양이 말한다 — 갈래가 넷을 넘으면 색약에서
 # 구분이 무너진다 (검증기 실측: 8색 전체 조합 최악 ΔE 1.6)
 check("색 갈래는 4개 이하", len(set(TYPE_GROUP.values())) <= 4)
