@@ -8,6 +8,10 @@
 옮기고 결손 원추를 나머지 둘로부터 복원한 뒤 되돌린다. 2형(deutan)이
 가장 흔하고, 여기서도 가장 나쁜 값이 나온다.
 
+**3형(tritan)은 참고만 할 것.** Viénot 의 방법은 저자가 1·2형에만 유효하다고
+밝힌 것이고, 3형은 같은 틀에 끼워 넣은 근사다. 방식마다 값이 크게 달라져
+같은 팔레트를 두고 6 과 14 가 갈리기도 한다. 판단은 1·2형으로 한다.
+
 **이 수치가 말하지 않는 것:** ΔE 는 두 색을 나란히 놓고 견준 값이다.
 화면에서 노드는 흩어져 있고 크기도 작아, 실제 구별은 이보다 어렵다.
 그래서 낮은 값이 나오면 '색 말고 무엇이 그 뜻을 말하는가'를 물어야 한다.
@@ -94,7 +98,9 @@ def worst_pair(colors: dict[str, str], kind: str) -> tuple[float, str, str]:
     return best
 
 
+# 3형은 근사라 눈금 판정(⚠)에서 뺀다 — 위 주석 참고.
 VIEWS = ["정상 시야", "2형(deutan)", "1형(protan)", "3형(tritan)"]
+JUDGED = {"정상 시야", "2형(deutan)", "1형(protan)"}
 
 
 def table(title: str, colors: dict[str, str]) -> float:
@@ -102,9 +108,11 @@ def table(title: str, colors: dict[str, str]) -> float:
     lowest = 1e9
     for kind in VIEWS:
         d, a, b = worst_pair(colors, kind)
-        mark = " ⚠" if d < FLOOR else ""
+        judged = kind in JUDGED
+        mark = " ⚠" if judged and d < FLOOR else "" if judged else "  (참고)"
         print(f"  {kind:12} 최악 쌍 ΔE {d:5.1f}   {a} ↔ {b}{mark}")
-        lowest = min(lowest, d)
+        if judged:
+            lowest = min(lowest, d)
     return lowest
 
 
