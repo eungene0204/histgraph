@@ -61,15 +61,35 @@ run () {
 if [ -e .python-version ]; then
   fail ".python-version 이 이 커밋에 들어 있습니다 — Vercel 런타임은 3.12 이상만 받아 빌드가 죽습니다 (로컬 파일은 두고 git rm --cached 하세요)"
 fi
-if [ ! -f data/joseon.sqlite ]; then
-  fail "data/joseon.sqlite 가 이 커밋에 없습니다 — 배포된 함수가 DB 없이 떠서 /api 가 전부 죽습니다"
-fi
-printf '  ✓ 배포 입력\n'
 
-# 2) 파이썬. 의존성 없이 돈다 — 본체가 표준 라이브러리만 쓰기 때문이다.
+# 2) 배포된 함수가 실제로 대답하는지. **DB 파일 이름을 여기 박아 두지
+#    않는다.** 한 번 그렇게 짰다가 곧바로 낡았다 — 진입점의 기본값이
+#    joseon 에서 korea 로 옮겨 가자, 검사는 있지도 않은 걸 지키며 통과했다.
+#    진입점을 실제로 띄워 /api/meta 를 받아 보면 무엇을 열든 따라간다.
+DEPLOY_CHECK='
+import importlib.util
+spec = importlib.util.spec_from_file_location("entry", "api/index.py")
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+from histgraph.server import dispatch
+st, payload = dispatch(m.api, "/api/meta", {})
+assert st == 200, st
+n = payload["nodes_total"]
+e = payload["edges_total"]
+assert n, payload
+label = payload.get("era_label") or m.ERA
+print(f"{m.DB.name} · {label} · 노드 {n:,} · 엣지 {e:,}")
+'
+if ! out=$(python3 -c "$DEPLOY_CHECK" 2>&1); then
+  printf '  ✗ 배포 API\n\n%s\n' "$(printf '%s' "$out" | tail -20)"
+  fail "배포 진입점이 이 커밋에서 뜨지 못했습니다 — 화면은 떠도 /api 가 전부 죽습니다"
+fi
+printf '  ✓ 배포 API — %s\n' "$out"
+
+# 3) 파이썬. 의존성 없이 돈다 — 본체가 표준 라이브러리만 쓰기 때문이다.
 run '파이썬' python3 tests/test_pipeline.py
 
-# 3) 화면. node_modules 는 빌려 쓴다 — 여기서 npm install 을 하면 push 마다
+# 4) 화면. node_modules 는 빌려 쓴다 — 여기서 npm install 을 하면 push 마다
 #    30초씩 잡아먹는다. 재는 것은 소스이지 의존성 설치가 아니다.
 if [ ! -d "$ROOT/web/node_modules" ]; then
   fail "web/node_modules 가 없어 화면을 재지 못했습니다 — npm install 을 먼저 하세요"

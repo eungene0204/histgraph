@@ -59,14 +59,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
 
-      # 아래 둘은 실제로 겪은 것이다. 배포가 보는 것은 작업 트리가 아니라
-      # 저장소이고, 그 둘이 어긋나면 증상이 조용해서 늦게 알아챈다.
-      #
-      # 여기는 checkout 한 저장소라 '파일이 있다' 가 곧 '저장소에 있다' 이다.
-      # 로컬 pre-push 훅도 같은 것을 재지만, 거기서는 작업 트리가 아니라
-      # 올릴 커밋을 풀어서 잰다 — .python-version 은 로컬에 있는 것이
-      # 정상이라, 작업 트리를 존재로 재면 멀쩡한 맥에서 push 가 늘 막힌다.
+      # 아래는 실제로 겪은 것이다. 배포가 보는 것은 작업 트리가 아니라
+      # 저장소이고, 어긋나면 화면은 멀쩡히 뜨는데 /api 만 죽는다 — 가장
+      # 조용한 실패라 늦게 알아챈다.
 
       - name: .python-version 이 저장소에 없어야 한다
         run: |
@@ -76,10 +75,22 @@ jobs:
           fi
           echo "  없음 — Vercel 이 기본값 3.12 를 씁니다"
 
-      - name: 화면이 띄울 DB 가 저장소에 있어야 한다
+      # **DB 파일 이름을 여기 박아 두지 않는다.** 한 번 그렇게 짰다가 곧바로
+      # 낡았다 — 진입점의 기본값이 joseon 에서 korea 로 옮겨 가자, 검사는
+      # 있지도 않은 것을 지키며 통과했다. 진입점을 실제로 띄워 /api/meta 를
+      # 받아 보면 무엇을 열든 따라간다. 배포된 함수와 같은 3.12 로 잰다.
+      - name: 배포 진입점이 대답해야 한다
         run: |
-          if [ ! -f data/joseon.sqlite ]; then
-            echo "::error::data/joseon.sqlite 가 없습니다. Vercel 은 저장소를 클론해서 빌드하므로, 이 파일이 빠지면 함수가 DB 없이 떠서 /api 가 전부 죽습니다 (화면은 멀쩡히 뜹니다)."
-            exit 1
-          fi
-          printf "  있음 — %s\n" "$(du -h data/joseon.sqlite | cut -f1)"
+          python - <<'PY'
+          import importlib.util
+          spec = importlib.util.spec_from_file_location("entry", "api/index.py")
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          from histgraph.server import dispatch
+          st, payload = dispatch(m.api, "/api/meta", {})
+          assert st == 200, st
+          n, e = payload["nodes_total"], payload["edges_total"]
+          assert n, payload
+          label = payload.get("era_label") or m.ERA
+          print(f"  {m.DB.name} · {label} · 노드 {n:,} · 엣지 {e:,}")
+          PY
