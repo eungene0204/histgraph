@@ -631,6 +631,207 @@ def fetch_spans(
     return out
 
 
+# --- 사건 사이의 뼈대 -------------------------------------------------------
+# 상하위(P361 '~의 일부' / P527 '~로 이루어짐')와 전후(P155 '이전' /
+# P156 '다음'). 수집이 물어본 적 없는 관계다 — 인물↔사건(P1344)만 가져와서
+# **사건끼리는 서로를 모른다**. 실측: '왕자의 난'은 제1차·제2차와 아무
+# 엣지도 없이 홀로 서 있었고(연결 0건), '사화'도 무오·갑자·기묘·을사와
+# 끊겨 있었다. 화면 연표에서 셋이 나란히 서니 이어져 보였을 뿐이다.
+#
+# 여기에 P710·P828·P1542·P276 을 같이 두는 이유: 전부 **사건이 자기 쪽에
+# 적어 둔 관계**인데 수집이 인물 쪽에서만 물어봤다. 참여(P1344)는 인물의
+# 속성이라 사람에게 물으면 나오지만, '이 사건에 누가 참여했나'(P710)는
+# 사건의 속성이라 아무도 안 물어봤다 — 실측: 옥포 해전은 이순신과, 신임사화는
+# 노론·소론과 끊겨 있었다. 원인(P828)·결과(P1542)는 아예 한 건도 없었다.
+EVENT_LINK_PROPS = ("P361", "P527", "P155", "P156", "P710", "P828", "P1542", "P276")
+
+
+def fetch_event_links(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 150,
+    failures: list[str] | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """사건 QID 목록 -> (출발, 도착, 엣지 타입, 엣지 라벨).
+
+    Wikidata 는 같은 사실을 양쪽에 적는다 (제1차는 P361 로 '왕자의 난의
+    일부', 왕자의 난은 P527 로 '제1차로 이루어짐'; 병인박해는 P1542 로
+    '결과는 병인양요', 병인양요는 P828 로 '원인은 병인박해'). 그대로 담으면
+    같은 관계가 방향만 다른 엣지 둘이 되므로 **한 방향으로 모은다** —
+    하위에서 상위로, 앞선 사건에서 뒤 사건으로, 원인에서 결과로.
+
+    양끝 타입은 여기서 보지 않는다. '일본'이 해전의 참가자로 적혀 있는데
+    우리 그래프에서 일본은 place 라 참여 엣지가 될 수 없다 — 그 판정은
+    노드 타입을 아는 호출부(cli)가 한다."""
+    out: set[tuple[str, str, str, str]] = set()
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    props = " ".join(f"wdt:{p}" for p in EVENT_LINK_PROPS)
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?e ?prop ?v WHERE {{
+                  VALUES ?e {{ {values} }}
+                  VALUES ?p {{ {props} }}
+                  ?e ?p ?v .
+                  BIND(STR(?p) AS ?prop)
+                }}""",
+            f"사건 관계/{i}",
+            failures if failures is not None else [],
+        )
+        out.update(links_from_rows(rows))
+    return sorted(out)
+
+
+def links_from_rows(rows: list[dict]) -> set[tuple[str, str, str, str]]:
+    """SPARQL 결과 -> 한 방향으로 모은 관계 집합. 네트워크 없이 시험한다."""
+    out: set[tuple[str, str, str, str]] = set()
+    for r in rows:
+        e, v, prop = _val(r, "e"), _val(r, "v"), _val(r, "prop") or ""
+        if not (e and v and is_real_qid(e) and is_real_qid(v)):
+            continue
+        a, b = _qid(e), _qid(v)
+        if a == b:            # 자기 자신의 일부인 사건은 없다
+            continue
+        prop = prop.rsplit("/", 1)[-1]
+        if prop == "P361":    # a 는 b 의 일부
+            out.add((a, b, "part_of", ""))
+        elif prop == "P527":  # b 는 a 의 일부 — 방향을 뒤집어 담는다
+            out.add((b, a, "part_of", ""))
+        elif prop == "P156":  # a 다음이 b
+            out.add((a, b, "related_to", "다음"))
+        elif prop == "P155":  # a 이전이 b — 앞선 쪽을 출발로
+            out.add((b, a, "related_to", "다음"))
+        elif prop == "P710":  # b 가 a 에 참여했다 (사건이 적어 둔 참가자)
+            out.add((b, a, "participated_in", ""))
+        elif prop == "P828":  # a 의 원인이 b — 원인에서 결과로
+            out.add((b, a, "related_to", "원인"))
+        elif prop == "P1542":  # a 의 결과가 b
+            out.add((a, b, "related_to", "원인"))
+        elif prop == "P276":  # a 가 b 에서 일어났다
+            out.add((a, b, "occurred_at", ""))
+    return out
+
+
+# --- 재위 -----------------------------------------------------------------
+# 재위는 직위(P39)에 붙은 값이 아니라 **그 직위를 언제부터 언제까지 맡았나**
+# 라서, 문장(statement)의 한정어(pq:P580/P582)에만 있다. `wdt:` 로는 절대
+# 안 나오고, 그래서 우리 held_position 엣지 552개는 전부 날짜가 없었다.
+MONARCH_ROOT = "Q116"            # 군주
+# 왕비·황후도 P279* 로 군주에 닿는다 (조선 왕비 → 왕비 → 여왕 → …).
+# 배우자로 있었던 기간은 재위가 아니므로 갈라낸다. 실측으로 이 두 줄이
+# 없으면 조선 왕비 35명이 왕과 같은 띠에 선다.
+CONSORT_ROOTS = ("Q719039", "Q7723211")   # 왕비 · 황후
+
+
+def fetch_monarch_positions(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 150,
+    failures: list[str] | None = None,
+) -> dict[str, str]:
+    """직위 QID 중 '군주 자리'만 골라 라벨과 함께 돌려준다.
+
+    목록을 코드에 박지 않는 이유: 왕조마다 직위 항목이 다르다. 조선은
+    '조선 임금'(Q22304810)이라는 전용 항목을 쓰지만 고려 임금들은 일반
+    항목인 '군주'(Q116)·'왕(王)'(Q12087706)에 걸려 있다 — 박아 두면 고려가
+    통째로 빠진다. 계층(P279*)에 물어보면 그래프에 무엇이 들어오든 걸린다."""
+    out: dict[str, str] = {}
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?pos ?posLabel WHERE {{
+                  VALUES ?pos {{ {values} }}
+                  ?pos wdt:P279* wd:{MONARCH_ROOT} .
+                  {"".join(f"FILTER NOT EXISTS {{ ?pos wdt:P279* wd:{r} }} "
+                           for r in CONSORT_ROOTS)}
+                  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+                }}""",
+            f"군주 직위/{i}",
+            failures if failures is not None else [],
+        )
+        for r in rows:
+            uri = _val(r, "pos")
+            if uri and is_real_qid(uri):
+                out[_qid(uri)] = _val(r, "posLabel") or _qid(uri)
+    return out
+
+
+def fetch_reigns(
+    fetcher: Fetcher,
+    persons: list[str],
+    positions: list[str],
+    chunk: int = 80,
+    failures: list[str] | None = None,
+) -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    """(인물, 직위) -> (재위 시작, 재위 끝).
+
+    한 인물이 같은 자리에 두 번 앉기도 하고(복위), 자리를 옮기기도 한다
+    (고종은 조선 임금이었다가 대한제국 황제가 된다). 그래서 열쇠가 인물
+    하나가 아니라 (인물, 직위) 짝이고, 같은 짝이 여러 번 나오면 가장 이른
+    시작과 가장 늦은 끝으로 모은다.
+
+    **날짜가 없는 문장도 있다.** 추존왕(원종)은 '조선 임금' 자리를 갖고
+    있지만 한정어가 비어 있다 — 재위한 적이 없기 때문이다. 그런 짝은
+    아예 담지 않는다. 없는 것을 0년으로 채우면 연표에 없던 왕이 선다."""
+    out: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    if not positions:
+        return out
+    pos_values = " ".join(f"wd:{q}" for q in sorted(set(positions)) if QID_RE.match(q))
+    ordered = sorted({q for q in persons if QID_RE.match(q)})
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?p ?pos ?s ?e WHERE {{
+                  VALUES ?p {{ {values} }}
+                  VALUES ?pos {{ {pos_values} }}
+                  ?p p:P39 ?st . ?st ps:P39 ?pos .
+                  OPTIONAL {{ ?st pq:P580 ?s }}
+                  OPTIONAL {{ ?st pq:P582 ?e }}
+                }}""",
+            f"재위/{i}",
+            failures if failures is not None else [],
+        )
+        out.update(reigns_from_rows(rows))
+    return out
+
+
+def reigns_from_rows(
+    rows: list[dict],
+) -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    """SPARQL 결과 -> (인물, 직위)별 재위 구간. 네트워크 없이 시험한다."""
+    out: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for r in rows:
+        p_uri, pos_uri = _val(r, "p"), _val(r, "pos")
+        if not (p_uri and pos_uri and is_real_qid(p_uri) and is_real_qid(pos_uri)):
+            continue
+        start, end = _iso_date(_val(r, "s")), _iso_date(_val(r, "e"))
+        if not (start or end):
+            continue
+        # 뒤집힌 값은 버린다. 문자열 비교로도 되는 것은 둘 다 같은
+        # 자릿수의 ISO 날짜일 때뿐이라, 해는 부호 있는 정수로 본다.
+        if start and end and (_year_num(end), end) < (_year_num(start), start):
+            continue
+        key = (_qid(p_uri), _qid(pos_uri))
+        old_start, old_end = out.get(key, (None, None))
+        out[key] = (
+            min((x for x in (start, old_start) if x),
+                key=lambda d: (_year_num(d), d), default=None),
+            max((x for x in (end, old_end) if x),
+                key=lambda d: (_year_num(d), d), default=None),
+        )
+    return out
+
+
+def _year_num(date: str) -> int:
+    """'-0057-01-01' -> -57. 기원전을 문자열로 비교하면 순서가 뒤집힌다."""
+    neg = date.startswith("-")
+    return -int(date.lstrip("-").split("-", 1)[0]) if neg else int(date.split("-", 1)[0])
+
+
 def fetch_aliases(
     fetcher: Fetcher, qids: list[str], chunk: int = 200
 ) -> dict[str, list[str]]:

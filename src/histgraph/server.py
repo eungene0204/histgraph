@@ -451,8 +451,8 @@ class GraphAPI:
 
         **솎지 않는다.** 연대를 아는 사건은 다 세운다 — 연표에서 빠진
         사건은 그 시대에 없었던 일이 된다. 몰린 곳(1590년대에 20건)은
-        라벨이 서로를 밀어내지만, 밀린 만큼은 실선으로 제자리와 이어
-        둔다."""
+        라벨이 서로를 밀어내지만, 밀린 만큼은 가는 실선으로 제자리와
+        이어 둔다."""
         cached = getattr(self._local, "anchors", None)
         if cached is not None:
             return cached
@@ -507,6 +507,61 @@ class GraphAPI:
             })
         out.sort(key=lambda a: a["year"])
         self._local.anchors = out
+        return out
+
+    def _reigns(self) -> list[dict]:
+        """왕의 재위 띠 — 연표 왼쪽에 세로로 서는 자(尺).
+
+        **사건의 자리를 재는 눈금은 왕이다.** 사람이 조선의 시간을 읽는
+        방식이 그렇다 — '1456년'보다 '세조 2년'이, '1592년'보다 '선조
+        때'가 먼저 온다. 그래서 이 띠는 고른 노드가 무엇이든 늘 서 있다.
+
+        재위는 노드가 아니라 **엣지**에 적혀 있다 (`histgraph reigns` 가
+        P39 문장의 한정어를 옮겨 적는다). 날짜가 붙은 held_position 이
+        재위뿐인 것은 지금 우연이므로, `props.reign` 표식이 있는 것만
+        고른다 — 나중에 영의정 재임 기간이 들어와도 왕의 띠에 서지 않는다.
+
+        **사망은 재위의 끝이 아니다.** 태조는 1398년에 물러나 1408년에
+        죽었고, 고종은 1907년에 물러나 1919년에 죽었다. 둘을 한 점으로
+        합치면 상왕으로 산 10년이 사라진다. 그래서 재위 구간과 몰년을
+        따로 넘긴다."""
+        cached = getattr(self._local, "reigns", None)
+        if cached is not None:
+            return cached
+        rows = self.store.conn.execute(
+            """SELECT e.src AS id, e.start_date AS r_start, e.end_date AS r_end,
+                      n.label, n.type, n.start_date, n.end_date,
+                      p.label AS position
+                 FROM edges e
+                 JOIN nodes n ON n.id = e.src
+                 JOIN nodes p ON p.id = e.dst
+                WHERE e.type = 'held_position'
+                  AND json_extract(e.props, '$.reign') IS NOT NULL
+                  AND e.start_date IS NOT NULL AND e.start_date != ''
+             ORDER BY e.start_date"""
+        ).fetchall()
+
+        out: list[dict] = []
+        for r in rows:
+            start = _year(r["r_start"])
+            if start is None:
+                continue
+            # 재위 끝이 비어 있으면(재위 중 죽은 임금 일부) 몰년으로 닫는다.
+            # 그것도 없으면 한 점으로 둔다 — 없는 끝을 오늘로 늘리지 않는다.
+            death = _year(r["end_date"])
+            end = _year(r["r_end"])
+            if end is None:
+                end = death if death is not None and death >= start else start
+            out.append({
+                "id": r["id"], "label": r["label"],
+                "position": r["position"],
+                "start": start, "end": end,
+                # 몰년이 재위 끝보다 앞서면 둘 중 하나가 틀린 것이다.
+                # 화면이 거꾸로 된 꼬리를 그리지 않게 여기서 뗀다.
+                "death": death if death is not None and death >= end else None,
+                "birth": _year(r["start_date"]),
+            })
+        self._local.reigns = out
         return out
 
     def timeline(self, node_id: str) -> dict | None:
@@ -634,8 +689,13 @@ class GraphAPI:
         basis = "self" if start is not None else "near" if near else "era"
 
         # --- 축 ---------------------------------------------------------
+        # **왕의 띠도 축 안에 들어와야 한다.** 축을 사건만으로 잡으면
+        # 고종이 1919년에 죽은 것이 축 밖으로 밀려 띠가 잘린다.
+        reigns = self._reigns()
         span_years = [m["year"] for m in marks] + [
             m["end"] for m in marks if m.get("end") is not None
+        ] + [r["start"] for r in reigns] + [
+            r["death"] or r["end"] for r in reigns
         ]
         # 처음·끝 표시가 가장자리에 딱 붙지 않게 몇 해만 띄운다. 비율로
         # 잡으면 축이 시대 전체(600년)라 앞뒤로 36년씩 빈 데가 생긴다.
@@ -661,6 +721,8 @@ class GraphAPI:
             # 이 연표가 담은 처음과 끝 해. 화면의 훑기 막대가 쓰는 눈금이다.
             "axis": {"from": axis_from, "to": axis_to},
             "marks": marks,
+            # 왕의 재위 띠. 고른 노드와 무관하게 늘 같은 자를 세운다.
+            "reigns": reigns,
         }
 
 

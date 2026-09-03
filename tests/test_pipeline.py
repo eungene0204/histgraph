@@ -1389,6 +1389,213 @@ with tempfile.TemporaryDirectory() as tmp:
           str([m for m in own["marks"] if m["id"] == "wd:Q28179"]))
     store.close()
 
+# --- 재시도가 질문을 바꿔치기하지 않는가 ---------------------------------
+# 실측 회귀: HTTPError 처리에서 응답 본문을 `body` 에 담았는데, 그 `body` 가
+# 다음 재시도에 보낼 **요청 본문**이었다. 503 한 번에 SPARQL 질문이 오류
+# HTML 로 바뀌어 POST 되고, 그 응답이 원래 질문의 캐시 자리에 들어앉는다 —
+# 사건 관계 수집에서 한 구간 98건이 그렇게 조용히 사라졌다.
+import io  # noqa: E402
+import time as _time  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+from histgraph import http as http_mod  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    sent: list[bytes | None] = []
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        sent.append(req.data)
+        if len(sent) == 1:
+            raise urllib.error.HTTPError(
+                req.full_url, 503, "busy", {}, io.BytesIO(b"<html>overloaded</html>"))
+        return _Resp(b'{"results": {"bindings": []}}')
+
+    real_urlopen, real_sleep = urllib.request.urlopen, _time.sleep
+    urllib.request.urlopen = fake_urlopen
+    http_mod.time.sleep = lambda _s: None
+    try:
+        f = http_mod.Fetcher(Path(tmp) / "cache", min_interval=0, retries=3)
+        out = f.post("https://example.test/sparql", {"query": "SELECT ?x WHERE {}"})
+    finally:
+        urllib.request.urlopen = real_urlopen
+        http_mod.time.sleep = real_sleep
+
+    check("재시도가 같은 질문을 다시 보낸다", sent[0] == sent[1], str(sent))
+    check("재시도 응답을 그대로 돌려준다", out.startswith('{"results"'), out[:40])
+    check("오류 본문이 요청에 섞이지 않는다", b"overloaded" not in (sent[1] or b""), str(sent[1]))
+
+# --- 사건 사이의 뼈대 ----------------------------------------------------
+# 실측 회귀: '왕자의 난'은 제1차·제2차와 아무 엣지도 없이 홀로 서 있었다
+# (연결 0건). 수집이 인물↔사건(P1344)만 물어봐서 사건끼리는 서로를 모른다.
+# 연표에서 나란히 서니 이어져 보였을 뿐이다.
+from histgraph.sources.wikidata import links_from_rows  # noqa: E402
+
+_E = "http://www.wikidata.org/entity/"
+
+
+def _lk(a, prop, b):
+    return {"e": {"value": _E + a},
+            "prop": {"value": "http://www.wikidata.org/prop/direct/" + prop},
+            "v": {"value": _E + b}}
+
+
+links = links_from_rows([
+    _lk("Q624181", "P361", "Q12608468"),   # 제1차는 왕자의 난의 일부
+    _lk("Q12608468", "P527", "Q624181"),   # 왕자의 난은 제1차로 이루어짐 (같은 사실)
+    _lk("Q624181", "P156", "Q624222"),     # 제1차 다음은 제2차
+    _lk("Q624222", "P155", "Q624181"),     # 제2차 이전은 제1차 (같은 사실)
+    _lk("Q1", "P361", "Q1"),               # 자기 자신의 일부인 사건은 없다
+    _lk("Q2", "P361", "genid-abc"),        # 값 불명(blank node)
+])
+check("상하위는 하위에서 상위로 한 방향으로 모은다",
+      ("Q624181", "Q12608468", "part_of", "") in links, str(links))
+check("P527 은 방향을 뒤집어 같은 엣지가 된다", len(
+    [x for x in links if x[2] == "part_of"]) == 1, str(links))
+check("전후는 앞선 사건에서 뒤 사건으로 모은다",
+      ("Q624181", "Q624222", "related_to", "다음") in links, str(links))
+check("P155 는 P156 과 같은 엣지로 접힌다",
+      len([x for x in links if x[2] == "related_to"]) == 1, str(links))
+check("자기 자신을 잇지 않는다", not any(x[0] == x[1] for x in links), str(links))
+check("QID 가 아닌 값은 버린다", not any("genid" in x[1] for x in links), str(links))
+
+# 사건이 자기 쪽에 적어 둔 나머지 관계 — 수집이 한 번도 안 물어본 것들
+side = links_from_rows([
+    _lk("Q1", "P710", "Q2"),      # 옥포 해전의 참가자 이순신
+    _lk("Q1", "P828", "Q3"),      # 병인양요의 원인은 병인박해
+    _lk("Q3", "P1542", "Q1"),     # 병인박해의 결과는 병인양요 (같은 사실)
+    _lk("Q1", "P276", "Q4"),      # 위화도 회군은 개성에서
+])
+check("사건이 적어 둔 참가자는 참여 엣지가 된다 (방향은 사람 → 사건)",
+      ("Q2", "Q1", "participated_in", "") in side, str(side))
+check("원인·결과는 원인에서 결과로 한 방향", ("Q3", "Q1", "related_to", "원인") in side, str(side))
+check("원인과 결과가 같은 엣지로 접힌다",
+      len([x for x in side if x[3] == "원인"]) == 1, str(side))
+check("장소는 발생 장소 엣지가 된다", ("Q1", "Q4", "occurred_at", "") in side, str(side))
+
+# --- 사건의 시대: props 에만 있고 엣지로는 없던 것 -----------------------
+# 실측: 같은 사실이 소스에 따라 갈려 있었다. 위키백과 사건은 from_period
+# 엣지로 조선에 붙는데 Wikidata 사건은 props.polity 칸에만 있어서, 화면에
+# 아무 관계도 없는 노드로 떴다 (조선 그래프 105건).
+from histgraph.resolve import link_event_periods  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "ep.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q28179", type="org", label="조선", source="wd"),
+        Node(id="wd:E1", type="event", label="무고의 옥", source="wd",
+             props={"polity": "조선"}),
+        Node(id="wd:E2", type="event", label="고구려 부흥운동", source="wd",
+             props={"polity": "고구려"}),        # 왕조 노드가 없다
+        Node(id="wd:E3", type="event", label="갑자사화", source="wd",
+             props={"polity": "조선"}),
+        Node(id="wd:E4", type="event", label="연도만 아는 일", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:E3", dst="wd:Q28179", type="from_period", source="kowiki"),
+    ])
+    n = link_event_periods(store)
+    got = {(r[0], r[1]) for r in store.conn.execute(
+        "SELECT src, dst FROM edges WHERE type='from_period'")}
+    check("props 에만 있던 시대를 엣지로 세운다", ("wd:E1", "wd:Q28179") in got, str(got))
+    check("왕조 노드가 없으면 잇지 않는다", not any(s == "wd:E2" for s, _ in got), str(got))
+    check("이미 이어진 것은 다시 세지 않는다", n == 1, n)
+    check("두 번 돌려도 늘지 않는다", link_event_periods(store) == 0)
+    store.close()
+
+# --- 왕의 재위 띠 --------------------------------------------------------
+# 실측 회귀: held_position 엣지 552개가 전부 날짜 없음이었다. 재위는
+# P39 문장의 한정어(pq:P580/P582)에만 있어서 `wdt:` 로 긁는 수집이 한 번도
+# 가져온 적이 없다. 그리고 **사망은 재위의 끝이 아니다** — 태조는 1398년에
+# 물러나 1408년에 죽었다.
+from histgraph.sources.wikidata import reigns_from_rows  # noqa: E402
+
+
+def _rg(p, pos, s=None, e=None):
+    row = {"p": {"value": f"http://www.wikidata.org/entity/{p}"},
+           "pos": {"value": f"http://www.wikidata.org/entity/{pos}"}}
+    if s:
+        row["s"] = {"value": s}
+    if e:
+        row["e"] = {"value": e}
+    return row
+
+
+rg = reigns_from_rows([
+    _rg("Q37682", "Q22304810", "1418-08-19T00:00:00Z", "1450-02-26T00:00:00Z"),
+    # 추존왕 — 자리는 있는데 앉은 적이 없다
+    _rg("Q492990", "Q22304810"),
+    # 같은 짝이 두 번(복위) — 가장 이른 시작, 가장 늦은 끝으로 모은다
+    _rg("Q9", "Q1", "1400-01-01T00:00:00Z", "1409-01-01T00:00:00Z"),
+    _rg("Q9", "Q1", "1390-01-01T00:00:00Z", "1395-01-01T00:00:00Z"),
+    # 끝이 시작보다 앞선 값은 버린다
+    _rg("Q8", "Q1", "1500-01-01T00:00:00Z", "1400-01-01T00:00:00Z"),
+    # 기원전 — 문자열로 비교하면 순서가 뒤집힌다 (동명성왕)
+    _rg("Q7", "Q1", "-0037-01-01T00:00:00Z", "-0019-01-01T00:00:00Z"),
+])
+check("P39 한정어에서 재위를 읽는다",
+      rg[("Q37682", "Q22304810")] == ("1418-08-19", "1450-02-26"), str(rg))
+check("추존왕은 재위가 없다", ("Q492990", "Q22304810") not in rg, str(rg))
+check("복위는 가장 이른 시작과 가장 늦은 끝으로 모은다",
+      rg[("Q9", "Q1")] == ("1390-01-01", "1409-01-01"), str(rg))
+check("끝이 시작보다 앞서면 버린다", ("Q8", "Q1") not in rg, str(rg))
+check("기원전 재위도 뒤집히지 않는다",
+      rg[("Q7", "Q1")] == ("-0037-01-01", "-0019-01-01"), str(rg))
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "rg.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:K1", type="person", label="조선 태조", source="wd",
+             start_date="1335", end_date="1408"),
+        Node(id="wd:K2", type="person", label="조선 세종", source="wd",
+             start_date="1397", end_date="1450"),
+        Node(id="wd:K3", type="person", label="조선 원종", source="wd",
+             start_date="1580", end_date="1619"),
+        Node(id="wd:POS", type="role", label="조선 임금", source="wd"),
+        Node(id="wd:OFC", type="role", label="영의정", source="wd"),
+        Node(id="wd:P9", type="person", label="황희", source="wd",
+             start_date="1363", end_date="1452"),
+        Node(id="wd:E1", type="event", label="갑자사화", source="wd",
+             start_date="1504"),
+        Node(id="wd:Q28179", type="org", label="조선", source="wd",
+             start_date="1392", end_date="1897"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:K1", dst="wd:POS", type="held_position", source="wd",
+             start_date="1392-07-25", end_date="1398-09-13", props={"reign": True}),
+        Edge(src="wd:K2", dst="wd:POS", type="held_position", source="wd",
+             start_date="1418-08-19", end_date="1450-02-26", props={"reign": True}),
+        # 추존왕은 날짜가 없다 — 띠에 서면 안 된다
+        Edge(src="wd:K3", dst="wd:POS", type="held_position", source="wd"),
+        # 왕이 아닌 자리에 날짜가 붙어도 왕의 띠에는 서지 않는다
+        Edge(src="wd:P9", dst="wd:OFC", type="held_position", source="wd",
+             start_date="1431-09-03", end_date="1449-10-05"),
+        Edge(src="wd:E1", dst="wd:Q28179", type="part_of", source="wd"),
+    ])
+    api = GraphAPI(store, era="joseon")
+    band = {r["id"]: r for r in api.timeline("wd:E1")["reigns"]}
+    check("재위가 붙은 임금만 띠에 선다", set(band) == {"wd:K1", "wd:K2"}, str(band))
+    check("재위 구간을 그대로 넘긴다",
+          (band["wd:K2"]["start"], band["wd:K2"]["end"]) == (1418, 1450), str(band))
+    # 태조는 1398년에 물러나 1408년에 죽었다. 둘을 한 점으로 합치면
+    # 상왕으로 산 10년이 사라진다.
+    check("퇴위한 임금의 몰년은 재위 끝과 따로 간다",
+          (band["wd:K1"]["end"], band["wd:K1"]["death"]) == (1398, 1408), str(band))
+    check("재위 중에 죽었으면 재위 끝이 곧 몰년",
+          band["wd:K2"]["death"] == 1450, str(band))
+    check("어느 노드를 골라도 같은 띠가 선다",
+          api.timeline("wd:K2")["reigns"] == api.timeline("wd:E1")["reigns"])
+    # 축을 사건만으로 잡으면 태조가 상왕으로 산 10년이 축 밖으로 밀린다
+    check("축이 몰년까지 담는다", api.timeline("wd:E1")["axis"]["to"] >= 1450)
+    store.close()
+
 # --- 시대 서브그래프: 장소 보강 -----------------------------------------
 # 실측 회귀: '위화도 회군'이 이성계의 이웃으로 서브그래프에 들어왔는데
 # 위화도는 두 홉 밖이라 잘려 나갔다. 남은 발생 장소가 개경뿐이어서

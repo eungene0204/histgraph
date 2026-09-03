@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .backends import build_backend
 from .http import Fetcher
-from .ontology import Edge, Node, validate_edge_endpoints
+from .ontology import EDGE_TYPES, Edge, Node, validate_edge_endpoints
 from .sources import culture, datagokr, heritage, wikidata
 from .store import GraphStore
 
@@ -272,6 +272,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         print("→ 장소 연결 중...")
         places = resolve_mod.link_places(store)
         print(f"  ✓ {places}건")
+
+        # 같은 사실이 소스에 따라 엣지(위키백과)와 props(Wikidata)로 갈려
+        # 있었다. 화면이 읽는 것은 엣지다.
+        print("→ 사건의 시대를 엣지로 세우는 중...")
+        eras = resolve_mod.link_event_periods(store)
+        print(f"  ✓ {eras}건")
 
         report = resolve_mod.bridge_report(store)
         print("\n=== 연결 검증 ===")
@@ -593,6 +599,221 @@ def cmd_spans(args: argparse.Namespace) -> int:
     return 0
 
 
+# 엣지에 남길 출처 표기. 어느 속성에서 왔는지 적어 두지 않으면 나중에
+# 이 엣지를 다시 검증할 길이 없다.
+_LINK_PROP = {
+    ("part_of", ""): "P361/P527",
+    ("related_to", "다음"): "P155/P156",
+    ("related_to", "원인"): "P828/P1542",
+    ("participated_in", ""): "P710",
+    ("occurred_at", ""): "P276",
+}
+
+
+def cmd_links(args: argparse.Namespace) -> int:
+    """사건이 자기 쪽에 적어 둔 관계를 채운다.
+
+    **수집은 사건 쪽에서 물어본 적이 없다.** 관계를 인물의 속성으로만
+    긁었다(P1344 '참여'). 그래서 사건이 자기 문서에 적어 둔 것 — 상하위
+    (P361/P527) · 전후(P155/P156) · 참가자(P710) · 원인(P828) · 결과
+    (P1542) · 장소(P276) — 은 통째로 빠져 있었다.
+
+    실측: '왕자의 난'은 제1차·제2차와 아무 엣지도 없이 홀로 서 있었고
+    (연결 0건), 옥포 해전은 이순신과, 신임사화는 노론·소론과 끊겨 있었다.
+    원인·결과 엣지는 그래프 전체에 한 건도 없었다 — 병인박해가 병인양요를
+    불렀다는 것을 그래프는 모르고 있었다.
+
+    **없는 사건을 새로 만들지는 않는다.** 반대쪽 끝이 그래프에 없으면
+    건너뛰고 수만 보고한다 — 여기서 노드를 만들기 시작하면 교황청
+    콘클라베처럼 한국사와 무관한 사건이 딸려 들어온다. 그건 events·
+    enrich 가 할 일이다."""
+    with GraphStore(args.db) as store:
+        rows = store.conn.execute(
+            "SELECT id, label FROM nodes WHERE type = 'event' AND id LIKE 'wd:%'"
+        ).fetchall()
+        if not rows:
+            print("  Wikidata 사건 노드가 없습니다.")
+            return 0
+        labels = dict(store.conn.execute("SELECT id, label FROM nodes"))
+        print(f"  사건 노드 {len(rows):,}개 조회 중...")
+
+        fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.5))
+        failures: list[str] = []
+        links = wikidata.fetch_event_links(
+            fetcher, [r["id"][len("wd:"):] for r in rows], failures=failures
+        )
+
+        types = dict(store.conn.execute("SELECT id, type FROM nodes"))
+        known = set(labels)
+        edges, outside, twins, mistyped = [], 0, [], []
+        for a, b, etype, elabel in links:
+            src, dst = f"wd:{a}", f"wd:{b}"
+            if src not in known or dst not in known:
+                outside += 1
+                continue
+            # **양끝 타입이 스키마에 맞아야 담는다.** Wikidata 는 옥포 해전의
+            # 참가자로 이순신과 '일본'을 나란히 적어 두는데, 우리 그래프에서
+            # 일본은 place 라 '장소가 해전에 참여했다'가 된다. 온톨로지가
+            # 막아 주는 것을 여기서 버리고, 몇 건인지는 반드시 보고한다.
+            _, ok_src, ok_dst = EDGE_TYPES[etype]
+            if types.get(src) not in ok_src or types.get(dst) not in ok_dst:
+                mistyped.append((src, dst, etype))
+                continue
+            # **이름이 같은 두 노드는 잇지 않는다.** 실측: Wikidata 는
+            # 임진왜란을 1592~1593년 침입(Q122846639)과 1592~1598년
+            # 전쟁(Q576338) 둘로 두고 앞의 것을 뒤의 것의 일부로 적는데,
+            # 우리 그래프는 둘 다 라벨이 '임진왜란'이라 화면에 "임진왜란은
+            # 임진왜란의 일부다"가 뜬다. 사실은 맞지만 읽을 수 없는 문장이고,
+            # 여기서 이을 일이 아니라 노드를 합칠 일이다. 보고만 한다.
+            if labels.get(src) == labels.get(dst):
+                twins.append((src, dst, labels.get(src, "")))
+                continue
+            edges.append(Edge(
+                src=src, dst=dst, type=etype, source="wd", label=elabel or None,
+                props={"wikidata_property": _LINK_PROP[(etype, elabel)]},
+            ))
+
+        # 이미 있는 엣지와 새로 생기는 엣지를 갈라 센다. 다시 돌릴 때
+        # '296건 이었습니다'만 찍히면 무엇이 늘었는지 알 수 없다.
+        existing = {
+            (r[0], r[1], r[2])
+            for r in store.conn.execute(
+                "SELECT src, dst, type FROM edges WHERE source = 'wd'")
+        }
+        fresh = [e for e in edges if (e.src, e.dst, e.type) not in existing]
+        before = store.stats()["by_edge_type"]
+        for e in fresh[:15]:
+            head = e.label or EDGE_TYPES[e.type][0]
+            print(f"    {labels.get(e.src, e.src)[:22]:24} —{head}→ {labels.get(e.dst, e.dst)}")
+        if len(fresh) > 15:
+            print(f"    … 그 밖 {len(fresh) - 15:,}건")
+        if not args.dry_run and edges:
+            store.upsert_edges(edges)
+        after = store.stats()["by_edge_type"]
+
+        head = "새로 이을 관계" if args.dry_run else "새로 이은 관계"
+        kinds = {}
+        for e in fresh:
+            kinds[e.type] = kinds.get(e.type, 0) + 1
+        shape = " · ".join(f"{k} {v:,}" for k, v in sorted(kinds.items())) or "없음"
+        print(f"\n  {head} {len(fresh):,}건 ({shape})"
+              f" · 이미 있던 것 {len(edges) - len(fresh):,}건")
+        for kind in sorted(kinds):
+            print(f"    {kind}: {before.get(kind, 0):,} → {after.get(kind, 0):,}")
+        # 반대쪽 끝이 없는 관계도 반드시 센다. '없는 관계'와 '못 담은
+        # 관계'가 같은 얼굴이면 그래프의 결손을 알 수 없다.
+        print(f"  반대쪽 개체가 그래프에 없어 건너뜀 {outside:,}건")
+        if mistyped:
+            kinds2: dict[str, int] = {}
+            for _, _, t in mistyped:
+                kinds2[t] = kinds2.get(t, 0) + 1
+            shape2 = " · ".join(f"{k} {v:,}" for k, v in sorted(kinds2.items()))
+            print(f"  양끝 타입이 스키마에 안 맞아 건너뜀 {len(mistyped):,}건 ({shape2})")
+            for src, dst, t in mistyped[:5]:
+                print(f"    {labels.get(src, src)}({types.get(src)})"
+                      f" -{t}-> {labels.get(dst, dst)}({types.get(dst)})")
+        if twins:
+            print(f"\n  ⚠ 이름이 같은 두 노드를 잇는 관계 {len(twins)}건 — 중복 의심,"
+                  f" 잇지 않았습니다:")
+            for src, dst, label in twins[:6]:
+                print(f"    {label}: {src} ↔ {dst}")
+        if failures:
+            print(f"  ⚠ 실패한 쿼리 {len(failures)}건 — 재실행하면 그 구간만 다시 시도합니다.",
+                  file=sys.stderr)
+    return 0
+
+
+def cmd_reigns(args: argparse.Namespace) -> int:
+    """왕의 재위 기간을 held_position 엣지에 채운다.
+
+    **재위는 노드가 아니라 엣지의 값이다.** 인물 노드의 P569/P570 은
+    생몰이고, 직위 노드(조선 임금)에 적을 수도 없다 — '언제부터 언제까지
+    그 자리에 있었나'는 그 둘을 잇는 엣지의 성질이다. Wikidata 에서도
+    P39 문장의 한정어(pq:P580/P582)에만 있어서 `wdt:` 로 긁는 우리 수집은
+    한 번도 가져온 적이 없었다. 실측: 조선 그래프의 held_position 552개가
+    전부 날짜 없음.
+
+    다시 수집해도 지워지지는 않는다 — `upsert_edges` 의 ON CONFLICT 는
+    날짜 칸을 갱신하지 않는다. 다만 props 는 덮어쓰므로(`props =
+    excluded.props`) 재위 표식은 날아간다. 수집 뒤에 다시 돌릴 것."""
+    with GraphStore(args.db) as store:
+        pairs = store.conn.execute(
+            """SELECT src, dst FROM edges
+                WHERE type = 'held_position'
+                  AND src LIKE 'wd:%' AND dst LIKE 'wd:%'"""
+        ).fetchall()
+        if not pairs:
+            print("  직위 엣지가 없습니다.")
+            return 0
+        labels = dict(store.conn.execute("SELECT id, label FROM nodes"))
+        positions = sorted({r["dst"][len("wd:"):] for r in pairs})
+        print(f"  직위 엣지 {len(pairs):,}개 · 직위 {len(positions):,}종 조회 중...")
+
+        fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.5))
+        failures: list[str] = []
+        monarch = wikidata.fetch_monarch_positions(
+            fetcher, positions, failures=failures
+        )
+        if not monarch:
+            print("  군주 자리에 해당하는 직위가 없습니다.")
+            return 0
+        print(f"  군주 자리 {len(monarch)}종: "
+              + " · ".join(sorted(monarch.values()))[:150])
+
+        wanted = [r for r in pairs if r["dst"][len("wd:"):] in monarch]
+        persons = sorted({r["src"][len("wd:"):] for r in wanted})
+        print(f"  그 자리에 앉은 인물 {len(persons):,}명 — 재위 조회 중...")
+        reigns = wikidata.fetch_reigns(
+            fetcher, persons, list(monarch), failures=failures
+        )
+
+        filled = 0
+        seated: set[str] = set()      # 재위를 하나라도 채운 인물
+        for r in wanted:
+            key = (r["src"][len("wd:"):], r["dst"][len("wd:"):])
+            start, end = reigns.get(key, (None, None))
+            if not (start or end):
+                continue
+            filled += 1
+            seated.add(r["src"])
+            if filled <= 12:
+                print(f"    {labels.get(r['src'], r['src'])[:16]:18}"
+                      f" {start or '?'} ~ {end or '?'}"
+                      f"  ({monarch[key[1]]})")
+            if args.dry_run:
+                continue
+            # 날짜만 넣지 않고 '이건 재위다'를 함께 적는다. 나중에 다른
+            # 직위(영의정 재임)에도 날짜가 붙으면 화면이 둘을 갈라야 한다.
+            store.conn.execute(
+                """UPDATE edges
+                      SET start_date = ?, end_date = ?,
+                          props = json_set(COALESCE(NULLIF(props, ''), '{}'),
+                                           '$.reign', json('true'))
+                    WHERE src = ? AND dst = ? AND type = 'held_position'""",
+                (start, end, r["src"], r["dst"]),
+            )
+        if not args.dry_run:
+            store.conn.commit()
+
+        head = "채울 재위" if args.dry_run else "채운 재위"
+        print(f"\n  {head} {filled:,}건 / 자리 {len(wanted):,}건"
+              f" · 재위를 아는 인물 {len(seated):,}명 / {len(persons):,}명")
+        # **한 인물이 같은 자리를 두 항목으로 갖기도 한다.** 정종은
+        # '조선 임금'과 일반 '왕' 둘에 걸려 있고 날짜는 앞의 것에만 있다.
+        # 빠진 자리를 세면 정종이 '재위를 모르는 왕'이 되므로, 못 채운
+        # 것은 자리가 아니라 **사람**으로 센다.
+        missing = [r["src"] for r in wanted if r["src"] not in seated]
+        if missing:
+            # 추존왕은 그 자리를 가졌지만 앉은 적이 없다. 0년으로 채우면
+            # 연표에 없던 왕이 서므로 비운 채로 두고 이름만 남긴다.
+            names = " · ".join(labels.get(i, i) for i in sorted(set(missing)))
+            print(f"  재위 날짜가 없는 인물 {len(set(missing))}명 (추존 등): {names[:160]}")
+        if failures:
+            print(f"  ⚠ 실패한 쿼리 {len(failures)}건 — 재실행하면 그 구간만 다시 시도합니다.",
+                  file=sys.stderr)
+    return 0
+
+
 def cmd_aliases(args: argparse.Namespace) -> int:
     """Wikidata 의 한국어 별칭(skos:altLabel)을 채운다.
 
@@ -848,6 +1069,16 @@ def main(argv: list[str] | None = None) -> int:
                       help="채울 노드 타입 (기본: 인물 제외 — 인물은 28,961개라 따로 돌린다)")
     p_al.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_al.set_defaults(func=cmd_aliases)
+
+    p_lk = sub.add_parser("links", help="사건끼리의 상하위·전후 관계 (P361/P527/P155/P156)")
+    p_lk.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
+    p_lk.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
+    p_lk.set_defaults(func=cmd_links)
+
+    p_rg = sub.add_parser("reigns", help="왕의 재위 기간을 직위 엣지에 채운다 (P39 한정어)")
+    p_rg.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
+    p_rg.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
+    p_rg.set_defaults(func=cmd_reigns)
 
     p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
     p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,

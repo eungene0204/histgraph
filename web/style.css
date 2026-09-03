@@ -163,7 +163,8 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* --- 연표 ---
    그래프는 관계만 말하고 시간은 말하지 않는다. 고른 노드가 몇 년쯤의
    일이고 무엇 뒤 무엇 앞인지를 이 막대가 맡는다. 자리는 연도에 비례하고,
-   겹쳐서 밀린 라벨은 실선으로 제자리와 이어 둔다. */
+   겹쳐서 밀린 라벨은 가는 회색 실선으로 제자리와 이어 둔다 — 노드 색으로
+   그었더니 관계선으로 읽혔다. 갈리는 것은 선의 모양이 아니라 색이다. */
 .timeline {
   width: 252px; flex: none;
   position: relative;
@@ -251,7 +252,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 }
 
 .tl-mark {
-  position: absolute; left: 0; right: 8px; transform: translateY(-50%);
+  position: absolute; left: var(--lane, 0px); right: 8px; transform: translateY(-50%);
   display: flex; align-items: baseline; gap: 6px;
   padding: 3px 4px 3px 0;
   background: none; border: none; border-radius: 6px;
@@ -275,6 +276,43 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .tl-mark.k-anchor:hover { color: var(--text-2); }
 /* 왕조 자신. 사건이 아니라 그것들이 놓인 틀이라 조금 물러나 있다. */
 .tl-mark.k-era { color: var(--text-2); font-weight: 600; }
+/* --- 왕의 재위 띠 ---
+   막대가 재위, 동그라미가 사망. 물러나서도 산 임금이 여럿이라(태조는
+   1398년에 물러나 1408년에 죽었다) 둘을 한 점으로 합칠 수 없다. 그 사이는
+   점선으로 잇는다 — 상왕으로 산 기간이다. */
+.tl-kings {
+  margin-top: 7px; padding: 2px 8px;
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--text-3); font: inherit; font-size: 10.5px; cursor: pointer;
+}
+.tl-kings:hover { color: var(--text-2); border-color: var(--text-3); }
+.tl-kings[aria-pressed="true"] { color: var(--actor); border-color: var(--actor); }
+.tl-reign-bar { pointer-events: auto; cursor: pointer; }
+.tl-reign-bar:hover { opacity: 1 !important; }
+/* 고른 노드가 누구 때의 일인지 — 그 임금의 막대만 밝다. */
+.tl-reign-bar.k-on { filter: brightness(1.15); }
+.tl-reign {
+  position: absolute; left: 27px; width: 70px;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 0; background: none; border: none;
+  color: var(--text-2); font: inherit; font-size: 11px; line-height: 1.25;
+  text-align: left; cursor: pointer;
+}
+.tl-reign b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-reign i {
+  font-style: normal; font-size: 10px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.tl-reign.k-on { color: var(--text); }
+.tl-reign.k-on b { color: var(--actor); }
+.tl-reign:hover { color: var(--text); }
+.tl-reign:hover i { color: var(--text-2); }
+/* 몰년만 따로 적은 줄. 재위 막대가 끝난 뒤의 표식이라 더 물러나 있다. */
+/* 몰년 줄은 한 줄이라 표식 높이에 맞춰 가운데로 올린다. */
+.tl-reign.k-death { transform: translateY(-50%); }
+.tl-reign.k-death i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-reign.k-death i { color: var(--text-3); opacity: .8; }
+
 .tl-empty { padding: 16px 14px; color: var(--text-3); font-size: 12px; line-height: 1.6; }
 
 .tl-body::-webkit-scrollbar { width: 9px; }

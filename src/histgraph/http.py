@@ -134,12 +134,19 @@ class Fetcher:
             except urllib.error.HTTPError as err:
                 # 공공 API 는 인증 실패 사유를 4xx 응답 '본문'에 담아 보낸다.
                 # 여기서 삼켜버리면 호출부가 401 인지 경로 오류인지 알 수 없다.
-                body = err.read().decode("utf-8", errors="replace")
+                #
+                # **응답 본문을 `body` 에 담지 말 것.** `body` 는 우리가 보낼
+                # 요청 본문이다. 여기에 에러 페이지를 덮어쓰면 다음 재시도가
+                # SPARQL 대신 오류 HTML 을 POST 하고, 그 응답이 원래 질문의
+                # 캐시 자리에 들어앉는다 — 재시도 한 번에 그 구간의 결과가
+                # 조용히 비어 버린다 (실측: 사건 관계 수집에서 한 구간
+                # 98건이 그렇게 사라졌다).
+                err_body = err.read().decode("utf-8", errors="replace")
                 if err.code in NO_RETRY_STATUS:
                     # 캐시에 쓰지 않는다 — 실패 응답을 캐싱하면 신청 승인 후에도
                     # 계속 옛 에러가 돌아온다.
                     log.debug("HTTP %d %s", err.code, redact(url))
-                    return body
+                    return err_body
                 last_err = err
                 # WDQS 는 과호출 시 403/502 로 막는다 — 공격적으로 물러난다.
                 backoff = 5.0 if err.code in RETRY_STATUS else 1.0

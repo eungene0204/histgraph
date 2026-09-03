@@ -8,7 +8,10 @@
 // **자리는 연도에 비례한다.** 목록으로 늘어놓으면 1400년과 1401년 사이가
 // 1400년과 1500년 사이와 똑같이 벌어져, 연표라고 부를 수 없게 된다.
 // 다만 라벨은 겹치면 못 읽으므로 밀어서 떨어뜨리고, 실제 자리와 밀린
-// 자리는 실선으로 이어 둔다 — 어긋난 만큼이 눈에 보여야 속지 않는다.
+// 자리는 가는 실선으로 이어 둔다 — 어긋난 만큼이 눈에 보여야 속지 않는다.
+// 그 선에 노드 색을 쓰지 않는 이유는 관계선으로 읽히기 때문이다 (실측:
+// 1398년에 나란히 선 '왕자의 난'과 '제1차 왕자의 난'이 이어진 것으로
+// 보였는데, 그때 그래프에는 둘 사이에 엣지가 하나도 없었다).
 //
 // **줌은 자리가 아니라 밀도를 바꾼다.** 지도가 멀리서는 큰 도시만, 가까이
 // 가면 동네까지 보여주듯이, 연표도 멀리서는 큰 사건만 세우고 가까이 갈수록
@@ -18,7 +21,23 @@
 
 import { GROUP_COLOR } from '/graph.js';
 
-const AXIS_X = 46;    // 세로축이 서는 자리 (왼쪽은 연도 칸)
+// **왼쪽에는 왕의 재위 띠가 선다.** 조선의 시간을 사람은 절대 연도가
+// 아니라 임금으로 읽는다 — '1456년'보다 '세조 때'가 먼저 온다. 재위는
+// 구간이므로 점이 아니라 막대로 긋고, 사망은 재위의 끝이 아니라서
+// (태조는 1398년에 물러나 1408년에 죽었다) 따로 찍어 점선으로 잇는다.
+const LANE_W = 104;   // 재위 띠 칸의 너비 (끄면 0)
+const BAR_X = 11;     // 재위 막대가 서는 자리 (칸 안에서)
+const BAR_W = 6;
+// 몰년 표식은 막대 옆으로 비켜 세운다. 같은 x 에 찍으면 다음 임금의
+// 막대가 그 위를 덮어 '물러난 뒤 산 기간'이 통째로 안 보인다.
+const DEATH_X = 19;
+// 띠 라벨은 이름과 연도 두 줄이라 26px 를 먹는다. 이보다 가까우면
+// 글자가 서로를 덮어 둘 다 못 읽는다 (실측: 13px 로 두었더니 문종 위에
+// 예종이, 광해군 위에 인조가 얹혔다).
+const LANE_GAP = 26;
+const PANEL_W = 252;  // 띠를 뺀 연표 패널의 너비 (style.css 와 같은 값)
+
+const AXIS_X = 46;    // 세로축이 서는 자리 (왼쪽은 연도 칸) — 띠 너비만큼 밀린다
 const DOT_X = 58;     // 라벨이 시작하는 자리
 const PAD_TOP = 18;   // 첫 표시가 머리에 붙지 않게
 // 아래는 넉넉히 둔다. 마지막 사건이 축 끝에 딱 붙으면 스크롤을 끝까지
@@ -43,13 +62,20 @@ export class TimelineRail {
     this.head = root.querySelector('.tl-head');
     // 새로고침해도 들여다보던 배율을 지킨다. 못 읽으면 0단계.
     this.level = 0;
-    try { this.level = clamp(+localStorage.getItem('tl-zoom') || 0, 0, MAX_LEVEL); } catch { /* 비공개 창 등 */ }
+    this.lane = 0;
+    // 재위 띠는 기본으로 켠다. 끈 사람은 그 선택을 기억한다.
+    this.showReigns = true;
+    try {
+      this.level = clamp(+localStorage.getItem('tl-zoom') || 0, 0, MAX_LEVEL);
+      this.showReigns = localStorage.getItem('tl-reigns') !== '0';
+    } catch { /* 비공개 창 등 */ }
     this.focusPy = 0;
     // 지금 배치의 축 — 연도 <-> 픽셀 환산에 쓴다
     this.axis = { from: 0, to: 1, H: 1 };
 
+    // 재위 막대와 띠 라벨도 노드다 — 누르면 그 임금으로 옮긴다.
     this.body.addEventListener('click', (ev) => {
-      const el = ev.target.closest('.tl-mark[data-id]');
+      const el = ev.target.closest('.tl-mark[data-id], .tl-reign[data-id], .tl-reign-bar[data-id]');
       if (el) this.onPick(el.dataset.id);
     });
     // 연표가 화면보다 길어졌으니 훑다 보면 고른 자리를 잃는다. 머리의
@@ -58,6 +84,7 @@ export class TimelineRail {
       if (ev.target.closest('.tl-when')) this.recenter();
       const z = ev.target.closest('.tl-zoom button');
       if (z) this.zoom(+z.dataset.dir);
+      if (ev.target.closest('.tl-kings')) this.toggleReigns();
     });
 
     this.body.addEventListener('scroll', () => this.syncMap(), { passive: true });
@@ -118,6 +145,7 @@ export class TimelineRail {
   // --- 머리: 몇 년인가 --------------------------------------------------
   renderHead() {
     const d = this.data;
+    const kings = (d.reigns || []).length;
     const when = d.year === null ? '연도 미상'
       : d.end !== null && d.end !== d.year ? `${yr(d.year)} ~ ${yr(d.end)}`
       : yr(d.year);
@@ -145,6 +173,8 @@ export class TimelineRail {
       </div>
       <button class="tl-when" title="고른 자리로 돌아가기">${esc(when)}${via}</button>
       <div class="tl-count"></div>
+      ${kings ? `<button class="tl-kings" aria-pressed="${this.showReigns}"
+            title="왼쪽에 왕의 재위 기간을 막대로 세웁니다">왕 ${kings}</button>` : ''}
       <div class="tl-map" hidden title="누르거나 끌어서 연표를 옮깁니다">
         <span>${d.axis.from}</span>
         <div class="tl-map-bar"><i class="tl-map-view"></i><b class="tl-map-here" hidden></b></div>
@@ -174,6 +204,14 @@ export class TimelineRail {
     this.syncMap();
   }
 
+  // 재위 띠를 켜고 끈다. 패널이 그만큼 넓어졌다 좁아진다.
+  toggleReigns() {
+    this.showReigns = !this.showReigns;
+    try { localStorage.setItem('tl-reigns', this.showReigns ? '1' : '0'); } catch { /* 저장 못 해도 동작한다 */ }
+    this.renderHead();
+    this.layout({ keepView: true });
+  }
+
   yOf(year) {
     const { from, to, H } = this.axis;
     return PAD_TOP + (clamp(year, from, to) - from) / Math.max(to - from, 1) * (H - PAD_TOP - PAD_BOTTOM);
@@ -195,6 +233,13 @@ export class TimelineRail {
     }
     // 창 크기가 바뀌어 다시 그리는 경우엔 보던 해를 지킨다
     const viewYear = keepView ? this.yearAt(this.body.scrollTop + this.body.clientHeight / 2) : null;
+
+    // 재위 띠가 왼쪽 칸을 먹고, 축과 라벨은 그만큼 오른쪽으로 밀린다.
+    const reigns = (d.reigns || []);
+    const lane = this.lane = this.showReigns && reigns.length ? LANE_W : 0;
+    this.root.style.width = `${PANEL_W + lane}px`;
+    const AX = lane + AXIS_X;
+    const DX = lane + DOT_X;
 
     const { from, to } = d.axis;
     const span = Math.max(to - from, 1);
@@ -248,16 +293,23 @@ export class TimelineRail {
       // 축 위에 겹쳐 그리면 그 위의 사건 점들을 다 덮는다.
       const hasSpan = m.end != null && m.end !== m.year;
       const bar = m.kind === 'self' && hasSpan
-        ? `<line x1="${AXIS_X}" y1="${ty}" x2="${AXIS_X}" y2="${at(m.end)}"
+        ? `<line x1="${AX}" y1="${ty}" x2="${AX}" y2="${at(m.end)}"
                  stroke="${c}" stroke-width="4" stroke-linecap="round" opacity=".85"/>`
         : m.kind === 'era' && hasSpan
-        ? `<line x1="${AXIS_X - 6}" y1="${ty}" x2="${AXIS_X - 6}" y2="${at(m.end)}"
+        ? `<line x1="${AX - 6}" y1="${ty}" x2="${AX - 6}" y2="${at(m.end)}"
                  stroke="${c}" stroke-width="2" stroke-linecap="round" opacity=".5"/>`
         : '';
-      return `${bar}
-        <path d="M${AXIS_X} ${ty} C${AXIS_X + 7} ${ty}, ${DOT_X - 9} ${py}, ${DOT_X - 2} ${py}"
-              fill="none" stroke="${c}" stroke-width="1" opacity=".45"/>
-        <circle cx="${AXIS_X}" cy="${ty}" r="${m.kind === 'self' ? 4 : 2.6}" fill="${c}"/>`;
+      // 라벨이 제 해에서 밀렸을 때만 잇는다. **관계선처럼 보이면 안 된다** —
+      // 실측: 1398년에 '왕자의 난'과 '제1차 왕자의 난'이 함께 서서 한 줄이
+      // 밀렸는데, 노드 색으로 그은 선이라 둘이 이어진 것으로 읽혔다
+      // (그때 그래프에는 둘 사이에 엣지가 하나도 없었다). 갈리는 것은 색이다 —
+      // 회색 실선은 글자를 제자리에 데려다 놓는 안내선이지 관계가 아니다.
+      const off = Math.abs(py - ty) > 1.5
+        ? `<path d="M${AX} ${ty} C${AX + 7} ${ty}, ${DX - 9} ${py}, ${DX - 2} ${py}"
+                 fill="none" stroke="var(--text-3)" stroke-width="1" opacity=".45"/>`
+        : '';
+      return `${bar}${off}
+        <circle cx="${AX}" cy="${ty}" r="${m.kind === 'self' ? 4 : 2.6}" fill="${c}"/>`;
     }).join('');
 
     const items = place.map(({ m, py }) => `
@@ -268,13 +320,19 @@ export class TimelineRail {
         ${m.rel ? `<span class="tl-rel">${esc(relHead(m.rel))}</span>` : ''}
       </button>`).join('');
 
+    const band = lane
+      ? this.reignBand(reigns, at, { id: d.id, year: d.year })
+      : { svg: '', items: '', named: 0 };
+
     this.body.innerHTML = `
-      <div class="tl-canvas" style="height:${H}px">
+      <div class="tl-canvas" style="height:${H}px; --lane:${lane}px">
         <svg class="tl-wires" width="100%" height="${H}" aria-hidden="true">
-          <line x1="${AXIS_X}" y1="${PAD_TOP - 8}" x2="${AXIS_X}" y2="${H - PAD_BOTTOM + 8}"
+          <line x1="${AX}" y1="${PAD_TOP - 8}" x2="${AX}" y2="${H - PAD_BOTTOM + 8}"
                 stroke="var(--line)" stroke-width="1"/>
+          ${band.svg}
           ${wires}
         </svg>
+        ${band.items}
         ${items}
       </div>`;
 
@@ -285,6 +343,17 @@ export class TimelineRail {
     if (count) {
       count.innerHTML = `큰 사건 <b>${shown}</b> / ${bones.length}`
         + (hidden ? ` <span class="tl-more">· 더 보려면 +</span>` : '');
+    }
+    const chip = this.head.querySelector('.tl-kings');
+    if (chip) {
+      const all = reigns.length;
+      chip.textContent = !lane || band.named >= all ? `왕 ${all}` : `왕 ${band.named}/${all}`;
+      chip.title = !lane
+        ? '왼쪽에 왕의 재위 기간을 막대로 세웁니다'
+        : band.named >= all
+        ? '막대가 재위, 동그라미가 몰년입니다'
+        : `이름을 세울 자리가 모자란 임금 ${all - band.named}명은 막대만 있습니다`
+          + ' — 줌인하거나 막대에 마우스를 올리면 이름이 나옵니다';
     }
     const lvl = this.head.querySelector('.tl-level');
     if (lvl) {
@@ -308,6 +377,83 @@ export class TimelineRail {
     if (recenter) this.recenter();
     else if (viewYear !== null) this.body.scrollTop = this.yOf(viewYear) - this.body.clientHeight / 2;
     this.syncMap();
+  }
+
+  // --- 왼쪽 칸: 왕의 재위 띠 ------------------------------------------
+  // 막대 = 재위, 동그라미 = 사망. 둘을 한 점으로 합치지 않는 이유는
+  // 물러나서도 산 임금이 여럿이기 때문이다 (태조 1398 퇴위 · 1408 사망,
+  // 고종 1907 퇴위 · 1919 사망). 재위 중에 죽은 임금은 막대 끝과 동그라미가
+  // 같은 자리에 겹치고, 그때 몰년은 막대 라벨의 뒷 숫자가 곧 몰년이다.
+  reignBand(reigns, at, self = {}) {
+    const c = GROUP_COLOR.actor;
+    const svg = [];
+    const labels = [];       // {y, prio, html}
+    // **고른 노드가 누구 때의 일인지 띠에서 바로 보이게 한다.** 연표가
+    // 답해야 할 물음이 그것이다 — 갑자사화(1504)를 고르면 연산군의 막대가
+    // 밝아진다. 고른 노드가 임금 자신이면 그 임금이 밝아진다.
+    const now = (r) => self.id === r.id
+      || (self.year != null && self.year >= r.start && self.year <= r.end);
+    for (const [i, r] of reigns.entries()) {
+      const y1 = at(r.start);
+      const y2 = Math.max(at(r.end), y1 + 2);
+      const dy = r.death != null ? at(r.death) : null;
+      const tip = `${r.label} · ${r.position} 재위 ${yr(r.start)}~${yr(r.end)}`
+        + (r.death != null ? ` · ${yr(r.death)} 사망` : '');
+      // 이웃한 재위는 끝과 시작이 맞닿는다. 한 칸씩 걸러 진하게 칠해야
+      // 어디서 갈리는지 보인다.
+      const on = now(r);
+      svg.push(`<rect class="tl-reign-bar${on ? ' k-on' : ''}" data-id="${esc(r.id)}"
+          x="${BAR_X - BAR_W / 2}" y="${y1.toFixed(1)}" width="${BAR_W}"
+          height="${(y2 - y1).toFixed(1)}" rx="${BAR_W / 2}" fill="${c}"
+          opacity="${on ? 1 : i % 2 ? 0.5 : 0.78}"><title>${esc(tip)}</title></rect>`);
+      if (dy != null && dy - y2 > 2) {
+        // 물러난 뒤 산 기간. 막대에서 비스듬히 빠져나와 몰년에 닿는다.
+        svg.push(`<path d="M${BAR_X} ${y2.toFixed(1)} L${DEATH_X} ${dy.toFixed(1)}"
+            fill="none" stroke="${c}" stroke-width="1" stroke-dasharray="2 3" opacity=".6"/>`);
+      }
+      if (dy != null) {
+        svg.push(`<circle cx="${DEATH_X}" cy="${dy.toFixed(1)}" r="2.8"
+            fill="var(--surface-2)" stroke="${c}" stroke-width="1.4"><title>${esc(tip)}</title></circle>`);
+      }
+      labels.push({
+        y: y1, prio: 0,
+        html: `<button class="tl-reign${on ? ' k-on' : ''}" data-id="${esc(r.id)}" style="top:${y1.toFixed(1)}px"
+                 title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${shortYear(r.start)}~${shortYear(r.end)}</i></button>`,
+      });
+      // 퇴위 뒤에도 산 임금만 몰년을 따로 적는다. 재위 중에 죽었으면
+      // 위 막대 라벨의 뒷 숫자가 이미 몰년이라 두 번 적는 셈이 된다.
+      //
+      // **이름을 반드시 함께 적는다.** 물러난 임금의 몰년은 이미 다음
+      // 임금의 재위 안이라, 연도만 적으면 그 자리의 막대 주인이 죽은
+      // 것으로 읽힌다 (태조의 1408년 몰이 태종 재위 한가운데에 선다).
+      if (r.death != null && r.death > r.end) {
+        labels.push({
+          y: dy, prio: 1,
+          html: `<button class="tl-reign k-death" data-id="${esc(r.id)}" style="top:${dy.toFixed(1)}px"
+                   title="${esc(tip)}"><i>${esc(shortName(r.label))} ${shortYear(r.death)} 사망</i></button>`,
+        });
+      }
+    }
+    // 라벨은 겹치면 못 읽는다. 재위 라벨이 몰년 라벨보다 먼저 자리를
+    // 얻고, 자리가 없으면 물러난다 — 막대와 동그라미는 그대로 남으므로
+    // 마우스를 올리면 언제나 이름과 연도를 말해 준다.
+    const taken = [];
+    const kept = labels
+      .slice()
+      .sort((a, b) => a.prio - b.prio || a.y - b.y)
+      .filter((l) => {
+        if (taken.some((y) => Math.abs(y - l.y) < LANE_GAP)) return false;
+        taken.push(l.y);
+        return true;
+      })
+      .sort((a, b) => a.y - b.y);
+    return {
+      svg: svg.join(''),
+      items: kept.map((l) => l.html).join(''),
+      // 이름을 못 세운 임금이 몇인지 알려야 한다. 막대는 다 서 있지만
+      // 라벨이 없으면 화면에서는 없는 왕이나 마찬가지다.
+      named: kept.filter((l) => l.prio === 0).length,
+    };
   }
 
   recenter() {
@@ -344,6 +490,14 @@ const DIR_HEAD = {
 
 function relHead(rel) {
   return DIR_HEAD[rel.type]?.[rel.dir] || rel.label;
+}
+
+// 띠 칸은 좁다. 왕조 접두어는 띠 전체가 같은 왕조라 떼어도 헷갈리지
+// 않는다 ('조선 세종' -> '세종'). 도구말에는 온 이름이 남는다.
+const DYNASTY_HEAD = /^(고구려|백제|신라|가야|발해|후백제|태봉|고려|조선|대한제국|대한민국)\s+/;
+
+function shortName(label) {
+  return String(label || '').replace(DYNASTY_HEAD, '');
 }
 
 function yr(y) {

@@ -17,6 +17,7 @@ import logging
 import re
 import sqlite3
 
+from .ontology import Edge
 from .store import GraphStore
 
 log = logging.getLogger(__name__)
@@ -114,6 +115,46 @@ def link_periods(store: GraphStore) -> int:
         len(links), multi, unmatched,
     )
     return len(links)
+
+
+def link_event_periods(store: GraphStore) -> int:
+    """사건의 `props.polity` 를 `from_period` 엣지로 세운다 (그래프 안 작업).
+
+    **같은 사실이 소스에 따라 다른 자리에 들어 있었다.** 위키백과에서 온
+    사건은 `from_period` 엣지로 조선에 붙는데, Wikidata 에서 온 사건은
+    `props.polity` 라는 칸에만 적혀 있다 (`fetch_events` 가 P17 을 그렇게
+    담는다). 그래서 화면에서 한쪽은 '시대 · 조선'이 보이고 다른 쪽은
+    아무 관계도 없는 노드로 뜬다 — 실측 198건, 조선 그래프에만 105건.
+
+    엣지의 자연키가 (src, dst, type, source) 라 여러 번 돌려도 쌓이지 않는다.
+    """
+    rows = store.conn.execute(
+        """SELECT id, json_extract(props, '$.polity') AS polity
+             FROM nodes
+            WHERE type = 'event' AND json_extract(props, '$.polity') IS NOT NULL"""
+    ).fetchall()
+    # 왕조 이름 -> 노드. 정체 표(POLITIES)의 QID 가 그래프에 있어야 잇는다.
+    from .sources.wikidata import POLITIES
+
+    target = {}
+    for qid, name in POLITIES.items():
+        if store.conn.execute("SELECT 1 FROM nodes WHERE id=?", (f"wd:{qid}",)).fetchone():
+            target[name] = f"wd:{qid}"
+
+    have = {
+        (r[0], r[1])
+        for r in store.conn.execute(
+            "SELECT src, dst FROM edges WHERE type = 'from_period'")
+    }
+    edges = [
+        Edge(src=r["id"], dst=target[r["polity"]], type="from_period", source="wd")
+        for r in rows
+        if r["polity"] in target and (r["id"], target[r["polity"]]) not in have
+    ]
+    if edges:
+        store.upsert_edges(edges)
+    log.info("사건 시대 엣지 %d건 추가 (대상 사건 %d개)", len(edges), len(rows))
+    return len(edges)
 
 
 def link_places(store: GraphStore) -> int:
