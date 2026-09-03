@@ -322,12 +322,34 @@ def local_matches(store: GraphStore, ex_ids: list[str] | None = None) -> list[di
     합쳐진다.
 
     **후보가 둘 이상이면 잇지 않는다.** '숙종'은 조선에도 고려에도 있다.
-    자동으로 고르면 절반은 틀린다."""
+    자동으로 고르면 절반은 틀린다.
+
+    **별칭도 라벨과 같은 무게로 본다.** 추출은 이름을 찾을 때 별칭을
+    보지만 그건 **추출이 돌던 그 순간의** 별칭표다. 자료는 순서대로 오지
+    않는다 — `정여립의 난` 은 8월 30일에 추출됐고, 그 이름이 기축옥사
+    (wd:Q7836645)의 별칭이라는 사실은 9월 3일 `aliases` 가 처음 돌면서
+    들어왔다. 며칠 차이로 화면에서 정여립의 난에 **정여립이 없었다** —
+    엣지 하나짜리 빈 노드가 떴고, 인물과 연대를 다 가진 진짜 사건은
+    기축옥사라는 다른 이름으로 옆에 따로 서 있었다.
+
+    사건은 이 길밖에 없다. `kowiki_matches` 는 사건에 대해 넘겨주기를
+    일부러 안 따라가고(하위 항목이 상위 항목에 흡수된다), 정여립의 난은
+    위키백과에서 기축옥사로 넘겨주기다. 두 문이 다 닫혀 있었다.
+    """
     by_label: dict[str, list[dict]] = {}
     for r in store.conn.execute(
         "SELECT id, type, label FROM nodes WHERE id NOT LIKE ?", (EX_PREFIX + "%",)
     ):
         by_label.setdefault(r["label"], []).append(dict(r))
+
+    by_alias: dict[str, list[dict]] = {}
+    for r in store.conn.execute(
+        """SELECT a.alias, n.id, n.type, n.label, n.start_date, n.end_date
+             FROM aliases a JOIN nodes n ON n.id = a.node_id
+            WHERE n.id NOT LIKE ?""",
+        (EX_PREFIX + "%",),
+    ):
+        by_alias.setdefault(r["alias"], []).append(dict(r))
 
     sql = "SELECT id, type, label FROM nodes WHERE id LIKE ?"
     rows = store.conn.execute(sql, (EX_PREFIX + "%",)).fetchall()
@@ -355,6 +377,28 @@ def local_matches(store: GraphStore, ex_ids: list[str] | None = None) -> list[di
             out.append({"ex_id": r["id"], "target": prefixed[0]["id"],
                         "label": r["label"], "method": "dynasty_prefix", "score": 0.9})
             continue
+
+        # 이 이름으로 불리는 노드가 **딱 하나**일 때만. 별칭은 라벨보다
+        # 붐빈다 — `add_bare_name_aliases` 가 '조선 정종'·'고려 정종'
+        # 양쪽에 '정종'을 달아두므로 왕의 휘는 여기서 후보 둘이 되어
+        # 저절로 걸러진다.
+        #
+        # 라벨이 정확히 같은 후보가 있었으면 여기까지 오지 않는다 —
+        # 위에서 이미 잇거나(하나) 포기했다(동명이인). 별칭이 남의 라벨을
+        # 밀어내는 일은 없다.
+        aliased = [c for c in by_alias.get(r["label"], []) if c["type"] == r["type"]]
+        if len(aliased) == 1:
+            target = aliased[0]
+            # 이름이 같아도 시대가 어긋나면 다른 것이다 — `kowiki_matches`
+            # 가 승격 전에 하는 검사를 여기서도 한다.
+            if plausible_period(
+                life_span(target["start_date"], target["end_date"]),
+                neighbor_years(store, r["id"]),
+            ):
+                out.append({"ex_id": r["id"], "target": target["id"],
+                            "label": r["label"], "method": "alias_exact",
+                            "score": 0.95})
+                continue
 
         # **`same_as` 가 이미 '같은 실체'라고 말했으면 그리로 합친다.**
         # 연표가 `ex:period:1871년` 을 `time:1871` 에 이어둔 것이 그 예다.

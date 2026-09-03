@@ -1022,6 +1022,59 @@ with tempfile.TemporaryDirectory() as tmp:
           ).fetchone()[0])["merged_from"] == "ex:person:세조")
     store.close()
 
+# 회귀: 별칭으로만 이어지는 것 — 화면의 '정여립의 난'에 정여립이 없었다.
+# 추출이 만든 이름은 8월 30일에 들어왔고, 그 이름이 기축옥사의 별칭이라는
+# 사실은 9월 3일에 들어왔다. 라벨만 보는 매칭은 이 순서를 못 따라간다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "alias.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q7836645", type="event", label="기축옥사", source="wd",
+             start_date="1589-01-01", end_date="1589-01-01"),
+        Node(id="wd:Q704854", type="person", label="정여립", source="wd",
+             start_date="1546-01-01", end_date="1589-01-01"),
+        Node(id="ex:event:정여립의 난", type="event", label="정여립의 난",
+             source="extract"),
+        # 왕의 휘는 별칭이 여럿에 걸린다 — 라벨 일치가 이겨야 한다
+        Node(id="wd:Q100", type="person", label="조선 예종", source="wd"),
+        Node(id="wd:Q101", type="person", label="이황", source="wd"),
+        Node(id="ex:person:이황", type="person", label="이황", source="extract"),
+        # 이름은 맞는데 시대가 어긋나는 것
+        Node(id="wd:Q200", type="person", label="한유", source="wd",
+             start_date="0768-01-01", end_date="0824-12-25"),
+        Node(id="ex:person:창려", type="person", label="창려", source="extract"),
+        Node(id="wd:Q201", type="person", label="김종직", source="wd",
+             start_date="1431-01-01", end_date="1491-08-19"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:Q704854", dst="wd:Q7836645", type="participated_in", source="wd"),
+        Edge(src="ex:person:창려", dst="wd:Q201", type="related_to", source="extract"),
+    ])
+    store.conn.executemany(
+        "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?,?)",
+        [("wd:Q7836645", "정여립의 난"), ("wd:Q7836645", "정여립의 옥사"),
+         ("wd:Q100", "이황"), ("wd:Q200", "창려")],
+    )
+    store.conn.commit()
+
+    plan = {m["ex_id"]: m for m in local_matches(store)}
+    check("별칭으로 매칭", plan["ex:event:정여립의 난"]["target"] == "wd:Q7836645")
+    check("별칭 매칭에 방법 기록",
+          plan["ex:event:정여립의 난"]["method"] == "alias_exact")
+    # 라벨이 정확히 같은 wd:Q101 이 있으므로 별칭(wd:Q100)이 이기면 안 된다
+    check("라벨 일치가 별칭보다 앞선다", plan["ex:person:이황"]["target"] == "wd:Q101")
+    check("별칭이 맞아도 시대가 어긋나면 매칭하지 않음", "ex:person:창려" not in plan)
+
+    merge_node(store, "ex:event:정여립의 난", "wd:Q7836645", method="alias_exact")
+    check("병합 뒤 사건에 정여립이 붙는다",
+          store.conn.execute(
+              "SELECT 1 FROM edges WHERE src='wd:Q704854' AND dst='wd:Q7836645'"
+          ).fetchone() is not None)
+    check("병합 뒤 빈 노드가 사라진다",
+          store.conn.execute(
+              "SELECT 1 FROM nodes WHERE id='ex:event:정여립의 난'"
+          ).fetchone() is None)
+    store.close()
+
 # 타입을 고치면 그 노드에 걸린 엣지가 스키마와 어긋난다. 버리지 않는다.
 with tempfile.TemporaryDirectory() as tmp:
     store = GraphStore(Path(tmp) / "q.sqlite")
