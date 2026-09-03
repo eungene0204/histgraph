@@ -811,6 +811,22 @@ def cmd_scope(args: argparse.Namespace) -> int:
     with GraphStore(args.db) as store:
         result = scope_mod.extract(store, args.era, out, hops=args.hops,
                                    drop_isolated=not args.keep_isolated)
+
+    # **파생본에 한국어 관문을 바로 건다.** scope 는 원본을 그대로 베끼므로
+    # 원본에서 relabel·redescribe 를 잊었으면 영어가 그대로 화면에 간다.
+    # "relabel 은 파생본에도 한 번 더"를 README 에 적어 두는 방식은 세 번
+    # 실패했다 (2026-09-03 ×2 · 09-04). 그래서 사람이 기억하지 않아도 되게
+    # 여기서 돌리고, 그러고도 남으면 **실패로 끝낸다** — 파일은 남되 종료
+    # 코드가 1 이라 파이프라인이 알아챈다. 남은 것은 표에 적고 다시 돌린다.
+    from . import koreanize
+    from . import labels as labels_mod
+
+    table = labels_mod.load_table(args.table)
+    with GraphStore(Path(out)) as derived:
+        relabeled = labels_mod.apply_overrides(derived.conn, table)
+        redescribed = koreanize.redescribe(derived.conn)
+        foreign = labels_mod.foreign_text(derived.conn)
+
     print(f"\n=== {result['era']} 서브그래프 ===")
     print(f"  출력: {result['out']}")
     print(f"  씨앗 {result['seeds']:,} → 노드 {result['kept_nodes']:,} · 엣지 {result['kept_edges']:,}"
@@ -824,6 +840,20 @@ def cmd_scope(args: argparse.Namespace) -> int:
     print("\n  관계 구성:")
     for k, v in result["by_edge_type"].items():
         print(f"    {k:16} {v:>6,}")
+
+    print(f"\n  한국어 관문: 이름 {len(relabeled.applied):,}개 · 설명"
+          f" {len(redescribed.applied):,}개 옮김 · 설명 {len(redescribed.cleared):,}개 비움")
+    if foreign:
+        print(f"\n  ✗ 화면에 한글 아닌 글이 뜨는 노드 {len(foreign):,}건 —"
+              f" {args.table.relative_to(ROOT) if args.table.is_relative_to(ROOT) else args.table}"
+              " 에 이름을 적고 다시 돌리세요"
+              f" (표만 고쳤다면 `histgraph --db {out} relabel` 로 충분합니다):")
+        for nid, ntype, column, text in foreign[:40]:
+            print(f"    {ntype:<7} {nid:>16}  {column}: {text[:60]}")
+        if len(foreign) > 40:
+            print(f"    … 그 밖 {len(foreign) - 40:,}건")
+        return 1
+    print("  한글 아닌 글이 뜨는 노드가 없습니다.")
     return 0
 
 
@@ -1297,6 +1327,33 @@ def cmd_relabel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_namu(args: argparse.Namespace) -> int:
+    """토막글 작품에 나무위키 개요를 보충한다.
+
+    `enrich` 뒤에 돌린다. 위키백과 본문이 100자 넘게 있는 작품은 손대지
+    않고, 한 줄짜리('《태조 왕건》은 영화이다.')만 채운다."""
+    from .sources import namu
+
+    fetcher = Fetcher(Path(args.db).parent / "cache", min_interval=max(args.interval, 1.0))
+    with GraphStore(args.db) as store:
+        print(f"→ 나무위키 개요 보충 중 (설명 {args.min_chars}자 미만인 {', '.join(args.types)})...")
+        report = namu.fill(
+            store, fetcher, tuple(args.types),
+            min_chars=args.min_chars, limit=args.limit,
+            dry_run=args.dry_run, refresh=args.refresh,
+        )
+        filled = report["filled"]
+        missed = report["missed"]
+        print(f"  대상 {report['candidates']:,}편 · 채움 {len(filled):,} · 못 찾음 {len(missed):,}")
+        for _, label, title in filled[: args.show]:
+            print(f"    ✓ {label} ← {title}")
+        for _, label in missed[: args.show]:
+            print(f"    · {label}", file=sys.stderr)
+        if args.dry_run:
+            print("\n  --dry-run 입니다. 저장하지 않았습니다.")
+    return 0
+
+
 def cmd_redescribe(args: argparse.Namespace) -> int:
     """영어로 들어온 노드 설명을 한국어로 바꾼다.
 
@@ -1500,6 +1557,17 @@ def main(argv: list[str] | None = None) -> int:
     p_pm.add_argument("--interval", type=float, default=1.0)
     p_pm.set_defaults(func=cmd_promote)
 
+    p_nm = sub.add_parser("namu", help="토막글 작품에 나무위키 개요 보충 (enrich 뒤)")
+    p_nm.add_argument("--types", nargs="*", default=["media"])
+    p_nm.add_argument("--min-chars", type=int, default=100,
+                      help="이 길이 미만인 설명만 보충 (기본 100)")
+    p_nm.add_argument("--limit", type=int, default=None, help="보충할 노드 수 (시험용)")
+    p_nm.add_argument("--show", type=int, default=20, help="출력할 예시 수")
+    p_nm.add_argument("--interval", type=float, default=1.5)
+    p_nm.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
+    p_nm.add_argument("--refresh", action="store_true", help="못 찾았다고 표시한 노드도 다시 본다")
+    p_nm.set_defaults(func=cmd_namu)
+
     p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
     p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")
     p_rd.add_argument("--list-cleared", action="store_true",
@@ -1516,6 +1584,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
     p_sc.add_argument("--keep-isolated", action="store_true", help="엣지 없는 노드도 유지")
+    p_sc.add_argument("--table", type=Path, default=DEFAULT_LABELS,
+                      help=f"파생본에 바로 적용할 한국어 라벨 표 (기본 {DEFAULT_LABELS.name})")
     p_sc.set_defaults(func=cmd_scope)
 
     p_tl = sub.add_parser("timeline", help="연도를 일급 개체로 정규화")

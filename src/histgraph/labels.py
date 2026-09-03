@@ -139,3 +139,27 @@ def apply_overrides(
     # 다른 수를 찍으면 그 수를 믿을 수 없다.
     report.remaining = [n for n in english_nodes(conn) if n[0] not in fixed]
     return report
+
+
+def foreign_text(conn: sqlite3.Connection) -> list[tuple[str, str, str, str]]:
+    """화면에 한글 아닌 글로 뜰 노드 전부 — (id, 타입, 칸, 글).
+
+    **이 함수가 배포 관문이다.** `tools/check_korean.py` 가 push 전에,
+    CI 가 push 뒤에 이걸 세고, `scope` 는 파생본을 만들자마자 센다. 화면에
+    영어가 뜨는 일이 세 번 반복됐는데 세 번 다 '표는 있는데 안 돌렸다'
+    였다 — 사람이 기억해서 돌리는 방식은 이미 실패했으므로, 돌렸는지를
+    기계가 묻는다.
+
+    라벨과 설명 두 칸을 본다. 빈 설명은 세지 않는다 — 화면이 '설명 없음'을
+    한국어로 그린다. 기준은 `has_hangul` 과 같이 '한글이 한 자도 없는가'
+    하나뿐이다. 더 정교하게 물으면 로마자 표기가 섞인 멀쩡한 글까지 걸린다.
+    """
+    found: list[tuple[str, str, str, str]] = []
+    for nid, ntype, label, desc in conn.execute(
+        "SELECT id, type, label, description FROM nodes ORDER BY type, id"
+    ):
+        if not HANGUL.search(label or ""):
+            found.append((nid, ntype, "label", label or ""))
+        if desc and desc.strip() and not HANGUL.search(desc):
+            found.append((nid, ntype, "description", desc))
+    return found

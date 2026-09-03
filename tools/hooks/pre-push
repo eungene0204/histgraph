@@ -86,6 +86,11 @@ if ! out=$(python3 -c "$DEPLOY_CHECK" 2>&1); then
 fi
 printf '  ✓ 배포 API — %s\n' "$out"
 
+# 2b) 배포될 DB 에 영어가 남았는지. 화면에 영어 이름이 뜨는 것을 세 번
+#     지적받았고, 세 번 다 표는 있었는데 안 돌린 것이었다. 기억에 맡기는
+#     대신 push 마다 센다. 어느 DB 인지는 저 스크립트가 진입점에서 읽는다.
+run '한국어' python3 tools/check_korean.py
+
 # 3) 파이썬. 의존성 없이 돈다 — 본체가 표준 라이브러리만 쓰기 때문이다.
 run '파이썬' python3 tests/test_pipeline.py
 

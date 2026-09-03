@@ -2762,5 +2762,87 @@ check("`가해자` 는 참여가 맞다",
 check("`위치` 로 `사건 정보` 틀을 연다",
       EVENT_FIELDS["위치"][0] == "occurred_at")
 
+print("\n[한국어 관문 — 화면에 한글 아닌 글이 뜨는 노드를 센다]")
+# 세 번 반복된 일이다: 표와 사전은 있는데 파생본에 안 돌려서 영어가 화면에
+# 떴다. tools/check_korean.py 와 `scope` 가 이 함수로 그걸 잰다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "kr.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q1", type="event", label="1923 Jogono Police Station bombing",
+             source="wd"),
+        Node(id="wd:Q2", type="person", label="Q2", source="wd"),
+        Node(id="wd:Q3", type="person", label="김상옥", source="wd",
+             description="독립운동가 (1889~1923)"),
+        Node(id="wd:Q4", type="place", label="단양 (Danyang)", source="wd",
+             description="   "),   # 빈 설명은 세지 않는다
+    ])
+    # Node 관문이 영어 설명을 걸러 버리므로, SQL 로 직접 쓰는 경로가
+    # 남긴 영어 설명은 SQL 로 흉내 낸다 (wikipedia._fill_from_wikidata 류).
+    store.conn.execute(
+        "UPDATE nodes SET description='human settlement in South Korea' WHERE id='wd:Q4'")
+    store.conn.commit()
+    found = labels_mod.foreign_text(store.conn)
+    check("한글 없는 라벨을 센다",
+          ("wd:Q1", "event", "label", "1923 Jogono Police Station bombing") in found)
+    check("QID 가 라벨인 노드도 센다", ("wd:Q2", "person", "label", "Q2") in found)
+    check("한글이 섞인 라벨은 통과", not any(f[0] == "wd:Q3" for f in found))
+    check("한글 없는 설명을 센다",
+          ("wd:Q4", "place", "description", "human settlement in South Korea") in found,
+          str(found))
+    check("라벨에 한글이 섞이면 라벨은 통과 (설명만 걸린다)",
+          [f for f in found if f[0] == "wd:Q4"] ==
+          [("wd:Q4", "place", "description", "human settlement in South Korea")])
+    check("정확히 셋", len(found) == 3, str(found))
+    store.close()
+
+    # 배포 관문 스크립트는 같은 함수를 돌리고, 걸리면 1 로 끝난다
+    import subprocess
+    tool = Path(__file__).resolve().parents[1] / "tools" / "check_korean.py"
+    bad = subprocess.run([sys.executable, str(tool), str(Path(tmp) / "kr.sqlite")],
+                         capture_output=True, text=True)
+    check("check_korean.py 는 영어가 있으면 실패한다", bad.returncode == 1, bad.stdout)
+    check("무엇이 걸렸는지 찍는다", "Jogono" in bad.stdout, bad.stdout)
+    clean = GraphStore(Path(tmp) / "ok.sqlite")
+    clean.upsert_nodes([Node(id="wd:Q3", type="person", label="김상옥", source="wd")])
+    clean.close()
+    good = subprocess.run([sys.executable, str(tool), str(Path(tmp) / "ok.sqlite")],
+                          capture_output=True, text=True)
+    check("check_korean.py 는 한글뿐이면 통과한다", good.returncode == 0, good.stdout)
+
+# --- 나무위키 개요 ------------------------------------------------------------
+# 제목만 같은 다른 작품이 흔하다. '태조 왕건' 을 그냥 열면 2000년 드라마가
+# 나오는데 우리 노드는 1970년 영화다 — 분류의 갈래·연도로 걸러야 한다.
+print("\n[나무위키 개요]")
+from histgraph.sources import namu  # noqa: E402
+
+_NAMU = (
+    '<a href="/w/%EB%B6%84%EB%A5%98:2015%EB%85%84%20%EB%93%9C%EB%9D%BC%EB%A7%88">2015년 드라마</a>'
+    '<a href="/w/%EB%B6%84%EB%A5%98:MBC%20%EB%8B%A8%EB%A7%89%EA%B7%B9">MBC 단막극</a>'
+    "<table><tr><td>포스터</td></tr></table>"
+    "<h2 class='x'><a id='s-1' href='#toc'>1.</a> <span id='개요'>개요"
+    "<span><a href='/edit/x'>&#91;편집&#93;</a></span></span></h2>"
+    "<div>2015년에 방영한 <a href='/w/MBC'>MBC</a> 드라마이다.<br data-v>"
+    "많은 인기를 얻었다.&#91;1&#93;</div>"
+    "<h2><a id='s-2'>2.</a> 줄거리</h2><div>수포자가 조선에 떨어진다.</div>"
+)
+cats = namu.page_categories(_NAMU)
+check("분류를 읽는다", cats == ["2015년 드라마", "MBC 단막극"], str(cats))
+ov = namu.overview(_NAMU)
+check("첫 절만 받고 표·각주·다음 절은 버린다",
+      ov == "2015년에 방영한 MBC 드라마이다.\n많은 인기를 얻었다.", repr(ov))
+check("갈래·연도가 맞으면 받는다", namu.matches(cats, "series", "2015"))
+check("연도가 다르면 거른다", not namu.matches(cats, "series", "2000"))
+check("갈래가 다르면 거른다 (영화 노드에 드라마 문서)", not namu.matches(cats, "film", "2015"))
+check("연도를 모르면 갈래만 본다", namu.matches(cats, "series", None))
+check("작품 분류가 없으면 거른다", not namu.matches(["동음이의어", "성씨"], None, None))
+check("괄호 앞 띄어쓰기를 없앤 제목이 후보에 든다",
+      "간신(영화)" in namu.candidates("간신 (영화)", "film", "2015"))
+picked = namu.pick_from_search(
+    [("태조 왕건", "분류:KBS 대하드라마 분류:2002년 종영"),
+     ("태조 왕건(영화)", "분류:1970년 영화"),
+     ("태조 왕건/평가", "분류:한국 드라마/평가")],
+    "태조 왕건 (영화)", "1970", "film")
+check("검색 결과에서 연도·갈래가 맞는 제목을 앞세운다", picked == ["태조 왕건(영화)"], str(picked))
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

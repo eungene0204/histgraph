@@ -43,8 +43,10 @@ uv run histgraph serve                           # 브라우저에서 탐색
 재위 띠가 통째로 사라집니다** — 재위는 `held_position` 엣지의
 `props.reign` 표식으로만 서 있는데 `ingest wikidata` 가 같은 P39 엣지를
 다시 넣으면서 그 표식을 지우기 때문입니다 (실측: 재위 26건 → 0건, 화면의
-'왕 24/26' 칩과 띠가 함께 사라졌다). 시대 그래프는 별도 파일이라 라벨은
-거기에도 한 번 더: `uv run histgraph --db data/korea.sqlite relabel`.
+'왕 24/26' 칩과 띠가 함께 사라졌다). 시대 그래프는 별도 파일인데, 거기에는
+`scope` 가 `relabel`·`redescribe` 를 **스스로 돌리고** 그러고도 영어가
+남으면 실패로 끝난다 (2026-09-04). push 전 훅과 CI 가
+`tools/check_korean.py` 로 같은 것을 다시 센다 — [CLAUDE.md](CLAUDE.md) §1.
 `precision` 은 날짜 칸을 고치는데 `upsert_nodes` 가 새 값으로 덮어쓰므로
 (`COALESCE(excluded…)`), 다시 수집하면 1월 1일이 되돌아옵니다.
 아래 "영어로 뜨는 노드"·"영어로 뜨는 설명" 참조.
@@ -606,8 +608,15 @@ Wikidata 에 같은 인물이 두 항목으로 있는 것이다. `relabel` 은 �
 
 **남은 1,055개는 적지 않았다.** 대부분 한자 없이 로마자 표기만 있는
 근현대 남북한 인물이라(`Pak Chung-il`) 음절 복원이 갈린다. 근거 없이 적는
-대신 `relabel` 이 끝날 때마다 남은 수를 찍는다. 화면이 읽는 조선 그래프는
+대신 `relabel` 이 끝날 때마다 남은 수를 찍는다. 화면이 읽는 그래프는
 0개다.
+
+**그런데도 세 번 떴다.** 표가 없어서가 아니라 안 돌려서였다 — 그래프를
+다시 만들고 `relabel` 을 잊거나, 원본에는 돌리고 파생본에는 안 돌렸다.
+2026-09-04 세 번째(`1923 Jogono Police Station bombing`) 뒤로는 사람이
+기억하지 않는다: `scope` 가 파생본에 바로 돌리고 남으면 실패하며,
+`tools/check_korean.py` 가 push 전(훅)과 push 뒤(CI)에 배포될 DB 를 센다.
+라벨·설명에 한글이 한 자도 없으면 걸린다 (`labels.foreign_text`).
 
 ### 영어로 뜨는 설명 (`redescribe`)
 
