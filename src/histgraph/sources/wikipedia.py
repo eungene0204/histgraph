@@ -89,12 +89,20 @@ EVENT_SEEDS: dict[str, list[str]] = {
 
 
 def fetch_titles(
-    fetcher: Fetcher, qids: list[str], chunk: int = 200
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 200,
+    unresolved: set[str] | None = None,
 ) -> dict[str, str]:
     """Wikidata QID -> 한국어 위키백과 문서명.
 
     노드 라벨을 그대로 문서명으로 쓰면 안 된다. 우리 라벨은 '조선 세종'
-    인데 실제 문서명은 '세종'이라 조회가 빗나간다. sitelink 가 정답이다."""
+    인데 실제 문서명은 '세종'이라 조회가 빗나간다. sitelink 가 정답이다.
+
+    `unresolved` 를 주면 **조회 자체가 실패한 구간의 QID** 를 담아 준다.
+    결과에서 빠진 QID 는 두 가지다 — 문서가 정말 없거나, 쿼리가 죽어서
+    못 물어봤거나. 둘을 섞으면 타임아웃 한 번에 200개가 '문서 없음'으로
+    영구 표시된다. 호출부가 구분할 수 있어야 한다."""
     from .wikidata import _qid, _safe_query, _val
 
     out: dict[str, str] = {}
@@ -102,7 +110,9 @@ def fetch_titles(
     ordered = sorted(set(qids))
 
     for i in range(0, len(ordered), chunk):
-        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        batch = ordered[i : i + chunk]
+        values = " ".join(f"wd:{q}" for q in batch)
+        before = len(failures)
         rows = _safe_query(
             fetcher,
             f"""SELECT ?item ?title WHERE {{
@@ -114,13 +124,18 @@ def fetch_titles(
             f"sitelink/{i}",
             failures,
         )
+        if len(failures) > before and unresolved is not None:
+            unresolved.update(batch)
         for r in rows:
             item, title = _val(r, "item"), _val(r, "title")
             if item and title:
                 out[_qid(item)] = title
 
     if failures:
-        log.warning("sitelink 조회 실패 %d구간", len(failures))
+        log.warning(
+            "sitelink 조회 실패 %d구간 — QID %d개는 문서 유무를 모른다",
+            len(failures), len(unresolved or ()),
+        )
     log.info("QID %d개 중 한국어 위키백과 문서 %d개 확인", len(ordered), len(out))
     return out
 
@@ -136,12 +151,27 @@ def _api(fetcher: Fetcher, params: dict[str, str]) -> dict:
 
 
 def fetch_extracts(
-    fetcher: Fetcher, titles: list[str], full: bool = False
+    fetcher: Fetcher,
+    titles: list[str],
+    full: bool = False,
+    resolved_from: dict[str, str] | None = None,
+    redirected: set[str] | None = None,
 ) -> dict[str, str]:
-    """문서명 -> 본문 텍스트.
+    """문서명 -> 본문 텍스트. 키는 **응답이 돌려준 문서명**이다.
 
     full=False 는 도입부만 받는다 (인물 항목 기준 900~1,400자). 한 번에
-    20건이라 빠르고 싸다. full=True 는 본문 전체지만 요청당 1건이다."""
+    20건이라 빠르고 싸다. full=True 는 본문 전체지만 요청당 1건이다.
+
+    `redirects=1` 이라 응답의 문서명이 요청한 것과 달라질 수 있다
+    ('신숙공주' → '순숙공주'). `resolved_from` 을 주면 {받은 이름:
+    요청한 이름} 을 담아 준다. 이게 없으면 호출부가 요청한 이름으로
+    결과를 찾다가 못 찾고 **넘겨주기 문서를 통째로 버린다** — 조선
+    그래프에서 실제로 4건이 그렇게 빈 설명으로 남아 있었다.
+
+    `redirected` 는 **진짜 넘겨주기로 온 문서명**만 담는다. 이름이
+    달라지는 이유는 둘인데, 넘겨주기(다른 문서로 보냄)와 정규화(밑줄·
+    공백 같은 표기 손질)는 뜻이 전혀 다르다. 정규화까지 넘겨주기로 세면
+    같은 문서를 두고 "다른 문서에서 넘겨받았다"고 적게 된다."""
     out: dict[str, str] = {}
     batch_size = 1 if full else INTRO_BATCH
 
@@ -166,12 +196,26 @@ def fetch_extracts(
             log.warning("추출 실패 (건너뜀): %s", err)
             continue
 
+        # 요청한 이름으로 되짚을 수 있게 넘겨주기·정규화를 모아둔다
+        back = {
+            r["to"]: r["from"] for r in data.get("query", {}).get("redirects", [])
+        }
+        norm = {
+            r["to"]: r["from"] for r in data.get("query", {}).get("normalized", [])
+        }
+
         for page in data.get("query", {}).get("pages", []):
             if page.get("missing"):
                 continue
             text = (page.get("extract") or "").strip()
             if text:
-                out[page["title"]] = text
+                title = page["title"]
+                out[title] = text
+                if title in back and redirected is not None:
+                    redirected.add(title)
+                if resolved_from is not None:
+                    requested = back.get(title, title)
+                    resolved_from[title] = norm.get(requested, requested)
 
         if i and i % 200 == 0:
             log.info("  본문 %d/%d건 수집", i, len(titles))
@@ -304,24 +348,52 @@ def ingest_events(
     return list(nodes.values()), edges
 
 
+# 그래프에 있는 wd 노드 타입 전부. 예전 기본값은 ('person','event') 였고,
+# 그래서 장소 350·직위 33·단체 77개는 한 번도 조회된 적이 없다.
+ALL_WD_TYPES: tuple[str, ...] = (
+    "person", "event", "place", "org", "role", "media", "artwork", "period",
+)
+
+
 def enrich(
     fetcher: Fetcher,
     store: GraphStore,
-    node_types: tuple[str, ...] = ("person", "event"),
-    limit: int = 500,
+    node_types: tuple[str, ...] = ALL_WD_TYPES,
+    limit: int | None = None,
     full: bool = False,
     refresh: bool = False,
     scope_ids: set[str] | None = None,
+    fallback: bool = True,
 ) -> dict[str, int]:
     """그래프의 Wikidata 노드에 위키백과 서사를 채운다.
 
-    연결 차수가 높은 노드부터 고른다 — 많이 연결된 인물이 문헌에도 많이
-    등장하고, 위키백과 항목도 길다. 전부 받으면 3만 건이라 비현실적이다."""
+    **왜 빈 칸이 남았는가.** 예전에는 차수 상위 500개만 받았다. 그래서
+    '사량진왜변'(차수 1)처럼 연결이 하나뿐인 노드는 순번이 오지 않았다.
+    화면에서 설명이 비어 있던 조선 그래프 노드 2,796개 중 2,227개가
+    인물이고, 그 평균 차수는 2.1 이다 — 설명 있는 인물의 평균은 8.4 다.
+    빠진 것은 '자료가 없는 노드'가 아니라 '순번이 오지 않은 노드'였다.
+    그래서 `limit` 의 기본값을 없앴다. 차수 정렬은 남긴다 — 중간에 끊어도
+    많이 연결된 것부터 채워지는 편이 낫다.
+
+    **그래도 남는 것.** 실측으로 표본 300개 중 56개(19%)는 한국어
+    위키백과 문서가 아예 없다. 이건 다시 돌려도 안 채워지므로
+    `props.no_kowiki` 로 표시해 다음 실행이 같은 헛수고를 반복하지 않게
+    한다(`--refresh` 면 그 표시도 무시하고 다시 본다). 그 노드들은
+    Wikidata 한 줄 설명으로 대신 채운다(`fallback`).
+    """
     marks = ",".join("?" * len(node_types))
     # refresh=True 면 이미 산문이 있는 노드도 다시 받는다. 도입부만 받아둔
     # 인물을 본문 전체로 교체할 때 필요하다 — 인물 486건이 평균 536자에
     # 그쳤는데, 관직·사건 참여는 대부분 첫 문단 뒤에 있다.
-    have_clause = "" if refresh else "AND (n.description IS NULL OR length(n.description) < 100)"
+    #
+    # 100자 미만을 '빈 것'으로 보므로 Wikidata 한 줄 설명(평균 30자)이
+    # 들어간 노드도 다음 실행에서 다시 후보가 된다. no_kowiki 표시가
+    # 그 중 헛수고인 것만 걸러낸다.
+    if refresh:
+        have_clause = ""
+    else:
+        have_clause = """AND (n.description IS NULL OR length(n.description) < 100)
+               AND json_extract(n.props, '$.no_kowiki') IS NULL"""
     rows = store.conn.execute(
         f"""SELECT n.id, n.label, COUNT(e.src) AS degree
               FROM nodes n
@@ -334,44 +406,152 @@ def enrich(
     ).fetchall()
     if scope_ids is not None:
         rows = [r for r in rows if r["id"] in scope_ids]
-    rows = rows[:limit]
+    total_candidates = len(rows)
+    if limit is not None:
+        rows = rows[:limit]
 
     if not rows:
         log.info("보강할 노드가 없습니다")
-        return {"titles": 0, "extracts": 0, "updated": 0}
+        return {"titles": 0, "extracts": 0, "updated": 0, "no_article": 0,
+                "fallback": 0, "unresolved": 0, "redirected": 0, "remaining": 0}
 
     qid_to_node = {r["id"].split(":", 1)[1]: r["id"] for r in rows}
-    titles = fetch_titles(fetcher, list(qid_to_node))
+    # 조회가 죽은 구간은 '문서 없음'과 구분해서 받아둔다
+    unresolved: set[str] = set()
+    titles = fetch_titles(fetcher, list(qid_to_node), unresolved=unresolved)
     if not titles:
-        return {"titles": 0, "extracts": 0, "updated": 0}
+        return {"titles": 0, "extracts": 0, "updated": 0, "no_article": 0,
+                "fallback": 0, "unresolved": len(unresolved),
+                "redirected": 0, "remaining": total_candidates}
 
     log.info("본문 %d건 수집 중 (full=%s)...", len(titles), full)
-    extracts = fetch_extracts(fetcher, list(titles.values()), full=full)
+    # 넘겨주기를 따라가면 받은 문서명이 요청한 것과 달라진다. 되짚는
+    # 표가 없으면 그 문서는 버려진다.
+    resolved_from: dict[str, str] = {}
+    true_redirects: set[str] = set()
+    extracts = fetch_extracts(
+        fetcher, list(titles.values()), full=full,
+        resolved_from=resolved_from, redirected=true_redirects,
+    )
 
-    # 문서명 -> QID 역인덱스. redirects 를 따라가면 응답의 title 이
-    # 요청한 title 과 달라질 수 있어 양쪽으로 찾는다.
     title_to_qid = {t: q for q, t in titles.items()}
     updates = []
+    redirected = 0
     for title, text in extracts.items():
-        qid = title_to_qid.get(title)
+        requested = resolved_from.get(title, title)
+        qid = title_to_qid.get(requested)
         if not qid:
             continue
         node_id = qid_to_node.get(qid)
-        if node_id:
-            updates.append((text, f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(title)}", node_id))
+        if not node_id:
+            continue
+        # '판의금부사'를 물으면 '의금부' 문서가 온다. 글은 쓸모 있지만
+        # 우리 노드를 그대로 설명하는 글은 아니다 — 어느 문서에서 온
+        # 글인지 남겨서 화면이 그 사실을 말할 수 있게 한다.
+        via = title if title in true_redirects else None
+        if via:
+            redirected += 1
+        updates.append((
+            text,
+            f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(title)}",
+            via,
+            node_id,
+        ))
 
     store.conn.executemany(
         """UPDATE nodes
               SET description = ?,
-                  props = json_set(COALESCE(NULLIF(props,''), '{}'), '$.kowiki_url', ?),
+                  props = json_set(
+                      json_set(
+                          json_set(COALESCE(NULLIF(props,''), '{}'),
+                                   '$.kowiki_url', ?),
+                          '$.desc_via', ?),
+                      '$.desc_source', 'kowiki'),
                   updated_at = datetime('now')
             WHERE id = ?""",
         updates,
     )
     store.conn.commit()
+    if redirected:
+        log.info("넘겨주기를 따라간 설명 %d건 (desc_via 로 표시)", redirected)
+
+    # 사이트링크가 없던 QID = 한국어 위키백과에 문서가 없는 개체.
+    # 쿼리가 죽어서 못 물어본 구간(`unresolved`)은 제외한다 — 타임아웃
+    # 한 번으로 200개를 '문서 없음'으로 영구히 못 박으면, 다음 실행이
+    # 그 노드를 영영 건너뛴다.
+    no_article = [
+        q for q in qid_to_node if q not in titles and q not in unresolved
+    ]
+    store.conn.executemany(
+        """UPDATE nodes
+              SET props = json_set(COALESCE(NULLIF(props,''), '{}'),
+                                   '$.no_kowiki', 1)
+            WHERE id = ?""",
+        [(qid_to_node[q],) for q in no_article],
+    )
+    store.conn.commit()
+
+    filled = _fill_from_wikidata(
+        fetcher, store, {q: qid_to_node[q] for q in no_article}
+    ) if (fallback and no_article) else 0
 
     log.info(
-        "위키백과 보강: 문서명 %d, 본문 %d, 노드 갱신 %d",
-        len(titles), len(extracts), len(updates),
+        "위키백과 보강: 문서명 %d, 본문 %d, 노드 갱신 %d, 문서 없음 %d(대체 %d),"
+        " 조회 실패 %d",
+        len(titles), len(extracts), len(updates), len(no_article), filled,
+        len(unresolved),
     )
-    return {"titles": len(titles), "extracts": len(extracts), "updated": len(updates)}
+    return {
+        "titles": len(titles),
+        "extracts": len(extracts),
+        "updated": len(updates),
+        "no_article": len(no_article),
+        "fallback": filled,
+        "unresolved": len(unresolved),
+        "redirected": redirected,
+        "remaining": total_candidates - len(rows),
+    }
+
+
+def _fill_from_wikidata(
+    fetcher: Fetcher, store: GraphStore, qid_to_node: dict[str, str]
+) -> int:
+    """위키백과 문서가 없는 노드를 Wikidata 한 줄 설명으로 채운다.
+
+    산문이 아니라 한 줄이다. 덮어쓰지 않는다 — 이미 무언가 적혀 있으면
+    그쪽이 더 길고 낫다.
+
+    **영어는 그대로 넣지 않는다.** 사전으로 옮겨지면 한국어로 넣고,
+    옮기지 못하면 아예 넣지 않는다. 여기는 Node 를 거치지 않고 SQL 로
+    직접 쓰는 자리라 온톨로지의 관문이 걸리지 않는다 — 그래서 같은 규칙을
+    여기 한 번 더 적는다."""
+    from ..koreanize import to_korean
+    from .wikidata import fetch_descriptions
+
+    descs = fetch_descriptions(fetcher, list(qid_to_node))
+    updates = []
+    dropped = 0
+    for qid, (text, lang) in descs.items():
+        if qid not in qid_to_node:
+            continue
+        korean = text if lang == "ko" else to_korean(text)
+        if not korean:
+            dropped += 1
+            continue
+        updates.append((korean, "wd:ko" if lang == "ko" else "사전",
+                        qid_to_node[qid]))
+    if dropped:
+        log.info("한국어로 옮기지 못한 한 줄 설명 %d개는 넣지 않았다", dropped)
+    cur = store.conn.executemany(
+        """UPDATE nodes
+              SET description = ?,
+                  props = json_set(COALESCE(NULLIF(props,''), '{}'),
+                                   '$.desc_source', ?),
+                  updated_at = datetime('now')
+            WHERE id = ?
+              AND (description IS NULL OR trim(description) = '')""",
+        updates,
+    )
+    store.conn.commit()
+    # WHERE 로 걸러지는 행이 있으므로 요청 수가 아니라 실제 갱신 수를 센다
+    return max(cur.rowcount, 0)

@@ -387,6 +387,21 @@ class GraphAPI:
             "start": row["start_date"],
             "end": row["end_date"],
             "description": row["description"],
+            # 설명이 어디서 왔는지. 'kowiki' 는 위키백과 산문, 'wd:ko' 는
+            # Wikidata 한국어 한 줄, '사전' 은 영어 한 줄을 koreanize 로
+            # 옮긴 것이다. **화면은 이것을 그리지 않는다** — 자료 출처는
+            # 읽는 사람이 묻지 않은 것이다. 도구가 쓰라고 남겨 둔다.
+            "desc_source": props.get("desc_source"),
+            # 영어 한 줄이 왔지만 사전으로 옮기지 못해 비운 노드.
+            # 빈 칸의 이유를 화면이 정확히 말할 수 있게 한다.
+            "desc_dropped": bool(props.get("desc_en") and not row["description"]),
+            # 넘겨주기를 따라가 다른 문서에서 가져온 글이면 그 문서명.
+            # '판의금부사'의 설명은 '의금부' 문서의 글이다 — 같은 것을
+            # 설명하는 글이 아니므로 그렇다고 적어야 한다.
+            "desc_via": props.get("desc_via"),
+            # 빈 설명칸의 이유. 한국어 위키백과에 문서가 없어서 비어 있는
+            # 것과, 아직 받아오지 않아 비어 있는 것은 다른 이야기다.
+            "no_kowiki": bool(props.get("no_kowiki")),
             "url": row["url"],
             "kowiki_url": props.get("kowiki_url"),
             "merged_from": props.get("merged_from") or [],

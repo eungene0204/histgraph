@@ -1800,5 +1800,293 @@ with tempfile.TemporaryDirectory() as tmp:
     store.close()
 
 
+# --- 설명 보강: 왜 빈 칸이 남았는가 --------------------------------------
+# 화면의 '사량진왜변'(차수 1)에 설명이 없었다. 자료가 없어서가 아니라
+# enrich 가 차수 상위 500개만 받았기 때문이다. 순번이 오지 않은 것과
+# 문서가 없는 것을 구분해서 고정한다.
+print("\n[설명 보강]")
+from histgraph.sources import wikidata as wd_mod  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "en.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q1", type="person", label="많이 연결된 사람", source="wd"),
+        Node(id="wd:Q2", type="event", label="사량진왜변", source="wd"),
+        Node(id="wd:Q3", type="place", label="사량면", source="wd"),
+        Node(id="wd:Q4", type="person", label="문서 없는 사람", source="wd"),
+        Node(id="wd:Q5", type="person", label="이미 적힌 사람", source="wd",
+             description="가" * 400),
+        Node(id="ex:person:추출", type="person", label="추출된 사람",
+             source="extract"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:Q1", dst="wd:Q2", type="participated_in", source="wd"),
+        Edge(src="wd:Q1", dst="wd:Q3", type="born_in", source="wd"),
+        Edge(src="wd:Q2", dst="wd:Q3", type="occurred_at", source="wd"),
+    ])
+
+    asked: list[list[str]] = []
+    ARTICLES = {"Q1": "많이 연결된 사람", "Q2": "사량진왜변", "Q3": "사량면"}
+
+    dead: set[str] = set()   # 이 회차에 sitelink 쿼리가 죽은 QID
+
+    def fake_titles(fetcher, qids, chunk=200, unresolved=None):
+        asked.append(sorted(qids))
+        if unresolved is not None:
+            unresolved.update(q for q in qids if q in dead)
+        return {q: t for q, t in ARTICLES.items()
+                if q in set(qids) and q not in dead}
+
+    # '판의금부사'를 물으면 '의금부' 문서가 온다 — 응답의 문서명은
+    # 요청한 것과 다르다. 실제 API 와 같은 모양으로 흉내낸다.
+    REDIRECT = {"사량면": "통영시 사량면"}
+
+    # 이름이 달라지는 이유는 둘이다. 넘겨주기는 **다른 문서**로 보내고,
+    # 정규화는 표기만 손질한다. 둘을 같이 세면 같은 문서를 두고
+    # "다른 문서에서 넘겨받았다"고 적게 된다.
+    NORMALIZED = {"많이 연결된 사람": "많이 연결된 사람"}
+
+    def fake_extracts(fetcher, titles, full=False, resolved_from=None,
+                      redirected=None):
+        out = {}
+        for t in titles:
+            got = REDIRECT.get(t, NORMALIZED.get(t, t))
+            out[got] = f"{got} 문서 본문. " + "나" * 300
+            if resolved_from is not None:
+                resolved_from[got] = t
+            if t in REDIRECT and redirected is not None:
+                redirected.add(got)
+        return out
+
+    def fake_descs(fetcher, qids, chunk=300):
+        return {"Q4": ("Joseon civil servant (1738 - 1798)", "en")}
+
+    real = (wikipedia.fetch_titles, wikipedia.fetch_extracts,
+            wd_mod.fetch_descriptions)
+    wikipedia.fetch_titles = fake_titles
+    wikipedia.fetch_extracts = fake_extracts
+    wd_mod.fetch_descriptions = fake_descs
+    try:
+        result = wikipedia.enrich(None, store)
+
+        # 차수 0·1짜리도 이번 회차에 들어와야 한다. 예전 기본값(500)이
+        # 아니라 '남은 전부'가 기본이라는 뜻이다.
+        check("차수가 낮은 노드도 한 회차에 다 조회한다",
+              asked and set(asked[0]) == {"Q1", "Q2", "Q3", "Q4"},
+              str(asked[:1]))
+        check("person·event 밖의 타입도 대상이다 (place)",
+              "Q3" in set(asked[0]))
+        check("이미 산문이 있는 노드는 다시 받지 않는다",
+              "Q5" not in set(asked[0]))
+        check("wd 가 아닌 노드는 대상이 아니다",
+              not any(a.startswith("ex:") for a in asked[0]))
+
+        descs = dict(store.conn.execute(
+            "SELECT id, description FROM nodes"))
+        check("차수 1짜리 사건에 설명이 들어간다",
+              (descs["wd:Q2"] or "").startswith("사량진왜변 문서 본문"))
+        check("설명 출처를 kowiki 로 남긴다", store.conn.execute(
+            "SELECT json_extract(props,'$.desc_source') FROM nodes"
+            " WHERE id='wd:Q3'").fetchone()[0] == "kowiki")
+
+        # 넘겨주기를 따라간 문서를 버리면 안 된다. 요청한 이름으로만
+        # 결과를 찾다가 조선 그래프 4건이 빈 설명으로 남아 있었다.
+        check("넘겨주기를 따라간 본문도 노드에 붙는다",
+              (descs["wd:Q3"] or "").startswith("통영시 사량면 문서 본문"),
+              repr((descs["wd:Q3"] or "")[:40]))
+        check("어느 문서에서 넘겨받았는지 적는다", store.conn.execute(
+            "SELECT json_extract(props,'$.desc_via') FROM nodes"
+            " WHERE id='wd:Q3'").fetchone()[0] == "통영시 사량면")
+        check("넘겨주기가 아닌 글에는 표시가 없다", store.conn.execute(
+            "SELECT json_extract(props,'$.desc_via') FROM nodes"
+            " WHERE id='wd:Q2'").fetchone()[0] is None)
+        check("보고에 넘겨주기 건수가 적힌다", result["redirected"] == 1,
+              str(result))
+        # 표기만 손질된 문서에 '넘겨받은 글' 딱지를 붙이면 안 된다
+        check("정규화는 넘겨주기로 세지 않는다", store.conn.execute(
+            "SELECT json_extract(props,'$.desc_via') FROM nodes"
+            " WHERE id='wd:Q1'").fetchone()[0] is None)
+
+        # 문서가 없는 것과 아직 안 받은 것은 다른 이야기다. 표시가 남아야
+        # 화면이 "왜 비었는지"를 말할 수 있다.
+        check("문서가 없는 노드에 no_kowiki 표시가 남는다", store.conn.execute(
+            "SELECT json_extract(props,'$.no_kowiki') FROM nodes"
+            " WHERE id='wd:Q4'").fetchone()[0] == 1)
+        check("문서가 있는 노드에는 표시가 없다", store.conn.execute(
+            "SELECT json_extract(props,'$.no_kowiki') FROM nodes"
+            " WHERE id='wd:Q2'").fetchone()[0] is None)
+        # 한 줄 설명은 영어로 오지만 **영어로 저장되지 않는다.** 여기는
+        # Node 관문을 지나지 않고 SQL 로 바로 쓰는 자리라, 규칙이 빠지면
+        # 화면에 영어가 다시 뜬다.
+        check("문서 없는 노드는 한 줄 설명을 한국어로 옮겨 채운다",
+              descs["wd:Q4"] == "조선의 문신 (1738~1798)", repr(descs["wd:Q4"]))
+        check("사전으로 옮긴 설명임을 남긴다", store.conn.execute(
+            "SELECT json_extract(props,'$.desc_source') FROM nodes"
+            " WHERE id='wd:Q4'").fetchone()[0] == "사전")
+        check("보고에 못 채운 쪽이 함께 적힌다",
+              result["no_article"] == 1 and result["fallback"] == 1
+              and result["remaining"] == 0, str(result))
+
+        # 두 번째 회차: 헛수고를 반복하지 않는다.
+        asked.clear()
+        again = wikipedia.enrich(None, store)
+        check("문서 없는 노드를 다음 회차에 다시 묻지 않는다",
+              not asked or "Q4" not in set(asked[0]), str(asked[:1]))
+        check("다 채운 뒤에는 조회할 것이 없다",
+              again["updated"] == 0 and again["no_article"] == 0, str(again))
+
+        # --refresh 는 그 표시까지 무시하고 다시 본다
+        asked.clear()
+        wikipedia.enrich(None, store, refresh=True)
+        check("--refresh 는 no_kowiki 표시도 무시하고 다시 본다",
+              asked and "Q4" in set(asked[0]), str(asked[:1]))
+        check("--refresh 여도 한 줄 설명이 산문을 덮어쓰지 않는다",
+              store.conn.execute(
+                  "SELECT description FROM nodes WHERE id='wd:Q5'"
+              ).fetchone()[0] == "가" * 400)
+
+        # limit 을 주면 남은 수를 보고해야 한다 — 조용히 자르면 안 된다
+        store.conn.execute(
+            "UPDATE nodes SET description=NULL,"
+            " props=json_remove(props,'$.no_kowiki')")
+        store.conn.commit()
+        capped = wikipedia.enrich(None, store, limit=1)
+        check("--limit 으로 자른 나머지를 보고한다", capped["remaining"] == 4,
+              str(capped))
+
+        # 쿼리가 죽어서 못 물어본 것을 '문서 없음'으로 못 박으면, 타임아웃
+        # 한 번에 200개가 영구히 건너뛰어진다.
+        store.conn.execute(
+            "UPDATE nodes SET description=NULL,"
+            " props=json_remove(props,'$.no_kowiki','$.desc_source')")
+        store.conn.commit()
+        dead.add("Q2")
+        broke = wikipedia.enrich(None, store)
+        check("조회가 죽은 노드는 no_kowiki 로 못 박지 않는다",
+              store.conn.execute(
+                  "SELECT json_extract(props,'$.no_kowiki') FROM nodes"
+                  " WHERE id='wd:Q2'").fetchone()[0] is None)
+        # Q2 는 쿼리가 죽어 '모름', Q4·Q5 는 정말로 문서가 없다.
+        check("조회 실패는 문서 없음과 따로 센다",
+              broke["unresolved"] == 1 and broke["no_article"] == 2,
+              str(broke))
+        dead.clear()
+        asked.clear()
+        wikipedia.enrich(None, store)
+        check("실패했던 노드는 다음 회차에 다시 묻는다",
+              asked and "Q2" in set(asked[0]), str(asked[:1]))
+    finally:
+        (wikipedia.fetch_titles, wikipedia.fetch_extracts,
+         wd_mod.fetch_descriptions) = real
+    store.close()
+
+
+# --- 넘겨받은 글은 추출에 넣지 않는다 ------------------------------------
+# '무관랑'의 설명은 '사다함' 문서다. 화면에서는 출처를 밝히고 보여주면
+# 되지만, 추출이 그 글을 무관랑의 것으로 읽으면 사다함의 관계가 무관랑에게
+# 붙는다. 근거 구절 검증으로는 못 막는다 — 구절은 원문에 실제로 있다.
+print("\n[넘겨받은 글은 추출 대상이 아니다]")
+from histgraph.extract import load_documents  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "via.sqlite")
+    long_text = "무관랑은 사다함의 벗이다. " + "가" * 300
+    store.upsert_nodes([
+        Node(id="wd:A", type="person", label="사다함", source="wd",
+             description=long_text),
+        Node(id="wd:B", type="person", label="무관랑", source="wd",
+             description=long_text, props={"desc_via": "사다함"}),
+    ])
+    picked = {d.node_id for d in load_documents(store, min_score=0.0)}
+    check("제 문서를 가진 노드는 추출 대상이다", "wd:A" in picked, str(picked))
+    check("넘겨받은 글은 추출 대상에서 빠진다", "wd:B" not in picked, str(picked))
+    store.close()
+
+
+print("\n[영어 설명은 화면까지 오지 못한다]")
+from histgraph import koreanize  # noqa: E402
+
+check("현대 직업은 국적과 함께 옮긴다",
+      koreanize.to_korean("South Korean wrestler") == "대한민국의 레슬링 선수",
+      koreanize.to_korean("South Korean wrestler"))
+# 'south korean' 을 'korean' 으로 먼저 자르면 남한이 그냥 한국이 된다
+check("긴 국적을 먼저 맞춘다",
+      koreanize.to_korean("North Korean footballer") == "북한의 축구 선수",
+      koreanize.to_korean("North Korean footballer"))
+# 같은 낱말이 시대에 따라 다른 말이 된다
+check("전근대의 civil servant 는 문신",
+      koreanize.to_korean("Joseon civil servant (1390 - 1453)") == "조선의 문신 (1390~1453)",
+      koreanize.to_korean("Joseon civil servant (1390 - 1453)"))
+check("현대의 civil servant 는 공무원",
+      koreanize.to_korean("South Korean civil servant") == "대한민국의 공무원",
+      koreanize.to_korean("South Korean civil servant"))
+check("사건은 연도를 앞에 달고 온다",
+      koreanize.to_korean("1592 military campaign") == "1592년 군사 작전",
+      koreanize.to_korean("1592 military campaign"))
+check("관직은 품계와 기관을 남긴다",
+      koreanize.to_korean("second rank official in Uijeongbu during the Joseon Dynasty")
+      == "조선의 의정부 2품 관직",
+      koreanize.to_korean("second rank official in Uijeongbu during the Joseon Dynasty"))
+# 접속사가 아닌 '&' — 'R&B' 를 쪼개면 가수가 사라진다
+check("R&B 는 접속사로 쪼개지지 않는다",
+      koreanize.to_korean("South Korean R&B singer") is None
+      or "R" not in koreanize.to_korean("South Korean R&B singer"),
+      repr(koreanize.to_korean("South Korean R&B singer")))
+# **모르면 지어내지 않는다.** 이 규칙이 무너지면 그럴듯한 오역이 조용히 쌓인다
+check("모르는 말은 옮기지 않는다",
+      koreanize.to_korean("Goryeo person CBDB = 3435") is None,
+      koreanize.to_korean("Goryeo person CBDB = 3435"))
+check("연도가 아닌 괄호는 통째로 포기한다",
+      koreanize.to_korean("born 1595; [Ch\u2019anggang]") is None)
+check("한 조각이라도 모르면 통째로 포기한다",
+      koreanize.to_korean("South Korean singer and flurbologist") is None,
+      koreanize.to_korean("South Korean singer and flurbologist"))
+
+# 온톨로지 관문 — 커넥터마다 검사를 적지 않아도 여기서 걸린다
+gate = Node(id="wd:Q1", type="person", label="ㄱ", source="wd",
+            description="North Korean judoka")
+check("Node 가 영어 설명을 한국어로 바꾼다", gate.description == "북한의 유도 선수",
+      repr(gate.description))
+gate2 = Node(id="wd:Q2", type="person", label="ㄴ", source="wd",
+             description="Goryeo person CBDB = 39526")
+check("옮기지 못한 영어 설명은 비운다", gate2.description is None, repr(gate2.description))
+prose = "임진왜란(壬辰倭亂)은 1592년부터\n\n두 문단짜리 글이다."
+gate3 = Node(id="wd:Q3", type="event", label="ㄷ", source="wd", description=prose)
+check("한국어 산문은 줄바꿈까지 그대로 둔다", gate3.description == prose)
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "ko.sqlite")
+    # 관문을 지나지 않는 길(SQL 직접 쓰기)로 영어를 넣어 둔다 —
+    # 이미 그렇게 들어와 있는 그래프가 redescribe 의 대상이다
+    store.upsert_nodes([Node(id="wd:Q9", type="person", label="ㄹ", source="wd")])
+    store.conn.execute(
+        "UPDATE nodes SET description = 'South Korean fencer' WHERE id = 'wd:Q9'")
+    store.upsert_nodes([Node(id="wd:Q10", type="person", label="ㅁ", source="wd")])
+    store.conn.execute(
+        "UPDATE nodes SET description = 'Goryeo person CBDB = 1' WHERE id = 'wd:Q10'")
+    store.conn.commit()
+
+    rep = koreanize.redescribe(store.conn)
+    check("영어 설명을 바꾼다", len(rep.applied) == 1, str(rep.applied))
+    check("못 옮긴 설명은 비운다", len(rep.cleared) == 1, str(rep.cleared))
+    check("한글이 없는 설명이 남지 않는다",
+          koreanize.english_descriptions(store.conn) == [],
+          str(koreanize.english_descriptions(store.conn)))
+    # 비운 노드의 원문은 남아 있어야 한다 — 사전이 자라면 다시 살린다
+    kept = store.conn.execute(
+        "SELECT json_extract(props,'$.desc_en') FROM nodes WHERE id='wd:Q10'").fetchone()[0]
+    check("비운 설명의 원문을 남긴다", kept == "Goryeo person CBDB = 1", repr(kept))
+
+    again = koreanize.redescribe(store.conn)
+    check("두 번 돌려도 더 바꾸지 않는다", not again.applied, str(again.applied))
+    # 사전이 자란 뒤 다시 돌리면 비워 둔 것이 되살아난다
+    koreanize.JOB["person cbdb = 1"] = "시험용 직업"
+    revived = koreanize.redescribe(store.conn)
+    check("사전이 자라면 비워 둔 설명이 되살아난다",
+          len(revived.applied) == 1, str(revived.applied))
+    del koreanize.JOB["person cbdb = 1"]
+    store.close()
+
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

@@ -216,7 +216,8 @@ def cmd_enrich(args: argparse.Namespace) -> int:
 
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
     with GraphStore(args.db) as store:
-        print(f"→ 위키백과 보강 중 (상위 {args.limit}개 노드, full={args.full})...")
+        target = f"상위 {args.limit:,}개" if args.limit else "남은 전부"
+        print(f"→ 위키백과 보강 중 ({target}, full={args.full})...")
         result = wikipedia.enrich(
             fetcher,
             store,
@@ -225,11 +226,32 @@ def cmd_enrich(args: argparse.Namespace) -> int:
             full=args.full,
             refresh=args.refresh,
             scope_ids=ex_scope_ids(args.scope),
+            fallback=not args.no_fallback,
         )
         print(
             f"  ✓ 문서명 {result['titles']:,} · 본문 {result['extracts']:,}"
             f" · 노드 갱신 {result['updated']:,}"
         )
+        # 못 채운 쪽도 반드시 적는다. 빈 설명칸이 왜 비어 있는지는
+        # '아직 안 받았다'와 '문서가 없다'가 전혀 다른 이야기다.
+        if result["no_article"]:
+            print(
+                f"  · 한국어 위키백과 문서 없음 {result['no_article']:,}개"
+                f" → Wikidata 한 줄 설명 {result['fallback']:,}개로 대체"
+            )
+        if result["unresolved"]:
+            print(
+                f"  ⚠ sitelink 조회가 죽어 문서 유무를 모르는 노드"
+                f" {result['unresolved']:,}개 — 다시 실행하면 재시도합니다",
+                file=sys.stderr,
+            )
+        if result["redirected"]:
+            print(
+                f"  · 넘겨주기를 따라간 설명 {result['redirected']:,}개"
+                f" — 다른 문서의 글이라 화면에 그렇게 표시됩니다"
+            )
+        if result["remaining"]:
+            print(f"  · --limit 으로 남긴 노드 {result['remaining']:,}개")
         if result["updated"] == 0 and result["titles"] > 0:
             print("  ⚠ 본문은 받았지만 노드에 반영되지 않았습니다", file=sys.stderr)
     return 0
@@ -921,6 +943,51 @@ def cmd_relabel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_redescribe(args: argparse.Namespace) -> int:
+    """영어로 들어온 노드 설명을 한국어로 바꾼다.
+
+    `relabel` 이 이름에 하는 일을 설명에 한다. 수집이 설명을 덮어쓸 수
+    있으므로 `enrich` 뒤에 다시 돌린다. 시대 그래프는 별도 파일이니
+    거기에도 한 번 더:
+
+        python3 -m histgraph redescribe
+        python3 -m histgraph --db data/joseon.sqlite redescribe
+    """
+    from . import koreanize
+
+    with GraphStore(args.db) as store:
+        report = koreanize.redescribe(store.conn, dry_run=args.dry_run)
+        head = "바꿀 설명" if args.dry_run else "바꾼 설명"
+        total = len(report.applied) + len(report.cleared)
+        print(f"  영어 설명 {total:,}개 · {head} {len(report.applied):,}개"
+              f" · 비운 설명 {len(report.cleared):,}개")
+        for node_id, old, new in report.applied[:12]:
+            print(f"    {node_id:>16}  {old[:44]} → {new}")
+        if len(report.applied) > 12:
+            print(f"    … 그 밖 {len(report.applied) - 12:,}개")
+
+        if report.cleared:
+            # 비운 것은 실패가 아니라 '지어내지 않았다'는 기록이다.
+            # 사전에 말을 더하면 다시 돌려서 살릴 수 있으므로 원문은
+            # props.desc_en 에 남아 있다.
+            print(f"\n  사전에 없어 비운 설명 {len(report.cleared):,}개"
+                  " — 원문은 props.desc_en 에 남겼습니다:")
+            for node_id, old in report.cleared[:10]:
+                print(f"    {node_id:>16}  {old[:64]}")
+            if args.list_cleared:
+                for node_id, old in report.cleared[10:]:
+                    print(f"    {node_id:>16}  {old[:64]}")
+
+        left = koreanize.english_descriptions(store.conn)
+        if args.dry_run:
+            print("\n  (미리보기라 아직 아무것도 바꾸지 않았습니다)")
+        elif left:
+            print(f"\n  ⚠ 아직 영어인 설명 {len(left):,}개가 남아 있습니다")
+        else:
+            print("\n  영어로 뜨는 설명이 없습니다.")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """그래프 탐색 화면을 띄운다."""
     from . import server
@@ -992,8 +1059,14 @@ def main(argv: list[str] | None = None) -> int:
     p_ib.set_defaults(func=cmd_infobox)
 
     p_en = sub.add_parser("enrich", help="한국어 위키백과 서사로 노드 보강")
-    p_en.add_argument("--limit", type=int, default=500, help="보강할 노드 수 (차수 상위순)")
-    p_en.add_argument("--types", nargs="*", default=["person", "event"])
+    # 기본값 없음 = 남은 것을 다 채운다. 예전 기본값 500 이 화면의 빈
+    # 설명칸을 만든 원인이었다 — 차수 1짜리 노드는 순번이 오지 않았다.
+    p_en.add_argument("--limit", type=int, default=None,
+                      help="보강할 노드 수 (차수 상위순). 기본은 전부")
+    from .sources.wikipedia import ALL_WD_TYPES
+    p_en.add_argument("--types", nargs="*", default=list(ALL_WD_TYPES))
+    p_en.add_argument("--no-fallback", action="store_true",
+                      help="위키백과 문서가 없는 노드에 Wikidata 한 줄 설명도 넣지 않기")
     p_en.add_argument("--full", action="store_true", help="도입부 대신 본문 전체 (요청당 1건, 느림)")
     p_en.add_argument("--interval", type=float, default=1.0)
     p_en.add_argument("--refresh", action="store_true", help="이미 산문이 있는 노드도 다시 받기")
@@ -1044,6 +1117,12 @@ def main(argv: list[str] | None = None) -> int:
     p_pm.add_argument("--show", type=int, default=20, help="출력할 매칭 예시 수")
     p_pm.add_argument("--interval", type=float, default=1.0)
     p_pm.set_defaults(func=cmd_promote)
+
+    p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
+    p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")
+    p_rd.add_argument("--list-cleared", action="store_true",
+                      help="비운 설명을 전부 나열")
+    p_rd.set_defaults(func=cmd_redescribe)
 
     p_sc = sub.add_parser("scope", help="한 시대만 별도 그래프로 추출")
     p_sc.add_argument("era", choices=["joseon", "goryeo", "silla", "goguryeo", "baekje"])

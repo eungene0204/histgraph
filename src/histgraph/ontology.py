@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .koreanize import has_hangul, to_korean
+
 
 # --- 노드 타입 -------------------------------------------------------------
 # 값은 저장/직렬화용 안정 키, 라벨은 UI 표기용.
@@ -87,6 +89,14 @@ class Node:
             raise OntologyError(f"노드 id 는 '{{source}}:{{id}}' 형식이어야 함: {self.id!r}")
         if not self.label:
             raise OntologyError(f"라벨이 비어 있음: {self.id}")
+        # **한국어 아닌 설명은 여기서 막는다.** 소스가 늘어날 때마다
+        # 커넥터마다 같은 검사를 적어 두면 언젠가 하나가 빠지고, 그 하나로
+        # 화면에 영어가 다시 뜬다. 모든 커넥터가 Node 를 지나므로 관문은
+        # 여기 하나면 된다. 옮길 수 있으면 옮기고, 없으면 비운다 —
+        # 예외를 던지지 않는 이유는 설명 한 줄 때문에 수집 전체가 멈추면
+        # 안 되기 때문이다.
+        if self.description and not has_hangul(self.description):
+            self.description = to_korean(self.description)
 
 
 @dataclass(slots=True)

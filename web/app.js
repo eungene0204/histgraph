@@ -222,6 +222,43 @@ function note(html) {
 }
 
 // --- 상세 패널 ---------------------------------------------------------
+// 빈 설명의 이유는 노드가 어디서 왔는지에 달려 있다. 뭉뚱그려
+// '자료 없음'이라고 적으면, 더 받아오면 채워지는 노드와 애초에 채울
+// 것이 없는 노드가 같은 말을 하게 된다.
+function whyEmpty(d) {
+  if (d.source === 'timeline') return '연표의 해를 세우는 노드입니다.';
+  if (d.source === 'extract') return '산문에서 이름만 추출된 노드라 원문이 없습니다.';
+  if (d.source === 'khs') return '국가유산청 자료에 해설문이 없습니다.';
+  // 한 줄 설명이 영어로 와서 비운 경우. 원문이 남아 있다는 사실만
+  // 말하고 영어 자체는 내보내지 않는다.
+  if (d.desc_dropped) return '한국어로 옮길 수 있는 설명이 아직 없습니다.';
+  if (d.no_kowiki) return '한국어 위키백과에 문서가 없습니다.';
+  return '아직 서사를 받아오지 않았습니다.';
+}
+
+// 설명칸. 비어 있을 때 아무것도 그리지 않으면 "이 노드는 원래 설명이
+// 없는 것"처럼 보인다. 왜 비었는지를 대신 적는다.
+//
+// **어느 자료에서 왔는지는 적지 않는다.** 'Wikidata 한 줄 설명' 같은
+// 딱지는 읽는 사람이 묻지 않은 것을 답하면서 정작 궁금한 것(이 사람이
+// 누구인가)은 밀어낸다. 수집 경로는 화면이 아니라 props 에 남는다.
+function descHtml(d) {
+  if (!d.description) {
+    return `<p class="d-nodesc">설명 없음 — ${esc(whyEmpty(d))}</p>`;
+  }
+  // 접힌 높이(168px)를 넘길 만큼 길 때만 단추를 낸다. 세 줄짜리 글에
+  // '전문 보기'가 붙어 있으면 눌러도 아무 일이 없다.
+  const long = d.description.length > 220;
+  // 넘겨주기를 따라온 글은 이 노드를 설명하는 글이 아닐 수 있다
+  // ('판의금부사' → '의금부'). 읽는 사람이 알고 읽어야 한다.
+  const via = d.desc_via
+    ? `<p class="d-desc-src">‘${esc(d.desc_via)}’ 문서에서 넘겨받은 글입니다</p>`
+    : '';
+  return `<div class="d-desc${long ? '' : ' open'}" id="desc">${esc(d.description)}</div>
+          ${via}
+          ${long ? '<button class="d-more" id="more">전문 보기</button>' : ''}`;
+}
+
 async function showDetail(id, { back = false } = {}) {
   // 새로 들어가는 길이면 지금 보던 곳을 되돌아갈 자리에 쌓는다.
   // ('←' 로 온 걸음은 쌓지 않는다 — 그러면 두 노드 사이를 영영 못 벗어난다)
@@ -332,8 +369,7 @@ async function showDetail(id, { back = false } = {}) {
     <span class="d-type">${glyph(d.type, d.group, 11)} ${esc(d.type_label)}</span>
     <h2 class="d-title">${esc(d.label)}</h2>
     ${dates ? `<div class="d-dates">${esc(dates)}</div>` : ''}
-    ${d.description ? `<div class="d-desc" id="desc">${esc(d.description)}</div>
-       <button class="d-more" id="more">전문 보기</button>` : ''}
+    ${descHtml(d)}
     ${d.aliases.length ? `<div class="d-section-title">다른 이름</div>
       <div class="d-aliases">${d.aliases.map((a) => `<span>${esc(a)}</span>`).join('')}</div>` : ''}
     <div class="d-section-title">관계 ${relCount}</div>

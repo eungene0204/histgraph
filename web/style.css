@@ -362,6 +362,16 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   max-height: 168px; overflow: hidden; position: relative; white-space: pre-wrap;
 }
 .d-desc.open { max-height: none; }
+/* 설명이 없을 때의 자리. 빈 칸을 그냥 두면 '없는 게 당연한 노드'로 읽힌다 */
+.d-nodesc {
+  font-size: 12px; line-height: 1.6; color: var(--text-3);
+  background: var(--surface-3); border-radius: 8px; padding: 10px 12px;
+  margin: 0; border-left: 2px solid var(--line);
+}
+/* 넘겨받은 글이라는 단서 — 산문과 같은 무게로 읽히면 안 된다.
+   자료 출처(Wikidata 따위)를 적는 자리가 아니다. 이건 '이 글이 다른
+   문서의 글'이라는 경고지 출처 표기가 아니다. */
+.d-desc-src { font-size: 11px; color: var(--text-3); margin: 5px 0 0; }
 .d-more {
   background: none; border: none; color: var(--actor);
   font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0;

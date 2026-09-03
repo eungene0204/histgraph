@@ -140,6 +140,52 @@ def _labels(fetcher: Fetcher, qids: set[str], chunk: int = 400) -> dict[str, tup
     return out
 
 
+def fetch_descriptions(
+    fetcher: Fetcher, qids: list[str], chunk: int = 300
+) -> dict[str, tuple[str, str]]:
+    """QID -> (한 줄 설명, 언어). 한국어가 있으면 한국어, 없으면 영어.
+
+    `_labels` 는 라벨과 P31 만 물어본다. 그래서 엣지의 반대편으로 딸려
+    들어온 노드는 이름만 있고 설명이 비어 있다 — 화면의 빈 칸은 대부분
+    이 경로로 생긴다. 위키백과 문서가 아예 없는 개체에는 이 한 줄이
+    유일하게 남는 설명이다.
+
+    영어도 받아 오는 이유: `Q117196164 황진` 의 wd 설명은 'badminton
+    player' 다. 조선 인물이 아니라는 뜻이고, 비어 있을 때는 알 수 없던
+    사실이다. 다만 **영어 그대로 그래프에 들어가지는 않는다** — 부르는
+    쪽(`_fill_from_wikidata`)이 `koreanize` 로 옮겨서 '배드민턴 선수'로
+    넣고, 옮기지 못하면 넣지 않는다. 언어를 같이 돌려주는 것은 옮길
+    필요가 있는지 부르는 쪽이 알아야 하기 때문이다."""
+    out: dict[str, tuple[str, str]] = {}
+    ordered = sorted(set(qids))
+    failures: list[str] = []
+
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?e ?ko ?en WHERE {{
+                  VALUES ?e {{ {values} }}
+                  OPTIONAL {{ ?e schema:description ?ko FILTER(lang(?ko) = "ko") }}
+                  OPTIONAL {{ ?e schema:description ?en FILTER(lang(?en) = "en") }}
+                }}""",
+            f"description/{i}",
+            failures,
+        )
+        for r in rows:
+            qid = _qid(_val(r, "e") or "")
+            ko, en = _val(r, "ko"), _val(r, "en")
+            if ko and ko.strip():
+                out[qid] = (ko.strip(), "ko")
+            elif en and en.strip():
+                out[qid] = (en.strip(), "en")
+
+    if failures:
+        log.warning("설명 조회 실패 %d구간 — 그만큼은 빈 칸으로 남는다", len(failures))
+    log.info("QID %d개 중 한 줄 설명 %d개", len(ordered), len(out))
+    return out
+
+
 # 진짜 개체 식별자만. Wikidata 는 '값 불명'을 blank node 로 주는데
 # (`.well-known/genid/<32자리 해시>`) 그걸 QID 로 받아들이면 라벨이
 # 해시인 유령 인물이 그래프에 생긴다. 실측 75개가 그렇게 들어와 있었다 —

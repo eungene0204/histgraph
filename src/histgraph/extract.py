@@ -1107,18 +1107,26 @@ def load_documents(
     2.0 으로 올리면 둘 다 있는 글만 남는다.
 
     scope_ids 를 주면 그 노드들의 산문만 대상으로 한다."""
+    # **넘겨받은 글은 추출에 쓰지 않는다.** `enrich` 가 위키백과 넘겨주기를
+    # 따라가면 다른 개체의 문서가 붙는다 — '무관랑'의 설명은 '사다함'
+    # 문서이고, '이유'의 설명은 '엠파이어 (음악 그룹)' 문서다. 화면에서는
+    # 어디서 온 글인지 밝히고 보여주면 되지만, 추출은 다르다. 그 글을
+    # 이 노드의 것으로 읽으면 사다함의 관계가 무관랑에게 붙는다.
+    # 근거 구절 검증도 이걸 못 막는다 — 구절은 원문에 실제로 있다.
+    skip_via = "AND json_extract(props, '$.desc_via') IS NULL"
     if node_types:
         marks = ",".join("?" * len(node_types))
         rows = store.conn.execute(
             f"""SELECT id, label, description FROM nodes
                 WHERE description IS NOT NULL AND length(description) > 100
-                  AND type IN ({marks})""",
+                  AND type IN ({marks}) {skip_via}""",
             node_types,
         ).fetchall()
     else:
         rows = store.conn.execute(
-            """SELECT id, label, description FROM nodes
-               WHERE description IS NOT NULL AND length(description) > 100"""
+            f"""SELECT id, label, description FROM nodes
+               WHERE description IS NOT NULL AND length(description) > 100
+                 {skip_via}"""
         ).fetchall()
 
     if scope_ids is not None:
