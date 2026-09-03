@@ -8,10 +8,15 @@
   --text:         #f0efec;
   --text-2:       #c3c2b7;
   --text-3:       #8b8b84;
-  --actor:        #3987e5;
-  --event:        #d95926;
-  --thing:        #199e70;
-  --frame:        #8b8b84;
+  /* 크롬이 쓰는 단 하나의 색 — 초점·링크·누를 수 있는 것.
+     노드 색과는 다른 갈래라 이름도 따로 둔다. */
+  --accent:       #3987e5;
+  /* 로고 표식은 노드 팔레트의 축소판이다. 값은 graph-view.js 의
+     TYPE_COLOR person·event·place 를 그대로 옮긴 것 — 같은 것을 두
+     벌 두면 한쪽만 고쳐진다. (뼈대 색은 표식에 쓰지 않아 두지 않는다) */
+  --mark-actor:   #4a6ad8;
+  --mark-event:   #ec7e3e;
+  --mark-thing:   #3fb968;
   --font: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
 }
 
@@ -52,8 +57,8 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .brand h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
 .brand .mark {
   width: 13px; height: 13px; border-radius: 50%;
-  background: var(--actor);
-  box-shadow: 9px 5px 0 -3px var(--event), 16px -3px 0 -4px var(--thing);
+  background: var(--mark-actor);
+  box-shadow: 9px 5px 0 -3px var(--mark-event), 16px -3px 0 -4px var(--mark-thing);
 }
 .era {
   font-size: 12px; color: var(--text-2);
@@ -74,7 +79,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   font: inherit;
   font-size: 13px;
 }
-.search input:focus { outline: 2px solid var(--actor); outline-offset: -1px; }
+.search input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .results {
   position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; right: 0;
@@ -144,7 +149,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   padding: 4px 7px; font: inherit; font-size: 12.5px;
 }
 .check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); margin-bottom: 7px; cursor: pointer; }
-.check input { accent-color: var(--actor); }
+.check input { accent-color: var(--accent); }
 
 /* --- 캔버스 --- */
 .stage { flex: 1; position: relative; min-width: 0; background: var(--surface); }
@@ -201,7 +206,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* 몇 개가 물러나 있는지. 안 보이는 사건이 없는 셈이 되면 안 된다. */
 .tl-count { margin-top: 4px; font-size: 11px; color: var(--text-3); }
 .tl-count b { color: var(--text-2); font-weight: 600; }
-.tl-more { color: var(--actor); }
+.tl-more { color: var(--accent); }
 /* 연표는 화면보다 길어서 훑다 보면 고른 자리를 잃는다. 누르면 돌아온다. */
 .tl-when {
   display: block; width: 100%; padding: 0; text-align: left;
@@ -209,7 +214,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   color: var(--text); font: inherit; font-size: 16px; font-weight: 650;
   letter-spacing: -0.01em;
 }
-.tl-when:hover { color: var(--actor); }
+.tl-when:hover { color: var(--accent); }
 /* 노드가 스스로 적고 있는 날짜가 아니라 이어진 연도 노드에서 가져온 값.
    같은 얼굴로 내놓으면 안 된다. */
 .tl-via {
@@ -241,7 +246,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* 고른 노드의 자리 (인물이면 생몰 구간) */
 .tl-map-here {
   position: absolute; top: 3px; bottom: 3px; min-width: 2px;
-  border-radius: 2px; background: var(--actor);
+  border-radius: 2px; background: var(--accent);
 }
 
 .tl-body { flex: 1; overflow-y: auto; position: relative; min-height: 0; }
@@ -292,7 +297,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   color: var(--text-3); font: inherit; font-size: 10.5px; cursor: pointer;
 }
 .tl-kings:hover { color: var(--text-2); border-color: var(--text-3); }
-.tl-kings[aria-pressed="true"] { color: var(--actor); border-color: var(--actor); }
+.tl-kings[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .tl-reign-bar { pointer-events: auto; cursor: pointer; }
 .tl-reign-bar:hover { opacity: 1 !important; }
 /* 고른 노드가 누구 때의 일인지 — 그 임금의 막대만 밝다. */
@@ -310,7 +315,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   font-variant-numeric: tabular-nums;
 }
 .tl-reign.k-on { color: var(--text); }
-.tl-reign.k-on b { color: var(--actor); }
+.tl-reign.k-on b { color: var(--accent); }
 .tl-reign:hover { color: var(--text); }
 .tl-reign:hover i { color: var(--text-2); }
 /* 몰년만 따로 적은 줄. 재위 막대가 끝난 뒤의 표식이라 더 물러나 있다. */
@@ -379,7 +384,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
    문서의 글'이라는 경고지 출처 표기가 아니다. */
 .d-desc-src { font-size: 11px; color: var(--text-3); margin: 5px 0 0; }
 .d-more {
-  background: none; border: none; color: var(--actor);
+  background: none; border: none; color: var(--accent);
   font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0;
 }
 .d-section-title {
