@@ -1,0 +1,12 @@
+{
+  "name": "histgraph",
+  "private": true,
+  "description": "저장소 루트에서 친 npm 을 web/ 으로 넘긴다 — 프론트 설정의 본체는 web/package.json 이다.",
+  "scripts": {
+    "dev": "npm run dev --prefix web",
+    "dev:api": "PYTHONPATH=src python3 -m histgraph serve",
+    "build": "npm run build --prefix web",
+    "preview": "npm run preview --prefix web",
+    "postinstall": "npm install --prefix web"
+  }
+}

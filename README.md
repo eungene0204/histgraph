@@ -901,13 +901,17 @@ python3 -m histgraph serve          # http://127.0.0.1:8100  (data/joseon.sqlite
 8100 으로 넘긴다.
 
 ```bash
-cd web && npm install     # 처음 한 번
+npm install               # 처음 한 번
 
 npm run dev:api           # 8100 — 그래프 API (파이썬)
 npm run dev               # 5173 — 화면 (HMR)
 ```
 
 브라우저는 **5173 하나만** 본다. 프록시 설정은 `web/vite.config.js`.
+
+저장소 루트에서 친다. 프론트 설정의 본체는 `web/package.json` 이고 루트의
+것은 `--prefix web` 으로 넘기기만 한다 — 화면 파일이 `web/` 에 모여 있는
+것과, 루트에서 `npm run dev` 가 그냥 되는 것 둘 다 지키려는 것이다.
 
 `npm run build` 를 돌리면 `web/dist/` 가 생기고, 그때부터 `serve` 는 원본
 대신 **번들을 내준다** (`server._web_root`). 빌드 단계는 선택이지 전제가
