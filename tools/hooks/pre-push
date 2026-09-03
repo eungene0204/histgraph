@@ -1,0 +1,86 @@
+#!/bin/sh
+# push 전에 도는 검사. 깨지면 push 자체가 취소된다.
+#
+# **불을 앞으로 당기는 것이 이 파일의 일이다.** GitHub Actions 가 같은 것을
+# 돌리지만 그쪽은 push 를 계기로 돌아서, 빨간불이 켜졌을 때는 이미 나간
+# 뒤다 (실측: push 18:41:55 → Actions 결과 18:42:13 → 배포 완료 18:42:28).
+#
+# 그렇다고 Actions 가 남는 일이 되지는 않는다. 이 맥의 python3 는 3.11 이고
+# 배포는 3.12 에서 돈다 — 버전 차이로 갈리는 것은 여기서 못 잡는다.
+#
+# **작업 트리가 아니라 올릴 커밋을 잰다.** 이 저장소는 여러 세션이 동시에
+# 만진다. 작업 트리를 재면 남이 고치는 중인 파일 때문에 내 push 가 막히고,
+# 반대로 커밋 안 한 수정이 통과를 만들어 주기도 한다 — 둘 다 거짓말이다.
+# 그래서 올릴 커밋을 임시 디렉터리로 풀어서 거기서 잰다.
+#
+# 급할 때는 넘긴다:  git push --no-verify
+#
+# 이 훅이 도는 이유는 core.hooksPath 가 tools/hooks 를 가리키기 때문이다.
+# 새로 클론했다면 한 번 걸어 줘야 한다:
+#   git config core.hooksPath tools/hooks
+
+ROOT=$(git rev-parse --show-toplevel) || exit 1
+cd "$ROOT" || exit 1
+
+fail () {
+  printf '\n  ✗ %s\n\n  고치고 다시 push 하거나, 지금 꼭 올려야 한다면:\n    git push --no-verify\n\n' "$1"
+  exit 1
+}
+
+# git 이 stdin 으로 무엇을 올리는지 알려준다:
+#   <로컬 ref> <로컬 sha> <원격 ref> <원격 sha>
+# 로컬 sha 가 0 뿐이면 브랜치 삭제다 — 잴 것이 없다.
+SHA=
+while read -r _lref lsha _rref _rsha; do
+  case "$lsha" in
+    '' | *[!0]* ) SHA=$lsha; break ;;
+  esac
+done
+[ -n "$SHA" ] || exit 0
+
+printf '\n  push 전 검사 — %s\n\n' "$(git log --oneline -1 "$SHA" 2>/dev/null | cut -c1-60)"
+
+TMP=$(mktemp -d) || exit 1
+trap 'rm -rf "$TMP"' EXIT
+git archive "$SHA" | tar -x -C "$TMP" || fail "커밋을 풀지 못했습니다"
+
+cd "$TMP" || exit 1
+
+run () {
+  name=$1; shift
+  if ! out=$("$@" 2>&1); then
+    printf '  ✗ %s\n\n%s\n' "$name" "$(printf '%s' "$out" | tail -25)"
+    fail "$name"
+  fi
+  tally=$(printf '%s' "$out" | grep -o '통과 [0-9]* / 실패 [0-9]*' | tail -1)
+  printf '  ✓ %s%s\n' "$name" "${tally:+  ($tally)}"
+}
+
+# 1) 배포 입력. 여기는 풀어 놓은 커밋이라 '파일이 있다' 가 곧 '저장소에
+#    있다' 이다. Vercel 이 보는 것도 정확히 이것이다.
+if [ -e .python-version ]; then
+  fail ".python-version 이 이 커밋에 들어 있습니다 — Vercel 런타임은 3.12 이상만 받아 빌드가 죽습니다 (로컬 파일은 두고 git rm --cached 하세요)"
+fi
+if [ ! -f data/joseon.sqlite ]; then
+  fail "data/joseon.sqlite 가 이 커밋에 없습니다 — 배포된 함수가 DB 없이 떠서 /api 가 전부 죽습니다"
+fi
+printf '  ✓ 배포 입력\n'
+
+# 2) 파이썬. 의존성 없이 돈다 — 본체가 표준 라이브러리만 쓰기 때문이다.
+run '파이썬' python3 tests/test_pipeline.py
+
+# 3) 화면. node_modules 는 빌려 쓴다 — 여기서 npm install 을 하면 push 마다
+#    30초씩 잡아먹는다. 재는 것은 소스이지 의존성 설치가 아니다.
+if [ ! -d "$ROOT/web/node_modules" ]; then
+  fail "web/node_modules 가 없어 화면을 재지 못했습니다 — npm install 을 먼저 하세요"
+fi
+if [ ! -d "$TMP/web" ]; then
+  fail "이 커밋에 web/ 이 없어 화면을 재지 못했습니다"
+fi
+ln -s "$ROOT/web/node_modules" "$TMP/web/node_modules"   || fail "node_modules 를 빌려오지 못했습니다"
+
+# 테스트에 이어 빌드까지 — Vercel 이 치는 것과 같은 명령이다.
+run '화면' npm test
+run '빌드' npm run build
+
+printf '\n  통과 — push 합니다\n\n'
