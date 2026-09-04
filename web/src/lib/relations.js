@@ -267,20 +267,3 @@ export function pathSteps(path, nodes) {
 export function pathSentence(steps) {
   return steps.map((s, i) => (i === 0 ? s.label : `→ (${s.kind}) ${s.label}`)).join(' ');
 }
-
-// 사슬의 **먼 끝** — 두 걸음 이상 떨어진 잎. "이 일이 결국 어디까지
-// 이어졌나"에 이름을 치게 하지 않고 먼저 보여주기 위한 것이다. 원인 쪽
-// 잎은 그 일이 이 일까지 온 것이고, 결과 쪽 잎은 이 일이 거기까지 간 것이다.
-export function farEnds(data, limit = 8) {
-  const out = [];
-  const seen = new Set();
-  const walk = (items, side, depth) => {
-    for (const it of items || []) {
-      if (it.children?.length) walk(it.children, side, depth + 1);
-      else if (depth >= 1 && !seen.has(it.id)) { seen.add(it.id); out.push({ id: it.id, side, depth }); }
-    }
-  };
-  walk(data?.causes, 'cause', 0);
-  walk(data?.effects, 'effect', 0);
-  return out.sort((a, b) => b.depth - a.depth).slice(0, limit);
-}

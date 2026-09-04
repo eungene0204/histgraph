@@ -24,6 +24,9 @@ export default function App() {
   const [note, setNote] = useState(null);
   const [sideOpen, setSideOpen] = useState(false);
   const [ready, setReady] = useState(false);        // 그래프를 한 번이라도 그렸나
+  // 자료 서버에 못 닿은 상태. 화면에는 '아직 아무것도 안 골랐다'와
+  // 똑같이 비어 보이므로, 둘을 갈라 적으려고 따로 든다.
+  const [offline, setOffline] = useState(false);
 
   // **상세 패널에서** 관계를 타고 들어간 자취. '←' 로 한 칸씩 되짚어
   // 올라간다. 그래프나 연표에서 고른 노드는 여기 쌓이지 않는다 — 그건
@@ -46,7 +49,8 @@ export default function App() {
   const showTimeline = useCallback(async (id) => {
     if (!settingsRef.current.showRail || timelineIdRef.current === id) return;
     timelineIdRef.current = id;
-    const t = await api.timeline(id);
+    const t = await api.timeline(id).catch(() => null);
+    if (!t) return;
     // 그 사이에 다른 노드로 옮겼으면 늦게 온 답은 버린다
     if (timelineIdRef.current !== id) return;
     setTimeline(t.error ? null : t);
@@ -56,7 +60,11 @@ export default function App() {
   const load = useCallback(async (id, { merge = false } = {}) => {
     const view = viewRef.current;
     if (!view) return;
-    const data = await api.graph(id, settingsRef.current);
+    const data = await api.graph(id, settingsRef.current).catch(() => null);
+    // 서버가 죽어 있으면 fetch 가 통째로 터진다. 잡지 않으면 약속이 조용히
+    // 깨져 화면은 첫 빈 화면 그대로 서 있는다 — 그게 '그래프가 안 보인다'다.
+    if (!data) { setOffline(true); setNote(null); return; }
+    setOffline(false);
     if (data.missing || !data.nodes.length) {
       setNote(<>‘{id}’ 주변에 그릴 관계가 없습니다.</>);
       return;
@@ -133,11 +141,12 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const m = await api.meta();
+      const m = await api.meta().catch(() => null);
       if (!alive) return;
+      if (!m) { setOffline(true); return; }
       setMeta(m);
       document.title = `histgraph — ${m.era_label || '전체'}`;
-      const s = await api.seeds(12);
+      const s = await api.seeds(12).catch(() => []);
       if (!alive) return;
       setSeeds(s);
       // 주소가 비어 있으면 왕조에서 시작한다. 조선 그래프의 중심은 조선이다 —
@@ -245,6 +254,7 @@ export default function App() {
           showLabels={settings.showLabels}
           note={note}
           empty={!ready}
+          offline={offline}
           // **클릭하면 그 사람의 세계가 열려야 한다.** 고르기만 하면 화면에는
           // 그 노드가 우연히 들고 온 엣지 한두 개만 남는다 — 조선 화면에서
           // 정종을 누르면 '한씨'와의 선 하나뿐이고, 아버지 태조도 형제인 태종도

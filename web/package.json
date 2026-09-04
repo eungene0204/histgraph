@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node dev.mjs",
+    "dev:web": "vite",
     "dev:api": "cd .. && uv run histgraph serve",
     "build": "vite build",
     "preview": "vite preview",
