@@ -11,8 +11,9 @@
 바꾸는 규칙(`relations.js` 의 SENTENCE)은 옮겨 오지 않았다 — 같은 규칙을 두
 벌 두면 한쪽만 고쳐진다.
 
-여기도 §1 이 그대로 걸린다: 사람이 읽는 자리에 영어를 쓰지 않고, 자료가
-어디서 왔는지 말하지 않는다.
+여기도 §1 이 그대로 걸린다: 사람이 읽는 자리에 영어를 쓰지 않는다. 자료
+출처는 **설명 아래 한 줄**에만 적는다 — 라이선스 의무라서 두는 예외다
+(provenance.py). 다른 자리에는 여전히 안 적는다.
 
 **설명은 요약까지만 낸다.** 2026-09-05 애드센스가 이 사이트를 '주의 필요'로
 돌려보냈다. 그때 이 장은 설명 칸을 통째로 뿌리고 있었다 — 세조 25,093자,
@@ -174,7 +175,10 @@ h1 .also { color: var(--text-3); font-weight: 400; font-size: 19px; margin-left:
 .kind { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 13px; margin: 0 0 26px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .lead { color: var(--text); font-size: 16px; margin: 0 0 14px; }
-.desc { color: var(--text-2); font-size: 15px; margin: 0 0 18px; }
+.desc { color: var(--text-2); font-size: 15px; margin: 0 0 8px; }
+.src { color: var(--text-3); font-size: 12px; margin: 0 0 18px; }
+.src a { color: var(--text-3); text-decoration: underline; text-underline-offset: 2px; }
+.src a:hover { color: var(--accent); }
 .empty { color: var(--text-3); font-size: 14px; margin: 0 0 18px; }
 .aka { color: var(--text-3); font-size: 13px; margin: 0 0 8px; }
 h2 {
@@ -290,6 +294,25 @@ def _lead(title: str, kind: str,
     return f"{first} {shown}{rest} 모두 {total}건과 이어져 있습니다."
 
 
+def _origin_line(origin: dict | None) -> str:
+    """설명 아래 출처 한 줄. '한국어 위키백과 문서를 줄인 글입니다 ·
+    크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0'. 이름과 라이선스는
+    각각 그 주소로 이어진다. 출처를 모르면 빈 문자열 — 아무것도 안 적는다.
+    (§1 의 예외 — provenance.py 머리말.)"""
+    if not origin:
+        return ""
+    name = escape(origin["name"])
+    if origin.get("url"):
+        name = f'<a href="{escape(origin["url"])}" rel="nofollow">{name}</a>'
+    text = f"{name} 문서를 줄인 글입니다"
+    if origin.get("license"):
+        lic = escape(origin["license"])
+        if origin.get("license_url"):
+            lic = f'<a href="{escape(origin["license_url"])}" rel="license nofollow">{lic}</a>'
+        text += f" · {lic}"
+    return text
+
+
 def _link(other: dict) -> str:
     color = GROUP_COLOR.get(other.get("group"), "var(--frame)")
     kind = NODE_TYPES.get(other.get("type"), "")
@@ -379,6 +402,9 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     parts.append(f'<p class="lead">{escape(_lead(title, kind, groups, total))}</p>')
     if summary:
         parts.append(f'<p class="desc">{escape(summary)}</p>')
+        origin = _origin_line(node.get("desc_origin"))
+        if origin:
+            parts.append(f'<p class="src">{origin}</p>')
     else:
         parts.append(f'<p class="empty">{escape(_why_empty(node))}</p>')
 

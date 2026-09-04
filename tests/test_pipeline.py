@@ -2790,7 +2790,9 @@ with tempfile.TemporaryDirectory() as tmp:
         Node(id="wd:S", type="person", label="세종", source="wd",
              start_date="1397-04-10", end_date="1450-02-17",
              description=f"{SEJONG_INTRO}\n\n\n== 생애 ==\n{SEJONG_BODY}",
-             aliases=["이도"]),
+             aliases=["이도"],
+             props={"desc_source": "kowiki",
+                    "kowiki_url": "https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"}),
         Node(id="wd:T", type="person", label="태종", source="wd",
              description="조선의 제3대 국왕이다."),
         Node(id="wd:M", type="person", label="문종", source="wd",
@@ -2825,6 +2827,13 @@ with tempfile.TemporaryDirectory() as tmp:
           "세종은 인물입니다. " in text and "모두 3건과 이어져 있습니다" in text
           and text.index("인물입니다") < text.index("훈민정음"), text[:400])
     check("다른 이름이 적힌다", "이도" in text)
+    # 출처는 설명 아래 한 줄. §1 의 유일한 예외 — 라이선스 의무다.
+    check("출처와 라이선스가 설명 아래 한 줄로 선다",
+          "한국어 위키백과 문서를 줄인 글입니다 · 크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0" in text
+          and text.index("훈민정음") < text.index("문서를 줄인 글입니다"), text[:600])
+    check("출처 이름과 라이선스가 링크다",
+          'href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"' in body
+          and 'href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"' in body)
     # 방향이 뒤집히면 아버지가 자식이 된다 — child_of 는 나가는 쪽이 부모다.
     check("부모와 자녀가 갈려 있다",
           text.index("부모") < text.index("태종") and "자녀" in text, text)
@@ -2861,9 +2870,26 @@ with tempfile.TemporaryDirectory() as tmp:
     check("문장 단위로 끊는다",
           pages.summarize("가나다라마바사아자차. 카타파하가나다라마바. 사아자차카타파하.", limit=24)
           == "가나다라마바사아자차. 카타파하가나다라마바.")
-    check("상세 패널이 받는 전문에는 위키 문법이 없다",
+    check("상세 패널도 요약만 받는다 — 절 본문과 위키 문법이 없다",
           "== " not in api.node("wd:S")["description"]
-          and "생애" in api.node("wd:S")["description"] and "막동" in api.node("wd:S")["description"])
+          and "훈민정음" in api.node("wd:S")["description"]
+          and "막동" not in api.node("wd:S")["description"])
+    check("상세 패널이 출처를 받는다",
+          api.node("wd:S")["desc_origin"]["name"] == "한국어 위키백과"
+          and api.node("wd:T")["desc_origin"] is None)
+
+    # 출처 판정 자체 (provenance.desc_origin). 표식이 확실할 때만 적는다.
+    from histgraph.provenance import desc_origin as _origin
+    check("나무위키는 비영리 라이선스를 적는다",
+          "비영리" in _origin("kowiki", {"desc_source": "namu", "namu_url": "https://namu.wiki/w/x"})["license"])
+    check("국편 정본은 우리역사넷으로 적는다",
+          _origin("wd", {"canon": "nikh", "nikh_url": "https://contents.history.go.kr/x"})["name"]
+          == "국사편찬위원회 우리역사넷")
+    check("국가유산청 글은 노드 주소로 잇는다",
+          _origin("khs", {}, "https://www.heritage.go.kr/x")["url"] == "https://www.heritage.go.kr/x")
+    check("옛 수집분은 kowiki_url 로 되짚는다",
+          _origin("wd", {"kowiki_url": "https://ko.wikipedia.org/wiki/x"})["name"] == "한국어 위키백과")
+    check("표식이 없으면 모른다고 한다 — 틀린 출처보다 낫다", _origin("wd", {}) is None)
 
     status, _, body = pages.route(api, "/n/없는것")
     check("없는 노드는 404 이고 색인에 안 올린다",

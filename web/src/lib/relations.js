@@ -187,7 +187,3 @@ export function fmtDate(v) {
   const y = +m[2];
   return m[1] ? `기원전 ${y}년` : `${y}년`;
 }
-
-// 접힌 높이(168px)를 넘길 만큼 길 때만 '전문 보기'를 낸다. 세 줄짜리 글에
-// 단추가 붙어 있으면 눌러도 아무 일이 없다.
-export const LONG_DESC = 220;

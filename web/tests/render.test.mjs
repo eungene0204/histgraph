@@ -178,13 +178,24 @@ let detailHtml = '';
   ok('근거 구절이 따옴표 안에 들어간다', plain(detailHtml).includes('“세종이 훈민정음을 만들었다”'));
   ok('돌아가기 단추가 있다', detailHtml.includes('d-back'));
 
-  // 설명이 짧으면 '전문 보기'가 붙지 않는다
-  ok('짧은 설명에는 전문 보기가 없다', !detailHtml.includes('전문 보기'));
-  const longHtml = renderToString(h(DetailPanel, {
-    node: { ...node, description: '가'.repeat(400) },
+  // 서버가 요약을 주므로 화면은 접지 않고 '전문 보기'도 없다 — 전문을
+  // 화면에 내지 않는다 (2026-09-05 애드센스 '주의 필요').
+  ok('전문 보기가 없다', !detailHtml.includes('전문 보기') && !detailHtml.includes('d-more'));
+  // 출처는 설명 아래 한 줄 — 이름은 문서로, 라이선스는 그 조문으로 이어진다.
+  const originHtml = renderToString(h(DetailPanel, {
+    node: { ...node, desc_origin: {
+      name: '한국어 위키백과', url: 'https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85',
+      license: '크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0',
+      license_url: 'https://creativecommons.org/licenses/by-sa/4.0/deed.ko' } },
     prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
   }));
-  ok('긴 설명에는 전문 보기가 붙는다', longHtml.includes('전문 보기'));
+  ok('출처가 설명 아래 한 줄로 선다',
+     plain(originHtml).replace(/<[^>]+>/g, '').includes('한국어 위키백과 문서를 줄인 글입니다 · 크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0'),
+     originHtml.match(/d-desc-origin[\s\S]{0,300}/)?.[0]);
+  ok('출처 이름과 라이선스가 링크다',
+     originHtml.includes('href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"')
+     && originHtml.includes('href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"'));
+  ok('출처를 모르면 아무것도 안 적는다', !detailHtml.includes('d-desc-origin'));
 
   // 설명이 없으면 왜 없는지를 적는다
   const emptyHtml = renderToString(h(DetailPanel, {
