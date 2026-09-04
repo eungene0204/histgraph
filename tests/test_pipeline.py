@@ -1871,9 +1871,13 @@ with tempfile.TemporaryDirectory() as tmp:
         Node(id="wd:Q28179", type="org", label="조선", source="wd"),
         Node(id="wd:EV1", type="event", label="갑오개혁", source="wd",
              start_date="1894-01-01", props={"polity": "조선"},
+             description="1894년 조선에서 시작된 제도 개혁.",
              aliases=["갑오경장"]),
         Node(id="wd:EV2", type="event", label="무신정변", source="wd",
              props={"polity": "고려"}),
+        # 설명이 없는 사건. 연대는 알지만 화면에서 이름 말고 할 말이 없다.
+        Node(id="wd:EV3", type="event", label="이름뿐인 사건", source="wd",
+             start_date="1895-01-01", props={"polity": "조선"}),
     ])
     era_seeds = select_seeds(store, ERAS["joseon"])
     check("Wikidata 가 그 정체의 사건이라 한 것은 씨앗이 된다",
@@ -1904,7 +1908,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("연대를 아는 사건은 엣지가 없어도 남는다",
           dest.conn.execute(
               "SELECT 1 FROM nodes WHERE id='wd:EV1'").fetchone() is not None)
+    # 사용자 지적(2026-09-04): 실록 기사 제목이 설명 없이 연표에 서 있었다.
+    # "안 보여주는 게 더 좋을 것 같은데" — 연대를 알아도 할 말이 없으면
+    # 세우지 않는다. 연대 있는 사건을 살리는 규칙보다 이쪽이 앞선다.
+    check("설명이 없으면 연대를 알아도 빠진다",
+          dest.conn.execute(
+              "SELECT 1 FROM nodes WHERE id='wd:EV3'").fetchone() is None)
     dest.close()
+
+    # 뼈대는 설명이 없어도 남는다 — 연표의 눈금과 직위가 사라지면 축과
+    # 인물 상세가 무너진다.
+    from histgraph.scope import UNDESCRIBED_DROP_TYPES  # noqa: E402
+
+    check("연표 눈금은 설명 없이도 남는다", "period" not in UNDESCRIBED_DROP_TYPES)
+    check("직위는 설명 없이도 남는다", "role" not in UNDESCRIBED_DROP_TYPES)
+    # '서울 종로구'에 해설을 붙일 일이 없는데, 빼면 그 구에 있는 유물
+    # 86건이 '어디 있는지'를 잃는다.
+    check("장소는 설명 없이도 남는다", "place" not in UNDESCRIBED_DROP_TYPES)
     store.close()
 
 # --- 사실 정합성 보수 ----------------------------------------------------
@@ -3205,6 +3225,63 @@ check("절 단위로 읽고 요약·참고문헌은 뺀다", [t for t, _ in secs
 check("태그를 벗기고 문단 줄을 지킨다", secs[1][1] == "첫 문단 링크 끝.\n둘째 문단.", repr(secs[1][1]))
 text = aks_mod.article_text(secs)
 check("말뭉치가 쪼개는 모양이다", [s for s, _ in corpus_mod.split_passages(text)] == ["정의", "경과"])
+
+# 빈 설명을 사전의 '정의 한 문장'으로 채운다. 사용자 지적(2026-09-04)에
+# 따라 설명 없는 노드를 지우기로 했으므로, 지우기 전에 채울 수 있는 것을
+# 다 채우는 이 길이 먼저 있어야 한다 — 실측: 빈 설명 3,297개 중 wd 노드
+# 415개는 위키백과·Wikidata 에, 304개는 이 사전에 글이 있었다.
+print("\n[민족문화대백과 — 빈 설명 채우기]")
+with tempfile.TemporaryDirectory() as tmp:
+    raw = Path(tmp) / "raw"
+    raw.mkdir()
+    rows = [
+        ("E1", "목민심서", "문헌/고서", "정약용이 지은 책."),
+        ("E2", "영의정", "제도/관직", "조선시대 의정부의 으뜸 벼슬."),
+        ("E3", "김규식", "인물/근현대 인물", "독립운동가 하나."),
+        ("E4", "김규식", "인물/근현대 인물", "독립운동가 둘."),
+        ("E5", "설명이있는사건", "사건", "덮어쓰면 안 되는 정의."),
+        ("E6", "한자만", "사건", "漢字"),
+    ]
+    head = "항목 아이디,항목 고유 웹주소,대표 미디어 아이디,항목명,원어,항목 분야,항목 유형,시대,항목 정의,집필자 정보"
+    body = "\n".join(
+        f"{i},https://encykorea.aks.ac.kr/Article/{i},x,{label},,,{kind},조선,{d},글쓴이"
+        for i, label, kind, d in rows)
+    (raw / aks_mod.INDEX_CSV).write_text("\ufeff" + head + "\n" + body + "\n", encoding="utf-8")
+
+    store = GraphStore(Path(tmp) / "desc.sqlite")
+    store.upsert_nodes([
+        Node(id="ex:artwork:목민심서", type="artwork", label="목민심서", source="extract"),
+        Node(id="ex:role:영의정", type="role", label="영의정", source="extract"),
+        Node(id="ex:person:김규식", type="person", label="김규식", source="extract"),
+        Node(id="wd:HAVE", type="event", label="설명이있는사건", source="wd",
+             description="이미 적혀 있는 설명."),
+        Node(id="wd:HANJA", type="event", label="한자만", source="wd"),
+    ])
+    rep = aks_mod.fill_descriptions(store, raw_dir=raw)
+    got = dict(store.conn.execute("SELECT id, description FROM nodes"))
+    check("유형 표를 넓혀 문헌·관직도 받는다",
+          got["ex:artwork:목민심서"] == "정약용이 지은 책."
+          and got["ex:role:영의정"] == "조선시대 의정부의 으뜸 벼슬.", str(got))
+    check("동명이인에는 남의 정의를 붙이지 않는다",
+          not (got["ex:person:김규식"] or "") and rep["ambiguous"] == 1, str(rep))
+    check("이미 적힌 설명은 덮어쓰지 않는다", got["wd:HAVE"] == "이미 적혀 있는 설명.")
+    check("한글이 한 자도 없는 정의는 넣지 않는다", not (got["wd:HANJA"] or ""))
+    check("채운 수를 센다", rep["filled"] == 2, str(rep))
+
+    # 파생본 두 번째 빗질 — redescribe 가 설명을 비운 뒤에도 걸러야 한다
+    from histgraph.scope import sweep_undescribed  # noqa: E402
+
+    store.upsert_edges([
+        Edge(src="wd:HAVE", dst="wd:HANJA", type="related_to", source="wd"),
+    ])
+    swept = sweep_undescribed(store.conn)
+    left = {r[0] for r in store.conn.execute("SELECT id FROM nodes")}
+    check("설명이 빈 내용 노드는 파생본에서 지운다", "wd:HANJA" not in left, str(sorted(left)))
+    check("직위는 설명이 없어도 남긴다", "ex:role:영의정" in left, str(sorted(left)))
+    check("지운 노드의 엣지도 같이 지운다",
+          store.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
+          and swept["edges"] == 1, str(swept))
+    store.close()
 
 # --- 역할 판정 -------------------------------------------------------------
 passages = [{"title": "12.3 내란", "section": "체포 지시",

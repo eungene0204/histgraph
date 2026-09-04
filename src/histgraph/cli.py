@@ -832,12 +832,24 @@ def cmd_scope(args: argparse.Namespace) -> int:
         relabeled = labels_mod.apply_overrides(derived.conn, table)
         redescribed = koreanize.redescribe(derived.conn)
         homs = hom.sweep(derived.conn)
+        # **지우기 전에 한 번 더 채운다.** redescribe 가 방금 비운 칸이
+        # 있고, 사전에는 그 노드의 정의가 있을 수 있다. 항목 CSV 는
+        # 저장소에 없으니(`data/raw/` 는 .gitignore) 있을 때만 돌린다.
+        from .sources import aks
+        filled = {"filled": 0}
+        if (aks.RAW_DIR / aks.INDEX_CSV).exists():
+            filled = aks.fill_descriptions(derived)
+        # 그러고도 빈 내용 노드는 화면에 세우지 않는다 (CLAUDE.md §1-3).
+        swept = scope_mod.sweep_undescribed(derived.conn)
         foreign = labels_mod.foreign_text(derived.conn)
 
     print(f"\n=== {result['era']} 서브그래프 ===")
     print(f"  출력: {result['out']}")
     print(f"  씨앗 {result['seeds']:,} → 노드 {result['kept_nodes']:,} · 엣지 {result['kept_edges']:,}"
           f" · 별칭 {result['kept_aliases']:,}")
+    if result["undescribed_dropped"]:
+        print(f"  설명 없는 노드 {result['undescribed_dropped']:,}개 제외"
+              " (이름 말고 할 말이 없어 화면에 세우지 않는다)")
     if result["isolated_dropped"]:
         print(f"  고립 노드 {result['isolated_dropped']:,}개 제외 (엣지가 없어 그래프에 기여하지 않음)")
     print(f"  댕글링 엣지: {result['dangling']}")
@@ -850,6 +862,11 @@ def cmd_scope(args: argparse.Namespace) -> int:
 
     print(f"\n  한국어 관문: 이름 {len(relabeled.applied):,}개 · 설명"
           f" {len(redescribed.applied):,}개 옮김 · 설명 {len(redescribed.cleared):,}개 비움")
+    if filled["filled"]:
+        print(f"  사전의 정의로 채운 설명 {filled['filled']:,}개")
+    if swept["nodes"]:
+        print(f"  설명을 비운 뒤 다시 지운 노드 {swept['nodes']:,}개"
+              f" · 엣지 {swept['edges']:,}건 — 원본에서 redescribe 를 먼저 돌리세요")
     print(f"  동명이인 관문: 문서에 돌려놓은 엣지 {homs.repointed:,}건 ·"
           f" 버린 엣지 {homs.dropped:,}건")
     print(f"    연대가 100년 넘게 어긋난 참여 {len(homs.conflicts):,}건 ·"
@@ -1613,6 +1630,40 @@ def cmd_redescribe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_describe(args: argparse.Namespace) -> int:
+    """빈 설명칸을 민족문화대백과의 '정의 한 문장'으로 채운다.
+
+    `enrich` 는 Wikidata QID 가 있는 노드만 채운다 — 산문에서 이름만 뽑혀
+    나온 `ex:` 노드에는 물어볼 QID 가 없다. 그쪽은 사전 항목 CSV 로
+    채운다. 네트워크가 필요 없고 `data/raw/` 만 있으면 된다.
+
+    수집 뒤마다 `redescribe` 와 같이 돌린다. 원본과 파생본 둘 다:
+
+        uv run histgraph describe
+        uv run histgraph --db data/korea.sqlite describe
+    """
+    from .sources import aks
+
+    with GraphStore(args.db) as store:
+        before = store.conn.execute(
+            "SELECT COUNT(*) FROM nodes"
+            " WHERE description IS NULL OR trim(description) = ''"
+        ).fetchone()[0]
+        report = aks.fill_descriptions(store, dry_run=args.dry_run)
+        head = "채울 설명" if args.dry_run else "채운 설명"
+        print(f"  빈 설명 {before:,}개 · 사전 항목 {report['entries']:,}건"
+              f" · {head} {report['filled']:,}개")
+        # 동명이인은 채우지 않는다. 몇 개를 그래서 남겼는지 적지 않으면
+        # '사전에 없어서'와 구별이 안 된다.
+        if report["ambiguous"]:
+            print(f"  · 이름이 겹쳐 잇지 않은 노드 {report['ambiguous']:,}개")
+        for nid, text in report["samples"]:
+            print(f"    {nid:>28}  {text[:52]}")
+        if args.dry_run:
+            print("\n  (미리보기라 아직 아무것도 바꾸지 않았습니다)")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """그래프 탐색 화면을 띄운다."""
     from . import server
@@ -1806,6 +1857,11 @@ def main(argv: list[str] | None = None) -> int:
     p_rd.add_argument("--list-cleared", action="store_true",
                       help="비운 설명을 전부 나열")
     p_rd.set_defaults(func=cmd_redescribe)
+
+    p_ds = sub.add_parser("describe",
+                          help="빈 설명을 민족문화대백과의 정의 한 문장으로 (수집 뒤마다)")
+    p_ds.add_argument("--dry-run", action="store_true", help="채우지 않고 미리보기")
+    p_ds.set_defaults(func=cmd_describe)
 
     p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")
     p_sc.add_argument("era", nargs="+",

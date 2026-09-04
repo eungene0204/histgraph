@@ -344,12 +344,61 @@ def _dated_events(store: GraphStore, ids: set[str]) -> set[str]:
     return out
 
 
+# 설명이 없으면 지우는 타입. **화면에서 제 이름 말고 할 말이 있어야 하는**
+# 노드들이다. 사용자 지적(2026-09-04): 연표에 '백성들이 종이를 바치는 일의
+# 폐단에 대해 선혜청에서 아뢰다'(실록 기사 제목)가 설명 없이 서 있었다 —
+# "안 보여주는 게 더 좋을 것 같은데".
+#
+# **여기 없는 타입은 뼈대다.**
+#   period  연표의 눈금(`time:1592`)과 유물 제작연대 문자열('1436년(조선
+#           세종 18)'). 설명이 있을 수 없고, 없어도 연표가 그 자리를 그린다.
+#           지우면 축이 무너진다.
+#   role    직위는 인물 상세의 '직위' 줄로만 서고 연표에 안 선다. 이름
+#           자체가 뜻이다 — '영의정'에 더 적을 말이 없어도 빈 칸이 아니다.
+#   place   행정 지명도 이름이 곧 뜻이다. '서울 종로구'에 해설을 붙일
+#           일이 없는데, 빼면 그 구에 있는 유물 86건이 '어디 있는지'를
+#           잃는다 (실측: 빈 설명 장소 284개 중 상위 20개가 엣지 10건
+#           이상인 행정 지명이다).
+#
+# **지우기 전에 채운다.** 이 관문에 걸리는 것은 '자료가 없는 노드'가
+# 아니라 '아직 안 받아온 노드'인 적이 많았다 (실측: 빈 설명 wd 노드 573개
+# 중 415개가 한국어 위키백과나 Wikidata 한 줄 설명을 갖고 있었다).
+# `enrich` 와 `describe` 를 먼저 돌리지 않으면 이 규칙이 멀쩡한 노드를
+# 지운다 — 그래서 `cmd_scope` 가 남은 수를 세어 알린다.
+UNDESCRIBED_DROP_TYPES = (
+    "event", "person", "org", "heritage", "artwork", "media", "concept",
+)
+
+
+def _undescribed(store: GraphStore, ids: set[str]) -> set[str]:
+    """그 가운데 설명이 비어 있어 화면에 할 말이 없는 노드."""
+    if not ids:
+        return set()
+    out: set[str] = set()
+    ordered = sorted(ids)
+    kinds = ",".join(f"'{t}'" for t in UNDESCRIBED_DROP_TYPES)  # 코드 안의 고정 목록
+    for i in range(0, len(ordered), 500):
+        batch = ordered[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        out.update(
+            r["id"]
+            for r in store.conn.execute(
+                f"""SELECT id FROM nodes
+                     WHERE id IN ({marks}) AND type IN ({kinds})
+                       AND (description IS NULL OR trim(description) = '')""",
+                batch,
+            )
+        )
+    return out
+
+
 def extract(
     store: GraphStore,
     era_keys: str | Sequence[str],
     out_path: str,
     hops: int = 1,
     drop_isolated: bool = True,
+    drop_undescribed: bool = True,
 ) -> dict[str, object]:
     """시대 서브그래프를 별도 DB 로 뽑는다. 시대를 여럿 주면 한 DB 에 담는다.
 
@@ -404,6 +453,15 @@ def extract(
     if len(real) != len(keep):
         log.info("노드 행이 없는 끝점 %d개 제외", len(keep) - len(real))
     keep = real
+
+    # **설명이 없는 내용 노드를 뺀다 — 고립 정리보다 먼저.** 나중에 빼면
+    # 그것만 사라진 자리에 이웃이 점으로 남는다. 순서를 지키면 고립 검사가
+    # 최종 노드 집합을 본다.
+    undescribed: set[str] = set()
+    if drop_undescribed:
+        undescribed = _undescribed(store, keep)
+        keep -= undescribed
+        log.info("설명 없는 노드 %d개 제외 (남은 노드 %d)", len(undescribed), len(keep))
 
     isolated: set[str] = set()
     if drop_isolated:
@@ -506,6 +564,7 @@ def extract(
         "era": " · ".join(e.name for e in eras),
         "out": str(out),
         "seeds": len(seeds),
+        "undescribed_dropped": len(undescribed),
         "isolated_dropped": len(isolated),
         "kept_aliases": len(name_rows),
         "kept_nodes": stats["nodes_total"],
@@ -514,3 +573,40 @@ def extract(
         "by_edge_type": stats["by_edge_type"],
         "dangling": stats["dangling_edges"],
     }
+
+
+def sweep_undescribed(conn) -> dict[str, int]:
+    """파생본에서 설명 없는 내용 노드를 지운다 — `redescribe` 뒤의 두 번째 빗질.
+
+    `extract` 가 이미 한 번 걸렀는데도 이게 필요한 이유: `cmd_scope` 는
+    파생본을 만든 **뒤에** `redescribe` 를 돌리고, 그것은 한국어로 옮기지
+    못한 설명을 **비운다**. 그래서 복사할 때는 차 있던 칸이 그 다음에
+    빈다. 한 번만 거르면 그 노드들이 그대로 화면에 선다.
+
+    엣지·별칭·same_as 도 같이 지운다. 남기면 없는 곳을 가리키는 엣지가
+    된다."""
+    kinds = ",".join(f"'{t}'" for t in UNDESCRIBED_DROP_TYPES)  # 코드 안의 고정 목록
+    ids = [
+        r[0] for r in conn.execute(
+            f"""SELECT id FROM nodes WHERE type IN ({kinds})
+                 AND (description IS NULL OR trim(description) = '')"""
+        )
+    ]
+    if not ids:
+        return {"nodes": 0, "edges": 0}
+    edges = 0
+    for i in range(0, len(ids), 500):
+        batch = ids[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        edges += conn.execute(
+            f"DELETE FROM edges WHERE src IN ({marks}) OR dst IN ({marks})",
+            (*batch, *batch),
+        ).rowcount
+        conn.execute(
+            f"DELETE FROM same_as WHERE a IN ({marks}) OR b IN ({marks})",
+            (*batch, *batch),
+        )
+        conn.execute(f"DELETE FROM aliases WHERE node_id IN ({marks})", batch)
+        conn.execute(f"DELETE FROM nodes WHERE id IN ({marks})", batch)
+    conn.commit()
+    return {"nodes": len(ids), "edges": max(edges, 0)}

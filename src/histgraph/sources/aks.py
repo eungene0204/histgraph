@@ -291,3 +291,118 @@ def ingest(
     conn.commit()
     return {"entries": len(entries), "matched": len(matched), "todo": len(todo),
             "fetched": fetched, "empty": empty, "skipped": skipped, "passages": passages}
+
+
+# --- 빈 설명을 '정의 한 문장'으로 채우기 -------------------------------------
+#
+# 항목 CSV 에는 본문 말고도 **정의 한 문장**이 붙어 있다 (75,339건). 이건
+# 네트워크 없이 지금 당장 읽을 수 있는 글이고, 화면의 빈 설명칸에 딱 맞는
+# 길이다. 말뭉치(`ingest`)는 문서 페이지를 받아 와야 하지만 이쪽은 파일만
+# 있으면 된다.
+#
+# **유형 표를 여기서만 넓힌다.** `KIND_TO_TYPE` 은 '이 글을 어느 노드의
+# 정본으로 삼을 것인가'를 정하는 표라 좁게 뒀다 — 잘못 이으면 엉뚱한
+# 문서가 정본 행세를 한다. 정의 한 문장을 옮기는 데는 그 표가 모자란다:
+# `ex:artwork:목민심서` 는 사전에서 '문헌/고서'고 `ex:role:영의정` 은
+# '제도/관직'인데 둘 다 표에 없어 통째로 빠졌다. 한 유형이 노드 타입
+# 여럿을 받기도 한다 — 사전의 '작품'에는 그림(artwork)과 소설(media)이
+# 같이 있다.
+DESC_KIND_TO_TYPES: dict[str, set[str]] = {
+    "인물": {"person"},
+    "사건": {"event"},
+    "단체": {"org"},
+    "제도": {"concept"},
+    "개념": {"concept"},
+    "지명": {"place"},
+    "유적": {"heritage", "place"},
+    "유물": {"heritage"},
+    "물품": {"heritage"},
+    "작품": {"media", "artwork"},
+    "문헌": {"artwork", "media"},
+}
+# 앞머리가 아니라 유형 전체로 봐야 갈리는 것. '제도/관직'의 앞머리는
+# '제도'라 개념이 되는데, 영의정·관찰사는 개념이 아니라 직위다.
+DESC_FULL_KIND_TO_TYPES: dict[str, set[str]] = {"제도/관직": {"role"}}
+
+
+def _desc_types(entry: Entry) -> set[str]:
+    if entry.kind in DESC_FULL_KIND_TO_TYPES:
+        return DESC_FULL_KIND_TO_TYPES[entry.kind]
+    return DESC_KIND_TO_TYPES.get(entry.kind.split("/")[0], set())
+
+
+def fill_descriptions(
+    store, raw_dir: Path = RAW_DIR, dry_run: bool = False
+) -> dict[str, object]:
+    """설명이 빈 노드를 사전의 정의 한 문장으로 채운다.
+
+    **이름이 양쪽에서 하나뿐일 때만 채운다** — `match_nodes` 와 같은 규칙이다
+    (README '노드 병합은 절반이 틀린다'). 동명이인에 남의 정의를 붙이면
+    빈 칸보다 나쁘다: 빈 칸은 모른다고 말하지만 틀린 정의는 안다고
+    말한다.
+
+    **이미 적힌 설명은 건드리지 않는다.** 위키백과 서사가 들어와 있으면
+    그쪽이 길고 낫다. 이 함수가 채우는 곳은 `enrich` 도 사전도 아무것도
+    넣지 못한 칸뿐이다.
+
+    여기는 Node 를 거치지 않고 SQL 로 설명을 쓰는 자리다 (CLAUDE.md §1).
+    사전의 정의는 한국어지만, 한글이 한 자도 없는 글은 넣지 않는다.
+    """
+    from ..koreanize import has_hangul
+
+    entries = [e for e in load_index(raw_dir) if e.definition]
+    rows = store.conn.execute(
+        "SELECT id, label, type, description FROM nodes"
+    ).fetchall()
+    aliases: dict[str, list[str]] = defaultdict(list)
+    for nid, alias in store.conn.execute("SELECT node_id, alias FROM aliases"):
+        aliases[nid].append(alias)
+
+    # (이름, 노드타입) -> 항목들 / 노드들. 양쪽 다 하나뿐이어야 잇는다.
+    by_key: dict[tuple[str, str], list[Entry]] = defaultdict(list)
+    for e in entries:
+        for t in _desc_types(e):
+            by_key[(norm_name(e.label), t)].append(e)
+    owners: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for r in rows:
+        for name in [r["label"], *aliases[r["id"]]]:
+            owners[(norm_name(name), r["type"])].add(r["id"])
+
+    updates: list[tuple[str, str, str]] = []
+    skipped_ambiguous = 0
+    for r in rows:
+        if (r["description"] or "").strip():
+            continue
+        for name in [r["label"], *aliases[r["id"]]]:
+            key = (norm_name(name), r["type"])
+            found = by_key.get(key)
+            if not found:
+                continue
+            if len(found) > 1 or len(owners[key]) > 1:
+                skipped_ambiguous += 1
+                break
+            if not has_hangul(found[0].definition):
+                break
+            updates.append((found[0].definition, found[0].url, r["id"]))
+            break
+
+    if not dry_run and updates:
+        store.conn.executemany(
+            """UPDATE nodes
+                  SET description = ?,
+                      props = json_set(
+                          json_set(COALESCE(NULLIF(props,''), '{}'),
+                                   '$.desc_source', 'aks'),
+                          '$.desc_url', ?),
+                      updated_at = datetime('now')
+                WHERE id = ?
+                  AND (description IS NULL OR trim(description) = '')""",
+            updates,
+        )
+        store.conn.commit()
+    return {
+        "entries": len(entries),
+        "filled": len(updates),
+        "ambiguous": skipped_ambiguous,
+        "samples": [(nid, text) for text, _, nid in updates[:10]],
+    }
