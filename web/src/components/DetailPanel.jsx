@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { nodeColor } from '../lib/graph-view.js';
 import {
-  groupRelations, cardsFor, sentence, whyEmpty, fmtDate, LONG_DESC,
+  groupRelations, cardsFor, sentence, whyEmpty, fmtDate,
 } from '../lib/relations.js';
 import { Glyph } from './Glyph.jsx';
 import { ChainPanel } from './ChainPanel.jsx';
@@ -9,33 +9,41 @@ import { ChainPanel } from './ChainPanel.jsx';
 // 설명칸. 비어 있을 때 아무것도 그리지 않으면 "이 노드는 원래 설명이
 // 없는 것"처럼 보인다. 왜 비었는지를 대신 적는다.
 //
-// **어느 자료에서 왔는지는 적지 않는다.** 'Wikidata 한 줄 설명' 같은
-// 딱지는 읽는 사람이 묻지 않은 것을 답하면서 정작 궁금한 것(이 사람이
-// 누구인가)은 밀어낸다. 수집 경로는 화면이 아니라 props 에 남는다.
+// 서버가 주는 설명은 **요약**이다 (첫 절 제목 앞의 도입부, 360자). 전문은
+// 화면에 내지 않는다 — 2026-09-05 전문을 뿌린 것이 애드센스 '주의 필요'
+// (스크랩)로 돌아왔다. 그래서 '전문 보기'도 없다.
+//
+// 출처는 **설명 아래 한 줄**에만 적는다 (`desc_origin`, 서버가 판정). 남의
+// 글을 옮겨 왔으면 그렇다고 적는 것이 라이선스 의무라서 두는 §1 의 예외다.
+// 서버가 출처를 모르면 아무것도 안 적는다 — 틀린 출처는 없는 것보다 나쁘다.
 function Description({ d }) {
-  const [open, setOpen] = useState(false);
-
-  // 다른 노드로 옮겨가면 접힌 상태로 되돌린다
-  useEffect(() => { setOpen(false); }, [d.id]);
-
   if (!d.description) {
     return <p className="d-nodesc">설명 없음 — {whyEmpty(d)}</p>;
   }
-  // 접힌 높이를 넘길 만큼 길 때만 단추를 낸다. 세 줄짜리 글에 '전문 보기'가
-  // 붙어 있으면 눌러도 아무 일이 없다.
-  const long = d.description.length > LONG_DESC;
+  const o = d.desc_origin;
   return (
     <>
-      <div className={`d-desc${long && !open ? '' : ' open'}`}>{d.description}</div>
+      <div className="d-desc open">{d.description}</div>
       {/* 넘겨주기를 따라온 글은 이 노드를 설명하는 글이 아닐 수 있다
           ('판의금부사' → '의금부'). 읽는 사람이 알고 읽어야 한다. */}
       {d.desc_via && (
         <p className="d-desc-src">‘{d.desc_via}’ 문서에서 넘겨받은 글입니다</p>
       )}
-      {long && (
-        <button className="d-more" onClick={() => setOpen((v) => !v)}>
-          {open ? '접기' : '전문 보기'}
-        </button>
+      {o && (
+        <p className="d-desc-origin">
+          {o.url
+            ? <a href={o.url} target="_blank" rel="noopener nofollow">{o.name}</a>
+            : o.name}
+          {' 문서를 줄인 글입니다'}
+          {o.license && (
+            <>
+              {' · '}
+              {o.license_url
+                ? <a href={o.license_url} target="_blank" rel="license noopener nofollow">{o.license}</a>
+                : o.license}
+            </>
+          )}
+        </p>
       )}
     </>
   );

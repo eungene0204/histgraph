@@ -19,8 +19,9 @@
 한 번 더 찾는다.
 
 라이선스: 나무위키 본문은 CC BY-NC-SA 2.0 KR 이다. `props.desc_source`
-에 `namu` 를 적어 두어 어디서 왔는지는 남긴다 (화면에는 출처를 쓰지
-않는다 — CLAUDE.md §1).
+에 `namu` 를 적어 두면 화면이 설명 아래 한 줄로 출처와 라이선스를 적는다
+(provenance.py). **비영리 조건**이 붙어 있어 광고가 걸린 화면에는 맞지
+않는다 — 이 글을 계속 둘지는 사용자 결정 (HANDOFF 2026-09-05).
 """
 
 from __future__ import annotations

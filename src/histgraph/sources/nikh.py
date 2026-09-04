@@ -896,6 +896,10 @@ def ingest(
         props.update({
             "canon": SOURCE, "nikh_id": ent.kc_id, "kind": ent.kind,
             "nikh_url": f"https://contents.history.go.kr/front/kc/view.do?levelId={ent.kc_id}",
+            # 설명을 덮어쓰므로 출처 표식도 제 것이어야 한다. 위키백과의
+            # `kowiki` 가 남아 있으면 화면이 국편 글을 위키백과 글이라 적는다
+            # (배포본에 21건 있었다).
+            "desc_source": SOURCE,
         })
         if ent.hanja:
             props["hanja"] = ent.hanja

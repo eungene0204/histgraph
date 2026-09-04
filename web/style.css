@@ -375,13 +375,13 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   margin: 0; border-left: 2px solid var(--line);
 }
 /* 넘겨받은 글이라는 단서 — 산문과 같은 무게로 읽히면 안 된다.
-   자료 출처(Wikidata 따위)를 적는 자리가 아니다. 이건 '이 글이 다른
-   문서의 글'이라는 경고지 출처 표기가 아니다. */
+   이건 '이 글이 다른 문서의 글'이라는 경고지 출처 표기가 아니다. */
 .d-desc-src { font-size: 11px; color: var(--text-3); margin: 5px 0 0; }
-.d-more {
-  background: none; border: none; color: var(--accent);
-  font: inherit; font-size: 12px; cursor: pointer; padding: 6px 0;
-}
+/* 출처 한 줄. §1 의 유일한 예외 — 남의 글을 옮겼으면 그렇다고 적는 것이
+   라이선스 의무다. 설명 바로 아래, 이 한 줄뿐이다. */
+.d-desc-origin { font-size: 11px; color: var(--text-3); margin: 5px 0 0; line-height: 1.5; }
+.d-desc-origin a { color: var(--text-3); text-decoration: underline; text-underline-offset: 2px; }
+.d-desc-origin a:hover { color: var(--accent); }
 .d-section-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--text-3); margin: 20px 0 8px;

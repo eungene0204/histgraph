@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import pages
 from .ontology import EDGE_TYPES, NODE_TYPES
+from .provenance import desc_origin
 from .store import GraphStore
 
 log = logging.getLogger(__name__)
@@ -516,14 +517,21 @@ class GraphAPI:
             "source": row["source"],
             "start": row["start_date"],
             "end": row["end_date"],
-            # 본문 전체를 받은 설명엔 `== 생애 ==` 가 남아 있다. 화면에
-            # 위키 문법을 세우지 않는다 — 제목 글자만 남긴다.
-            "description": pages.plain_description(row["description"]),
+            # 화면은 **요약**만 받는다 (`pages.summarize` — 첫 절 제목 앞의
+            # 도입부, 문장 단위로 360자). 전문은 DB 에 그대로 있고 추출·
+            # 말뭉치가 쓴다. 2026-09-05 화면에 전문을 뿌린 것이 애드센스
+            # '주의 필요'(스크랩)로 돌아왔다 — 이 자리에서 전문을 다시
+            # 내보내지 않는다.
+            "description": pages.summarize(row["description"]),
             # 설명이 어디서 왔는지. 'kowiki' 는 위키백과 산문, 'wd:ko' 는
             # Wikidata 한국어 한 줄, '사전' 은 영어 한 줄을 koreanize 로
-            # 옮긴 것이다. **화면은 이것을 그리지 않는다** — 자료 출처는
-            # 읽는 사람이 묻지 않은 것이다. 도구가 쓰라고 남겨 둔다.
+            # 옮긴 것이다. 도구가 쓰라고 남겨 둔다. 화면이 그리는 것은 아래
+            # `desc_origin` 이다.
             "desc_source": props.get("desc_source"),
+            # 설명 아래 한 줄로 적는 출처 — 이름·문서 주소·라이선스(한국어).
+            # 남의 글을 옮겼으면 그렇다고 적는 것이 라이선스 의무다
+            # (provenance.py). 모르면 None 이고, 화면은 그때 아무것도 안 적는다.
+            "desc_origin": desc_origin(row["source"], props, row["url"]),
             # 영어 한 줄이 왔지만 사전으로 옮기지 못해 비운 노드.
             # 빈 칸의 이유를 화면이 정확히 말할 수 있게 한다.
             "desc_dropped": bool(props.get("desc_en") and not row["description"]),
