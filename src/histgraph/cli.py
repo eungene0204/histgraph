@@ -1777,16 +1777,28 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
     merges = sum(1 for v in table if v.action == "merge")
     print(f"  {args.type} 후보 {len(rep.candidates):,}쌍 · 표에 적힌 판정"
           f" {len(table):,}줄 (합친다 {merges:,} · 다르다 {len(table) - merges:,})")
+    print(f"  증거로 판정한 것 — 같다 {len(rep.auto_same):,}쌍 ·"
+          f" 다르다 {len(rep.auto_diff):,}쌍 · 모름 {len(rep.unjudged):,}쌍")
+
+    if rep.auto_diff and args.show:
+        by_why: dict[str, int] = {}
+        for _, why in rep.auto_diff:
+            by_why[why.split(" (")[0]] = by_why.get(why.split(" (")[0], 0) + 1
+        shape = " · ".join(f"{w} {n:,}" for w, n in sorted(
+            by_why.items(), key=lambda kv: -kv[1])[:4])
+        print(f"    다르다고 본 근거: {shape}")
 
     if rep.merged:
         print(f"\n  ✓ 합친 짝 {len(rep.merged):,}개")
-        for keep, drop, moved in rep.merged:
+        for keep, drop, moved in rep.merged[:args.show or len(rep.merged)]:
             print(f"    {name(drop)}  →  {name(keep)}   엣지 {moved:,}건 옮김")
+        if args.show and len(rep.merged) > args.show:
+            print(f"    … 그 밖 {len(rep.merged) - args.show:,}개")
     if rep.date_clashes:
         # 어느 쪽이 맞는지 기계는 모른다. 남는 노드의 날짜를 그대로 두고 알린다.
         print(f"\n  합친 짝의 연대가 어긋난 것 {len(rep.date_clashes):,}건"
               f" — 남은 쪽 날짜를 그대로 두었습니다:")
-        for line in rep.date_clashes:
+        for line in rep.date_clashes[:args.show or len(rep.date_clashes)]:
             print(f"    {line}")
     if rep.stale:
         print(f"  이미 합쳐져 있던 짝 {len(rep.stale):,}개")
@@ -1797,7 +1809,7 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
 
     if rep.unjudged:
         what = "사건" if args.type == "event" else args.type
-        print(f"\n  ⚠ 표에 없는 후보 {len(rep.unjudged):,}쌍 — 같은 {what}인지"
+        print(f"\n  ⚠ 증거가 모자란 후보 {len(rep.unjudged):,}쌍 — 같은 {what}인지"
               f" 사람이 한 줄 적어야 합니다 ({args.table}):")
         for c in rep.unjudged[:args.show]:
             print(f"    [{c.rule}] {name(c.a)}  ↔  {name(c.b)}")
@@ -1805,7 +1817,7 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
         if len(rep.unjudged) > args.show:
             print(f"    … 그 밖 {len(rep.unjudged) - args.show:,}쌍")
         print("\n    merge<TAB>남길 id<TAB>없앨 id<TAB>근거"
-              "   /   keep<TAB>id<TAB>id<TAB>왜 다른 사건인지")
+              "   /   keep<TAB>id<TAB>id<TAB>왜 다른지")
         return 1
 
     print("\n  판정이 안 적힌 후보가 없습니다.")
@@ -2091,6 +2103,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ro.add_argument("--model", default=None)
     p_ro.add_argument("--dry-run", action="store_true", help="모델 없이 근거 문단 유무만 센다")
     p_ro.add_argument("--redo", action="store_true", help="이미 판정한 엣지도 다시")
+    p_ro.add_argument("--redo-roles", default=None,
+                      help="이 역할로 판정됐던 엣지만 다시 묻는다 (쉼표, 예: 주도)")
     p_ro.set_defaults(func=cmd_roles)
 
     p_ca = sub.add_parser("causes", help="사건 문서에 서술된 인과(원인 → 결과)를 말뭉치 근거로 적는다")

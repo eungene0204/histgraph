@@ -75,6 +75,9 @@ ALIAS_PHRASES = (
     r"(?:이칭|다른 이름은?|달리)\s*(?:‘|')?{n}",
 )
 
+# 이 말이 첫 문장에 없으면 이칭 선언이 아니다 (값싼 사전 거르개).
+_ALIAS_MARKERS = ("또는", "혹은", "라고도", "로도", "이칭", "다른 이름", "달리")
+
 # 이칭을 찾을 때 상대 이름 앞에 차수가 붙어 있으면 다른 사건을 부른 것이다.
 _ORD_BEFORE = re.compile(r"(제\s*\d+\s*차|제\s*\d+|\d+\s*차)\s*$")
 
@@ -110,7 +113,9 @@ class Verdict:
 @dataclass(slots=True)
 class Report:
     candidates: list[Candidate] = field(default_factory=list)
-    unjudged: list[Candidate] = field(default_factory=list)
+    auto_same: list[tuple[Candidate, str]] = field(default_factory=list)
+    auto_diff: list[tuple[Candidate, str]] = field(default_factory=list)
+    unjudged: list[Candidate] = field(default_factory=list)   # 모름 — 표로 넘긴다
     merged: list[tuple[str, str, int]] = field(default_factory=list)  # (남긴, 없앤, 옮긴 엣지)
     absent: list[Verdict] = field(default_factory=list)   # 이 그래프에 없는 짝
     stale: list[Verdict] = field(default_factory=list)    # 이미 합쳐진 짝
@@ -208,11 +213,31 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
     for nid, n in nodes.items():
         by_label.setdefault(n["label"], []).append(nid)
 
+    # `same_as` 로 이어 둔 짝은 뺀다. 이미 같은 것이라 알고 있고, 그럼에도
+    # 두 노드로 두는 것이 엔티티 해소의 설계다 — 국가유산청의 '서울 종로구'
+    # 와 Wikidata 의 '종로구'는 서로 다른 소스의 열쇠를 들고 있어서, 합치면
+    # 다음 수집이 다시 둘로 만든다 (`resolve` 모듈 머리글).
+    linked: set[frozenset[str]] = set()
+    try:
+        for r in conn.execute("SELECT a, b FROM same_as"):
+            linked.add(frozenset((r["a"], r["b"])))
+    except sqlite3.OperationalError:
+        pass                                   # same_as 가 없는 파생본
+
     found: dict[frozenset[str], Candidate] = {}
 
+    def rank(i: str) -> tuple:
+        # 남길 쪽. **설명이 있는 노드가 먼저다** — 국가유산청 목록에는
+        # 이름과 관리번호만 있는 빈 줄이 섞여 들어와 있어서, 엣지 수만
+        # 보면 알맹이가 있는 줄을 지우고 빈 줄을 남기게 된다.
+        return (0 if (nodes[i]["description"] or "").strip() else 1,
+                -deg.get(i, 0), i)
+
     def add(rule: str, x: str, y: str, evidence: str) -> None:
-        a, b = sorted((x, y), key=lambda i: (-deg.get(i, 0), i))
+        a, b = sorted((x, y), key=rank)
         key = frozenset((a, b))
+        if key in linked:
+            return
         if key not in found:
             found[key] = Candidate(rule, a, b, evidence)
 
@@ -243,6 +268,10 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
         # 자기 이름이 첫 문장에 없으면 그 문장은 이 노드를 정의하는 문장이
         # 아니다 ('조선의 역사' 가 본문에서 임진왜란을 부르는 것).
         if not head or n["label"] not in head:
+            continue
+        # 이칭 문형이 없으면 이름을 하나하나 맞춰 볼 것도 없다. 인물 3만
+        # 개짜리 타입에서 이 한 줄이 전수 조사를 몇 분에서 몇 초로 줄인다.
+        if not any(w in head for w in _ALIAS_MARKERS):
             continue
         for name in names:
             if name == n["label"] or name not in head:
@@ -301,6 +330,199 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
     return sorted(found.values(), key=lambda c: (order[c.rule], c.a))
 
 
+# --- 이름 말고 무엇이 같은가 ------------------------------------------------
+#
+# 사건은 이름이 거의 유일해서 후보 55쌍을 사람이 한 줄씩 판정할 수 있었다.
+# **인물은 아니다** — 이름이 같은 인물 후보가 5,302쌍이고 그 대부분은
+# 동명이인이다(2026-09-04 실측: 시작 연대가 둘 다 있는 3,470쌍이 5년 넘게
+# 어긋났다. 김지훈이 넷, 강지영이 둘이다).
+#
+# 그래서 이름 말고 **다른 증거**를 본다. 증거가 말해 주는 것만 기계가
+# 판정하고, 나머지는 표로 넘긴다. 표는 언제나 기계를 이긴다.
+#
+#   다르다  한자가 서로 다르다 · 연대가 5년 넘게 어긋난다
+#   같다    이름이 같고 + 생몰년이 똑같다 / 한자가 같다 / 설명 첫 문장이 같다,
+#           또는 **띄어쓰기·구두점만 다른 같은 이름**
+#   모름    그 밖 — 사람이 표에 적어야 한다
+#
+# 마지막 것이 값이 크다. 동명이인은 이름이 **통째로** 같지 띄어쓰기가
+# 다르지 않다. '경주 김씨'/'경주김씨', '3·1 운동'/'3·1운동' 은 한 이름의
+# 두 표기이고, 글자까지 똑같은 '청주 전투' 둘은 1592년과 1950년의 다른
+# 싸움이다 — 그래서 **완전히 같은 이름은 모름**으로 남긴다.
+#
+# **'같다'는 이름이 같을 때만 낸다.** 설명 첫 문장이 같다는 것만으로는
+# 인물에서 못 믿는다: `enrich` 가 박종철의 문서를 아버지 박정기에게도,
+# 전두환의 것을 전상우에게도 붙여 놓았다 (그건 중복이 아니라 **설명이
+# 잘못 붙은 것**이라 따로 고칠 일이다).
+
+# 이 너머로 어긋나면 다른 사람·다른 것이다. 지저분한 날짜를 감안해
+# 넉넉히 잡는다 (`promote.plausible_period` 와 같은 취지).
+YEAR_SLACK = 5
+
+_HANJA = re.compile(r"^[一-鿿]{2,12}$")
+
+
+def _hanja_of(conn: sqlite3.Connection, node_type: str) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """(정본 한자, 알려진 한자 표기 전부).
+
+    앞의 것은 `props.hanja` 뿐이다 — 국편·민족문화대백과가 항목에 달아 준
+    표기라 **한 노드에 하나**고, 다르면 다른 것이라 말할 수 있다.
+    뒤의 것은 한자 별칭까지 담는다. 별칭은 여럿이고 남의 것이 섞이기도
+    해서(임진왜란 노드에 '丁酉再亂'이 별칭으로 붙어 있다) **같다는 근거로만
+    쓰고 다르다는 근거로는 쓰지 않는다.**"""
+    canon: dict[str, str] = {}
+    known: dict[str, set[str]] = {}
+    for r in conn.execute(
+        "SELECT id, json_extract(props,'$.hanja') AS hanja FROM nodes"
+        " WHERE type = ? AND hanja IS NOT NULL", (node_type,)
+    ):
+        canon[r["id"]] = r["hanja"]
+        known.setdefault(r["id"], set()).add(r["hanja"])
+    for r in conn.execute(
+        "SELECT a.node_id, a.alias FROM aliases a JOIN nodes n ON n.id = a.node_id"
+        " WHERE n.type = ?", (node_type,)
+    ):
+        if _HANJA.match(r["alias"] or ""):
+            known.setdefault(r["node_id"], set()).add(r["alias"])
+    return canon, known
+
+
+# 국가유산청은 **지정 건마다** 관리번호와 소재지를 준다. 이름도 한자도
+# 같은 '동의보감'이 셋인데 국립중앙도서관본·규장각본·한국학중앙연구원본
+# 이라 서로 다른 보물이다. 반대로 '여수 진남관'은 1963년 보물 324호이던
+# 것이 2001년 국보 304호가 되면서 두 줄이 됐다 — 주소가 같다.
+_SIDO = re.compile(
+    r"^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청북도|충청남도"
+    r"|충북|충남|전라북도|전라남도|전북|전남|경상북도|경상남도|경북|경남|제주)\S*$"
+)
+
+
+def address_key(addr: str | None) -> tuple[str, ...]:
+    """소재지의 앞 세 마디 (시도는 뗀다). 없으면 빈 튜플.
+
+    괄호 안(법정동·기관명)은 뺀다 — 같은 건물을 '(군자동)'으로도
+    '(지번)전남 여수시 군자동 472'로도 적어 놓기 때문이다."""
+    a = re.sub(r"\([^)]*\)", " ", addr or "")
+    a = re.sub(r"[,·/]", " ", a)
+    # '불국로 132' 와 '불국로 132-0' 은 같은 자리다
+    a = re.sub(r"(\d)-0(?=\s|$)", r"\1", a)
+    toks = a.split()
+    if toks and _SIDO.match(toks[0]):
+        toks = toks[1:]
+    return tuple(toks[:3])
+
+
+# 권차·판본 표기. 국가유산은 **권마다 따로 지정된다** — '월인석보 권1~2'
+# 와 '권23' 은 보물 745-1 과 745-8 로 서로 다른 지정 건이다. 설명은 책
+# 자체를 풀이하므로 권이 달라도 글자까지 같다.
+_VOLUME = re.compile(r"권[\s\d,~∼·\-]*|\(\d{4}(?:-\d+)?\)|제?\d+책|[가-힣]+사고본")
+
+
+def _khs_verdict(a: dict, b: dict) -> tuple[str, str] | None:
+    """국가유산청 노드끼리의 판정. 아니면 None (다른 규칙에 맡긴다)."""
+    if not (a["id"].startswith("khs:") and b["id"].startswith("khs:")):
+        return None
+    asno_a, asno_b = a["id"].split("-")[-1], b["id"].split("-")[-1]
+    if asno_a == asno_b:
+        return "같다", f"국가유산 관리번호가 같다 ({asno_a})"
+    # 이름이 다르면 다른 지정 건이다. 한 소스가 같은 유산에 두 이름을
+    # 달지는 않는다 — '월인석보 권1~2'와 '권23', '조선왕조실록 정족산
+    # 사고본'과 '오대산사고본'은 설명이 글자까지 같아도(설명은 책을
+    # 풀이한다) 보물 745-1 과 745-8, 국보 151-1 과 151-3 이다.
+    # 띄어쓰기만 다른 것은 여기서 걸러 두 줄이 같은 유산일 길을 남긴다.
+    if PUNCT.sub("", a["label"]) != PUNCT.sub("", b["label"]):
+        return "다르다", f"이름이 다른 두 지정 건이다 ({a['label']} ↔ {b['label']})"
+    ka, kb = address_key(a["address"]), address_key(b["address"])
+    if len(ka) == 3 and len(kb) == 3:
+        if ka != kb:
+            return "다르다", f"소재지가 다르다 ({' '.join(ka)} ↔ {' '.join(kb)})"
+        # 소재지까지 같다면 **종목이 바뀐 것**일 때만 같은 유산이다
+        # (보물 929 기사계첩이 2019년 국보 325 가 됐다). 같은 종목 안에서
+        # 관리번호가 다른 것은 한 박물관이 같은 이름의 유물을 여럿 가진
+        # 것이다 — 국보 128 과 보물 927 금동관음보살입상은 소장처가 아예
+        # 다르고, 같은 소장처 안에서도 지정 건은 따로 센다.
+        if a["id"].split("-")[0] != b["id"].split("-")[0]:
+            return "같다", f"소재지가 같고 종목이 다르다 ({' '.join(ka)}) — 지정이 바뀐 것이다"
+        return "다르다", f"소재지는 같지만 지정 건이 다르다 ({' '.join(ka)})"
+    return None
+
+
+def _year(date: str | None) -> int | None:
+    m = re.match(r"^(-?\d{1,4})", (date or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def _dates_agree(a: dict, b: dict) -> bool:
+    """두 노드의 날짜가 서로 어긋나지 않는가.
+
+    한쪽이 비었거나 한쪽이 다른 쪽의 앞자리이면(1592 / 1592-05-23) 맞는
+    것으로 본다. **1983 과 1984 는 어긋난 것이다** — 이 한 줄이 '이 재현'
+    (1984년생 음악가)과 '이재현'(1983년생 성우)을 갈랐다."""
+    for col in ("start_date", "end_date"):
+        x, y = (a[col] or "").strip(), (b[col] or "").strip()
+        if x and y and not (x.startswith(y) or y.startswith(x)):
+            return False
+    return True
+
+
+def _spacing_variant(x: str, y: str) -> bool:
+    """두 이름이 한 이름의 두 표기인가 (띄어쓰기·구두점만 다른가).
+
+    **첫 마디가 한 글자면 아니라고 본다.** 사람 이름은 성과 이름 사이를
+    띄기도 해서 ('이 명희'/'이명희') 그 공백이 표기 차이가 아니라 관례다 —
+    1969년생 배드민턴 선수와 1950년생 한진 회장이 그렇게 한 노드가 될
+    뻔했다. 성은 언제나 앞에 오므로 **앞 마디만** 보면 된다: '고려 말',
+    '1613년 경', '17세기 초'처럼 뒤에 붙는 한 글자는 표기 차이가 맞다."""
+    for name in (x, y):
+        head = name.split()
+        if head and len(head[0]) < 2:
+            return False
+    return True
+
+
+def decide(
+    a: dict, b: dict, canon: dict[str, str], known: dict[str, set[str]]
+) -> tuple[str, str]:
+    """(판정, 근거). 판정은 '같다'·'다르다'·'모름'."""
+    khs = _khs_verdict(a, b)
+    if khs:
+        return khs
+    ha, hb = canon.get(a["id"]), canon.get(b["id"])
+    if ha and hb and ha != hb:
+        return "다르다", f"한자가 다르다 ({ha} ↔ {hb})"
+
+    same_label = PUNCT.sub("", a["label"]) == PUNCT.sub("", b["label"])
+    agree = _dates_agree(a, b)
+
+    # 표기만 다른 같은 이름. **연대보다 이것이 세다** — 띄어쓰기가 다른
+    # 두 표기가 우연히 만들어지지 않기 때문이다. 국편 연대기가 6·10 만세
+    # 운동을 1920년, 여수·순천 사건을 2021년(특별법 제정 연도)으로 적어
+    # 둔 탓에, 연대를 먼저 보면 이 둘이 다른 사건이 된다.
+    if same_label and a["label"] != b["label"] and _spacing_variant(a["label"], b["label"]):
+        return "같다", f"띄어쓰기·구두점만 다르다 ({a['label']} ↔ {b['label']})"
+
+    sa, sb = _year(a["start_date"]), _year(b["start_date"])
+    ea, eb = _year(a["end_date"]), _year(b["end_date"])
+    if same_label and agree and sa and sb and ea and eb:
+        return "같다", f"이름과 생몰년이 같다 ({a['start_date']}~{a['end_date']})"
+    for x, y, what in ((sa, sb, "연대"), (ea, eb, "끝 연대")):
+        if x and y and abs(x - y) > YEAR_SLACK:
+            return "다르다", f"{what}가 {abs(x - y)}년 어긋난다 ({x} ↔ {y})"
+    # 여기부터는 날짜가 어긋나면 아무것도 단정하지 않는다. 몇 해 차이는
+    # 지저분한 날짜일 수도, 다른 사람일 수도 있다 — 그건 사람이 본다.
+    if not agree:
+        return "모름", ""
+    if same_label:
+        shared = known.get(a["id"], set()) & known.get(b["id"], set())
+        if shared:
+            return "같다", f"이름과 한자가 같다 ({'·'.join(sorted(shared))})"
+        la = re.sub(r"\s+", "", lead_sentence(a["description"]))
+        lb = re.sub(r"\s+", "", lead_sentence(b["description"]))
+        if len(la) >= 40 and la == lb:
+            return "같다", "이름이 같고 설명 첫 문장이 글자 그대로 같다"
+    return "모름", ""
+
+
 # --- 적용 -----------------------------------------------------------------
 
 
@@ -309,26 +531,41 @@ def sweep(
     table: list[Verdict],
     node_type: str = "event",
 ) -> Report:
-    """후보를 찾고 표와 맞춰 본다. 고치지는 않는다."""
+    """후보를 찾아 증거로 판정하고, 표와 맞춰 본다. 고치지는 않는다."""
     rep = Report(candidates=find(conn, node_type))
     judged = {v.key for v in table}
     group = _merge_groups(table)
-    rep.unjudged = [
-        c for c in rep.candidates
-        if c.key not in judged
+    canon_hanja, known_hanja = _hanja_of(conn, node_type)
+    nodes = {
+        r["id"]: dict(r)
+        for r in conn.execute(
+            "SELECT id, label, start_date, end_date, description,"
+            " json_extract(props,'$.address') AS address FROM nodes"
+            " WHERE type = ?", (node_type,))
+    }
+
+    for c in rep.candidates:
+        if c.key in judged:
+            continue
         # 셋이 한 사건인 경우. `가↔나`, `가↔다` 를 적었으면 `나↔다` 도 판정된
         # 것이다 — 같은 것에 같은 것은 같다.
-        and not (group.get(c.a) is not None and group.get(c.a) == group.get(c.b))
-    ]
-    have = {
-        r["id"] for r in conn.execute("SELECT id FROM nodes")
-    }
+        if group.get(c.a) is not None and group.get(c.a) == group.get(c.b):
+            continue
+        if c.a not in nodes or c.b not in nodes:
+            continue
+        verdict, why = decide(nodes[c.a], nodes[c.b], canon_hanja, known_hanja)
+        if verdict == "같다":
+            rep.auto_same.append((c, why))
+        elif verdict == "다르다":
+            rep.auto_diff.append((c, why))
+        else:
+            rep.unjudged.append(c)
+
+    have = {r["id"] for r in conn.execute("SELECT id FROM nodes")}
     for v in table:
         if v.action != "merge":
             continue
-        if v.keep not in have and v.drop not in have:
-            rep.absent.append(v)
-        elif v.drop not in have:
+        if v.drop not in have:
             rep.stale.append(v)             # 이미 합쳐졌다 (멱등)
         elif v.keep not in have:
             rep.absent.append(v)            # 남길 쪽이 없다 — 손대지 않는다
@@ -357,25 +594,83 @@ def _merge_groups(table: list[Verdict]) -> dict[str, int]:
 
 
 def apply(store, table: list[Verdict], node_type: str = "event") -> Report:
-    """표의 `merge` 줄을 적용한다. 몇 번 돌려도 결과가 같다."""
+    """표의 `merge` 줄과 증거가 '같다'고 한 짝을 합친다. 몇 번 돌려도 같다."""
     from .promote import merge_node
 
     conn = store.conn
     rep = sweep(conn, table, node_type)
     skip = {v.key for v in rep.absent} | {v.key for v in rep.stale}
-    for v in table:
-        if v.action != "merge" or v.key in skip:
-            continue
-        clash = _carry_content(conn, v.keep, v.drop)
+    pairs: list[tuple[str, str, str]] = [
+        (v.keep, v.drop, "duplicate_table")
+        for v in table if v.action == "merge" and v.key not in skip
+    ]
+    pairs += [(c.a, c.b, "duplicate_evidence") for c, _ in rep.auto_same]
+
+    preferred = {v.keep for v in table if v.action == "merge"}
+    for keep, drop, method in _resolve_chains(conn, pairs, preferred):
+        clash = _carry_content(conn, keep, drop)
         if clash:
             rep.date_clashes.append(clash)
-        stats = merge_node(store, v.drop, v.keep, method="duplicate_table")
-        rep.merged.append((v.keep, v.drop, stats["edges"]))
+        stats = merge_node(store, drop, keep, method=method)
+        rep.merged.append((keep, drop, stats["edges"]))
     conn.commit()
     # 합친 뒤 다시 세어야 '남은 후보'가 맞다.
     after = sweep(conn, table, node_type)
     rep.candidates, rep.unjudged = after.candidates, after.unjudged
+    rep.auto_same, rep.auto_diff = after.auto_same, after.auto_diff
     return rep
+
+
+def _resolve_chains(
+    conn: sqlite3.Connection,
+    pairs: list[tuple[str, str, str]],
+    preferred: set[str] = frozenset(),
+) -> list[tuple[str, str, str]]:
+    """짝들이 사슬로 이어지면 **한 노드로** 모은다.
+
+    '여수진남관'(보물, 빈 줄) → '여수 진남관'(국보, 빈 줄) → '여수
+    진남관'(국보, 알맹이) 처럼 셋이 얽힐 때, 짝을 적힌 순서대로 합치면
+    이미 지운 노드에 엣지를 붙이게 된다. 무리마다 남길 노드를 하나
+    골라(설명이 있는 쪽 · 엣지가 많은 쪽) 나머지를 전부 거기로 보낸다."""
+    parent: dict[str, str] = {}
+
+    def root(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for keep, drop, _ in pairs:
+        parent[root(keep)] = root(drop)
+
+    groups: dict[str, list[str]] = {}
+    for node in parent:
+        groups.setdefault(root(node), []).append(node)
+
+    # 표가 '남겨라'고 적은 노드가 먼저다 — 사람의 판정은 기계의 순서보다
+    # 세다. 그 다음이 설명이 있는 쪽, 엣지가 많은 쪽이다.
+    info = {
+        r["id"]: (0 if r["id"] in preferred else 1,
+                  0 if (r["description"] or "").strip() else 1, -r["deg"], r["id"])
+        for r in conn.execute(
+            "SELECT id, description,"
+            " (SELECT COUNT(*) FROM edges e WHERE e.src=n.id OR e.dst=n.id) deg"
+            " FROM nodes n")
+    }
+    method = {frozenset((k, d)): m for k, d, m in pairs}
+    out: list[tuple[str, str, str]] = []
+    for members in groups.values():
+        alive = [m for m in members if m in info]
+        if len(alive) < 2:
+            continue
+        winner = min(alive, key=lambda i: info[i])
+        for loser in alive:
+            if loser == winner:
+                continue
+            out.append((winner, loser,
+                        method.get(frozenset((winner, loser)), "duplicate_chain")))
+    return out
 
 
 def _carry_content(conn: sqlite3.Connection, keep: str, drop: str) -> str | None:
@@ -404,6 +699,11 @@ def _carry_content(conn: sqlite3.Connection, keep: str, drop: str) -> str | None
     fill = {c: d[c] for c in ("start_date", "end_date", "description", "url")
             if not (k[c] or "").strip() and (d[c] or "").strip()}
     props = json.loads(k["props"] or "{}")
+    # 없앨 쪽 props 에만 있는 칸도 가져온다 — 국가유산청 노드는 소재지·
+    # 지정 종목이 거기 들어 있어서, 빈 줄을 남기면 그게 통째로 사라진다.
+    for key, val in json.loads(d["props"] or "{}").items():
+        if key not in ("merged_from", "merged_desc") and not props.get(key):
+            props[key] = val
     if (d["description"] or "").strip() and "description" not in fill:
         props.setdefault("merged_desc", d["description"])
     sets = ", ".join(f"{c} = ?" for c in fill)

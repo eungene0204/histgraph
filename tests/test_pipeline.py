@@ -3651,6 +3651,13 @@ with tempfile.TemporaryDirectory() as tmp:
              description="고려사(高麗史)는 조선 초에 편찬된 고려 왕조의 정사로,"
                          " 기전체로 쓰였으며 139권에 이른다.",
              props={"about": "nikh:KORYOSA"}),
+        # 이름이 통째로 같은 두 싸움. 1592년 청주성과 1950년 정주 전투다.
+        Node(id="wd:CHEONGJU1592", type="event", label="청주 전투", source="wd",
+             start_date="1592-09-06", description="임진왜란 당시 조헌의 의병과"
+             " 영규의 승병이 청주성을 되찾은 싸움이다."),
+        Node(id="wd:CHEONGJU1950", type="event", label="청주 전투", source="wd",
+             start_date="1950-10-29", description="6·25 전쟁 중 유엔군 공세"
+             " 기간에 벌어진 싸움이다."),
         Node(id="wd:CHOI", type="person", label="최영", source="wd"),
         Node(id="wd:YEONGJO", type="person", label="영조", source="wd"),
     ])
@@ -3684,8 +3691,17 @@ with tempfile.TemporaryDirectory() as tmp:
         dup_mod.Verdict("merge", "wd:BANTAK", "ex:event:반탁 운동", "다른 이름"),
     ]
     rep = dup_mod.sweep(store.conn, table)
-    check("표에 없는 후보가 남으면 알린다",
-          {c.rule for c in rep.unjudged} == {"라벨", "설명"}, str(rep.unjudged))
+    check("증거가 없는 후보만 표로 넘긴다",
+          {c.rule for c in rep.unjudged} == {"설명"}, str(rep.unjudged))
+    check("띄어쓰기만 다른 표제는 증거가 판정한다 (3·1운동)",
+          any({c.a, c.b} == {"nikh:SAMIL", "wd:SAMIL"} for c, _ in rep.auto_same),
+          str(rep.auto_same))
+    check("성과 이름 사이 공백은 표기 차이로 보지 않는다",
+          not dup_mod._spacing_variant("이 명희", "이명희")
+          and dup_mod._spacing_variant("경주 김씨", "경주김씨"))
+    check("이름이 같아도 연대가 어긋나면 다르다고 본다",
+          any({c.a, c.b} == {"wd:CHEONGJU1592", "wd:CHEONGJU1950"}
+              for c, _ in rep.auto_diff), str(rep.auto_diff))
 
     rep = dup_mod.apply(store, table)
     row = store.conn.execute(
@@ -3712,6 +3728,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("합친 뒤 후보가 사라진다 (멱등)",
           all({c.a, c.b} != {"wd:HONGSAN", "ex:event:홍산 전투"} for c in rep.candidates),
           str(rep.candidates))
+    check("증거로 합친 짝도 사라진다 (3·1운동)", store.conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE id IN ('nikh:SAMIL','wd:SAMIL')"
+    ).fetchone()[0] == 1)
     again = dup_mod.apply(store, table)
     check("두 번 돌려도 결과가 같다", again.merged == [] and len(again.stale) == 3,
           f"{again.merged} {again.stale}")
@@ -3731,6 +3750,62 @@ with tempfile.TemporaryDirectory() as tmp:
         check("merge/keep 이 아닌 판정을 거부한다", False)
     except dup_mod.DuplicateTableError:
         check("merge/keep 이 아닌 판정을 거부한다", True)
+
+
+# --- 국가유산은 지정 건마다 관리번호와 소재지를 갖는다 ------------------------
+#
+# 이름도 한자도 같은 '동의보감'이 셋인데 국립중앙도서관본·규장각본·
+# 한국학중앙연구원본이라 서로 다른 보물이다. 반대로 '여수 진남관'은 보물
+# 324호이던 것이 국보 304호가 되며 두 줄이 됐다 — 소재지가 같다.
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "khs.sqlite")
+    def _h(nid, label, addr, desc=""):
+        return Node(id=nid, type="heritage", label=label, source="khs",
+                    description=desc or None, props={"address": addr})
+    store.upsert_nodes([
+        _h("khs:12-11-0010850000100", "동의보감",
+           "서울 서초구 반포대로 201, 국립중앙도서관 (반포동)", "허준이 지은 의서다."),
+        _h("khs:12-11-0010850000300", "동의보감",
+           "서울 관악구 관악로 1, 서울대학교 규장각한국학연구원 (신림동)",
+           "허준이 지은 의서다."),
+        _h("khs:11-24-0003040000000", "여수 진남관", ""),
+        _h("khs:11-36-0003040000000", "여수 진남관",
+           "전남광주통합특별시 여수시 동문로 11 (군자동) / (지번)전남 여수시 군자동 472",
+           "전라좌수영 객사로 세운 건물이다."),
+        _h("khs:12-36-0003240000000", "여수진남관", "전남 여수시 동문로 11 (군자동)",
+           "조선 수군의 본거지였다."),
+    ])
+    rep = dup_mod.sweep(store.conn, [], "heritage")
+    same = {frozenset((c.a, c.b)): why for c, why in rep.auto_same}
+    diff = {frozenset((c.a, c.b)) for c, _ in rep.auto_diff}
+    check("소장처가 다른 같은 이름은 다른 지정 건이다 (동의보감)",
+          frozenset(("khs:12-11-0010850000100", "khs:12-11-0010850000300")) in diff,
+          str(rep.auto_diff))
+    check("관리번호가 같으면 같은 유산이다 (시도코드만 다른 줄)",
+          "관리번호" in same.get(
+              frozenset(("khs:11-24-0003040000000", "khs:11-36-0003040000000")), ""),
+          str(same))
+    check("소재지가 같고 종목이 다르면 지정이 바뀐 것이다 (보물 → 국보)",
+          "소재지" in same.get(
+              frozenset(("khs:11-36-0003040000000", "khs:12-36-0003240000000")), ""),
+          str(same))
+
+    dup_mod.apply(store, [], "heritage")
+    rows = store.conn.execute(
+        "SELECT id, label, json_extract(props,'$.address') AS addr FROM nodes"
+        " WHERE label LIKE '%진남관%'").fetchall()
+    check("셋이 사슬로 얽혀도 한 노드로 모인다", len(rows) == 1, str([dict(r) for r in rows]))
+    check("남은 것은 알맹이가 있는 줄이다 (빈 줄이 이기지 않는다)",
+          rows and rows[0]["id"] == "khs:11-36-0003040000000", str([dict(r) for r in rows]))
+    check("없앤 줄의 props 도 이어받는다",
+          store.conn.execute("SELECT COUNT(*) FROM nodes WHERE label='동의보감'"
+                             ).fetchone()[0] == 2)
+    check("소재지 앞 세 마디로 견준다 (시도는 뗀다)",
+          dup_mod.address_key("전남 여수시 동문로 11 (군자동)")
+          == dup_mod.address_key(
+              "전남광주통합특별시 여수시 동문로 11 (군자동) / (지번)전남 여수시 군자동 472"))
+    store.close()
 
 
 # --- 표가 그래프와 맞는가 -----------------------------------------------------
