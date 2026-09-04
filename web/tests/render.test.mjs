@@ -236,10 +236,12 @@ let detailHtml = '';
 // 클래스 이름·속성·색값은 사람이 읽는 자리가 아니므로 뺀다.
 {
   // 제품 이름과 범례에 일부러 적어 둔 자료 용어는 봐준다. 막으려는 것은
-  // **설명이 영어로 새는 것**이지 이름 자체가 아니다.
+  // **설명이 영어로 새는 것**이지 이름 자체가 아니다. 방침·약관의 문의
+  // 메일 주소도 같다 — 한글로 옮기면 편지가 오지 않는다.
   const visibleText = (html) => plain(html)
     .replace(/<[^>]+>/g, ' ')                  // 태그를 통째로 걷어낸다
-    .replace(/histgraph|same_as/g, ' ');
+    .replace(/histgraph|same_as/g, ' ')
+    .replace(/[\w.+-]+@[\w.-]+/g, ' ');
   const leaks = [];
   const pages = [['App', appHtml], ['상세', detailHtml],
                  ['방침', readFileSync(join(WEB, 'privacy.html'), 'utf-8')],
