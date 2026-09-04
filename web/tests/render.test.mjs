@@ -84,8 +84,12 @@ let appHtml = '';
   for (const [name, file] of docs) {
     const html = readFileSync(join(WEB, file), 'utf-8');
     ok(`${name} 페이지가 있다`, html.includes('<h1>') && html.length > 1000);
-    // 자바스크립트 없이 열려야 한다 — 광고 심사와 검색 로봇이 보는 페이지다.
-    ok(`${name} 은 자바스크립트 없이 읽힌다`, !/<script/.test(html));
+    // 본문이 스크립트에 기대면 안 된다 — 광고 심사와 검색 로봇이 빈 페이지를
+    // 본다. 광고를 부르는 한 줄은 예외다 (본문은 그것 없이도 이미 다 있다).
+    const scripts = html.match(/<script[^>]*>/g) || [];
+    ok(`${name} 은 본문이 스크립트에 기대지 않는다`,
+       scripts.every((tag) => tag.includes('adsbygoogle.js')), scripts.join(' '));
+    ok(`${name} 이 광고를 부른다`, html.includes('adsbygoogle.js?client=ca-pub-'));
     ok(`${name} 에 그래프로 돌아가는 길이 있다`, html.includes('href="/"'));
   }
 }
