@@ -345,6 +345,32 @@ def backwards(store: GraphStore, cause: str, effect: str, effect_type: str) -> b
     return cause_year > effect_year + 1
 
 
+def part_of_each_other(store: GraphStore, a: str, b: str) -> bool:
+    """둘 사이에 상하위(`part_of`) 엣지가 있는가 — 어느 방향이든.
+
+    실측: 사건 문서 478건에서 `북관대첩 → 임진왜란 (원인)`·`한산도 전투 →
+    임진왜란 (영향)` 처럼 전투가 자기가 속한 전쟁의 원인으로 18건 적혔다.
+    같은 해라 연대로는 못 잡는다. 반대 방향(`임진왜란 → 용인 전투 (배경)`)은
+    틀리진 않지만 상하위가 이미 말하는 것이다 — 둘 다 적지 않는다."""
+    return store.conn.execute(
+        """SELECT 1 FROM edges WHERE type = 'part_of'
+            AND ((src = ?1 AND dst = ?2) OR (src = ?2 AND dst = ?1)) LIMIT 1""",
+        (a, b),
+    ).fetchone() is not None
+
+
+def prune_part_of(store: GraphStore) -> int:
+    """이미 적힌 인과 엣지 중 상하위 관계와 겹치는 것을 지운다 (되돌아가며 고칠 때)."""
+    cur = store.conn.execute(
+        """DELETE FROM edges WHERE type = ? AND EXISTS (
+             SELECT 1 FROM edges p WHERE p.type = 'part_of'
+                AND ((p.src = edges.src AND p.dst = edges.dst) OR (p.src = edges.dst AND p.dst = edges.src)))""",
+        (EDGE_TYPE,),
+    )
+    store.conn.commit()
+    return cur.rowcount
+
+
 def reversed_by_source(store: GraphStore, cause: str, effect: str) -> bool:
     return store.conn.execute(
         "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND type = ? AND source = 'wd' LIMIT 1",
@@ -396,6 +422,9 @@ def accept(
             continue
         if reversed_by_source(store, cid, eid):
             drop("구조화 소스와 반대")
+            continue
+        if part_of_each_other(store, cid, eid):
+            drop("상하위 관계")
             continue
         how = " ".join(str(a.get("how", "")).split())
         if not has_hangul(how) or len(how) > HOW_MAX:
@@ -510,6 +539,8 @@ def sync(store: GraphStore, target: GraphStore) -> int:
     `scope` 를 다시 돌리면 같은 결과가 나오지만, 그러려면 enrich·describe
     부터 다시 밟아야 한다. 인과 엣지만 새로 생겼을 때는 이것으로 족하다."""
     migrate(target)
+    prune_part_of(store)
+    prune_part_of(target)
     rows = store.conn.execute("SELECT * FROM edges WHERE type = ?", (EDGE_TYPE,)).fetchall()
     have = {r["id"] for r in target.conn.execute("SELECT id FROM nodes")}
     edges = [

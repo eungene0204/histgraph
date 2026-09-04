@@ -3871,6 +3871,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("구조화 소스와 반대 방향이면 버린다 (연대보다 먼저 잡히지 않아도)",
           why2.get("연대 역행") == 1 or why2.get("구조화 소스와 반대") == 1, str(why2))
 
+    # 전투는 자기가 속한 전쟁의 원인이 아니다 — 상하위가 있는 짝은 적지 않는다
+    store.upsert_nodes([Node(id="wd:HS", type="event", label="한산도 전투", source="wd", start_date="1592")])
+    store.upsert_edges([Edge(src="wd:HS", dst="wd:IMJIN", type="part_of", source="wd")])
+    _, why3, _ = causes_mod.accept(store, doc, [
+        {"cause": "한산도 전투", "cause_type": "event", "effect": "임진왜란", "effect_type": "event", "kind": "영향",
+         "how": "", "evidence": "임진왜란으로 명나라의 국력이 크게 소진되었고", "confidence": "certain"}], passages, "m")
+    check("상하위 관계가 있는 짝은 인과로 적지 않는다", why3 == {"상하위 관계": 1}, str(why3))
+    store.upsert_edges([Edge(src="wd:IMJIN", dst="wd:HS", type="caused", source="causes", label="배경")])
+    check("이미 적힌 것은 되돌아가 지운다", causes_mod.prune_part_of(store) == 1
+          and store.conn.execute("SELECT COUNT(*) FROM edges WHERE type='caused' AND dst='wd:HS'").fetchone()[0] == 0)
+
     # 사슬 — 임진왜란 → 명나라 (영향) · 후금 → 병자호란 (배경) · 정묘호란 → 병자호란 (wd)
     store.upsert_edges([Edge(src="wd:MING", dst="wd:JIN", type="caused", source="causes", label="배경",
                              confidence=0.7, props={"how": "명의 쇠퇴로 여진이 성장할 틈이 생겼다"})])
