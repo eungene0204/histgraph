@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "data" / "histgraph.sqlite"
 DEFAULT_CACHE = ROOT / "data" / "cache"
 DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
+DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -1666,6 +1667,65 @@ def cmd_describe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dedupe(args: argparse.Namespace) -> int:
+    """한 사건이 두 노드로 들어와 있는 것을 찾는다 (`duplicates` 모듈 머리글).
+
+    규칙은 후보를 찾을 뿐이고, 합치는 것은 표에 적힌 짝뿐이다. 수집이
+    노드를 다시 세우므로 `ingest` 뒤마다, 파생본에도 한 번 더 돌린다:
+
+        uv run histgraph dedupe --apply
+        uv run histgraph --db data/korea.sqlite dedupe --apply
+    """
+    from . import duplicates as dup
+
+    try:
+        table = dup.load_table(args.table)
+    except (OSError, dup.DuplicateTableError) as err:
+        print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
+        return 1
+
+    with GraphStore(args.db) as store:
+        label = {r["id"]: r["label"]
+                 for r in store.conn.execute("SELECT id, label FROM nodes")}
+        rep = (dup.apply(store, table, args.type) if args.apply
+               else dup.sweep(store.conn, table, args.type))
+        label.update({r["id"]: r["label"]
+                      for r in store.conn.execute("SELECT id, label FROM nodes")})
+
+    def name(nid: str) -> str:
+        return f"{label.get(nid, '?')}({nid})"
+
+    merges = sum(1 for v in table if v.action == "merge")
+    print(f"  {args.type} 후보 {len(rep.candidates):,}쌍 · 표에 적힌 판정"
+          f" {len(table):,}줄 (합친다 {merges:,} · 다른 사건 {len(table) - merges:,})")
+
+    if rep.merged:
+        print(f"\n  ✓ 합친 짝 {len(rep.merged):,}개")
+        for keep, drop, moved in rep.merged:
+            print(f"    {name(drop)}  →  {name(keep)}   엣지 {moved:,}건 옮김")
+    if rep.stale:
+        print(f"  이미 합쳐져 있던 짝 {len(rep.stale):,}개")
+    if rep.absent:
+        # 파생본에는 원본의 노드가 다 있지 않다. 시대 그래프에서는 정상이다.
+        print(f"  이 그래프에 없는 짝 {len(rep.absent):,}개"
+              f" (예: {', '.join(v.drop for v in rep.absent[:3])})")
+
+    if rep.unjudged:
+        print(f"\n  ⚠ 표에 없는 후보 {len(rep.unjudged):,}쌍 — 같은 사건인지"
+              f" 사람이 한 줄 적어야 합니다 ({args.table}):")
+        for c in rep.unjudged[:args.show]:
+            print(f"    [{c.rule}] {name(c.a)}  ↔  {name(c.b)}")
+            print(f"           근거: {c.evidence}")
+        if len(rep.unjudged) > args.show:
+            print(f"    … 그 밖 {len(rep.unjudged) - args.show:,}쌍")
+        print("\n    merge<TAB>남길 id<TAB>없앨 id<TAB>근거"
+              "   /   keep<TAB>id<TAB>id<TAB>왜 다른 사건인지")
+        return 1
+
+    print("\n  판정이 안 적힌 후보가 없습니다.")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """그래프 탐색 화면을 띄운다."""
     from . import server
@@ -1853,6 +1913,17 @@ def main(argv: list[str] | None = None) -> int:
     p_hm.add_argument("--show", type=int, default=15, help="출력할 예시 수")
     p_hm.add_argument("--dry-run", action="store_true", help="고치지 않고 세기만")
     p_hm.set_defaults(func=cmd_homonyms)
+
+    p_dp = sub.add_parser(
+        "dedupe", help="한 사건이 두 노드로 들어와 있는 것을 찾는다 (중복 관문)"
+    )
+    p_dp.add_argument("--table", type=Path, default=DEFAULT_DUPLICATES,
+                      help="판정 표 (기본: data/duplicates.tsv)")
+    p_dp.add_argument("--type", default="event", help="볼 노드 타입 (기본: event)")
+    p_dp.add_argument("--apply", action="store_true",
+                      help="표의 merge 줄을 실제로 합친다 (기본은 세기만)")
+    p_dp.add_argument("--show", type=int, default=20, help="출력할 후보 수")
+    p_dp.set_defaults(func=cmd_dedupe)
 
     p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
     p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")

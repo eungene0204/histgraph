@@ -270,6 +270,10 @@ def run(
         role = verdict["role"] if verdict else "근거 없음"
         by_role[role] = by_role.get(role, 0) + 1
         apply(store, e, verdict, getattr(backend, "model", "?"))
+        # 판정마다 커밋한다 — 끝에서 한 번 하면 첫 판정부터 몇 시간 쓰기
+        # 잠금을 쥐어 다른 세션(promote·extract)이 '데이터베이스 잠김'으로
+        # 죽는다 (journal_mode 가 delete 라 쓰는 쪽은 하나다).
+        store.conn.commit()
         if len(samples) < 12:
             samples.append(f"{e['person']} / {e['event']} → {role}"
                            + (f"  「{verdict['evidence'][:60]}」" if verdict else ""))
