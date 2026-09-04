@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 import urllib.parse
 
 from .extract import HANJA_TAIL, kin_title_mismatch, name_variants, orient
@@ -337,10 +338,12 @@ def local_matches(store: GraphStore, ex_ids: list[str] | None = None) -> list[di
     위키백과에서 기축옥사로 넘겨주기다. 두 문이 다 닫혀 있었다.
     """
     by_label: dict[str, list[dict]] = {}
+    by_nospace: dict[str, list[dict]] = {}
     for r in store.conn.execute(
         "SELECT id, type, label FROM nodes WHERE id NOT LIKE ?", (EX_PREFIX + "%",)
     ):
         by_label.setdefault(r["label"], []).append(dict(r))
+        by_nospace.setdefault(_nospace(r["label"]), []).append(dict(r))
 
     by_alias: dict[str, list[dict]] = {}
     for r in store.conn.execute(
@@ -366,6 +369,22 @@ def local_matches(store: GraphStore, ex_ids: list[str] | None = None) -> list[di
             continue
         if same_type:
             continue  # 동명이인 — 자동으로 고르지 않는다
+
+        # **띄어쓰기는 뜻이 아니다.** 추출은 산문에 적힌 대로 이름을
+        # 만들어서 '단종 복위운동'이 되고, 우리 노드는 '단종 복위 운동'
+        # 이다. 글자 그대로 비교하면 둘이 남남으로 남고, 그러면 사전의
+        # 정의를 채울 때도 '같은 이름의 노드가 둘'이라 둘 다 못 채운다
+        # (실측 2026-09-04: 단종복위운동이 그래서 설명 없이 지워졌다).
+        # 라벨이 똑같은 후보가 있었으면 위에서 이미 갈렸으므로, 여기 오는
+        # 것은 띄어쓰기만 다른 경우뿐이다.
+        spaced = [c for c in by_nospace.get(_nospace(r["label"]), [])
+                  if c["type"] == r["type"]]
+        if len(spaced) == 1:
+            out.append({"ex_id": r["id"], "target": spaced[0]["id"],
+                        "label": r["label"], "method": "label_nospace", "score": 0.93})
+            continue
+        if spaced:
+            continue  # 띄어쓰기를 떼니 후보가 둘 — 고르지 않는다
 
         prefixed = [
             c
@@ -493,6 +512,13 @@ TITLE_BATCH = 50  # action=query 의 titles 상한 (비봇 계정)
 CATEGORY_TO_TYPE: dict[str, str] = {
     "Q5": "person",
     "Q1656682": "event",
+    # **Wikidata 의 사건은 두 뿌리로 갈라져 있다.** Q1656682(event) 만
+    # 보면 전쟁·조약·학살이 통째로 빠진다 — 실측: 국공 내전(P31=내전
+    # Q8465)·조미 수호 통상 조약(P31=조약 Q131569)·자유시 참변(P31=학살
+    # Q3199915) 이 셋 다 Q1656682 로 올라가지 않고 Q1190554(사건, 일어난
+    # 일)로 올라간다. 그래서 위키백과 문서가 멀쩡히 있는데도 '클래스를
+    # 확인 못 함'으로 떨어졌다 (2026-09-04 승격에서 unverified 180건).
+    "Q1190554": "event",
     "Q43229": "org",
     "Q6256": "org",
     "Q7275": "org",
@@ -505,6 +531,13 @@ CATEGORY_TO_TYPE: dict[str, str] = {
 
 # 라벨이 이 꼴이면 위키백과에 물어볼 것도 없다. 요청만 낭비된다.
 _JUNK = re.compile(r"^\s*$|[|#\[\]{}<>]|\(\s*\d*\s*\)")
+
+_SPACES = re.compile(r"\s+")
+
+
+def _nospace(title: str) -> str:
+    """띄어쓰기를 뗀 문서명. 넘겨주기가 표기 차이인지 흡수인지 가른다."""
+    return _SPACES.sub("", title or "")
 
 # 동명이인 방어. 이웃 노드의 연대와 이만큼 넘게 어긋나면 다른 사람이다.
 # 넉넉하게 잡는다 — 사건 노드에 연대가 없는 경우가 많아 근거 자체가
@@ -583,7 +616,8 @@ def neighbor_years(store: GraphStore, node_id: str) -> list[int]:
 
 
 def fetch_qids(
-    fetcher: Fetcher, labels: list[str], follow_redirects: bool = True
+    fetcher: Fetcher, labels: list[str], follow_redirects: bool = True,
+    spacing_only: bool = False,
 ) -> tuple[dict[str, str], list[str]]:
     """문서명 -> QID. (찾은 것, 동음이의로 건너뛴 것).
 
@@ -594,7 +628,13 @@ def fetch_qids(
     `follow_redirects` 는 사건에만 끈다. 인물의 넘겨주기는 이름 이표기
     ('리델' → '펠릭스클레르 리델')라 따라가는 게 맞지만, 사건의 넘겨주기는
     대개 하위 항목이 상위 항목을 가리키는 것이다 ('곽산 학살 사건' →
-    '3·1 운동'). 따라가면 개별 사건이 큰 사건에 흡수돼 해상도가 사라진다."""
+    '3·1 운동'). 따라가면 개별 사건이 큰 사건에 흡수돼 해상도가 사라진다.
+
+    `spacing_only` 는 그 중간이다 — 넘겨주기를 따라가되 **띄어쓰기만 다른
+    것만** 받는다. 위키백과의 사건 문서명은 띄어쓰기가 우리 라벨과 자주
+    어긋난다 ('조미수호통상조약' → '조미 수호 통상 조약'). 이건 흡수가
+    아니라 같은 문서의 다른 표기라 따라가는 게 맞다. 반면 '단종 복위 운동'
+    → '세조찬위' 는 이름이 아예 달라 걸러진다 — 그쪽은 상위 사건이다."""
     from .sources.wikipedia import API_URL, _api
 
     found: dict[str, str] = {}
@@ -611,7 +651,7 @@ def fetch_qids(
             "formatversion": "2",
             "titles": "|".join(batch),
         }
-        if follow_redirects:
+        if follow_redirects or spacing_only:
             params["redirects"] = "1"
         try:
             data = _api(fetcher, params)
@@ -633,6 +673,9 @@ def fetch_qids(
             props = page.get("pageprops", {})
             if "disambiguation" in props:
                 ambiguous.append(requested)
+                continue
+            if spacing_only and _nospace(requested) != _nospace(title):
+                # 이름이 아예 다른 넘겨주기는 상위 항목으로의 흡수다
                 continue
             qid = props.get("wikibase_item")
             if qid:
@@ -722,6 +765,14 @@ def kowiki_matches(
 
     qid_by_label, ambiguous = fetch_qids(fetcher, others)
     event_qids, event_ambiguous = fetch_qids(fetcher, events, follow_redirects=False)
+    # 그대로의 문서명으로 못 찾은 사건만 다시 묻는다 — 띄어쓰기만 다른
+    # 넘겨주기까지 받는다 ('조미수호통상조약' → '조미 수호 통상 조약').
+    left = [t for t in events if t not in event_qids]
+    if left:
+        spaced, spaced_ambiguous = fetch_qids(
+            fetcher, left, follow_redirects=False, spacing_only=True)
+        event_qids.update(spaced)
+        event_ambiguous.extend(spaced_ambiguous)
     qid_by_label.update(event_qids)
     ambiguous.extend(event_ambiguous)
     if not qid_by_label:
@@ -1464,8 +1515,20 @@ def repair_facts(store: GraphStore, dry_run: bool = False) -> dict[str, object]:
     if dry_run:
         return report
     conn = store.conn
+    collided = 0
     for m in report["moves"]:
-        conn.execute("UPDATE edges SET src = ? WHERE rowid = ?", (m["to"], m["rowid"]))
+        try:
+            conn.execute("UPDATE edges SET src = ? WHERE rowid = ?",
+                         (m["to"], m["rowid"]))
+        except sqlite3.IntegrityError:
+            # **옮겨 갈 자리에 같은 엣지가 이미 있다.** 그러면 옮기는 대신
+            # 지운다 — 관계는 이미 제 사람에게 붙어 있으니 잃는 것이 없고,
+            # 남겨 두면 죽은 사람이 그 사건에 참여한 채로 남는다.
+            # (실측 2026-09-04: `promote` 를 두 번째 돌릴 때 터졌다. 첫
+            # 번째가 옮겨 놓은 엣지와 부딪힌 것이라, 한 번만 돌리는 동안은
+            # 드러나지 않는 결함이었다.)
+            conn.execute("DELETE FROM edges WHERE rowid = ?", (m["rowid"],))
+            collided += 1
     ids = [d["rowid"] for d in report["drops"]]
     for i in range(0, len(ids), 500):
         batch = ids[i : i + 500]
@@ -1473,6 +1536,8 @@ def repair_facts(store: GraphStore, dry_run: bool = False) -> dict[str, object]:
             f"DELETE FROM edges WHERE rowid IN ({','.join('?' * len(batch))})", batch
         )
     conn.commit()
-    log.info("모순 관계 %d건 삭제 · %d건 재연결 · 보류 %d건",
-             len(ids), len(report["moves"]), len(report["holds"]))
+    log.info("모순 관계 %d건 삭제 · %d건 재연결 (그중 %d건은 이미 있어 지움)"
+             " · 보류 %d건",
+             len(ids), len(report["moves"]), collided, len(report["holds"]))
+    report["collided"] = collided
     return report

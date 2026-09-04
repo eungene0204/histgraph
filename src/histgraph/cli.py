@@ -810,7 +810,8 @@ def cmd_scope(args: argparse.Namespace) -> int:
 
     with GraphStore(args.db) as store:
         result = scope_mod.extract(store, args.era, out, hops=args.hops,
-                                   drop_isolated=not args.keep_isolated)
+                                   drop_isolated=not args.keep_isolated,
+                                   drop_undescribed=not args.keep_undescribed)
 
     # **파생본에 한국어 관문을 바로 건다.** scope 는 원본을 그대로 베끼므로
     # 원본에서 relabel·redescribe 를 잊었으면 영어가 그대로 화면에 간다.
@@ -840,7 +841,8 @@ def cmd_scope(args: argparse.Namespace) -> int:
         if (aks.RAW_DIR / aks.INDEX_CSV).exists():
             filled = aks.fill_descriptions(derived)
         # 그러고도 빈 내용 노드는 화면에 세우지 않는다 (CLAUDE.md §1-3).
-        swept = scope_mod.sweep_undescribed(derived.conn)
+        swept = ({"nodes": 0, "edges": 0} if args.keep_undescribed
+                 else scope_mod.sweep_undescribed(derived.conn))
         foreign = labels_mod.foreign_text(derived.conn)
 
     print(f"\n=== {result['era']} 서브그래프 ===")
@@ -1873,6 +1875,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
     p_sc.add_argument("--keep-isolated", action="store_true", help="엣지 없는 노드도 유지")
+    # **`enrich --scope` 를 위한 문이다.** 설명이 빈 노드를 빼 버린 파생본을
+    # 범위로 주면, 정작 채워야 할 노드가 범위 밖이라 영영 안 채워진다.
+    # 채울 때는 이 스위치로 전부 담은 파생본을 한 번 만들어 그걸 범위로 준다.
+    p_sc.add_argument("--keep-undescribed", action="store_true",
+                      help="설명이 빈 내용 노드도 유지 (enrich --scope 대상 만들 때)")
     p_sc.add_argument("--table", type=Path, default=DEFAULT_LABELS,
                       help=f"파생본에 바로 적용할 한국어 라벨 표 (기본 {DEFAULT_LABELS.name})")
     p_sc.set_defaults(func=cmd_scope)

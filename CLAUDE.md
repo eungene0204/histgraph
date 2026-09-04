@@ -83,10 +83,15 @@ Station bombing` 이 사건 이름으로 떴다). 세 번 다 원인이 같았�
 Wikidata 한 줄 설명을 갖고 있었다. 그래서 순서가 있다:
 
 ```
-uv run histgraph enrich --scope data/korea.sqlite   # 위키백과·Wikidata
+uv run histgraph scope korea --keep-undescribed --out /tmp/full.sqlite
+uv run histgraph enrich --scope /tmp/full.sqlite    # 위키백과·Wikidata
 uv run histgraph describe                           # 민족문화대백과 정의 (네트워크 불필요)
 uv run histgraph scope korea                        # 그러고도 빈 것만 뺀다
 ```
+
+첫 줄이 왜 필요한가: `enrich --scope data/korea.sqlite` 로 주면 **이미
+지워진 파생본**을 범위로 삼는다 — 정작 채워야 할 노드가 범위 밖이라 영영
+안 채워진다. 채울 때 쓰는 범위는 `--keep-undescribed` 로 전부 담아 만든다.
 
 `enrich`·`describe` 를 건너뛰고 `scope` 를 돌리면 **채울 수 있었던 노드가
 지워진다.** 사건이 갑자기 수백 개 줄면 그것부터 의심한다.

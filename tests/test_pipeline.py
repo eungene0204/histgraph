@@ -1062,6 +1062,40 @@ check("사건은 넘겨주기를 따라가지 않음", "redirects" not in stub.p
 fetch_qids(stub, ["리델"])
 check("인물은 넘겨주기를 따라감", stub.params.get("redirects") == "1")
 
+# 사건의 넘겨주기 중 **띄어쓰기만 다른 것**은 흡수가 아니라 표기 차이다.
+# 실측(2026-09-04): '조미수호통상조약'이 '조미 수호 통상 조약'을 가리키는데
+# 사건이라 넘겨주기를 안 따라가 문서가 없는 것으로 떨어졌다. 반대로
+# '단종 복위 운동' → '세조찬위' 는 상위 사건이라 따라가면 안 된다.
+spacing_stub = _StubFetcher({
+    "query": {
+        "redirects": [
+            {"from": "조미수호통상조약", "to": "조미 수호 통상 조약"},
+            {"from": "단종 복위 운동", "to": "세조찬위"},
+        ],
+        "pages": [
+            {"title": "조미 수호 통상 조약", "pageprops": {"wikibase_item": "Q697104"}},
+            {"title": "세조찬위", "pageprops": {"wikibase_item": "Q16175444"}},
+        ],
+    }
+})
+found2, _ = fetch_qids(spacing_stub, ["조미수호통상조약", "단종 복위 운동"],
+                       follow_redirects=False, spacing_only=True)
+check("띄어쓰기만 다른 넘겨주기는 따라간다",
+      found2 == {"조미수호통상조약": "Q697104"}, str(found2))
+check("이름이 다른 넘겨주기는 상위 항목으로의 흡수라 버린다",
+      "단종 복위 운동" not in found2)
+check("띄어쓰기만 볼 때도 넘겨주기 자체는 켠다",
+      spacing_stub.params.get("redirects") == "1")
+
+# Wikidata 의 사건은 Q1656682 와 Q1190554 두 뿌리로 갈라져 있다. 앞의
+# 것만 보면 전쟁·조약·학살이 통째로 '클래스 확인 실패'가 된다 (실측:
+# 국공 내전 P31=내전, 조미 수호 통상 조약 P31=조약, 자유시 참변 P31=학살).
+from histgraph.promote import CATEGORY_TO_TYPE  # noqa: E402
+
+check("사건의 두 뿌리를 다 본다",
+      CATEGORY_TO_TYPE.get("Q1656682") == "event"
+      and CATEGORY_TO_TYPE.get("Q1190554") == "event")
+
 # 회귀: 문서명만 보고 승격하면 동명이인에 붙는다. 무오사화 문서의 '한유'는
 # 조선 인물인데 위키백과 '한유'는 당나라 문인 韓愈(768~824)다.
 from histgraph.promote import life_span, plausible_period  # noqa: E402
@@ -1090,6 +1124,15 @@ with tempfile.TemporaryDirectory() as tmp:
         Node(id="ex:person:세조", type="person", label="세조", source="extract"),
         Node(id="ex:person:숙종", type="person", label="숙종", source="extract"),
         Node(id="ex:person:고종", type="person", label="고종", source="extract"),
+        # 띄어쓰기만 다른 고아. 산문이 적은 대로 노드가 만들어진다.
+        Node(id="wd:Q5", type="event", label="단종 복위 운동", source="wd"),
+        Node(id="ex:event:단종 복위운동", type="event", label="단종 복위운동",
+             source="extract"),
+        # 띄어쓰기를 떼도 후보가 둘이면 고르지 않는다
+        Node(id="wd:Q6", type="event", label="여진 정벌 (조선)", source="wd"),
+        Node(id="wd:Q7", type="event", label="여진정벌 (조선)", source="wd"),
+        Node(id="ex:event:여진 정벌(조선)", type="event", label="여진 정벌(조선)",
+             source="extract"),
     ])
     store.upsert_edges([
         Edge(src="ex:person:세조", dst="wd:Q2", type="participated_in",
@@ -1104,6 +1147,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("왕조 접두로 매칭", plan["ex:person:세조"]["target"] == "wd:Q1")
     check("왕조가 둘이면 매칭하지 않음", "ex:person:숙종" not in plan)
     check("타입이 다르면 매칭하지 않음", "ex:person:고종" not in plan)
+    # 실측 회귀(2026-09-04): '단종 복위운동'(고아)과 '단종 복위 운동'(진짜)이
+    # 남남으로 남아, 사전에 정의가 있는데도 '같은 이름의 노드가 둘'이라
+    # 설명을 못 채우고 지워졌다. 띄어쓰기는 뜻이 아니다.
+    check("띄어쓰기만 다르면 같은 노드로 본다",
+          plan.get("ex:event:단종 복위운동", {}).get("target") == "wd:Q5"
+          and plan["ex:event:단종 복위운동"]["method"] == "label_nospace", str(plan.get("ex:event:단종 복위운동")))
+    check("띄어쓰기를 떼도 후보가 둘이면 고르지 않는다",
+          "ex:event:여진 정벌(조선)" not in plan)
 
     stats = merge_node(store, "ex:person:세조", "wd:Q1", method="dynasty_prefix")
     check("자기순환 엣지 제거", stats["self_loops"] == 1)
@@ -1995,6 +2046,33 @@ with tempfile.TemporaryDirectory() as tmp:
     check("보수 뒤 남는 건 참인 관계뿐",
           left == {("wd:W", "wd:H", "spouse_of"), ("wd:S", "wd:F", "child_of")}, str(left))
     check("두 번 돌려도 더 지울 게 없다", not audit_facts(store)["drops"])
+    store.close()
+
+# 옮겨 갈 자리에 같은 엣지가 이미 있으면 UNIQUE 제약에 부딪힌다. 실측
+# (2026-09-04): `promote` 를 두 번째 돌릴 때 IntegrityError 로 죽었다 —
+# 첫 번째가 옮겨 놓은 엣지와 부딪힌 것이라 한 번만 돌리는 동안은 안 보였다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "clash.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:OLD", type="person", label="김철", source="wd",
+             start_date="1400", end_date="1450"),
+        Node(id="wd:NEW", type="person", label="김철", source="wd",
+             start_date="1480", end_date="1550"),
+        Node(id="wd:EV2", type="event", label="어떤 사화", source="wd",
+             start_date="1500", end_date="1500"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:OLD", dst="wd:EV2", type="participated_in", source="extract",
+             props={"evidence": "김철이 이 사화에 얽혔다"}),
+        Edge(src="wd:NEW", dst="wd:EV2", type="participated_in", source="extract",
+             props={"evidence": "김철이 이 사화에 얽혔다"}),
+    ])
+    rep = repair_facts(store)
+    left = {(r["src"], r["dst"]) for r in
+            store.conn.execute("SELECT src, dst FROM edges")}
+    check("옮길 자리가 이미 차 있으면 지운다 (죽지 않는다)",
+          left == {("wd:NEW", "wd:EV2")}, str(left))
+    check("부딪힌 수를 센다", rep.get("collided") == 1, str(rep.get("collided")))
     store.close()
 
 # --- 한국어 라벨 덮어쓰기 ------------------------------------------------
