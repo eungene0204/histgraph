@@ -2776,14 +2776,27 @@ with tempfile.TemporaryDirectory() as tmp:
     from histgraph.server import GraphAPI as _GraphAPI
 
     store = GraphStore(Path(tmp) / "g.sqlite")
+    # 세종의 설명은 위키백과 본문 전체 꼴이다 — 도입부 뒤에 `== 생애 ==` 절이
+    # 달려 있다. 장은 도입부만 내야 한다 (2026-09-05 애드센스 '주의 필요':
+    # 남의 백과사전을 통째로 옮긴 페이지로 읽혔다).
+    SEJONG_INTRO = (
+        "세종(世宗, 1397년~1450년)은 조선의 제4대 국왕으로, 재위 기간은 "
+        "1418년부터 1450년까지다. 훈민정음을 창제하고 측우기·자격루 같은 "
+        "기구를 만들게 했으며, 4군 6진을 개척하여 국경을 넓혔다. 황희와 "
+        "맹사성을 등용하여 의정부서사제를 열었다."
+    )
+    SEJONG_BODY = "1397년 한성 준수방에서 태종의 셋째 아들로 태어났다. 아명은 막동이다."
     store.upsert_nodes([
         Node(id="wd:S", type="person", label="세종", source="wd",
              start_date="1397-04-10", end_date="1450-02-17",
-             description="조선의 제4대 국왕이다.", aliases=["이도"]),
+             description=f"{SEJONG_INTRO}\n\n\n== 생애 ==\n{SEJONG_BODY}",
+             aliases=["이도"]),
         Node(id="wd:T", type="person", label="태종", source="wd",
              description="조선의 제3대 국왕이다."),
         Node(id="wd:M", type="person", label="문종", source="wd",
              description="조선의 제5대 국왕이다."),
+        Node(id="wd:H", type="person", label="황희", source="wd",
+             description="조선의 영의정이다."),
         Node(id="ex:X", type="person", label="이름뿐", source="extract"),
         Node(id="wd:SL/A", type="event", label="빗금 든 것", source="wd",
              description="주소 한 칸에 담기지 않는 이름이다."),
@@ -2791,6 +2804,7 @@ with tempfile.TemporaryDirectory() as tmp:
     store.upsert_edges([
         Edge(src="wd:S", dst="wd:T", type="child_of", source="wd"),
         Edge(src="wd:M", dst="wd:S", type="child_of", source="wd"),
+        Edge(src="wd:S", dst="wd:H", type="related_to", source="wd"),
     ])
     api = _GraphAPI(store, era="korea")
 
@@ -2804,7 +2818,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("노드 장이 열린다", status == 200 and ctype.startswith("text/html"))
     check("이름·갈래·생몰이 글로 적힌다",
           "세종" in text and "인물" in text and "1397년 ~ 1450년" in text, text[:200])
-    check("설명이 본문에 들어 있다", "조선의 제4대 국왕이다." in text)
+    check("설명의 도입부가 본문에 들어 있다", "훈민정음을 창제하고" in text)
+    # 원문 전체를 옮기면 스크랩이다. 절 본문은 내지 않고 위키 문법도 세우지 않는다.
+    check("절 본문은 내지 않는다", "막동" not in text and "== " not in text, text[:400])
+    check("이 사이트의 말이 먼저 온다 — 무엇이고 몇 건과 이어졌는지",
+          "세종은 인물입니다. " in text and "모두 3건과 이어져 있습니다" in text
+          and text.index("인물입니다") < text.index("훈민정음"), text[:400])
     check("다른 이름이 적힌다", "이도" in text)
     # 방향이 뒤집히면 아버지가 자식이 된다 — child_of 는 나가는 쪽이 부모다.
     check("부모와 자녀가 갈려 있다",
@@ -2828,13 +2847,31 @@ with tempfile.TemporaryDirectory() as tmp:
           status == 200 and 'content="noindex,follow"' in body)
     check("빈 설명의 이유를 적는다", "산문에서 이름만 추출된 노드라" in _visible(body))
 
+    # 문턱: 요약이 짧거나 이어진 것이 적으면 색인에 안 올린다. 태종은
+    # 설명 한 줄에 관계 하나 — 목록일 뿐이다.
+    status, _, body = pages.route(api, "/n/wd:T")
+    check("얇은 장은 색인에 올리지 않는다", 'content="noindex,follow"' in body)
+    check("얇은 장도 읽을 수는 있다", status == 200 and "조선의 제3대 국왕이다." in _visible(body))
+
+    # 요약 규칙 자체. 위키 문법과 마침표 없는 절 제목 앞까지가 도입부다.
+    check("요약은 첫 절 제목 앞에서 멈춘다",
+          pages.summarize("머리말\n갑은 을이다. 병은 정이다.\n출생과 성장\n무는 기다.")
+          == "갑은 을이다. 병은 정이다.")
+    check("제목뿐인 설명은 지우지 않는다", pages.summarize("화가") == "화가")
+    check("문장 단위로 끊는다",
+          pages.summarize("가나다라마바사아자차. 카타파하가나다라마바. 사아자차카타파하.", limit=24)
+          == "가나다라마바사아자차. 카타파하가나다라마바.")
+    check("상세 패널이 받는 전문에는 위키 문법이 없다",
+          "== " not in api.node("wd:S")["description"]
+          and "생애" in api.node("wd:S")["description"] and "막동" in api.node("wd:S")["description"])
+
     status, _, body = pages.route(api, "/n/없는것")
     check("없는 노드는 404 이고 색인에 안 올린다",
           status == 404 and "noindex" in body)
 
     status, ctype, body = pages.route(api, "/sitemap.xml")
-    check("사이트맵은 설명 있는 노드만 싣는다",
-          "/n/wd%3AS" in body and "/n/ex%3AX" not in body, body)
+    check("사이트맵은 노드 장과 같은 문턱을 건다",
+          "/n/wd%3AS" in body and "/n/ex%3AX" not in body and "/n/wd%3AT" not in body, body)
     check("사이트맵에 목록 장과 방침·약관이 있다",
           "/n/</loc>" in body and "/privacy.html" in body and "/terms.html" in body)
     # 주소 한 칸(:id)에 담기지 않는 id 는 링크가 죽는다. 죽은 주소를
@@ -2843,8 +2880,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     status, _, body = pages.route(api, "/n/")
     text = _visible(body)
-    check("목록 장이 갈래별로 세운다",
-          status == 200 and "인물" in text and "세종" in text and "태종" in text, text[:200])
+    check("목록 장은 읽을 것이 있는 장만 세운다",
+          status == 200 and "인물" in text and "세종" in text and "태종" not in text, text[:200])
     check("목록 장에도 영어가 없다",
           not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
           str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))

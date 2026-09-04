@@ -13,11 +13,19 @@
 
 여기도 §1 이 그대로 걸린다: 사람이 읽는 자리에 영어를 쓰지 않고, 자료가
 어디서 왔는지 말하지 않는다.
+
+**설명은 요약까지만 낸다.** 2026-09-05 애드센스가 이 사이트를 '주의 필요'로
+돌려보냈다. 그때 이 장은 설명 칸을 통째로 뿌리고 있었다 — 세조 25,093자,
+태조 18,787자, `== 생애 ==` 위키 문법까지 그대로. 로봇에게 그것은 남의
+백과사전을 긁어 온 페이지였다. 그래서 지금은 (1) 설명은 첫 몇 문장까지만,
+(2) 이 사이트만 아는 것 — 언제의 무엇이고 무엇과 몇 건이나 이어졌는지 — 를
+이 사이트의 말로 먼저 적고, (3) 그 둘이 다 얇은 장은 색인에 올리지 않는다.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from html import escape
 from urllib.parse import quote
 
@@ -45,6 +53,92 @@ TIME_TYPES = ("from_period", "dated_to")
 # 한 묶음에 이만큼까지만 적는다. 세종의 '자녀'처럼 수십이 붙는 자리가
 # 있는데, 문서로 읽는 화면에서 목록이 화면을 넘기면 아무도 안 읽는다.
 GROUP_MAX = 30
+
+# 설명을 이만큼까지만 낸다 (문장 단위로 끊으므로 조금 넘을 수 있다). 인물
+# 항목의 도입부 한 문단이 대개 300~400자다 — 그 너머는 원문을 옮기는 일이지
+# 이 장이 할 말이 아니다.
+SUMMARY_MAX = 360
+
+# 색인에 올리는 문턱. 요약이 이보다 짧고 이어진 것이 이보다 적으면 장에
+# 읽을 것이 없다 — 설명이 '화가' 한 낱말인 장이 3,382개였고, 그런 장이
+# 6,810개 색인 속에 깔려 읽을 것이 있는 장을 묻었다. 두 조건은 **모두**
+# 넘어야 한다: 설명이 길어도 아무것과 안 이어졌으면 이 사이트에 있을 까닭이
+# 없고, 관계가 많아도 설명이 한 줄이면 목록일 뿐이다.
+MIN_SUMMARY = 120
+MIN_RELATIONS = 3
+
+# 위키 문법의 절 제목 (`== 생애 ==`). 본문 전체를 받은 설명에 남아 있다.
+_HEADING = re.compile(r"^=+[ \t]*.+?[ \t]*=+[ \t]*$", re.M)
+# 문장 끝. '다.' '이다.' 뒤에 공백이나 줄바꿈이 오는 자리에서 끊는다.
+# 괄호 안의 '(음력 4월 10일)~1450년 3월 30일)' 같은 마침표 없는 구절은
+# 여기 안 걸리므로 문장 중간이 잘리지 않는다.
+_SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
+
+
+def summarize(text: str | None, limit: int = SUMMARY_MAX) -> str:
+    """설명에서 **도입부 몇 문장**만 남긴다.
+
+    1. 첫 절 제목 앞까지가 도입부다. `== 생애 ==` 도, 마침표 없이 짧게
+       끝나는 줄('출생과 성장')도 제목이다. 글머리의 제목('머리말')은
+       건너뛴다.
+    2. 문장 단위로 이어 붙이다 `limit` 를 넘기면 멈춘다. 첫 문장 하나가
+       이미 넘으면 그 문장은 통째로 둔다 — 문장 중간을 자르면 뜻이 남지
+       않는다.
+    """
+    if not text:
+        return ""
+    # 절 제목은 두 꼴이다. 위키 문법 `== 생애 ==`, 그리고 민족문화대백과·
+    # 국편 글이 본문 사이에 세우는 마침표 없는 짧은 줄('출생과 성장',
+    # '호방한 기상으로 세상을 놀라게 하다'). 어느 쪽이든 **첫 제목 앞까지가
+    # 도입부**다 — 제목 뒤는 절의 본문이라 이어 붙이면 뜻이 끊긴다. 글머리에
+    # 선 제목('머리말')은 건너뛰고 읽는다. 제목뿐인 설명('화가')은 그대로
+    # 둔다 — 지우면 빈 설명이 되어 화면이 '아직 못 받아왔다'고 거짓을 말한다.
+    lines = [ln.strip() for ln in _HEADING.sub(lambda m: m.group(0).strip("= \t"),
+                                               text).split("\n") if ln.strip()]
+    prose: list[str] = []
+    for line in lines:
+        if _is_heading_line(line):
+            if prose:
+                break
+            continue
+        prose.append(line)
+    text = " ".join(prose if prose else lines)
+    text = re.sub(r"[ \t]{2,}", " ", text).strip()
+    out: list[str] = []
+    size = 0
+    for sentence in _SENTENCE_END.split(text):
+        if out and size + len(sentence) > limit:
+            break
+        out.append(sentence)
+        size += len(sentence) + 1
+    return " ".join(out).strip()
+
+
+def _is_heading_line(line: str) -> bool:
+    return len(line) <= 40 and not line.endswith((".", "!", "?", "。", "다", "”", "」", ")"))
+
+
+def plain_description(text: str | None) -> str:
+    """설명 전문에서 위키 문법만 걷어 낸다 (`== 생애 ==` → `생애`). 상세
+    패널이 전문을 보일 때 쓴다 — 요약이 아니라 **문법**만 지우는 자리다."""
+    if not text:
+        return ""
+    return _HEADING.sub(lambda m: m.group(0).strip("= \t"), text)
+
+
+def indexable(summary: str, relations: int) -> bool:
+    """이 장을 색인에 올릴 만한가. 문턱은 위의 두 상수다."""
+    return len(summary) >= MIN_SUMMARY and relations >= MIN_RELATIONS
+
+
+def _josa(word: str, with_batchim: str, without: str) -> str:
+    """받침이 있으면 앞말, 없으면 뒷말. '세종은' / '황진이는'.
+    (`relations.js` 의 pt 와 같다 — 조사는 문법이지 규칙표가 아니다.)"""
+    tail = word.strip()[-1:] if word.strip() else ""
+    code = ord(tail) - 0xAC00 if tail else -1
+    if code < 0 or code > 11171:
+        return without
+    return with_batchim if code % 28 else without
 
 STYLE = """
 :root {
@@ -79,7 +173,8 @@ h1 { color: var(--text); font-size: 28px; font-weight: 650; letter-spacing: -0.0
 h1 .also { color: var(--text-3); font-weight: 400; font-size: 19px; margin-left: 8px; }
 .kind { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 13px; margin: 0 0 26px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.desc { color: var(--text); font-size: 16px; margin: 0 0 18px; white-space: pre-wrap; }
+.lead { color: var(--text); font-size: 16px; margin: 0 0 14px; }
+.desc { color: var(--text-2); font-size: 15px; margin: 0 0 18px; }
 .empty { color: var(--text-3); font-size: 14px; margin: 0 0 18px; }
 .aka { color: var(--text-3); font-size: 13px; margin: 0 0 8px; }
 h2 {
@@ -169,6 +264,32 @@ def _groups(relations: list[dict]) -> list[tuple[str, list[dict]]]:
     return out
 
 
+def _lead(title: str, kind: str,
+          groups: list[tuple[str, list[dict]]], total: int) -> str:
+    """이 사이트의 말로 적는 첫 문단. 원문을 옮기지 않고 관계망이 아는
+    것만 말한다 — 언제의 무엇이고, 무엇과 몇 건이나 이어졌는지.
+
+    '조선 세종은 조선의 인물입니다. 자녀 18 · 사건 9 · 시기 3 등 모두 87건과
+    이어져 있습니다.' 생몰은 바로 위 갈래 줄에 있으니 되풀이하지 않는다.
+    """
+    era = ""
+    for head, rels in groups:
+        if head == "시기":
+            named = [r["other"]["label"] for r in rels
+                     if not str(r["other"]["id"]).startswith("time:")]
+            if named:
+                era = f"{named[0]}의 "
+            break
+    first = f"{title}{_josa(title, '은', '는')} {era}{kind}입니다."
+    if not total:
+        return first
+    heads = [(head, len(rels)) for head, rels in groups]
+    heads.sort(key=lambda x: -x[1])
+    shown = " · ".join(f"{head} {n}" for head, n in heads[:4])
+    rest = " 등" if len(heads) > 4 else ""
+    return f"{first} {shown}{rest} 모두 {total}건과 이어져 있습니다."
+
+
 def _link(other: dict) -> str:
     color = GROUP_COLOR.get(other.get("group"), "var(--frame)")
     kind = NODE_TYPES.get(other.get("type"), "")
@@ -249,8 +370,15 @@ def node_page(api, node_id: str) -> tuple[int, str]:
         f'<p class="kind"><span class="dot" style="background:{color}"></span>'
         f'{escape(kind)}' + (f' · {escape(span)}' if span else "") + "</p>"
     )
-    if desc:
-        parts.append(f'<p class="desc">{escape(desc)}</p>')
+    groups = _groups(node.get("relations") or [])
+    total = sum(len(rels) for _, rels in groups)
+    summary = summarize(desc)
+
+    # 이 사이트의 말이 먼저다 — 언제의 무엇이고 무엇과 이어졌는지는 원문이
+    # 아니라 관계망이 아는 것이다. 그다음에 원문 요약이 온다.
+    parts.append(f'<p class="lead">{escape(_lead(title, kind, groups, total))}</p>')
+    if summary:
+        parts.append(f'<p class="desc">{escape(summary)}</p>')
     else:
         parts.append(f'<p class="empty">{escape(_why_empty(node))}</p>')
 
@@ -258,8 +386,6 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     if aliases:
         parts.append(f'<p class="aka">다른 이름 · {escape(" · ".join(aliases))}</p>')
 
-    groups = _groups(node.get("relations") or [])
-    total = sum(len(rels) for _, rels in groups)
     if total:
         parts.append(f"<h2>이어진 것 {total}</h2>")
         for head, rels in groups:
@@ -276,15 +402,16 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     )
     parts.append("</main>")
 
-    # 설명이 비어 있는 장은 색인에 올리지 않는다. 이름과 목록만 있는 장이
-    # 검색 결과에 깔리면 읽을 것이 있는 장까지 같이 묻힌다.
-    summary = desc[:150] if desc else f"{title} — {kind}. 이어진 것 {total}."
+    # 얇은 장은 색인에 올리지 않는다 (`indexable` — 사이트맵과 같은 문턱).
+    # 이름과 목록만 있는 장이 검색 결과에 깔리면 읽을 것이 있는 장까지 같이
+    # 묻힌다.
+    meta = summary[:150] if summary else f"{title} — {kind}. 이어진 것 {total}."
     return 200, _shell(
         f"{title} — histgraph",
-        summary,
+        meta,
         f"{SITE}/n/{quote(node['id'], safe='')}",
         "\n".join(parts),
-        noindex=not desc,
+        noindex=not indexable(summary, total),
     )
 
 
@@ -312,16 +439,19 @@ def index_page(api) -> tuple[int, str]:
              '<p class="kind">한국사의 개체들이 서로 어떻게 이어져 있는지를 '
              '글과 관계망 두 가지로 봅니다.</p>']
     for kind, head in INDEX_KINDS:
-        rows = api.store.conn.execute(
-            """SELECT n.id, n.label, n.type,
-                      (SELECT COUNT(*) FROM edges e
-                        WHERE e.src = n.id OR e.dst = n.id) AS degree
-                 FROM nodes n
-                WHERE n.type = ? AND COALESCE(n.description,'') <> ''
-                ORDER BY degree DESC, n.label
-                LIMIT ?""",
-            (kind, INDEX_EACH),
-        ).fetchall()
+        rows = [
+            r for r in api.store.conn.execute(
+                """SELECT n.id, n.label, n.type, n.description,
+                          (SELECT COUNT(*) FROM edges e
+                            WHERE e.src = n.id OR e.dst = n.id) AS degree
+                     FROM nodes n
+                    WHERE n.type = ? AND COALESCE(n.description,'') <> ''
+                    ORDER BY degree DESC, n.label
+                    LIMIT ?""",
+                (kind, INDEX_EACH * 3),
+            )
+            if indexable(summarize(r["description"]), r["degree"])
+        ][:INDEX_EACH]
         if not rows:
             continue
         parts.append(f"<h2>{escape(head)}</h2><ul>")
@@ -343,12 +473,22 @@ def index_page(api) -> tuple[int, str]:
 
 
 def sitemap(api) -> tuple[int, str]:
-    """색인에 올릴 주소 목록. **설명이 있는 노드만** 싣는다 — 이름뿐인 장을
-    수천 개 올리면 읽을 것이 있는 장이 그 속에 묻힌다."""
-    rows = api.store.conn.execute(
-        "SELECT id FROM nodes WHERE COALESCE(description,'') <> '' "
-        "AND id NOT LIKE '%/%' ORDER BY id"
-    ).fetchall()
+    """색인에 올릴 주소 목록. 노드 장이 `noindex` 를 다는 기준(`indexable`)과
+    같은 문턱을 건다 — 이름뿐인 장을 수천 개 올리면 읽을 것이 있는 장이 그
+    속에 묻힌다. 배포본 실측: 설명 유무로만 걸렀을 때 6,810장, 문턱을 걸면
+    약 2,400장."""
+    rows = [
+        r for r in api.store.conn.execute(
+            """SELECT n.id, n.description,
+                      (SELECT COUNT(*) FROM edges e
+                        WHERE e.src = n.id OR e.dst = n.id) AS degree
+                 FROM nodes n
+                WHERE COALESCE(n.description,'') <> ''
+                  AND n.id NOT LIKE '%/%'
+                ORDER BY n.id"""
+        )
+        if indexable(summarize(r["description"]), r["degree"])
+    ]
     urls = [f"{SITE}/", f"{SITE}/n/", f"{SITE}/privacy.html", f"{SITE}/terms.html"]
     urls += [f"{SITE}/n/{quote(r['id'], safe='')}" for r in rows]
     body = "\n".join(f"  <url><loc>{escape(u)}</loc></url>" for u in urls)
