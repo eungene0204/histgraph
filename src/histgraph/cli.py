@@ -1507,6 +1507,8 @@ def cmd_nikh(args: argparse.Namespace) -> int:
               f"인물 생몰년 {rep.person_dates:,} · 연도 못 잡은 사건 {len(rep.undated_events):,}")
         print(f"  엣지: 참여 {rep.edges_participated:,} · 시대 {rep.edges_period:,} · "
               f"흡수할 추출 고아 {len(rep.merges):,}")
+        if rep.absent_mentions:
+            print(f"    항목 본문에는 있으나 실록 기사에는 없는 사람 {rep.absent_mentions:,}건 — 잇지 않았다")
         if rep.undated_events:
             print(f"    연도 없음: {', '.join(rep.undated_events[:args.show])}")
         if rep.ambiguous:
@@ -1520,6 +1522,9 @@ def cmd_nikh(args: argparse.Namespace) -> int:
         if args.dry_run:
             print("  (dry-run: 저장하지 않음)")
             return 0
+        stale = nikh.drop_sillok_participation(store)
+        if stale:
+            print(f"  이전에 실록 기사에 붙인 참여 엣지 {stale:,}건을 지우고 다시 만든다")
         _persist(store, nikh.SOURCE, nodes, edges)
         merged = nikh.apply_merges(store, rep.merges)
         if merged:

@@ -475,6 +475,15 @@ class SillokIndex:
         self.conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         self.conn.row_factory = sqlite3.Row
 
+    def article_people(self, art_id: str) -> tuple[frozenset[str], str]:
+        """기사에 인명 색인으로 달린 한자 이름들과 원문 (없으면 빈 것)."""
+        r = self.conn.execute(
+            "SELECT names, text FROM articles WHERE id = ?", (art_id,)
+        ).fetchone()
+        if r is None:
+            return frozenset(), ""
+        return frozenset(n for n in (r["names"] or "").split("|") if n), r["text"] or ""
+
     def search_titles(self, term: str, limit: int = 300) -> list[sqlite3.Row]:
         # 트라이그램은 세 글자 미만을 못 찾는다 ('4군'·'6진'). 그건 LIKE 로.
         if len(term) < 3:
@@ -589,6 +598,13 @@ def sillok_events_for(
         if len(out) >= limit:
             break
     return out
+
+
+def named_in_article(hanja: str, names: frozenset[str], text: str) -> bool:
+    """그 사람이 **그 기사에** 나오는가. 한자 이름이 인명 색인에 있거나 원문에
+    글자 그대로 있어야 한다. 한글만 아는 사람은 원문(한문)에서 못 찾으므로
+    아니다 — 모르면 잇지 않는다."""
+    return bool(hanja) and (hanja in names or hanja in text)
 
 
 def lunar_iso(date: str) -> str:
@@ -765,6 +781,7 @@ class Report:
     sillok_events: int = 0
     edges_participated: int = 0
     dead_mentions: int = 0
+    absent_mentions: int = 0     # 항목 본문엔 있으나 실록 기사엔 없는 사람
     edges_period: int = 0
     merges: list[tuple[str, str]] = field(default_factory=list)   # (ex 고아, 정본)
     unresolved_mentions: Counter = field(default_factory=Counter)
@@ -957,6 +974,9 @@ def ingest(
         event_ids: list[tuple[str, int | None]] = (
             [(nid, year)] if ent.node_type == "event" else []
         )
+        # 실록 기사 -> (인명 색인 한자, 원문). 항목 본문의 언급을 그 기사에
+        # 이을지 가리는 근거다.
+        article_people: dict[str, tuple[frozenset[str], str]] = {}
         if ent.node_type in ("heritage", "org", "concept") and index is not None:
             order = list(candidate_years(ent))
             if old_start is not None and old_start not in order:
@@ -982,9 +1002,17 @@ def ingest(
                     edges.append(Edge(src=eid, dst=f"wd:{POLITY_QID[era]}",
                                       type="from_period", source=SOURCE))
                 event_ids.append((eid, _year_of(e_start)))
+                article_people[eid] = index.article_people(hit["id"])
                 rep.sillok_events += 1
 
         # 3) 참여자 — 본문의 이름 언급. 그 해에 살아 있던 사람만.
+        #
+        # 항목이 **단체·유물**이고 사건이 실록 기사일 때는 하나 더 본다: 그
+        # 사람의 한자 이름이 **그 기사에** 있는가. 「규장각」 항목 본문은
+        # 정조 사후 김조순이 어떻게 컸는지까지 말하는데, 그 문장이 1781년
+        # '규장각에서 고사 절목을 올리다' 기사의 참여 근거로 서 있었다
+        # (14명, 기사엔 아무도 없었다). 항목 본문의 언급은 그 항목에 얽힌
+        # 사람이지 기사 한 건의 참여자가 아니다.
         if event_ids:
             plain = [
                 n for n, es in by_name.items()
@@ -1003,6 +1031,11 @@ def ingest(
                         continue
                     if not _alive(life, ey):
                         rep.dead_mentions += 1
+                        continue
+                    if eid in article_people and not named_in_article(
+                        hanja, *article_people[eid]
+                    ):
+                        rep.absent_mentions += 1
                         continue
                     linked.add((pid, eid))
                     edges.append(Edge(
@@ -1033,6 +1066,12 @@ def _alive(life: tuple[int | None, int | None], year: int | None) -> bool:
     return True
 
 
+# 관청·건물·문 이름의 꼬리 글자. '이문원(摛文院)' 은 규장각의 부속 건물인데
+# 이름이 같은 인물 이문원(李文源) 노드에 맞춰졌다. 연대기 항목의 한자와
+# 맞출 때는 문제가 없고, 이름만으로 기존 노드를 고르는 갈래에서만 본다.
+NOT_A_PERSON = re.compile(r"[院館閣殿堂寺門宮城署廳府司曹監庫樓臺陵廟壇]$")
+
+
 def _resolve_person(
     index: NodeIndex, name: str, hanja: str,
     by_name: dict[str, list[Entity]], target: dict[str, str], ctx: Entity,
@@ -1044,7 +1083,7 @@ def _resolve_person(
             return target[same[0].kc_id]
     if len(ents) == 1 and (not hanja or not ents[0].hanja or ents[0].hanja == hanja):
         return target[ents[0].kc_id]
-    if not hanja:
+    if not hanja or NOT_A_PERSON.search(hanja):
         return None
     # 연대기에 없는 사람: 기존 인물 노드가 하나뿐이고 시대가 맞으면
     _, (lo, hi) = ERA_DIGIT.get(ctx.era_digit, (None, (-9999, 9999)))
@@ -1055,6 +1094,18 @@ def _resolve_person(
         if y is None or lo - 80 <= y <= hi:
             fit.append(r)
     return fit[0]["id"] if len(fit) == 1 else None
+
+
+def drop_sillok_participation(store: GraphStore) -> int:
+    """이전 `nikh` 가 실록 기사에 붙인 참여 엣지를 지운다. `ingest` 가 매번
+    전부 다시 만드는 것이라, 지우지 않으면 관문이 걸러낸 것이 남는다."""
+    cur = store.conn.execute(
+        """DELETE FROM edges
+            WHERE source = ? AND type = 'participated_in' AND dst LIKE 'sillok:%'""",
+        (SOURCE,),
+    )
+    store.conn.commit()
+    return cur.rowcount
 
 
 def apply_merges(store: GraphStore, merges: list[tuple[str, str]]) -> int:

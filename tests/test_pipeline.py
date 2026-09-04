@@ -3140,6 +3140,18 @@ with tempfile.TemporaryDirectory() as tmp:
           and nikh.date_from_sillok(idx, "향과 축문", None)["date"].startswith("1443"))
     refs = idx.conn.execute("SELECT refs FROM articles WHERE id='wda_12812001_001'").fetchone()[0]
     check("인명 색인의 인물 ID 가 기사에 붙는다", refs == "M_0000001", refs)
+    # 「규장각」 항목 본문의 김조순이 1781년 절목 기사의 참여자로 섰던 일.
+    # 실록 기사에는 그 기사에 이름이 있는 사람만 잇는다.
+    names, text = idx.article_people("wda_12812001_001")
+    check("기사의 인명 색인과 원문을 준다", names == {"鄭麟趾"} and "鄭麟趾" in text, str((names, text)))
+    check("한자 이름이 기사에 있어야 그 기사의 참여자다",
+          nikh.named_in_article("鄭麟趾", names, text)
+          and not nikh.named_in_article("金祖淳", names, text))
+    check("한글만 아는 사람은 한문 기사에서 못 찾으므로 잇지 않는다",
+          not nikh.named_in_article("", names, text))
+    check("없는 기사는 빈 것이다", idx.article_people("없음") == (frozenset(), ""))
+    check("관청·건물 한자는 사람 이름이 아니다 (이문원(摛文院) ≠ 이문원(李文源))",
+          nikh.NOT_A_PERSON.search("摛文院") and not nikh.NOT_A_PERSON.search("李文源"))
 
     # 이름이 같은 노드 가르기
     store = GraphStore(raw / "g.sqlite")
