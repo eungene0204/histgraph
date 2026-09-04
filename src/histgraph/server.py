@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from . import pages
 from .ontology import EDGE_TYPES, NODE_TYPES
 from .store import GraphStore
 
@@ -934,10 +935,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _page(self, status: int, ctype: str, body: str) -> None:
+        raw = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def do_GET(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
         url = urlparse(self.path)
         try:
-            if url.path.startswith("/api/"):
+            # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`)이 먼저다. 정적 파일보다
+            # 앞에 둬야 web/public 에 같은 이름이 생겨도 이쪽이 이긴다.
+            page = pages.route(self.api, url.path)
+            if page is not None:
+                self._page(*page)
+            elif url.path.startswith("/api/"):
                 status, payload = dispatch(self.api, url.path, parse_qs(url.query))
                 self._json(payload, status)
             else:

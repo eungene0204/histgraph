@@ -2762,5 +2762,102 @@ check("`가해자` 는 참여가 맞다",
 check("`위치` 로 `사건 정보` 틀을 연다",
       EVENT_FIELDS["위치"][0] == "occurred_at")
 
+# --- 글로 읽는 장 (`/n/<id>`) --------------------------------------------
+#
+# 관계망은 자바스크립트가 그려서, 검색 로봇과 광고 심사의 눈에는 화면이
+# 빈 <div> 하나다. 이 장들이 같은 자료를 글로 낸다. 재는 것은 셋이다 —
+# 글이 실제로 들어 있는가, 이웃으로 이어지는 링크가 있는가, 그리고 §1
+# 대로 **사람이 읽는 자리에 영어가 없는가**.
+print("\n[글로 읽는 장]")
+with tempfile.TemporaryDirectory() as tmp:
+    import re as _re
+
+    from histgraph import pages
+    from histgraph.server import GraphAPI as _GraphAPI
+
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:S", type="person", label="세종", source="wd",
+             start_date="1397-04-10", end_date="1450-02-17",
+             description="조선의 제4대 국왕이다.", aliases=["이도"]),
+        Node(id="wd:T", type="person", label="태종", source="wd",
+             description="조선의 제3대 국왕이다."),
+        Node(id="wd:M", type="person", label="문종", source="wd",
+             description="조선의 제5대 국왕이다."),
+        Node(id="ex:X", type="person", label="이름뿐", source="extract"),
+        Node(id="wd:SL/A", type="event", label="빗금 든 것", source="wd",
+             description="주소 한 칸에 담기지 않는 이름이다."),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:S", dst="wd:T", type="child_of", source="wd"),
+        Edge(src="wd:M", dst="wd:S", type="child_of", source="wd"),
+    ])
+    api = _GraphAPI(store, era="korea")
+
+    def _visible(html: str) -> str:
+        html = _re.sub(r"<(script|style)\b[\s\S]*?</\1>", " ", html)
+        html = _re.sub(r"<!--[\s\S]*?-->", " ", html)
+        return _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", " ", html)).strip()
+
+    status, ctype, body = pages.route(api, "/n/wd:S")
+    text = _visible(body)
+    check("노드 장이 열린다", status == 200 and ctype.startswith("text/html"))
+    check("이름·갈래·생몰이 글로 적힌다",
+          "세종" in text and "인물" in text and "1397년 ~ 1450년" in text, text[:200])
+    check("설명이 본문에 들어 있다", "조선의 제4대 국왕이다." in text)
+    check("다른 이름이 적힌다", "이도" in text)
+    # 방향이 뒤집히면 아버지가 자식이 된다 — child_of 는 나가는 쪽이 부모다.
+    check("부모와 자녀가 갈려 있다",
+          text.index("부모") < text.index("태종") and "자녀" in text, text)
+    check("이웃으로 가는 링크가 있다",
+          'href="/n/wd%3AT"' in body and 'href="/n/wd%3AM"' in body)
+    check("관계망으로 돌아가는 길이 있다", 'href="/#wd%3AS"' in body)
+    check("정본 주소를 스스로 말한다",
+          '<link rel="canonical" href="https://www.histgraph.space/n/wd%3AS">' in body)
+    check("광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
+    check("방침·약관으로 이어진다",
+          '/privacy.html' in body and '/terms.html' in body)
+    check("사람이 읽는 글자에 영어가 없다",
+          not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
+          str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))
+
+    # 설명이 없는 장은 이름과 목록뿐이다. 색인에 올리면 읽을 것이 있는
+    # 장까지 그 속에 묻힌다 — 왜 비었는지만 적고 물러난다.
+    status, _, body = pages.route(api, "/n/ex:X")
+    check("설명 없는 장은 색인에 올리지 않는다",
+          status == 200 and 'content="noindex,follow"' in body)
+    check("빈 설명의 이유를 적는다", "산문에서 이름만 추출된 노드라" in _visible(body))
+
+    status, _, body = pages.route(api, "/n/없는것")
+    check("없는 노드는 404 이고 색인에 안 올린다",
+          status == 404 and "noindex" in body)
+
+    status, ctype, body = pages.route(api, "/sitemap.xml")
+    check("사이트맵은 설명 있는 노드만 싣는다",
+          "/n/wd%3AS" in body and "/n/ex%3AX" not in body, body)
+    check("사이트맵에 목록 장과 방침·약관이 있다",
+          "/n/</loc>" in body and "/privacy.html" in body and "/terms.html" in body)
+    # 주소 한 칸(:id)에 담기지 않는 id 는 링크가 죽는다. 죽은 주소를
+    # 사이트맵에 실으면 로봇이 그것부터 물어 온다.
+    check("빗금 든 id 는 사이트맵에서 뺀다", "SL" not in body)
+
+    status, _, body = pages.route(api, "/n/")
+    text = _visible(body)
+    check("목록 장이 갈래별로 세운다",
+          status == 200 and "인물" in text and "세종" in text and "태종" in text, text[:200])
+    check("목록 장에도 영어가 없다",
+          not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
+          str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))
+
+    # 배포에서는 rewrite 가 `/api/n/…` 으로 바꿔 넘긴다 — 같은 표가 받아야 한다.
+    check("배포 경로(/api/n/…)도 같은 장을 낸다",
+          pages.route(api, "/api/n/wd:S")[0] == 200)
+    check("다른 경로는 건드리지 않는다",
+          pages.route(api, "/api/meta") is None
+          and pages.route(api, "/privacy.html") is None
+          and pages.route(api, "/") is None)
+    store.close()
+
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

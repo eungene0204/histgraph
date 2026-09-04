@@ -9,6 +9,25 @@
     }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api?__p=:path*" }
+    {
+      "source": "/api/:path*",
+      "destination": "/api?__p=:path*"
+    },
+    {
+      "source": "/n",
+      "destination": "/api?__p=n/"
+    },
+    {
+      "source": "/n/",
+      "destination": "/api?__p=n/"
+    },
+    {
+      "source": "/n/:id*",
+      "destination": "/api?__p=n/:id*"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api?__p=sitemap.xml"
+    }
   ]
 }

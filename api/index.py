@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from histgraph import pages  # noqa: E402
 from histgraph.server import GraphAPI, dispatch  # noqa: E402
 
 # 화면이 띄우는 것은 시대 그래프다 — 전체 그래프(38,654 노드)가 아니라
@@ -56,6 +57,12 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
         try:
+            # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`). rewrite 가 `/api/n/…`
+            # 으로 바꿔 넘기므로 같은 표(pages.route)가 양쪽을 다 받는다.
+            page = pages.route(api, _path(url))
+            if page is not None:
+                self._send(*page)
+                return
             status, payload = dispatch(api, _path(url), parse_qs(url.query))
         except (ValueError, KeyError) as err:
             status, payload = 400, {"error": f"{type(err).__name__}: {err}"}
@@ -69,3 +76,14 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         self.send_header("Cache-Control", "public, max-age=0, s-maxage=86400")
         self.end_headers()
         self.wfile.write(body)
+
+    def _send(self, status: int, ctype: str, text: str) -> None:
+        """글로 읽는 장. JSON 과 같은 이유로 엣지에 재운다 —
+        그래프는 배포 사이에 바뀌지 않는다."""
+        raw = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "public, max-age=0, s-maxage=86400")
+        self.end_headers()
+        self.wfile.write(raw)
