@@ -1702,12 +1702,18 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
 
     merges = sum(1 for v in table if v.action == "merge")
     print(f"  {args.type} 후보 {len(rep.candidates):,}쌍 · 표에 적힌 판정"
-          f" {len(table):,}줄 (합친다 {merges:,} · 다른 사건 {len(table) - merges:,})")
+          f" {len(table):,}줄 (합친다 {merges:,} · 다르다 {len(table) - merges:,})")
 
     if rep.merged:
         print(f"\n  ✓ 합친 짝 {len(rep.merged):,}개")
         for keep, drop, moved in rep.merged:
             print(f"    {name(drop)}  →  {name(keep)}   엣지 {moved:,}건 옮김")
+    if rep.date_clashes:
+        # 어느 쪽이 맞는지 기계는 모른다. 남는 노드의 날짜를 그대로 두고 알린다.
+        print(f"\n  합친 짝의 연대가 어긋난 것 {len(rep.date_clashes):,}건"
+              f" — 남은 쪽 날짜를 그대로 두었습니다:")
+        for line in rep.date_clashes:
+            print(f"    {line}")
     if rep.stale:
         print(f"  이미 합쳐져 있던 짝 {len(rep.stale):,}개")
     if rep.absent:
@@ -1716,7 +1722,8 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
               f" (예: {', '.join(v.drop for v in rep.absent[:3])})")
 
     if rep.unjudged:
-        print(f"\n  ⚠ 표에 없는 후보 {len(rep.unjudged):,}쌍 — 같은 사건인지"
+        what = "사건" if args.type == "event" else args.type
+        print(f"\n  ⚠ 표에 없는 후보 {len(rep.unjudged):,}쌍 — 같은 {what}인지"
               f" 사람이 한 줄 적어야 합니다 ({args.table}):")
         for c in rep.unjudged[:args.show]:
             print(f"    [{c.rule}] {name(c.a)}  ↔  {name(c.b)}")

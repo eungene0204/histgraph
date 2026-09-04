@@ -3592,5 +3592,156 @@ with tempfile.TemporaryDirectory() as _tmp:
     store.close()
 
 
+# --- 중복 관문: 한 사건이 두 노드로 -------------------------------------------
+#
+# 2026-09-04 지적: "사도세자 사건과, 임오화변은 같은거야." 소스마다 표제를
+# 다르게 달아 같은 일이 두 노드가 된다. 규칙은 후보를 찾을 뿐이고, 합치는
+# 것은 표에 적힌 짝뿐이다 — 라벨이 비슷하다고 합치면 절반이 틀린다.
+
+print("\n[중복 관문]")
+from histgraph import duplicates as dup_mod  # noqa: E402
+
+check("갈래 접미사와 차수를 뗀 핵심어",
+      (dup_mod.core_name("제2차 진주성 전투"), dup_mod.core_name("홍산대첩"))
+      == ("진주성", "홍산"))
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "dup.sqlite")
+    store.upsert_nodes([
+        Node(id="nikh:SADO", type="event", label="사도세자 사건", source="nikh",
+             start_date="1762-05",
+             description="1762년(영조 38) 5월 영조가 아들인 사도세자를 뒤주에 가두어"
+                         " 죽인 사건으로, ‘임오화변’이라고도 한다."),
+        Node(id="wd:IMO", type="event", label="임오화변", source="wd",
+             start_date="1762-07-05", url="https://ko.wikipedia.org/wiki/임오화변",
+             description="임오화변(壬午禍變), 임오옥(壬午獄) 또는 사도세자"
+                         " 사건(思悼世子事件)은 1762년 7월 4일 사도세자가 뒤주에"
+                         " 갇혔다가 죽은 사건이다."),
+        Node(id="nikh:SAMIL", type="event", label="3·1운동", source="nikh"),
+        Node(id="wd:SAMIL", type="event", label="3·1 운동", source="wd"),
+        Node(id="ex:event:반탁 운동", type="event", label="반탁 운동", source="extract"),
+        Node(id="wd:BANTAK", type="event", label="신탁 통치 반대 운동", source="wd",
+             description="신탁 통치 반대 운동(信託統治反對運動) 또는 반탁"
+                         " 운동(反託運動)은 1945년 12월에 일어난 국민 운동이다."),
+        Node(id="wd:WANGJA1", type="event", label="제1차 왕자의 난", source="wd",
+             start_date="1398-10-14"),
+        Node(id="wd:WANGJA2", type="event", label="제2차 왕자의 난", source="wd",
+             start_date="1400"),
+        Node(id="wd:HONGSAN", type="event", label="홍산대첩", source="wd",
+             start_date="1376-07"),
+        Node(id="ex:event:홍산 전투", type="event", label="홍산 전투", source="extract"),
+        # 같은 위키백과 문서가 두 노드에 붙었다 — 이름은 하나도 안 겹친다.
+        Node(id="wd:IMSUL", type="event", label="임술민란", source="wd",
+             start_date="1862",
+             description="임술농민봉기(壬戌農民蜂起) 혹은 임술민란(壬戌民亂)은"
+                         " 1862년, 조선 각지에서 동시다발적으로 일어난 농민"
+                         " 봉기이다. 세금 제도의 문란이 원인이었다."),
+        Node(id="wd:JINJU", type="event", label="진주민란", source="wd",
+             start_date="1862",
+             description="임술농민봉기(壬戌農民蜂起) 혹은 임술민란(壬戌民亂)은"
+                         " 1862년, 조선 각지에서 동시다발적으로 일어난 농민"
+                         " 봉기이다. 진주에서 시작되었다."),
+        # 한 항목(《고려사》)을 말하는 두 실록 기사. 설명이 같은 게 당연하다.
+        Node(id="sillok:A", type="event", label="《고려사》를 올리다", source="nikh",
+             description="고려사(高麗史)는 조선 초에 편찬된 고려 왕조의 정사로,"
+                         " 기전체로 쓰였으며 139권에 이른다.",
+             props={"about": "nikh:KORYOSA"}),
+        Node(id="sillok:B", type="event", label="《고려사》를 교정하여 올리다",
+             source="nikh",
+             description="고려사(高麗史)는 조선 초에 편찬된 고려 왕조의 정사로,"
+                         " 기전체로 쓰였으며 139권에 이른다.",
+             props={"about": "nikh:KORYOSA"}),
+        Node(id="wd:CHOI", type="person", label="최영", source="wd"),
+        Node(id="wd:YEONGJO", type="person", label="영조", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:CHOI", dst="ex:event:홍산 전투", type="participated_in", source="extract"),
+        Edge(src="wd:YEONGJO", dst="wd:IMO", type="participated_in", source="wd"),
+    ])
+
+    cands = {(c.rule, c.a, c.b) for c in dup_mod.find(store.conn)}
+    check("띄어쓰기만 다른 표제를 찾는다",
+          ("라벨", "nikh:SAMIL", "wd:SAMIL") in cands
+          or ("라벨", "wd:SAMIL", "nikh:SAMIL") in cands, str(cands))
+    check("설명이 서로를 이칭으로 부르는 짝을 찾는다",
+          any(r == "이칭" and {a, b} == {"nikh:SADO", "wd:IMO"} for r, a, b in cands),
+          str(cands))
+    check("갈래만 다른 이름을 찾는다 (홍산대첩 ↔ 홍산 전투)",
+          any(r == "핵심어" and {a, b} == {"wd:HONGSAN", "ex:event:홍산 전투"}
+              for r, a, b in cands), str(cands))
+    check("이름이 하나도 안 겹쳐도 같은 설명이면 찾는다 (진주민란 ↔ 임술민란)",
+          any(r == "설명" and {a, b} == {"wd:IMSUL", "wd:JINJU"} for r, a, b in cands),
+          str(cands))
+    check("한 항목을 말하는 실록 기사끼리는 후보가 아니다",
+          not any({a, b} == {"sillok:A", "sillok:B"} for _, a, b in cands), str(cands))
+    check("차수가 어긋나면 후보로 올리지 않는다",
+          not any({a, b} == {"wd:WANGJA1", "wd:WANGJA2"} for _, a, b in cands),
+          str(cands))
+
+    table = [
+        dup_mod.Verdict("merge", "nikh:SADO", "wd:IMO", "같은 사건"),
+        dup_mod.Verdict("merge", "wd:HONGSAN", "ex:event:홍산 전투", "같은 싸움"),
+        dup_mod.Verdict("merge", "wd:BANTAK", "ex:event:반탁 운동", "다른 이름"),
+    ]
+    rep = dup_mod.sweep(store.conn, table)
+    check("표에 없는 후보가 남으면 알린다",
+          {c.rule for c in rep.unjudged} == {"라벨", "설명"}, str(rep.unjudged))
+
+    rep = dup_mod.apply(store, table)
+    row = store.conn.execute(
+        "SELECT label, start_date, url, description FROM nodes WHERE id='nikh:SADO'"
+    ).fetchone()
+    check("없앤 노드가 사라진다",
+          store.conn.execute("SELECT COUNT(*) FROM nodes WHERE id='wd:IMO'").fetchone()[0] == 0)
+    check("엣지가 남은 노드로 옮겨진다", store.conn.execute(
+        "SELECT COUNT(*) FROM edges WHERE dst='nikh:SADO' AND src='wd:YEONGJO'"
+    ).fetchone()[0] == 1)
+    check("없어진 이름은 별칭으로 남는다", store.conn.execute(
+        "SELECT COUNT(*) FROM aliases WHERE node_id='nikh:SADO' AND alias='임오화변'"
+    ).fetchone()[0] == 1)
+    check("빈 칸만 없앤 쪽에서 채운다 (url 은 오고 날짜는 그대로)",
+          row["url"].endswith("임오화변") and row["start_date"] == "1762-05",
+          str(dict(row)))
+    check("지워질 설명은 props 에 남긴다", "임오옥" in (store.conn.execute(
+        "SELECT json_extract(props,'$.merged_desc') FROM nodes WHERE id='nikh:SADO'"
+    ).fetchone()[0] or ""))
+    check("연대가 어긋나면 알린다",
+          any("1762-05" in c for c in rep.date_clashes), str(rep.date_clashes))
+
+    # 셋이 한 사건: 표가 `가↔나`·`가↔다` 를 적었으면 `나↔다` 도 판정된 것이다.
+    check("합친 뒤 후보가 사라진다 (멱등)",
+          all({c.a, c.b} != {"wd:HONGSAN", "ex:event:홍산 전투"} for c in rep.candidates),
+          str(rep.candidates))
+    again = dup_mod.apply(store, table)
+    check("두 번 돌려도 결과가 같다", again.merged == [] and len(again.stale) == 3,
+          f"{again.merged} {again.stale}")
+    store.close()
+
+with tempfile.TemporaryDirectory() as tmp:
+    bad = Path(tmp) / "t.tsv"
+    bad.write_text("merge\tonly-one-column\n", encoding="utf-8")
+    try:
+        dup_mod.load_table(bad)
+        check("칸이 모자란 표를 거부한다", False)
+    except dup_mod.DuplicateTableError:
+        check("칸이 모자란 표를 거부한다", True)
+    bad.write_text("maybe\ta:1\ta:2\t?\n", encoding="utf-8")
+    try:
+        dup_mod.load_table(bad)
+        check("merge/keep 이 아닌 판정을 거부한다", False)
+    except dup_mod.DuplicateTableError:
+        check("merge/keep 이 아닌 판정을 거부한다", True)
+
+
+# --- 표가 그래프와 맞는가 -----------------------------------------------------
+
+_dup_table = Path(__file__).resolve().parents[1] / "data" / "duplicates.tsv"
+if _dup_table.exists():
+    rows = dup_mod.load_table(_dup_table)
+    check("판정 표가 읽힌다", len(rows) > 0)
+    check("한 짝을 두 번 적지 않았다",
+          len({r.key for r in rows}) == len(rows))
+
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

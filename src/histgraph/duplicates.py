@@ -9,13 +9,14 @@
 '사도세자 사건', 위키백과는 '임오화변'이다. 띄어쓰기만 달라지는 것도
 같은 원인이다 ('3·1 운동' / '3·1운동', '만보산 사건' / '만보산사건').
 
-**찾는 규칙은 넷이다. 판정에 짐작을 넣지 않는다.**
+**찾는 규칙은 다섯이다. 판정에 짐작을 넣지 않는다.**
 
 | 규칙 | 무엇을 보나 | 예 |
 |---|---|---|
 | `라벨` | 공백·가운뎃점·괄호를 지우면 같은 이름 | `만보산 사건` / `만보산사건` |
 | `별칭` | 한쪽의 라벨이 다른 쪽의 별칭 | `조일동맹조약` / `조일맹약` |
 | `이칭` | 설명 첫 문장이 상대를 '또는 …', '…이라고도 한다'로 부른다 | `임오화변` / `사도세자 사건` |
+| `설명` | 설명 첫 문장이 글자 그대로 같다 (같은 문서가 두 노드에) | `진주민란` / `임술민란` |
 | `핵심어` | 갈래 접미사(전투·대첩·사건…)를 떼면 같은 이름 | `홍산대첩` / `홍산 전투` |
 
 **규칙은 후보를 찾을 뿐, 합치지 않는다.** 라벨 유사도로 합치면 절반이
@@ -197,6 +198,12 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
         )
     }
     deg = _degree(conn)
+    about = {
+        r["id"]: r["about"]
+        for r in conn.execute(
+            "SELECT id, json_extract(props,'$.about') AS about FROM nodes"
+            " WHERE type = ? AND about IS NOT NULL", (node_type,))
+    }
     by_label: dict[str, list[str]] = {}
     for nid, n in nodes.items():
         by_label.setdefault(n["label"], []).append(nid)
@@ -254,7 +261,27 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
                             f"{n['label']} 의 설명이 '{hit.group(0).strip()}'")
                 break
 
-    # 규칙 4 — 갈래 접미사를 뗀 핵심어가 같다. 차수가 어긋나면 다른 사건이다.
+    # 규칙 4 — 설명 첫 문장이 글자 그대로 같다. 같은 문서가 두 노드에 붙은
+    # 것이다 ('진주민란'과 '임술민란'이 임술농민봉기 문서를 같이 썼다).
+    # **이름이 하나도 안 겹쳐도 잡히는 유일한 규칙**이다.
+    #
+    # 한 항목을 설명하는 여러 실록 기사는 뺀다 — 《고려사》를 올린 기사가
+    # 둘이면 설명이 같은 게 당연하다 (`props.about` 이 그 항목을 가리킨다).
+    same_lead: dict[str, list[str]] = {}
+    for nid, n in nodes.items():
+        head = re.sub(r"\s+", "", lead_sentence(n["description"]))
+        if len(head) >= 40:
+            same_lead.setdefault(head, []).append(nid)
+    for ids in same_lead.values():
+        if len(ids) > 1:
+            for i, x in enumerate(ids):
+                for y in ids[i + 1:]:
+                    ax, ay = about.get(x), about.get(y)
+                    if ax is not None and ax == ay:
+                        continue
+                    add("설명", x, y, "설명 첫 문장이 글자 그대로 같다 — 같은 문서에서 왔다")
+
+    # 규칙 5 — 갈래 접미사를 뗀 핵심어가 같다. 차수가 어긋나면 다른 사건이다.
     cores: dict[str, list[str]] = {}
     for nid, n in nodes.items():
         c = core_name(n["label"])
@@ -270,7 +297,7 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
                     continue                      # 제1차 ≠ 제2차
                 add("핵심어", x, y, f"갈래를 떼면 '{c}'")
 
-    order = {"라벨": 0, "별칭": 1, "이칭": 2, "핵심어": 3}
+    order = {"라벨": 0, "별칭": 1, "이칭": 2, "설명": 3, "핵심어": 4}
     return sorted(found.values(), key=lambda c: (order[c.rule], c.a))
 
 
