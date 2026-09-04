@@ -516,7 +516,9 @@ class GraphAPI:
             "source": row["source"],
             "start": row["start_date"],
             "end": row["end_date"],
-            "description": row["description"],
+            # 본문 전체를 받은 설명엔 `== 생애 ==` 가 남아 있다. 화면에
+            # 위키 문법을 세우지 않는다 — 제목 글자만 남긴다.
+            "description": pages.plain_description(row["description"]),
             # 설명이 어디서 왔는지. 'kowiki' 는 위키백과 산문, 'wd:ko' 는
             # Wikidata 한국어 한 줄, '사전' 은 영어 한 줄을 koreanize 로
             # 옮긴 것이다. **화면은 이것을 그리지 않는다** — 자료 출처는
