@@ -6,7 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName } from '../src/lib/timeline.js';
 
 let pass = 0;
 let fail = 0;
@@ -244,6 +244,25 @@ console.log('\n배치 (d3-force)');
   ok('대통령만 있으면 대통령만 센다', seatCount(presidents) === '대통령 2');
   // 종류를 안 적은 예전 데이터는 왕이다
   ok('종류가 없으면 왕으로 센다', seatCount([{ id: 'x' }]) === '왕 1');
+}
+
+// --- 인물은 생년 자리에 '탄생'을 달고 선다 ---------------------------------
+// 이름만 찍으면 그 해에 무엇을 했다는 것처럼 읽힌다. 띠의 '사망'과 같은
+// 꼴이다. 다만 날짜 없이 이어진 사건으로 자리만 가늠한 인물에게는 붙이지
+// 않는다 — 그 해는 생년이 아니다.
+{
+  ok('생년에 선 인물은 탄생을 단다',
+     markName({ label: '세종', type: 'person', group: 'actor', year: 1397, date: '1397-05-15' }) === '세종 탄생');
+  ok('연도만 아는 생년도 탄생이다',
+     markName({ label: '이순신', type: 'person', group: 'actor', year: 1545, date: '1545' }) === '이순신 탄생');
+  ok('기원전 생년도 탄생이다',
+     markName({ label: '주몽', type: 'person', group: 'actor', year: -58, date: '-0058-01-01' }) === '주몽 탄생');
+  ok('자리만 가늠한 인물에는 붙이지 않는다',
+     markName({ label: '서장옥', type: 'person', group: 'actor', year: 1894, date: '' }) === '서장옥');
+  ok('연도가 날짜와 다르면 붙이지 않는다',
+     markName({ label: '서장옥', type: 'person', group: 'actor', year: 1894, date: '1900-01-01' }) === '서장옥');
+  ok('사건에는 붙이지 않는다',
+     markName({ label: '임진왜란', type: 'event', group: 'event', year: 1592, date: '1592-04-13' }) === '임진왜란');
 }
 
 console.log('\n==============================================');
