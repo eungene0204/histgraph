@@ -333,19 +333,16 @@ export class TimelineRail {
         <circle cx="${AX}" cy="${ty}" r="${m.kind === 'self' ? 4 : 2.6}" fill="${c}"/>`;
     }).join('');
 
-    // 연도 칸은 **그 해의 첫 줄에만** 해를 적고, 나머지 줄에는 달을 적는다.
-    // 늘어난 해에서 같은 숫자를 서른여덟 번 되풀이해 봐야 읽을 것이 없고,
-    // 달은 그 안의 차례를 실제로 설명한다. 달을 모르는 줄은 **비운다** —
-    // 위키데이터가 연도만 아는 날을 1월 1일로 적어 보내는 것을 `precision`
-    // 이 걷어냈으므로, 빈 칸은 '1월'이 아니라 '모른다'는 뜻이다.
-    const items = place.map(({ m, ty }, i) => `
+    const items = place.map(({ m, ty }, i) => {
+      const cell = yearCell(m, i ? place[i - 1].m : null);
+      return `
       <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${ty.toFixed(1)}px"
               title="${esc(markName(m))} · ${esc(whenText(m))}">
-        <span class="tl-y">${i && place[i - 1].m.year === m.year
-          ? esc(monthOf(m.date)) : esc(shortYear(m.year))}</span>
+        <span class="tl-y${cell.repeat ? ' rep' : ''}">${esc(cell.text)}</span>
         <span class="tl-name">${esc(markName(m))}</span>
         ${m.rel ? `<span class="tl-rel">${esc(relHead(m.rel))}</span>` : ''}
-      </button>`).join('');
+      </button>`;
+    }).join('');
 
     const band = lane
       ? this.reignBand(reigns, at, { id: d.id, year: d.year })
@@ -542,6 +539,22 @@ export function markName(m) {
   const own = /^(-?\d{1,4})/.exec(String(m.date || ''));
   if (!own || Number(own[1]) !== m.year) return label;
   return `${label} 탄생`;
+}
+
+// 연도 칸에 무엇을 적는가. **그 해의 첫 줄**에는 해를 적고, 뒤따르는
+// 줄에는 달을 적는다 — 늘어난 해에서 같은 숫자를 서른여덟 번 되풀이해
+// 봐야 읽을 것이 없고, 달은 그 안의 차례를 실제로 설명한다.
+//
+// **달을 모르면 해를 다시 적되 흐리게 둔다.** 예전에는 비웠는데, 그러면
+// 한 해에 둘만 서고 그 둘 다 날짜가 없을 때 뒤에 선 쪽만 연도 칸이 통째로
+// 비어 '연도를 모르는 사건'으로 읽힌다 (실측: 1380년에 진포 해전과
+// 황산대첩이 나란히 섰고, 가나다순으로 뒤인 황산대첩에 연도가 없었다).
+// 모르는 것은 달이지 해가 아니다 — 아는 것을 지워 모르는 척할 이유는 없다.
+export function yearCell(m, prev) {
+  if (!prev || prev.year !== m.year) return { text: shortYear(m.year), repeat: false };
+  const month = monthOf(m.date);
+  return month ? { text: month, repeat: false }
+    : { text: shortYear(m.year), repeat: true };
 }
 
 // 왕은 재위하고 대통령은 재임한다. 서버가 자리의 종류를 준다.

@@ -275,6 +275,9 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* 고른 노드 자신. 나머지는 그 자리를 재는 눈금이므로 물러나 있어야 한다. */
 .tl-mark.k-self { color: var(--text); font-weight: 650; }
 .tl-mark.k-self .tl-y { color: var(--text-2); }
+/* 같은 해가 다시 적힌 줄 — 달을 몰라 해로 되풀이한 칸이다. 비우면 그
+   줄만 '연도 미상'으로 읽히고, 그대로 두면 같은 숫자가 눈을 잡는다. */
+.tl-y.rep { opacity: .42; }
 .tl-mark.k-anchor { color: var(--text-3); }
 .tl-mark.k-anchor:hover { color: var(--text-2); }
 /* 왕조 자신. 사건이 아니라 그것들이 놓인 틀이라 조금 물러나 있다. */

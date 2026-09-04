@@ -6,7 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell } from '../src/lib/timeline.js';
 
 let pass = 0;
 let fail = 0;
@@ -263,6 +263,25 @@ console.log('\n배치 (d3-force)');
      markName({ label: '서장옥', type: 'person', group: 'actor', year: 1894, date: '1900-01-01' }) === '서장옥');
   ok('사건에는 붙이지 않는다',
      markName({ label: '임진왜란', type: 'event', group: 'event', year: 1592, date: '1592-04-13' }) === '임진왜란');
+}
+
+// --- 연도 칸: 아는 해를 지우지 않는다 --------------------------------------
+// 같은 해의 뒤따르는 줄에는 달을 적어 그 안의 차례를 설명한다. 달을 모르면
+// 비우는 것이 아니라 해를 흐리게 되풀이한다 — 비우면 그 줄만 '연도 미상'
+// 으로 읽힌다 (실측: 1380년의 진포 해전 다음에 선 황산대첩).
+{
+  const a = { year: 1380, date: '1380', label: '진포 해전' };
+  const b = { year: 1380, date: '1380', label: '황산대첩' };
+  ok('그 해의 첫 줄에는 해를 적는다',
+     yearCell(a, null).text === '1380' && yearCell(a, null).repeat === false);
+  ok('달을 모르는 뒷줄은 비우지 않고 해를 되풀이한다',
+     yearCell(b, a).text === '1380' && yearCell(b, a).repeat === true);
+  ok('달을 아는 뒷줄에는 달을 적는다',
+     yearCell({ year: 1592, date: '1592-07-08' }, { year: 1592, date: '1592-04-13' }).text === '7월');
+  ok('해가 바뀌면 다시 해를 적는다',
+     yearCell({ year: 1381, date: '1381-03' }, a).text === '1381');
+  ok('기원전은 접두어를 줄여 적는다',
+     yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '전57');
 }
 
 console.log('\n==============================================');
