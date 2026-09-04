@@ -11,7 +11,7 @@
 조선 그래프   노드  7,133 · 엣지 13,601 · 별칭 3,189 (data/joseon.sqlite)
 추출 고아     ex: 노드 1,361 (인물 680 · 사건 305 · 직위 194 · 작품 75 · 그 외 107)
 화면          uv run histgraph serve  →  http://127.0.0.1:8100 (이 프로젝트 전용 포트)
-테스트        474/474 통과   uv run tests/test_pipeline.py
+테스트        711/711 통과   uv run tests/test_pipeline.py
 환경          uv (Python 3.11) — `uv sync --extra mlx` 로 잡는다
 ```
 
@@ -34,6 +34,47 @@
 | LLM 추출 (로컬 MLX) | 키 불필요 | 관계 965건 (participated_in 454) |
 | 승격 보강 (`promote`) | 불필요 | 신규 노드 69 · 관계 189건 |
 | 공공데이터포털 / 문화광장 | **활용신청 대기** | 0 |
+
+## 2026-09-04 — 말뭉치에 정본이 들어왔다 (`corpus --source aks|nikh`)
+
+말뭉치를 위키백과 하나로 채웠다고 하자 사용자가 "필요한 사이트의 문서를
+다운로드 받고 싶으면 나에게 요청해"라 했고, 공공데이터포털에서 받은
+한국학중앙연구원 CSV 둘을 `data/raw/` 에 두며 **"rag용도로 사용하고 저
+문서들이 정본이야"**. 설계는 README "말뭉치의 정본" 절.
+
+한 것:
+
+- `corpus.py`: 문서 표 열쇠가 (노드, 소스). 옛 파일은 `open_corpus` 가
+  열 때 옮긴다. `SOURCE_PRIORITY` aks → nikh → kowiki — `mentions`(역할
+  판정이 쓰는 대조)는 정본 문단을 앞에, `search` 는 점수 같으면 정본을
+  앞에. `has_doc(conn, nid, source)`, `drop_doc`, `build_nikh`(연대기 본문,
+  네트워크 없음).
+- `sources/aks.py`: 항목 CSV → 노드 잇기(정규화 이름·타입 일치 + 양쪽 유일,
+  별칭 포함) → 문서 페이지를 절 단위로 읽어 `== 절 ==` 글로. 못 이은
+  항목은 `aks:E00…`. 근현대 사건부터 받는다.
+- `corpus --source all|aks|nikh|kowiki --kinds 사건` (기본 all).
+- 시험 711/711 (다른 세션의 nikh 시험도 이제 같이 돈다).
+
+실측 (2026-09-04):
+
+```
+민족문화대백과  항목 75,352 · 노드에 이은 것 6,760 (인물 4,823 · 유물유적 1,043 · 지명 353 · 사건 195 …)
+                받을 것 7,407 쪽 — 한 쪽 ~2초, 근현대 사건 → 근현대 → 나머지 순
+                12.3 내란은 2025-08 색인에도 없다 (그 사건의 근거는 아직 위키백과)
+한국사연대기    914 항목 (인물 426 · 사건 193 · 유물유적 168 · 단체 111)
+```
+
+받기는 이어받기가 된다 (`has_doc` + `data/cache`). 끊겼으면 그냥 다시:
+
+```sh
+uv run histgraph corpus --source aks        # 남은 쪽만
+uv run histgraph corpus --source nikh       # 연대기 (몇 초)
+uv run histgraph roles --dry-run            # 근거 문단이 있는 후보 수 — 정본이 들어오면 늘어야 한다
+```
+
+남은 것: `roles` 모델 판정 (MLX 가 비면), 그 뒤 `scope korea` ·
+`check_korean`. 국편 출처 표시 의무는 README 와 `docs.source` 로 지고
+화면에는 안 쓴다 — 사용자에게 물었고 답은 아직이다.
 
 ## 2026-09-04 — 세종 연표에 사건이 하나였다 → 국편 정본 (`nikh`)
 

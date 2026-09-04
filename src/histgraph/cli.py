@@ -1136,27 +1136,57 @@ def cmd_corpus(args: argparse.Namespace) -> int:
     것은 구조화 소스 어디에도 없고 산문에만 있다 — 그 산문을 문단으로
     쪼개 검색할 수 있게 둔다 (`ask`), 그리고 `roles` 가 거기서 근거를
     찾는다. 설명(`nodes.description`)과 다른 점: 설명은 화면용으로 잘려
-    있고(인물은 도입부만) 검색 색인이 없다."""
+    있고(인물은 도입부만) 검색 색인이 없다.
+
+    소스는 셋이고 `--source` 로 고른다 (기본은 셋 다):
+    - `aks`  민족문화대백과 — 정본. `data/raw/` 의 항목 CSV 로 노드에 잇고
+      문서 페이지를 받는다. 이어진 항목 전부 + 근현대 `--kinds`(기본 사건).
+    - `nikh` 한국사연대기 — 정본. `data/raw/nikh/yeondaegi.xlsx` 에 본문이
+      이미 있어 네트워크가 없다.
+    - `kowiki` 위키백과 — 정본에 없는 것을 메운다."""
     from . import corpus as corpus_mod
 
+    sources = ["aks", "nikh", "kowiki"] if args.source == "all" else [args.source]
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
     with GraphStore(args.db) as store:
-        picked = corpus_mod.pick_nodes(store, since=args.since)
         conn = corpus_mod.open_corpus(args.corpus)
+        picked = corpus_mod.pick_nodes(store, since=args.since)
         by_reason: dict[str, int] = {}
         for why in picked.values():
             by_reason[why] = by_reason.get(why, 0) + 1
         print(f"  대상 노드 {len(picked):,}개: "
               + " · ".join(f"{k} {v:,}" for k, v in sorted(by_reason.items())))
-        if args.dry_run:
-            return 0
-        got = corpus_mod.build(fetcher, store, conn, sorted(picked), refresh=args.refresh,
-                               limit=args.limit)
+        if "aks" in sources:
+            from .sources import aks
+            kinds = tuple(k.strip() for k in args.kinds.split(",") if k.strip())
+            if args.dry_run:
+                entries = aks.load_index()
+                matched = aks.match_nodes(entries, aks.node_names(store))
+                todo = aks.select_entries(entries, matched, kinds=kinds)
+                print(f"  민족문화대백과: 항목 {len(entries):,}건 · 노드에 이은 것 {len(matched):,}건"
+                      f" · 받을 것 {len(todo):,}건")
+            else:
+                got = aks.ingest(fetcher, store, conn, kinds=kinds, limit=args.limit,
+                                 refresh=args.refresh)
+                print(f"  민족문화대백과: 노드에 이은 것 {got['matched']:,}건 · 받음 {got['fetched']:,}건"
+                      f" / 대상 {got['todo']:,}건 · 빈 문서 {got['empty']:,}건"
+                      f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개")
+        if "nikh" in sources and not args.dry_run:
+            got = corpus_mod.build_nikh(store, conn, refresh=args.refresh)
+            print(f"  한국사연대기: 항목 {got['entries']:,}건 · 노드에 이은 것 {got['linked']:,}건"
+                  f" · 넣음 {got['put']:,}건 · 이미 있음 {got['skipped']:,}건"
+                  f" · 새 문단 {got['passages']:,}개")
+        if "kowiki" in sources and not args.dry_run:
+            got = corpus_mod.build(fetcher, store, conn, sorted(picked), refresh=args.refresh,
+                                   limit=args.limit)
+            print(f"  위키백과: 내려받음 {got['fetched']:,}건 / 요청 {got['asked']:,}건"
+                  f" · 없는 문서 {got['missing']:,}건 · 새 문단 {got['passages']:,}개")
         st = corpus_mod.stats(conn)
         conn.close()
-    print(f"  내려받음 {got['fetched']:,}건 / 요청 {got['asked']:,}건 · 없는 문서 {got['missing']:,}건"
-          f" · 새 문단 {got['passages']:,}개")
-    print(f"  말뭉치: 문서 {st['docs']:,}건 · 문단 {st['passages']:,}개 · {st['chars'] / 10000:,.0f}만 자")
+    if args.dry_run:
+        return 0
+    print(f"  말뭉치: 문서 {st['docs']:,}건 · 문단 {st['passages']:,}개 · {st['chars'] / 10000:,.0f}만 자"
+          + " · " + " · ".join(f"{k} {v:,}" for k, v in st["by_source"].items()))
     return 0
 
 
@@ -1766,6 +1796,10 @@ def main(argv: list[str] | None = None) -> int:
     p_cp.add_argument("--refresh", action="store_true", help="이미 있는 문서도 다시 받는다")
     p_cp.add_argument("--interval", type=float, default=0.5)
     p_cp.add_argument("--dry-run", action="store_true", help="대상만 세고 받지 않는다")
+    p_cp.add_argument("--source", choices=["all", "aks", "nikh", "kowiki"], default="all",
+                      help="aks 민족문화대백과(정본) · nikh 한국사연대기(정본) · kowiki 위키백과")
+    p_cp.add_argument("--kinds", default="사건",
+                      help="민족문화대백과에서 노드와 무관하게도 받을 근현대 항목 유형 (쉼표)")
     p_cp.set_defaults(func=cmd_corpus)
 
     p_ask = sub.add_parser("ask", help="말뭉치에서 물음에 가까운 문단을 찾는다")

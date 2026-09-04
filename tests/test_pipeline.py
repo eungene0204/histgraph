@@ -3123,6 +3123,81 @@ with tempfile.TemporaryDirectory() as tmp:
     check("색인을 다시 지어도 같은 것을 찾는다", any("욕설" in h["text"] for h in corpus_mod.search(conn, "욕설")))
     conn.close()
 
+# --- 말뭉치의 정본: 한 노드에 소스가 여럿 -----------------------------------
+# 사용자가 민족문화대백과·한국사연대기를 정본이라 했다 (2026-09-04). 같은
+# 노드의 문단을 줄 때 정본이 앞서고, 위키백과는 지워지지 않는다.
+import sqlite3  # noqa: E402
+from histgraph.sources import aks as aks_mod  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "multi.sqlite"
+    # 옛 파일(node_id 하나가 유일 열쇠)을 흉내 내 두고 연다 — 옮겨져야 한다
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE docs (id INTEGER PRIMARY KEY, node_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+            source TEXT NOT NULL, url TEXT, fetched_at TEXT NOT NULL, chars INTEGER NOT NULL);
+        CREATE TABLE passages (id INTEGER PRIMARY KEY, doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+            node_id TEXT NOT NULL, n INTEGER NOT NULL, section TEXT NOT NULL DEFAULT '', text TEXT NOT NULL);
+        INSERT INTO docs VALUES (1, 'wd:EV', '12.3 내란', 'kowiki', NULL, '2026', 10);
+        INSERT INTO passages VALUES (1, 1, 'wd:EV', 0, '', '위키백과: 이재명은 담을 넘었다.');
+    """)
+    old.commit(); old.close()
+    conn = corpus_mod.open_corpus(path)
+    check("옛 말뭉치 파일의 열쇠가 (노드, 소스)로 바뀐다",
+          "UNIQUE (node_id, source)" in conn.execute(
+              "SELECT sql FROM sqlite_master WHERE name='docs'").fetchone()[0]
+          and corpus_mod.stats(conn)["docs"] == 1)
+    corpus_mod.put_doc(conn, "wd:EV", "12·3 비상계엄", "== 정의 ==\n정본: 이재명은 체포 대상이었다.", "aks")
+    st = corpus_mod.stats(conn)
+    check("같은 노드에 소스별로 글이 나란히 든다",
+          st["docs"] == 2 and st["by_source"] == {"aks": 1, "kowiki": 1}, str(st))
+    check("has_doc 은 소스를 가려 묻는다",
+          corpus_mod.has_doc(conn, "wd:EV") and corpus_mod.has_doc(conn, "wd:EV", "aks")
+          and not corpus_mod.has_doc(conn, "wd:EV", "nikh"))
+    ment = corpus_mod.mentions(conn, "wd:EV", ["이재명"])
+    check("같은 노드의 문단은 정본이 앞선다",
+          [m["source"] for m in ment] == ["aks", "kowiki"], str([m["source"] for m in ment]))
+    corpus_mod.put_doc(conn, "wd:EV", "12·3 비상계엄", "== 정의 ==\n정본을 다시 넣었다. 이름 없음.", "aks")
+    check("다시 넣으면 그 소스의 글만 바뀐다",
+          corpus_mod.stats(conn)["docs"] == 2
+          and [m["source"] for m in corpus_mod.mentions(conn, "wd:EV", ["이재명"])] == ["kowiki"])
+    conn.close()
+
+# --- 민족문화대백과 커넥터 -------------------------------------------------
+print("\n[민족문화대백과 — 잇기·본문]")
+check("이름 정규화: 괄호와 띄어쓰기를 뗀다",
+      aks_mod.norm_name("김용현 (군인)") == "김용현" and aks_mod.norm_name("1·4 후퇴") == "1·4후퇴")
+_E = lambda i, label, kind, era="현대/대한민국": aks_mod.Entry(  # noqa: E731
+    id=i, url=f"https://encykorea.aks.ac.kr/Article/{i}", label=label, hanja="",
+    field="", kind=kind, era=era, definition="정의.")
+entries = [
+    _E("E1", "이재명", "인물/근현대 인물"),
+    _E("E2", "김규식", "인물/근현대 인물"), _E("E3", "김규식", "인물/근현대 인물"),
+    _E("E4", "1·4후퇴", "사건"), _E("E5", "황진이", "인물/전통 인물", "조선"),
+    _E("E6", "네덜란드", "지명/국가"), _E("E7", "갑자사화", "사건", "조선"),
+]
+nodes = [("wd:1", "이재명", "person"), ("wd:2", "김규식", "person"),
+         ("wd:4", "1·4 후퇴", "event"), ("wd:5", "황진이", "media"),
+         ("wd:6", "네덜란드", "place"), ("wd:6b", "네덜란드", "place")]
+m = aks_mod.match_nodes(entries, nodes)
+check("이름·타입이 맞고 양쪽 다 하나뿐일 때만 잇는다", m == {"E1": "wd:1", "E4": "wd:4"}, str(m))
+m2 = aks_mod.match_nodes(entries + [_E("E8", "10월유신", "사건")],
+                         nodes + [("wd:8", "10월 유신", "event"), ("wd:8", "유신 체제", "event"),
+                                  ("wd:8", "10월유신", "event")])
+check("별칭으로도 잇되 노드 쪽 '하나뿐'은 노드 수로 센다", m2.get("E8") == "wd:8", str(m2))
+todo = aks_mod.select_entries(entries, m, kinds=("사건",))
+check("이은 항목 + 근현대 사건, 근현대 사건이 앞", [e.id for e in todo] == ["E4", "E1"], str([e.id for e in todo]))
+page = """<html><section class="content_section"><h3 class="tit">내용 요약</h3>
+<div class="detail">사전이 만든 요약</div></section>
+<section class="content_section"><h3 class="tit">정의</h3><div class="detail">재미 한인들이 전개한 운동.</div></section>
+<section class="content_section"><h3 class="tit">경과</h3><div class="detail"><p>첫 문단 <a href="/x">링크</a>&nbsp;끝.</p><p>둘째 문단.</p></div></section>
+<section class="content_section"><h3 class="tit">참고문헌</h3><div class="detail">『책』</div></section></html>"""
+secs = aks_mod.parse_article(page)
+check("절 단위로 읽고 요약·참고문헌은 뺀다", [t for t, _ in secs] == ["정의", "경과"], str(secs))
+check("태그를 벗기고 문단 줄을 지킨다", secs[1][1] == "첫 문단 링크 끝.\n둘째 문단.", repr(secs[1][1]))
+text = aks_mod.article_text(secs)
+check("말뭉치가 쪼개는 모양이다", [s for s, _ in corpus_mod.split_passages(text)] == ["정의", "경과"])
+
 # --- 역할 판정 -------------------------------------------------------------
 passages = [{"title": "12.3 내란", "section": "체포 지시",
              "text": "여 사령관은 다음과 같은 체포 명단을 불러주며 위치 추적을 요청했다: 이재명 더불어민주당 대표"}]

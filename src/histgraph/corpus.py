@@ -11,6 +11,12 @@
 편이었나)은 `roles` 가 하고, 그것도 여기서 찾은 문단을 **인용**해야만
 쓴다 (`extract.evidence_supported` 와 같은 규칙).
 
+**소스가 여럿이고 정본이 있다.** 한 노드에 위키백과 글과 민족문화대백과
+글(`aks`)·한국사연대기 글(`nikh`)이 나란히 들어간다 — 문서 표의 열쇠는
+(노드, 소스) 다. 사용자가 뒤의 둘을 정본이라 했으므로(2026-09-04) 같은
+노드의 문단을 줄 때 정본이 앞선다 (`SOURCE_PRIORITY`). 위키백과를 버리지는
+않는다 — 정본에 없는 항목이 많다.
+
 **그래프 파일과 다른 파일이다** (`data/corpus.sqlite`). 글은 그래프보다
 훨씬 크고, 화면 DB(`korea.sqlite`)는 저장소에 실려 배포되므로 거기에
 글을 얹으면 안 된다. `*.sqlite` 는 .gitignore 가 이미 막는다.
@@ -39,12 +45,13 @@ DEFAULT_CORPUS = ROOT / "data" / "corpus.sqlite"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
     id         INTEGER PRIMARY KEY,
-    node_id    TEXT NOT NULL UNIQUE,
+    node_id    TEXT NOT NULL,
     title      TEXT NOT NULL,
     source     TEXT NOT NULL,
     url        TEXT,
     fetched_at TEXT NOT NULL,
-    chars      INTEGER NOT NULL
+    chars      INTEGER NOT NULL,
+    UNIQUE (node_id, source)
 );
 CREATE TABLE IF NOT EXISTS passages (
     id      INTEGER PRIMARY KEY,
@@ -60,6 +67,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS passages_fts USING fts5(
 );
 """
 FTS_TOKENIZER = "unicode61"
+# 같은 노드에 글이 여럿이면 이 차례로 준다. 작을수록 앞. 없는 소스는 맨 뒤.
+SOURCE_PRIORITY: dict[str, int] = {"aks": 0, "nikh": 1, "kowiki": 5}
+_PRIORITY_SQL = "CASE d.source " + " ".join(
+    f"WHEN '{k}' THEN {v}" for k, v in SOURCE_PRIORITY.items()) + " ELSE 9 END"
 
 
 def open_corpus(path: Path | str | None = None) -> sqlite3.Connection:
@@ -70,6 +81,7 @@ def open_corpus(path: Path | str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 30000")
+    _migrate_docs_key(conn)
     conn.executescript(SCHEMA)
     # 색인 방식이 바뀌었으면(trigram 시절 파일) 다시 짓는다. 가상 테이블은
     # CREATE IF NOT EXISTS 로는 안 바뀐다.
@@ -78,6 +90,34 @@ def open_corpus(path: Path | str | None = None) -> sqlite3.Connection:
     if made and f"tokenize='{FTS_TOKENIZER}'" not in (made["sql"] or ""):
         reindex(conn)
     return conn
+
+
+def _migrate_docs_key(conn: sqlite3.Connection) -> None:
+    """옛 파일은 `node_id` 하나가 유일 열쇠였다 (위키백과만 있던 때).
+    (node_id, source) 로 바꾼다. 문단 표는 doc_id 로 잇고 있어 그대로다."""
+    made = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'docs'").fetchone()
+    if not made or "UNIQUE (node_id, source)" in made["sql"]:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript("""
+        CREATE TABLE docs_v2 (
+            id         INTEGER PRIMARY KEY,
+            node_id    TEXT NOT NULL,
+            title      TEXT NOT NULL,
+            source     TEXT NOT NULL,
+            url        TEXT,
+            fetched_at TEXT NOT NULL,
+            chars      INTEGER NOT NULL,
+            UNIQUE (node_id, source)
+        );
+        INSERT INTO docs_v2 SELECT id, node_id, title, source, url, fetched_at, chars FROM docs;
+        DROP TABLE docs;
+        ALTER TABLE docs_v2 RENAME TO docs;
+    """)
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+    log.info("말뭉치 문서 표 열쇠를 (노드, 소스)로 바꿨다")
 
 
 def reindex(conn: sqlite3.Connection) -> None:
@@ -171,16 +211,8 @@ def put_doc(
     source: str = "kowiki",
     url: str | None = None,
 ) -> int:
-    """문서 하나를 (다시) 넣는다. 같은 노드의 옛 문서는 지운다. 문단 수를 돌려준다."""
-    old = conn.execute("SELECT id FROM docs WHERE node_id = ?", (node_id,)).fetchone()
-    if old is not None:
-        ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM passages WHERE doc_id = ?", (old["id"],))]
-        for pid in ids:
-            conn.execute(
-                "INSERT INTO passages_fts(passages_fts, rowid, text, section) "
-                "SELECT 'delete', id, text, section FROM passages WHERE id = ?", (pid,))
-        conn.execute("DELETE FROM docs WHERE id = ?", (old["id"],))
+    """문서 하나를 (다시) 넣는다. 같은 (노드, 소스)의 옛 문서는 지운다. 문단 수를 돌려준다."""
+    drop_doc(conn, node_id, source)
     cur = conn.execute(
         "INSERT INTO docs (node_id, title, source, url, fetched_at, chars) VALUES (?,?,?,?,?,?)",
         (node_id, title, source, url,
@@ -201,14 +233,36 @@ def put_doc(
     return len(parts)
 
 
-def has_doc(conn: sqlite3.Connection, node_id: str) -> bool:
-    return conn.execute("SELECT 1 FROM docs WHERE node_id = ?", (node_id,)).fetchone() is not None
+def drop_doc(conn: sqlite3.Connection, node_id: str, source: str) -> bool:
+    """(노드, 소스)의 글과 문단·색인을 지운다. 색인은 외부 내용 표라 손으로 뺀다."""
+    old = conn.execute("SELECT id FROM docs WHERE node_id = ? AND source = ?",
+                       (node_id, source)).fetchone()
+    if old is None:
+        return False
+    for r in conn.execute("SELECT id FROM passages WHERE doc_id = ?", (old["id"],)).fetchall():
+        conn.execute(
+            "INSERT INTO passages_fts(passages_fts, rowid, text, section) "
+            "SELECT 'delete', id, text, section FROM passages WHERE id = ?", (r["id"],))
+    conn.execute("DELETE FROM docs WHERE id = ?", (old["id"],))
+    return True
 
 
-def stats(conn: sqlite3.Connection) -> dict[str, int]:
+def has_doc(conn: sqlite3.Connection, node_id: str, source: str | None = None) -> bool:
+    """그 노드의 글이 있나. `source` 를 주면 그 소스의 글이 있나."""
+    if source is None:
+        row = conn.execute("SELECT 1 FROM docs WHERE node_id = ?", (node_id,)).fetchone()
+    else:
+        row = conn.execute("SELECT 1 FROM docs WHERE node_id = ? AND source = ?",
+                           (node_id, source)).fetchone()
+    return row is not None
+
+
+def stats(conn: sqlite3.Connection) -> dict:
     docs = conn.execute("SELECT COUNT(*) AS n, COALESCE(SUM(chars), 0) AS c FROM docs").fetchone()
     passages = conn.execute("SELECT COUNT(*) FROM passages").fetchone()[0]
-    return {"docs": docs["n"], "chars": docs["c"], "passages": passages}
+    by_source = {r["source"]: r["n"] for r in conn.execute(
+        "SELECT source, COUNT(*) AS n FROM docs GROUP BY source ORDER BY source")}
+    return {"docs": docs["n"], "chars": docs["c"], "passages": passages, "by_source": by_source}
 
 
 # --- 찾기 ------------------------------------------------------------------
@@ -245,14 +299,16 @@ def search(
     ids = list(node_ids) if node_ids is not None else None
     if q is None:
         like = f"%{query.strip()}%"
-        sql = "SELECT p.node_id, p.section, p.text, d.title FROM passages p JOIN docs d ON d.id = p.doc_id WHERE p.text LIKE ?"
+        sql = ("SELECT p.node_id, p.section, p.text, d.title, d.source "
+               "FROM passages p JOIN docs d ON d.id = p.doc_id WHERE p.text LIKE ?")
         args: list = [like]
         if ids:
             sql += f" AND p.node_id IN ({','.join('?' * len(ids))})"
             args += ids
         rows = conn.execute(sql + " LIMIT ?", (*args, k)).fetchall()
         return [dict(r, rank=0.0) for r in rows]
-    sql = """SELECT p.node_id, p.section, p.text, d.title, bm25(passages_fts) AS rank
+    sql = f"""SELECT p.node_id, p.section, p.text, d.title, d.source,
+                     bm25(passages_fts) AS rank, {_PRIORITY_SQL} AS prio
                FROM passages_fts f
                JOIN passages p ON p.id = f.rowid
                JOIN docs d ON d.id = p.doc_id
@@ -262,10 +318,11 @@ def search(
     if ids:
         scope = f" AND p.node_id IN ({','.join('?' * len(ids))})"
         scope_args = ids
-    rows = conn.execute(sql + scope + " ORDER BY rank LIMIT ?", (q, *scope_args, k)).fetchall()
+    order = " ORDER BY rank, prio LIMIT ?"
+    rows = conn.execute(sql + scope + order, (q, *scope_args, k)).fetchall()
     if not rows:
         loose = fts_query(query, all_terms=False)
-        rows = conn.execute(sql + scope + " ORDER BY rank LIMIT ?", (loose, *scope_args, k)).fetchall()
+        rows = conn.execute(sql + scope + order, (loose, *scope_args, k)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -275,19 +332,21 @@ def mentions(
     names: Iterable[str],
     limit: int = 6,
 ) -> list[dict]:
-    """한 문서 안에서 이 이름들이 나오는 문단을 **문서 순서대로**.
+    """한 노드의 글에서 이 이름들이 나오는 문단을 **정본 먼저, 문서 순서대로**.
 
     검색이 아니라 대조다 — "이 사람이 이 사건 글에 어떻게 적혀 있나"에는
-    순위보다 차례가 맞다. 앞 문단이 뒤 문단의 문맥이다."""
+    순위보다 차례가 맞다. 앞 문단이 뒤 문단의 문맥이다. 글이 여럿이면
+    정본(`SOURCE_PRIORITY`)의 문단이 앞에 선다 — `limit` 에 걸려 잘리는
+    쪽은 위키백과다."""
     wanted = [n.strip() for n in names if n and len(n.strip()) >= 2]
     if not wanted:
         return []
     cond = " OR ".join("p.text LIKE ?" for _ in wanted)
     rows = conn.execute(
-        f"""SELECT p.node_id, p.n, p.section, p.text, d.title
+        f"""SELECT p.node_id, p.n, p.section, p.text, d.title, d.source
               FROM passages p JOIN docs d ON d.id = p.doc_id
              WHERE p.node_id = ? AND ({cond})
-             ORDER BY p.n LIMIT ?""",
+             ORDER BY {_PRIORITY_SQL}, p.n LIMIT ?""",
         (node_id, *[f"%{w}%" for w in wanted], limit),
     ).fetchall()
     return [dict(r) for r in rows]
@@ -351,7 +410,7 @@ def build(
 
     ids = [i for i in node_ids if i.startswith("wd:")]
     if not refresh:
-        ids = [i for i in ids if not has_doc(conn, i)]
+        ids = [i for i in ids if not has_doc(conn, i, "kowiki")]
     if limit:
         ids = ids[:limit]
     if not ids:
@@ -401,3 +460,38 @@ def build(
             log.info("  %d / %d", min(i + 20, len(ordered)), len(ordered))
     return {"asked": len(ids), "fetched": fetched,
             "missing": missing + (len(ids) - len(titles)), "passages": passages}
+
+
+def build_nikh(store, conn: sqlite3.Connection, refresh: bool = False,
+               raw_dir: Path | None = None) -> dict[str, int]:
+    """한국사연대기(`data/raw/nikh/yeondaegi.xlsx`) 항목 본문을 말뭉치에 넣는다.
+
+    국편 자료는 정본이다 (README '국편'). 그래프 쪽은 `histgraph nikh` 가
+    이미 노드를 만들거나 이었고 `props.nikh_id` 에 항목 아이디를 남긴다 —
+    여기서는 그 아이디로 노드를 찾아 글을 붙이고, 못 찾으면 `nikh:<아이디>`
+    를 노드 아이디로 쓴다 (`nikh` 가 고아 항목에 쓰는 것과 같은 아이디)."""
+    from .sources import nikh
+
+    ents = nikh.load_entities(raw_dir) if raw_dir else nikh.load_entities()
+    by_kc: dict[str, str] = {}
+    for r in store.conn.execute(
+        "SELECT id, json_extract(props, '$.nikh_id') AS kc FROM nodes"
+        " WHERE json_extract(props, '$.nikh_id') IS NOT NULL"
+    ):
+        by_kc.setdefault(r["kc"], r["id"])
+    put = skipped = empty = passages = 0
+    for ent in ents:
+        text = ent.full_text()
+        if not text.strip():
+            empty += 1
+            continue
+        nid = by_kc.get(ent.kc_id, f"nikh:{ent.kc_id}")
+        if not refresh and has_doc(conn, nid, "nikh"):
+            skipped += 1
+            continue
+        url = f"https://contents.history.go.kr/front/kc/view.do?levelId={ent.kc_id}"
+        passages += put_doc(conn, nid, ent.label, text, "nikh", url)
+        put += 1
+    conn.commit()
+    return {"entries": len(ents), "linked": sum(1 for e in ents if e.kc_id in by_kc),
+            "put": put, "skipped": skipped, "empty": empty, "passages": passages}
