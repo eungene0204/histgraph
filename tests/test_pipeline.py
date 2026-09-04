@@ -475,6 +475,14 @@ check("`X의 따님` 은 이름이 아니다", is_descriptive_name("양윤순(�
 check("`X의 딸` 도 이름이 아니다", is_descriptive_name("정승복의 딸"))
 check("보통 이름은 통과", not is_descriptive_name("안중관"))
 check("한자 병기 이름도 통과", not is_descriptive_name("송시열(宋時烈)"))
+# **친족어를 낱개로 세면 반드시 샌다.** 실측(기축옥사 문서): 목록에 `처`·
+# `형`·`누이` 는 있는데 `처자`·`형제`·`조상` 이 없어서 셋이 그대로 노드가
+# 됐다. 집합(형제·처자·일가)과 세대(조상·후손)를 같이 본다.
+for _bad in ("정여립의 처자", "정여립의 형제", "정여립의 조상", "정여립의 일가",
+             "이순신의 후손", "세종의 사위", "김종직의 문인", "현종의 스승"):
+    check(f"`{_bad}` 는 이름이 아니다", is_descriptive_name(_bad))
+for _ok in ("정옥남", "조선 세조", "기축옥사", "의금부", "이덕형", "형조판서"):
+    check(f"`{_ok}` 는 통과", not is_descriptive_name(_ok))
 
 # 한자 병기가 붙으면 같은 사람이 두 노드가 된다
 check("한자 병기 제거", normalize_name("송시열(宋時烈)") == "송시열")
@@ -3263,6 +3271,97 @@ with tempfile.TemporaryDirectory() as tmp:
           rel and rel[0]["edge_label"] == "표적" and any("체포 명단" in e for e in rel[0]["evidence"]), str(rel))
     conn.close()
     store.close()
+
+
+# --- 동명이인 관문 ------------------------------------------------------------
+# "여진 정벌은 고려때 일이야 왜 조선과 연결된지 모르겠어. 아마 왕이름이
+# 겹쳐서 그럴거야" (2026-09-04). 연표의 날짜와 이름 해소 두 자리를 고정한다.
+from histgraph import homonyms as hom_mod  # noqa: E402
+from histgraph.extract import pick_candidate  # noqa: E402
+
+print("\n[동명이인]")
+
+# 1) 연대기의 '설명' 칸이 딴 사건을 말할 때. kc_i304300(조선 여진 정벌)의
+#    설명은 고려 예종의 1107년 정벌이고 본문은 태종~선조대다. 첫 후보를
+#    그대로 쓰면 조선 사건이 1107년 자리에 선다.
+_yeojin = nikh.Entity(
+    "kc_i304300", "사건", "여진 정벌", "女眞征伐",
+    "예종이 숙종의 유지를 이어받아 1107년부터 시작한 여진에 대한 정벌.",
+    [("개요", "조선 전기~중기에 걸쳐 이루어진 여진족에 대한 대규모 군사활동."),
+     ("태종대의 여진 정벌", "최초의 여진 정벌은 1406년(태종 6) 태종에 의해 이루어졌다.")],
+)
+check("시대 창은 연대기 ID 의 자릿수에서 나온다",
+      nikh.era_window(_yeojin) == (1360, 1900), str(nikh.era_window(_yeojin)))
+_date, _basis, _ = nikh.resolve_date(_yeojin, None, None)
+check("짐작한 해는 그 항목의 시대 안에 든다 (1107 이 아니라 1406)",
+      (_date, _basis) == ("1406", "연대기 설명"), str((_date, _basis)))
+_goryeo = nikh.Entity("kc_i204300", "사건", "여진 정벌", "女眞征伐",
+                      "예종이 1107년부터 시작한 여진에 대한 정벌.")
+check("고려 항목이면 1107 을 그대로 받는다",
+      nikh.resolve_date(_goryeo, None, None)[0] == "1107")
+_only_out = nikh.Entity("kc_i300001", "사건", "가짜 사건", "", "1107년에 있었다.")
+check("시대 밖의 해뿐이면 지어내지 않고 비운다",
+      nikh.resolve_date(_only_out, None, None) == (None, None, {}))
+check("실록·기존 노드와 맞은 해는 창을 보지 않는다",
+      nikh.resolve_date(_yeojin, None, 1107)[1] == "연대기·기존 일치")
+check("시대 밖의 해만 말하는 '설명' 칸은 딴 항목의 것이다",
+      nikh.summary_is_alien(_yeojin) and not nikh.summary_is_alien(_goryeo))
+check("인물의 설명 칸은 시대보다 앞서도 된다",
+      not nikh.summary_is_alien(
+          nikh.Entity("kc_n403710", "인물", "이승훈", "", "1783년에 세례를 받았다.")))
+
+# 2) 문서의 주인공을 남에게 주지 않는다. 조선 예종의 휘가 이황(李晄)이라
+#    별칭이 겹치는데, 32년 차이라 생몰 검사(여유 40년)에 안 걸린다.
+_rows = [{"id": "wd:Q488694", "start_date": "1450", "end_date": "1469"},
+         {"id": "wd:Q486291", "start_date": "1501", "end_date": "1570"}]
+check("연대만으로는 예종과 퇴계를 못 가른다",
+      pick_candidate(_rows, (1501, 1570))["id"] == "wd:Q488694")
+check("후보 안에 출처 문서 자신이 있으면 그것이 답이다",
+      pick_candidate(_rows, (1501, 1570), "wd:Q486291")["id"] == "wd:Q486291")
+check("문서가 후보에 없으면 하던 대로 고른다",
+      pick_candidate(_rows, (1501, 1570), "wd:Q999")["id"] == "wd:Q488694")
+
+with tempfile.TemporaryDirectory() as _tmp:
+    store = GraphStore(Path(_tmp) / "h.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:YEJONG", type="person", label="조선 예종", source="wd",
+             start_date="1450", end_date="1469", aliases=["이황"]),
+        Node(id="wd:TOEGYE", type="person", label="이황", source="wd",
+             start_date="1501", end_date="1570"),
+        Node(id="ex:person:김해 허씨", type="person", label="김해 허씨", source="extract"),
+        Node(id="wd:EV", type="event", label="안시성 전투", source="wd", start_date="0645"),
+        Node(id="wd:YANG", type="person", label="양만춘", source="wd", start_date="0700"),
+        Node(id="wd:LATE", type="person", label="정성근", source="wd", start_date="1955"),
+        Node(id="wd:SAHWA", type="event", label="갑자사화", source="wd", start_date="1504"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:YEJONG", dst="ex:person:김해 허씨", type="spouse_of",
+             source="extract", props={"extracted_from": "wd:TOEGYE"}),
+        Edge(src="wd:YANG", dst="wd:EV", type="participated_in", source="wd"),
+        Edge(src="wd:LATE", dst="wd:SAHWA", type="participated_in", source="extract"),
+    ])
+    found = hom_mod.misrouted_edges(store.conn)
+    check("문서의 주인공이 남에게 간 엣지를 찾는다",
+          found == [("wd:YEJONG", "ex:person:김해 허씨", "spouse_of",
+                     "wd:YEJONG", "wd:TOEGYE")], str(found))
+    rep = hom_mod.sweep(store.conn)
+    moved = store.conn.execute(
+        "SELECT src, json_extract(props,'$.repointed_from') AS was FROM edges"
+        " WHERE type = 'spouse_of'").fetchone()
+    check("퇴계의 혼인을 퇴계에게 돌려놓는다",
+          rep.repointed == 1 and moved["src"] == "wd:TOEGYE"
+          and moved["was"] == "wd:YEJONG", str(dict(moved)))
+    check("100년 넘게 어긋난 참여만 충돌로 센다",
+          [c[1] for c in rep.conflicts] == ["정성근"], str(rep.conflicts))
+    check("양만춘의 틀린 생년은 지우지 않고 가까운 쪽에 둔다",
+          [c[1] for c in rep.near] == ["양만춘"] and store.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE type='participated_in'"
+          ).fetchone()[0] == 2)
+    check("다른 노드의 라벨이기도 한 별칭을 센다",
+          rep.alias_clashes == [("이황", "wd:YEJONG", "조선 예종", "wd:TOEGYE")],
+          str(rep.alias_clashes))
+    store.close()
+
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

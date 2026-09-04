@@ -125,6 +125,18 @@ YEAR_PLAIN = re.compile(r"(?<![\d])(\d{4})년")
 YEAR_PAREN = re.compile(r"[가-힣]+\s*\d+년\s*\((\d{3,4})\)")
 YEAR_PATTERNS = (YEAR_REIGN, YEAR_PLAIN, YEAR_PAREN)
 
+# 달. 연대기 문체는 해 **바로 다음**에 달을 적는다 — '1380년 9월',
+# '1380년(우왕 6) 9월에'. 떨어져 있는 달은 받지 않는다: 한 문단 안에서
+# 달만 따로 적히면 어느 해의 달인지 문장이 말해주지 않는다.
+MONTH_AFTER_YEAR = re.compile(
+    r"(?<!\d)(\d{3,4})년\s*(?:\([^)]*\))?\s*(?:에는?\s*)?(\d{1,2})월"
+)
+# 그 달이 **구간의 시작**이면 받지 않는다 — '10월 23일부터 11월 11일 사이에
+# 이루어진 두 차례의 전투'(우금치)는 10월의 일이 아니라 두 달에 걸친 일이다.
+MONTH_RANGE = re.compile(r"\s*\d{0,2}일?\s*(?:부터|~|∼|-|—)")
+# 양력을 쓰기 시작한 해 (건양 원년, 1896-01-01). 그 전의 달은 음력이다.
+SOLAR_FROM = 1896
+
 # 사건 이름의 꼬리말. 떼어낸 몸통이 실록 제목에 남는다 ('이시애의 난' -> '이시애').
 TAIL = re.compile(
     r"\s*(의 난|의 옥|의 변|의 정변|사건|전투|대첩|정벌|개척|반정|사화|환국|약조|조약|"
@@ -228,7 +240,13 @@ def group_entities(rows: Iterable[list[str]]) -> list[Entity]:
 
 
 def load_entities(raw_dir: Path = RAW_DIR) -> list[Entity]:
-    return group_entities(read_xlsx_rows(raw_dir / YEONDAEGI))
+    ents = group_entities(read_xlsx_rows(raw_dir / YEONDAEGI))
+    for ent in ents:
+        if summary_is_alien(ent):
+            log.warning("설명 칸이 딴 항목의 것이라 버린다: %s %s (%s)",
+                        ent.kc_id, ent.label, ent.summary[:40])
+            ent.summary = ""
+    return ents
 
 
 # --- 연도 ------------------------------------------------------------------
@@ -269,6 +287,63 @@ def candidate_years(ent: Entity) -> list[int]:
     return out
 
 
+def months_in(text: str, year: int) -> list[int]:
+    """그 해에 **붙여 적힌** 달들. 문장이 해 다음에 바로 적은 것만 센다."""
+    out: list[int] = []
+    for m in MONTH_AFTER_YEAR.finditer(text or ""):
+        if int(m.group(1)) != year:
+            continue
+        mo = int(m.group(2))
+        if not 1 <= mo <= 12 or MONTH_RANGE.match(text, m.end()):
+            continue
+        if mo not in out:
+            out.append(mo)
+    return out
+
+
+def month_of(ent: Entity, year: int | None) -> int | None:
+    """설명·개요의 **첫 문장**이 말하는 그 해의 달. 갈리면 모르는 것으로 둔다.
+
+    **본문은 보지 않는다.** 본문은 앞뒤 사건을 함께 말하므로 다른 일의 달이
+    섞인다 — 황산대첩 본문은 같은 1380년의 진포대첩('8월')을 먼저 말하고,
+    그 뒤에 황산의 9월이 온다. 설명('1380년 9월, 이성계 등이 …')과
+    개요('1380년(우왕 6) 9월에')는 그 항목 자신을 정의하는 문장이다.
+
+    **둘이 다르면 비운다.** 설명 칸은 한 줄로 줄이다 엉뚱한 달을 적기도
+    한다 (실측: 명량해전의 설명은 이순신이 재임용된 '1597년 8월'을 적고,
+    개요는 해전 자신의 '9월 16일'을 적는다). 어느 쪽이 맞는지 우리가 고를
+    근거가 없으니 달은 없는 것으로 둔다."""
+    if year is None:
+        return None
+    core = ent.core
+    said = []
+    for text in (ent.summary, ent.overview):
+        head = (sentences(text) or [""])[0]
+        # **그 문장이 이 항목을 부르고 있어야 한다.** 개요는 배경부터
+        # 시작하기도 한다 — 6월민주화운동의 첫 문장은 '1987년 1월 박종철이
+        # 고문으로 사망한 사건'이고, 제헌헌법의 첫 문장은 '1948년 5월 10일
+        # 총선거'다. 둘 다 이 항목의 날이 아니라 그 앞의 일이다.
+        if not (ent.label in head or (len(core) >= 2 and core in head)):
+            continue
+        months = months_in(head, year)
+        if len(months) == 1:
+            said.append(months[0])
+    return said[0] if said and len(set(said)) == 1 else None
+
+
+def dated(ent: Entity, year: int) -> tuple[str, dict]:
+    """(날짜, 덧붙일 props). 달을 알면 해에 붙인다 — '1380' -> '1380-09'.
+
+    연표는 몰린 해를 늘려 세우고 그 안의 차례를 달로 읽는다. 해만 적으면
+    같은 해의 이웃 뒤에서 연도 칸이 비어 '연도를 모르는 사건'으로 보인다.
+    달은 실록 날짜와 같은 규칙으로 **음력 그대로** 적고 밝힌다
+    (모듈 머리글 '실록 날짜는 음력이다')."""
+    month = month_of(ent, year)
+    if month is None:
+        return str(year), {}
+    return f"{year}-{month:02d}", {} if year >= SOLAR_FROM else {"calendar": "lunar"}
+
+
 def text_year(text: str) -> int | None:
     ys = _years_in(text)
     return ys[0] if ys else None
@@ -278,6 +353,38 @@ def entity_year(ent: Entity) -> int | None:
     """문장 규칙만으로 고른 연도 (실록·기존 노드 없이). 첫 후보다."""
     ys = candidate_years(ent)
     return ys[0] if ys else None
+
+
+# 시대 창의 여유. 연대기 항목은 시대를 넘나드는 앞뒤를 같이 적는다
+# (위화도 회군은 고려 항목이지만 1388년은 조선 창 쪽에 가깝다).
+GUESS_MARGIN = (20, 30)
+
+
+def era_window(ent: Entity) -> tuple[int, int]:
+    """이 항목의 해가 들어야 할 창. `pick_target` 과 같은 여유를 쓴다."""
+    _, (lo, hi) = ERA_DIGIT.get(ent.era_digit, (None, (-9999, 9999)))
+    return lo - GUESS_MARGIN[0], hi + GUESS_MARGIN[1]
+
+
+def summary_is_alien(ent: Entity) -> bool:
+    """'설명' 칸이 이 항목이 아니라 딴 항목을 말하고 있는가.
+
+    실측: 연대기의 '여진 정벌'(kc_i304300)은 조선 항목인데(본문이 태종~
+    선조대의 파저강·모련위 정벌이다) 설명 칸에는 고려 예종의 1107년 정벌이
+    적혀 있다. 화면은 이 칸을 설명의 첫 문단으로 그리므로, 조선 사건을 열면
+    고려 이야기가 먼저 나온다 — 사용자가 지적한 자리다 (2026-09-04).
+
+    **사건만 본다.** 인물의 설명 칸은 시대보다 앞선 해로 시작하는 것이
+    당연하다 — 연대기가 근대로 분류한 이승훈(kc_n403710)의 설명은 1783년
+    세례부터 말하는데, 칸이 틀린 게 아니라 분류가 그런 것이다. 실측 914
+    항목에서 이 검사에 걸리는 것은 그 둘뿐이고, 사건으로 좁히면 하나다."""
+    if ent.node_type != "event":
+        return False
+    years = _years_in(ent.summary)
+    if not years:
+        return False
+    lo, hi = era_window(ent)
+    return all(not (lo <= y <= hi) for y in years)
 
 
 def era_of(ent: Entity, year: int | None) -> str | None:
@@ -514,6 +621,15 @@ def load_persons_csv(raw_dir: Path = RAW_DIR) -> dict[tuple[str, str], tuple[str
 
 # --- 기존 노드와 맞추기 ----------------------------------------------------------
 
+def _refines(new: str | None, old: str | None) -> bool:
+    """새 날짜가 옛 날짜를 **자세하게만** 만드는가. '1380' -> '1380-09'.
+
+    두 자료가 같은 해를 말할 때 연대기가 달까지 적고 있으면 그 달을 받는다.
+    이미 일 단위로 아는 날짜('1380-06-15')는 밀어내지 않는다 — 앞이 다르면
+    같은 날의 더 자세한 표기가 아니라 **다른 날**이다."""
+    return bool(new and old and new != old and new.startswith(old))
+
+
 def _year_of(value: str | None) -> int | None:
     if not value:
         return None
@@ -680,9 +796,21 @@ def resolve_date(
             "sillok_title": hit["title"], "sillok_term": hit["term"],
         }
     if agreed is not None:
-        return str(agreed), "연대기·기존 일치", {}
-    if cands:
-        return str(cands[0]), "연대기 설명", {"date_uncertain": True}
+        date, props = dated(ent, agreed)
+        return date, "연대기·기존 일치", props
+    # 짐작한 해는 **그 항목의 시대 안**에 들어야 한다. 실측: '여진 정벌'
+    # (kc_i304300) 은 조선 항목인데 연대기의 '설명' 칸에 고려 예종의
+    # 여진 정벌(1107)이 적혀 있다 — 본문은 태종~선조대를 말하는데 설명만
+    # 딴 사건이다. 첫 후보를 그대로 쓰면 조선 사건이 1107년 자리에 서고,
+    # 화면에서는 고려 사건이 조선에 붙은 것으로 읽힌다.
+    #
+    # 실록 기사·기존 노드와의 일치는 자료끼리 맞춘 것이라 창을 안 본다.
+    # 창을 보는 것은 **우리가 고른 첫 후보뿐**이다.
+    lo, hi = era_window(ent)
+    fits = [y for y in cands if lo <= y <= hi]
+    if fits:
+        date, props = dated(ent, fits[0])
+        return date, "연대기 설명", {"date_uncertain": True, **props}
     return None, None, {}
 
 
@@ -783,7 +911,7 @@ def ingest(
                 start = date
                 rep.dated_sillok += 1
             elif basis == "연대기·기존 일치":
-                if old_start is None:
+                if old_start is None or _refines(date, existing["start_date"]):
                     start = date
                 rep.dated_agree += 1
             elif basis == "연대기 설명":

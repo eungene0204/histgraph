@@ -818,6 +818,12 @@ def cmd_scope(args: argparse.Namespace) -> int:
     # 실패했다 (2026-09-03 ×2 · 09-04). 그래서 사람이 기억하지 않아도 되게
     # 여기서 돌리고, 그러고도 남으면 **실패로 끝낸다** — 파일은 남되 종료
     # 코드가 1 이라 파이프라인이 알아챈다. 남은 것은 표에 적고 다시 돌린다.
+    #
+    # **동명이인 관문도 여기 건다.** 파생본이 화면이 읽는 것이므로, 이름이
+    # 겹쳐 엉뚱한 사람에게 붙은 연결은 여기서 걷어내야 화면에서 사라진다
+    # (`homonyms` 모듈 머리글 — 퇴계 이황의 관계 22건이 조선 예종에게
+    # 가 있었다). 원본도 같이 고칠 것: `uv run histgraph homonyms`.
+    from . import homonyms as hom
     from . import koreanize
     from . import labels as labels_mod
 
@@ -825,6 +831,7 @@ def cmd_scope(args: argparse.Namespace) -> int:
     with GraphStore(Path(out)) as derived:
         relabeled = labels_mod.apply_overrides(derived.conn, table)
         redescribed = koreanize.redescribe(derived.conn)
+        homs = hom.sweep(derived.conn)
         foreign = labels_mod.foreign_text(derived.conn)
 
     print(f"\n=== {result['era']} 서브그래프 ===")
@@ -843,6 +850,13 @@ def cmd_scope(args: argparse.Namespace) -> int:
 
     print(f"\n  한국어 관문: 이름 {len(relabeled.applied):,}개 · 설명"
           f" {len(redescribed.applied):,}개 옮김 · 설명 {len(redescribed.cleared):,}개 비움")
+    print(f"  동명이인 관문: 문서에 돌려놓은 엣지 {homs.repointed:,}건 ·"
+          f" 버린 엣지 {homs.dropped:,}건")
+    print(f"    연대가 100년 넘게 어긋난 참여 {len(homs.conflicts):,}건 ·"
+          f" 겹치는 별칭 {len(homs.alias_clashes):,}건 — `histgraph homonyms` 로 본다")
+    for _, pl, _, el, span, year, gap in homs.conflicts[:6]:
+        print(f"      {gap:>5}년  {pl[:12]:14} ({span[0]}~{span[1]}) --참여--> "
+              f"{el[:20]:22} ({year}년)")
     if foreign:
         print(f"\n  ✗ 화면에 한글 아닌 글이 뜨는 노드 {len(foreign):,}건 —"
               f" {args.table.relative_to(ROOT) if args.table.is_relative_to(ROOT) else args.table}"
@@ -1493,6 +1507,40 @@ def cmd_nikh(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_homonyms(args: argparse.Namespace) -> int:
+    """이름이 같을 뿐 다른 사람인 것을 가른다 (`homonyms` 모듈 머리글)."""
+    from . import homonyms as hom
+
+    with GraphStore(args.db) as store:
+        label = {r["id"]: r["label"]
+                 for r in store.conn.execute("SELECT id, label FROM nodes")}
+        rep = hom.sweep(store.conn, apply=not args.dry_run)
+
+    def name(nid: str) -> str:
+        return f"{label.get(nid, '?')[:20]}({nid})"
+
+    print(f"  문서의 주인공이 남에게 간 엣지 {len(rep.misrouted):,}건")
+    for src, dst, etype, wrong, doc in rep.misrouted[:args.show]:
+        other = dst if src == wrong else src
+        print(f"    {name(wrong)} --{etype}--> {name(other)}"
+              f"   →  주인공은 {name(doc)}")
+    print(f"\n  연대가 100년 넘게 어긋난 참여 {len(rep.conflicts):,}건 — 보고만 한다"
+          f" (다른 사람이거나 **연도가 틀린 것**이다)")
+    for _, pl, _, el, span, year, gap in rep.conflicts[:args.show]:
+        print(f"    {gap:>5}년  {pl[:14]:16} ({span[0]}~{span[1]}) --참여--> "
+              f"{el[:24]:26} ({year}년)")
+    print(f"  그 안쪽 {len(rep.near):,}건 — 부관참시이거나 지저분한 날짜다")
+    print(f"  다른 노드의 라벨이기도 한 별칭 {len(rep.alias_clashes):,}건 — 보고만 한다")
+    for alias, nid, owner, clash in rep.alias_clashes[:args.show]:
+        print(f"    '{alias}' : {owner} ({nid})  ↔  {clash}")
+    if args.dry_run:
+        print("\n  (dry-run: 고치지 않음)")
+    else:
+        print(f"\n  ✓ 문서에 돌려놓은 엣지 {rep.repointed:,}건 ·"
+              f" 갈 자리가 이미 차 있어 버린 엣지 {rep.dropped:,}건")
+    return 0
+
+
 def cmd_namu(args: argparse.Namespace) -> int:
     """토막글 작품에 나무위키 개요를 보충한다.
 
@@ -1745,6 +1793,13 @@ def main(argv: list[str] | None = None) -> int:
     p_nk.add_argument("--show", type=int, default=20, help="출력할 예시 수")
     p_nk.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
     p_nk.set_defaults(func=cmd_nikh)
+
+    p_hm = sub.add_parser(
+        "homonyms", help="이름이 같을 뿐 다른 사람인 연결을 가른다 (동명이인 관문)"
+    )
+    p_hm.add_argument("--show", type=int, default=15, help="출력할 예시 수")
+    p_hm.add_argument("--dry-run", action="store_true", help="고치지 않고 세기만")
+    p_hm.set_defaults(func=cmd_homonyms)
 
     p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
     p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")
