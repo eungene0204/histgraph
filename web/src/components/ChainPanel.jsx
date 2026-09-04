@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { nodeColor } from '../lib/graph-view.js';
-import { chainRows, chainName, pathSteps } from '../lib/relations.js';
+import { chainRows, chainName, pathSteps, farEnds, fmtDate } from '../lib/relations.js';
 import { Glyph } from './Glyph.jsx';
 
 // 인과 사슬. "이 일은 무엇이 불렀고 무엇을 불렀나"를 원인 → 결과 엣지만
@@ -94,15 +94,19 @@ export function PathView({ data, onVisit }) {
 
 const DEBOUNCE_MS = 140;
 
-// "…까지 어떻게 이어졌나". 상대를 검색으로 고르면 경로를 묻는다.
-function PathFinder({ from, onVisit }) {
-  const [q, setQ] = useState('');
-  const [rows, setRows] = useState(null);
+// "이 일은 결국 어디까지 이어졌나". 사슬의 먼 끝을 칩으로 세우고, 누르면
+// 거기까지의 경로를 걸음마다 '어떻게'와 함께 그린다. 이름을 쳐서 찾는
+// 검색창은 접어 둔다 — 빈 검색창은 아무것도 말해 주지 않는다 (2026-09-04
+// 지적: "이건 뭘 알려주는 거지? 아무것도 없는데?").
+function FarEnds({ from, data, onVisit }) {
   const [target, setTarget] = useState(null);
   const [result, setResult] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState(null);
   const seqRef = useRef(0);
 
-  useEffect(() => { setQ(''); setRows(null); setTarget(null); setResult(null); }, [from.id]);
+  useEffect(() => { setTarget(null); setResult(null); setSearching(false); setQ(''); setRows(null); }, [from.id]);
 
   useEffect(() => {
     const term = q.trim();
@@ -117,43 +121,71 @@ function PathFinder({ from, onVisit }) {
     return () => { alive = false; clearTimeout(timer); };
   }, [q, from.id]);
 
-  const pick = async (r) => {
+  const show = async (node, side) => {
     seqRef.current += 1;
     setRows(null);
     setQ('');
-    setTarget(r);
+    setTarget({ ...node, side });
     setResult(null);
-    const got = await api.path(from.id, r.id);
+    // 원인 쪽 끝은 그 일에서 이 일로 온 길, 결과 쪽 끝은 이 일에서 그 일로 간 길
+    const got = side === 'cause' ? await api.path(node.id, from.id) : await api.path(from.id, node.id);
     setResult(got);
   };
 
+  const ends = farEnds(data).map((e) => ({ ...e, ...(data.nodes[e.id] || {}) }));
+  const title = target
+    ? (target.side === 'cause' ? `${target.label} → … → ${from.label}` : `${from.label} → … → ${target.label}`)
+    : '';
+
   return (
-    <div className="pathfinder">
-      <div className="chain-head">{from.label}에서 어디까지 이어졌나</div>
-      <input
-        type="search"
-        placeholder="사건 이름 (예: 병자호란)"
-        autoComplete="off"
-        spellCheck="false"
-        value={q}
-        onChange={(ev) => setQ(ev.target.value)}
-        onKeyDown={(ev) => { if (ev.key === 'Enter' && rows?.length) { ev.preventDefault(); pick(rows[0]); } }}
-      />
-      {rows && (
-        <ul className="results pathfinder-results">
-          {rows.length === 0
-            ? <li className="empty-row">일치하는 개체가 없습니다</li>
-            : rows.map((r) => (
-              <li key={r.id} onClick={() => pick(r)}>
-                <Glyph type={r.type} group={r.group} size={11} />
-                <span>{(r.names || [r.label]).join(' · ')}</span>
-              </li>
+    <div className="farends">
+      {ends.length > 0 && (
+        <>
+          <div className="chain-head">멀리 이어진 것 — 누르면 그 길을 보입니다</div>
+          <div className="farends-chips">
+            {ends.map((e) => (
+              <button key={e.id} className={`chip${target?.id === e.id ? ' on' : ''}`}
+                      onClick={() => show(e, e.side)}>
+                <span className="rel-dot" style={{ background: nodeColor(e.type, e.group) }} />
+                {e.label}{fmtDate(e.start) && <span className="chain-year">{fmtDate(e.start)}</span>}
+                <span className="chip-steps">{e.depth + 1}걸음</span>
+              </button>
             ))}
-        </ul>
+          </div>
+        </>
+      )}
+      {!searching ? (
+        <button className="d-more" onClick={() => setSearching(true)}>다른 사건까지 이어졌는지 찾기</button>
+      ) : (
+        <div className="pathfinder">
+          <p className="hint">인과 엣지를 따라 {from.label}에서 그 사건까지 가는 길을 찾습니다.</p>
+          <input
+            type="search"
+            placeholder="사건 이름"
+            autoComplete="off"
+            spellCheck="false"
+            autoFocus
+            value={q}
+            onChange={(ev) => setQ(ev.target.value)}
+            onKeyDown={(ev) => { if (ev.key === 'Enter' && rows?.length) { ev.preventDefault(); show(rows[0], 'effect'); } }}
+          />
+          {rows && (
+            <ul className="results pathfinder-results">
+              {rows.length === 0
+                ? <li className="empty-row">일치하는 개체가 없습니다</li>
+                : rows.map((r) => (
+                  <li key={r.id} onClick={() => show(r, 'effect')}>
+                    <Glyph type={r.type} group={r.group} size={11} />
+                    <span>{(r.names || [r.label]).join(' · ')}</span>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
       )}
       {target && (
         <>
-          <div className="path-title">{from.label} → {target.label}</div>
+          <div className="path-title">{title}</div>
           {result ? <PathView data={result} onVisit={onVisit} /> : <p className="hint">찾는 중…</p>}
         </>
       )}
@@ -172,20 +204,14 @@ export function ChainPanel({ node, onVisit }) {
     return () => { alive = false; };
   }, [node?.id]);
 
-  if (!node) return null;
-  const has = data && (data.causes?.length || data.effects?.length);
+  // 인과 엣지가 하나도 없으면 아무것도 세우지 않는다 — 빈 칸에 이름을
+  // 치라고 해 봐야 갈 길이 없다.
+  if (!node || !data || !(data.causes?.length || data.effects?.length)) return null;
   return (
     <>
-      {has ? (
-        <>
-          <div className="d-section-title">인과 사슬</div>
-          <ChainTree data={data} onVisit={onVisit} />
-        </>
-      ) : null}
-      {/* 경로 찾기는 사건·단체·개념·인물에만 — 유물이나 장소는 원인이 되지 않는다. */}
-      {['event', 'org', 'concept', 'person'].includes(node.type) && (
-        <PathFinder from={node} onVisit={onVisit} />
-      )}
+      <div className="d-section-title">인과 사슬</div>
+      <ChainTree data={data} onVisit={onVisit} />
+      <FarEnds from={node} data={data} onVisit={onVisit} />
     </>
   );
 }

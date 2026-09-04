@@ -6,7 +6,7 @@
 // 같이 따라왔는지를 잰다.
 import {
   pt, sentence, groupRelations, relHead, byYear, cardsFor,
-  whyEmpty, fmtDate, chainRows, pathSteps, pathSentence,
+  whyEmpty, fmtDate, chainRows, pathSteps, pathSentence, farEnds,
 } from '../src/lib/relations.js';
 
 let pass = 0;
@@ -221,6 +221,9 @@ console.log('\n인과');
   const steps = pathSteps([{ id: 'wd:IMJIN', edge: null }, { id: 'wd:JIN', edge: { kind: '배경', how: '명의 쇠퇴' } }, { id: 'wd:BJ', edge: { kind: '원인', how: '' } }], tree.nodes);
   eq('경로를 글로 읽는다', pathSentence(steps), '임진왜란 → (배경) 후금 → (원인) 병자호란');
   eq('걸음에 연도가 붙는다', steps[0].year, '1592년');
+  const ends = farEnds(tree);
+  ok('먼 끝은 두 걸음 이상 떨어진 잎만', ends.length === 1 && ends[0].id === 'wd:IMJIN' && ends[0].side === 'cause' && ends[0].depth === 1, JSON.stringify(ends));
+  ok('한 걸음짜리만 있으면 먼 끝이 없다', farEnds({ causes: [{ id: 'a', children: [] }], effects: [] }).length === 0);
 }
 
 console.log('\n==============================================');

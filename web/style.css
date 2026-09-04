@@ -451,6 +451,17 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .chain-year { color: var(--text-3); font-size: 11px; }
 .chain-row .chain-how { flex-basis: 100%; margin: 0 0 2px 18px; }
 
+/* 사슬의 먼 끝 — 칩 */
+.farends { margin-bottom: 14px; }
+.farends-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-3); border: 1px solid transparent; border-radius: 999px;
+  padding: 4px 10px 4px 8px; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.chip:hover, .chip.on { border-color: var(--line); background: #2c2c29; }
+.chip-steps { font-size: 10.5px; color: var(--text-3); }
+
 /* 경로 찾기 */
 .pathfinder { margin-bottom: 14px; position: relative; }
 .pathfinder input {
