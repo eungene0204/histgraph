@@ -261,6 +261,15 @@ export default function App() {
           onVisit={visit}
         />
       </div>
+
+      {/* 광고를 실으려면 방침과 약관이 어느 화면에서든 한 번에 닿아야 한다.
+          두 장은 리액트 바깥의 정적 문서라 자바스크립트 없이도 열린다
+          (web/privacy.html · web/terms.html). 그래서 <a> 로 그냥 넘긴다. */}
+      <footer className="foot">
+        <span className="foot-copy">© 2026 histgraph</span>
+        <a href="/privacy.html">개인정보처리방침</a>
+        <a href="/terms.html">이용약관</a>
+      </footer>
     </>
   );
 }
