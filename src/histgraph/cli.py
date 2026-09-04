@@ -2093,6 +2093,25 @@ def main(argv: list[str] | None = None) -> int:
     p_ro.add_argument("--redo", action="store_true", help="이미 판정한 엣지도 다시")
     p_ro.set_defaults(func=cmd_roles)
 
+    p_ca = sub.add_parser("causes", help="사건 문서에 서술된 인과(원인 → 결과)를 말뭉치 근거로 적는다")
+    p_ca.add_argument("--corpus", type=Path, default=None)
+    p_ca.add_argument("--types", default="event", help="물을 노드 타입 (쉼표, 기본 event)")
+    p_ca.add_argument("--limit", type=int, default=None)
+    p_ca.add_argument("--backend", choices=["anthropic", "mlx", "ollama"], default="mlx")
+    p_ca.add_argument("--model", default=None)
+    p_ca.add_argument("--dry-run", action="store_true", help="모델 없이 물을 문서와 분량만 센다")
+    p_ca.add_argument("--redo", action="store_true", help="이미 물은 문서도 다시")
+    p_ca.add_argument("--sync-to", type=Path, default=None,
+                      help="끝나고 인과 엣지를 이 파생본(화면 DB)으로 옮긴다")
+    p_ca.add_argument("--sync-only", action="store_true", help="묻지 않고 옮기기만")
+    p_ca.set_defaults(func=cmd_causes)
+
+    p_ch = sub.add_parser("chain", help="인과 사슬을 글로 읽는다 (--to 를 주면 두 노드 사이의 경로)")
+    p_ch.add_argument("node", help="노드 id 또는 이름")
+    p_ch.add_argument("--to", default=None, help="이 노드까지의 최단 인과 경로")
+    p_ch.add_argument("--depth", type=int, default=4)
+    p_ch.set_defaults(func=cmd_chain)
+
     p_rg = sub.add_parser("reigns", help="왕의 재위·대통령의 재임 기간을 직위 엣지에 채운다 (P39 한정어)")
     p_rg.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_rg.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
