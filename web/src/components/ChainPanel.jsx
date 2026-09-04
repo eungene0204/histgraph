@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { nodeColor } from '../lib/graph-view.js';
 import { chainRows, chainName, pathSteps } from '../lib/relations.js';
@@ -92,6 +92,84 @@ export function PathView({ data, onVisit }) {
   );
 }
 
+const DEBOUNCE_MS = 140;
+
+// 두 사건 사이의 길 찾기. "…까지 이어졌는지 찾기"를 눌러야 열린다 — 나무가
+// 못 보여주는 것(깊이 4 너머, 또는 '이어지지 않는다'는 답)을 묻는 자리다.
+// 상대를 고르면 경로를 걸음마다 '어떻게'와 함께 그린다.
+function PathFinder({ from, onVisit }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState(null);
+  const [target, setTarget] = useState(null);
+  const [result, setResult] = useState(null);
+  const seqRef = useRef(0);
+
+  useEffect(() => { setOpen(false); setQ(''); setRows(null); setTarget(null); setResult(null); }, [from.id]);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (!term) { setRows(null); return; }
+    let alive = true;
+    const seq = seqRef.current;
+    const timer = setTimeout(async () => {
+      const found = await api.search(term, 8);
+      if (!alive || seq !== seqRef.current) return;
+      setRows(found.filter((r) => r.id !== from.id));
+    }, DEBOUNCE_MS);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [q, from.id]);
+
+  const pick = async (r) => {
+    seqRef.current += 1;
+    setRows(null);
+    setQ('');
+    setTarget(r);
+    setResult(null);
+    setResult(await api.path(from.id, r.id));
+  };
+
+  if (!open) {
+    return <button className="d-more" onClick={() => setOpen(true)}>다른 사건까지 이어졌는지 찾기</button>;
+  }
+  return (
+    <div className="pathfinder">
+      <p className="hint">인과 엣지를 따라 {from.label}에서 그 사건까지 가는 길을 찾습니다.</p>
+      <input
+        type="search"
+        placeholder="사건 이름"
+        autoComplete="off"
+        spellCheck="false"
+        autoFocus
+        value={q}
+        onChange={(ev) => setQ(ev.target.value)}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Escape') { setOpen(false); return; }
+          if (ev.key === 'Enter' && rows?.length) { ev.preventDefault(); pick(rows[0]); }
+        }}
+      />
+      {rows && (
+        <ul className="results pathfinder-results">
+          {rows.length === 0
+            ? <li className="empty-row">일치하는 개체가 없습니다</li>
+            : rows.map((r) => (
+              <li key={r.id} onClick={() => pick(r)}>
+                <Glyph type={r.type} group={r.group} size={11} />
+                <span>{(r.names || [r.label]).join(' · ')}</span>
+              </li>
+            ))}
+        </ul>
+      )}
+      {target && (
+        <>
+          <div className="path-title">{from.label} → … → {target.label}</div>
+          {result ? <PathView data={result} onVisit={onVisit} /> : <p className="hint">찾는 중…</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function ChainPanel({ node, onVisit }) {
   const [data, setData] = useState(null);
 
@@ -103,14 +181,15 @@ export function ChainPanel({ node, onVisit }) {
     return () => { alive = false; };
   }, [node?.id]);
 
-  // 인과 엣지가 하나도 없으면 아무것도 세우지 않는다. 나무 하나면 된다 —
-  // 먼 끝을 칩으로 다시 세우거나 이름을 쳐서 경로를 찾게 하는 것은 나무가
-  // 이미 말한 것을 되풀이한다 (2026-09-04 지적: "중복 표시야").
+  // 인과 엣지가 하나도 없으면 아무것도 세우지 않는다 — 갈 길이 없는데
+  // 이름을 치라고 할 이유가 없다. 나무 아래에는 길 찾기 하나만 둔다.
+  // 먼 끝을 칩으로 다시 세우는 것은 나무의 되풀이였다 (2026-09-04 지적).
   if (!node || !data || !(data.causes?.length || data.effects?.length)) return null;
   return (
     <>
       <div className="d-section-title">인과 사슬</div>
       <ChainTree data={data} onVisit={onVisit} />
+      <PathFinder from={node} onVisit={onVisit} />
     </>
   );
 }
