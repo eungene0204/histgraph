@@ -969,7 +969,7 @@ def cmd_spans(args: argparse.Namespace) -> int:
 _LINK_PROP = {
     ("part_of", ""): "P361/P527",
     ("related_to", "다음"): "P155/P156",
-    ("related_to", "원인"): "P828/P1542",
+    ("caused", "원인"): "P828/P1542",
     ("participated_in", ""): "P710",
     ("occurred_at", ""): "P276",
 }
@@ -1261,6 +1261,80 @@ def cmd_roles(args: argparse.Namespace) -> int:
         print(f"    {line}")
     if not args.dry_run:
         print("  화면 DB 는 `scope korea` 를 다시 돌려야 바뀝니다.")
+    return 0
+
+
+def cmd_causes(args: argparse.Namespace) -> int:
+    """사건 문서에 서술된 인과(원인 → 결과)를 말뭉치의 근거로 적는다.
+
+    `--dry-run` 은 모델 없이 물을 문서와 분량만 센다. 모델은 MLX 가 기본이고
+    메모리를 35GB 잡는다 — 다른 `extract`·`roles` 와 함께 띄우지 말 것.
+    끝나면 `--sync-to data/korea.sqlite` 로 화면 DB 에 옮긴다 (양끝이 거기
+    있는 엣지만). 노드를 새로 만들지 않으므로 `scope` 를 다시 돌릴 필요가 없다."""
+    from . import causes as causes_mod
+    from . import corpus as corpus_mod
+
+    with GraphStore(args.db) as store:
+        moved = causes_mod.migrate(store)
+        if moved:
+            print(f"  Wikidata 원인·결과 {moved}건을 인과 엣지로 옮겼습니다.")
+        if not args.sync_only:
+            backend = None if args.dry_run else build_backend(args.backend, args.model)
+            conn = corpus_mod.open_corpus(args.corpus)
+            types = tuple(t.strip() for t in args.types.split(",") if t.strip())
+            got = causes_mod.run(store, conn, backend, types=types, limit=args.limit,
+                                 dry_run=args.dry_run, redo=args.redo)
+            c = got["counts"]
+            print(f"  문서 {c['문서']:,}건" + ("" if args.dry_run else f" · 인과 엣지 {c['엣지']:,}건"))
+            if got["dropped"]:
+                print("  버림: " + " · ".join(f"{k} {v}" for k, v in sorted(got["dropped"].items(), key=lambda x: -x[1])))
+            if got["unresolved"]:
+                top = sorted(got["unresolved"].items(), key=lambda x: -x[1])[:20]
+                print("  못 푼 이름 (노드 후보): " + " · ".join(f"{k}×{v}" if v > 1 else k for k, v in top))
+            for line in got["samples"]:
+                print(f"    {line}")
+        if args.sync_to is not None:
+            with GraphStore(args.sync_to) as target:
+                n = causes_mod.sync(store, target)
+            print(f"  화면 DB 로 인과 엣지 {n:,}건을 옮겼습니다: {args.sync_to}")
+        total = store.conn.execute("SELECT COUNT(*) FROM edges WHERE type = 'caused'").fetchone()[0]
+        print(f"  인과 엣지 합계 {total:,}건")
+    return 0
+
+
+def _find_node(store: GraphStore, text: str) -> str | None:
+    """id 그대로, 아니면 라벨·별칭으로. 여럿이면 연결이 많은 쪽."""
+    if store.conn.execute("SELECT 1 FROM nodes WHERE id = ?", (text,)).fetchone():
+        return text
+    row = store.conn.execute(
+        """SELECT n.id, (SELECT COUNT(*) FROM edges e WHERE e.src = n.id OR e.dst = n.id) AS deg
+             FROM nodes n
+            WHERE n.label = ?1 OR EXISTS (SELECT 1 FROM aliases a WHERE a.node_id = n.id AND a.alias = ?1)
+         ORDER BY deg DESC LIMIT 1""",
+        (text,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def cmd_chain(args: argparse.Namespace) -> int:
+    """인과 사슬을 글로 읽는다. `--to` 를 주면 두 노드 사이의 최단 경로."""
+    from . import causes as causes_mod
+
+    with GraphStore(args.db) as store:
+        src = _find_node(store, args.node)
+        if src is None:
+            print(f"  노드를 찾지 못했습니다: {args.node}", file=sys.stderr)
+            return 1
+        if args.to:
+            dst = _find_node(store, args.to)
+            if dst is None:
+                print(f"  노드를 찾지 못했습니다: {args.to}", file=sys.stderr)
+                return 1
+            got = causes_mod.paths(store, src, dst, max_depth=args.depth * 2)
+            print(causes_mod.render_paths(got))
+            return 0 if got["found"] else 1
+        got = causes_mod.chain(store, src, depth=args.depth)
+        print(causes_mod.render_chain(got))
     return 0
 
 

@@ -34,7 +34,8 @@ import App from './src/App.jsx';
 import { SidePanel } from './src/components/SidePanel.jsx';
 import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph };
+import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView };
 `;
 
 await build({
@@ -51,7 +52,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -139,6 +140,8 @@ let detailHtml = '';
       { type: 'created', dir: 'out', label: '만듦',
         other: { id: 'a1', label: '훈민정음', type: 'heritage', group: 'thing' },
         evidence: ['세종이 훈민정음을 만들었다'] },
+      { type: 'caused', dir: 'in', label: '원인', edge_label: '배경', how: '집현전을 세워 학자를 길렀다',
+        as: '집현전 설치', other: { id: 'e1', label: '집현전', type: 'org', group: 'actor' }, evidence: [] },
     ],
   };
   detailHtml = renderToString(h(DetailPanel, {
@@ -171,7 +174,30 @@ let detailHtml = '';
        node, prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
      })).match(/d-title[^>]*>([^<]*)/)?.[1] ?? '') === '조선 세종');
   ok('부모와 자녀가 갈려 있다', detailHtml.includes('부모') && detailHtml.includes('자녀'));
-  ok('관계 수가 적힌다', /관계 3/.test(plain(detailHtml)));
+  ok('관계 수가 적힌다', /관계 4/.test(plain(detailHtml)));
+  ok('인과 카드에 종류와 어떻게가 적힌다',
+     detailHtml.includes('rel-how') && plain(detailHtml).includes('집현전 설치') && plain(detailHtml).includes('집현전을 세워 학자를 길렀다'),
+     detailHtml.match(/rel-how[\s\S]{0,160}/)?.[0]);
+  ok('인과가 원인 묶음으로 선다', plain(detailHtml).includes('원인 · 1'));
+
+  // 인과 사슬 나무와 경로 — 서버 없이 자료를 넣어 그린다
+  const tree = { center: 'wd:BJ',
+    causes: [{ id: 'wd:JIN', kind: '배경', how: '형제 관계를 요구했다', as: '후금의 파약 행위', evidence: [],
+               children: [{ id: 'wd:IMJIN', kind: '배경', how: '명의 쇠퇴로 여진이 성장했다', as: '', evidence: [], children: [] }] }],
+    effects: [],
+    nodes: { 'wd:BJ': { id: 'wd:BJ', label: '병자호란', type: 'event', group: 'event' },
+             'wd:JIN': { id: 'wd:JIN', label: '후금', type: 'org', group: 'actor' },
+             'wd:IMJIN': { id: 'wd:IMJIN', label: '임진왜란', type: 'event', group: 'event', start: '1592' } } };
+  const chainHtml = plain(renderToString(h(ChainTree, { data: tree, onVisit: () => {} })));
+  ok('사슬에 원인의 원인까지 선다', chainHtml.includes('이 일을 부른 것') && chainHtml.includes('후금') && chainHtml.includes('임진왜란'), chainHtml.slice(0, 200));
+  ok('사슬 줄에 서술구와 어떻게가 붙는다', chainHtml.includes('후금의 파약 행위') && chainHtml.includes('명의 쇠퇴로 여진이 성장했다'));
+  ok('비어 있으면 사슬을 그리지 않는다', renderToString(h(ChainTree, { data: { causes: [], effects: [], nodes: {} }, onVisit: () => {} })) === '');
+  const pathHtml = plain(renderToString(h(PathView, { data: {
+    found: true, reversed: false, nodes: tree.nodes,
+    paths: [[{ id: 'wd:IMJIN', edge: null }, { id: 'wd:JIN', edge: { kind: '배경', how: '명의 쇠퇴' } }, { id: 'wd:BJ', edge: { kind: '원인', how: '' } }]],
+  }, onVisit: () => {} })));
+  ok('경로에 걸음과 종류가 선다', pathHtml.includes('임진왜란') && pathHtml.includes('1592년') && pathHtml.includes('배경') && pathHtml.includes('병자호란'), pathHtml.slice(0, 300));
+  ok('경로가 없으면 한국어로 말한다', plain(renderToString(h(PathView, { data: { found: false, paths: [], nodes: {} }, onVisit: () => {} }))).includes('이어지지 않습니다'));
   ok('타고 들어온 관계가 문장으로 머리에 붙는다',
      detailHtml.includes('조선 세종의 아버지는 조선 태종이다'),
      detailHtml.match(/d-via-line[\s\S]{0,200}/)?.[0]);

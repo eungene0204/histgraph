@@ -36,6 +36,7 @@ const LINE_KINDS = [
   { dash: null, label: '구조화 소스 (확실)' },
   { dash: '5 4', label: '산문에서 추출 (근거 있음)' },
   { dash: '2 4', label: '동일 실체 (same_as)' },
+  { dash: null, width: 2.8, label: '인과 (원인 → 결과)' },
 ];
 
 export function SidePanel({ meta, seeds, settings, onSettings, onPick }) {
@@ -60,11 +61,11 @@ export function SidePanel({ meta, seeds, settings, onSettings, onPick }) {
         <h2>범례</h2>
         <Legend nodeTypes={meta?.node_types} />
         <ul className="legend lines">
-          {LINE_KINDS.map(({ dash, label }) => (
+          {LINE_KINDS.map(({ dash, width, label }) => (
             <li key={label}>
               <svg width="26" height="10" aria-hidden="true">
                 <line x1="1" y1="5" x2="25" y2="5" stroke="rgba(198,196,186,.6)"
-                      strokeWidth="1.4" strokeDasharray={dash || undefined} />
+                      strokeWidth={width || 1.4} strokeDasharray={dash || undefined} />
               </svg>
               <span>{label}</span>
             </li>

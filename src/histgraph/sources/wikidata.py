@@ -829,9 +829,9 @@ def links_from_rows(rows: list[dict]) -> set[tuple[str, str, str, str]]:
         elif prop == "P710":  # b 가 a 에 참여했다 (사건이 적어 둔 참가자)
             out.add((b, a, "participated_in", ""))
         elif prop == "P828":  # a 의 원인이 b — 원인에서 결과로
-            out.add((b, a, "related_to", "원인"))
+            out.add((b, a, "caused", "원인"))
         elif prop == "P1542":  # a 의 결과가 b
-            out.add((a, b, "related_to", "원인"))
+            out.add((a, b, "caused", "원인"))
         elif prop == "P276":  # a 가 b 에서 일어났다
             out.add((a, b, "occurred_at", ""))
     return out

@@ -424,6 +424,47 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* 여러 관계가 함께 딛고 선 근거. 카드 밖에 한 번만 둔다. */
 .rel-ev.shared { margin: 0 0 7px; }
 
+/* 인과 — 종류 딱지와 '어떻게'. 카드 안에서는 이름 뒤에, 사슬에서는 줄 끝에. */
+.chain-kind {
+  flex: none; font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 4px;
+  background: #3a3a35; color: var(--text-2, #c6c4ba); margin-left: 4px;
+}
+.rel-how, .chain-how { display: block; font-size: 11.5px; line-height: 1.5; color: var(--text-3); margin-top: 4px; }
+.rel-how b, .chain-how b { font-weight: 600; color: var(--text-2, #c6c4ba); }
+
+/* 인과 사슬 — 들여쓰기가 걸음 수다. */
+.chain { margin-bottom: 12px; }
+.chain-head { font-size: 12px; color: var(--text-3); margin: 6px 0 5px; }
+.chain-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+  padding: 4px 0; border-top: 1px solid #2a2a27;
+}
+.chain-row:first-of-type { border-top: 0; }
+.chain-arrow { color: var(--text-3); font-size: 12px; width: 12px; flex: none; }
+.chain-node {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  background: none; border: 0; padding: 2px 4px; margin: 0 -4px; border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 13px; cursor: pointer; text-align: left;
+}
+.chain-node:hover { background: var(--surface-3); }
+.chain-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chain-year { color: var(--text-3); font-size: 11px; }
+.chain-row .chain-how { flex-basis: 100%; margin: 0 0 2px 18px; }
+
+/* 경로 찾기 */
+.pathfinder { margin-bottom: 14px; position: relative; }
+.pathfinder input {
+  width: 100%; box-sizing: border-box; background: var(--surface-3); color: var(--text);
+  border: 1px solid transparent; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px;
+}
+.pathfinder input:focus { outline: none; border-color: var(--line); }
+.pathfinder-results { position: static; margin-top: 4px; max-height: 220px; }
+.path-title { font-size: 12.5px; color: var(--text-2, #c6c4ba); margin: 10px 0 4px; }
+.path-steps { list-style: none; margin: 0; padding: 0 0 0 6px; border-left: 2px solid #3a3a35; }
+.path-steps li { position: relative; padding: 2px 0 2px 8px; }
+.path-edge { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 3px 0 3px 4px; }
+.path-edge .chain-how { display: inline; margin: 0; }
+
 .side::-webkit-scrollbar, .detail::-webkit-scrollbar, .results::-webkit-scrollbar { width: 9px; }
 .side::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb, .results::-webkit-scrollbar-thumb {
   background: #35352f; border-radius: 5px;

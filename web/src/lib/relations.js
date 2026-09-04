@@ -7,6 +7,17 @@
 export const DIR_HEAD = {
   child_of: { out: '부모', in: '자녀' },
   part_of: { out: '상위', in: '하위' },
+  // 인과는 언제나 원인 → 결과다. 나가는 상대는 이 노드가 부른 결과,
+  // 들어오는 상대는 이 노드를 부른 원인이다.
+  caused: { out: '결과', in: '원인' },
+};
+
+// 인과의 종류(`causes.KINDS`)별 문장. 엣지 라벨이 종류다.
+export const KIND_SENTENCE = {
+  '원인': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 원인이 되었다`,
+  '배경': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 배경이 되었다`,
+  '계기': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 계기가 되었다`,
+  '영향': (a, b) => `${a}${pt(a, '은', '는')} ${b}에 영향을 주었다`,
 };
 
 // 시대(from_period)와 시점(dated_to)은 둘 다 '언제'를 가리킨다. 따로 세우면
@@ -70,6 +81,7 @@ export const SENTENCE = {
   member_of: (a, b) => `${a}${pt(a, '은', '는')} ${b} 소속이다`,
   held_position: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지냈다`,
   part_of: (a, b) => `${a}${pt(a, '은', '는')} ${b}의 일부다`,
+  caused: (a, b, o = {}) => (KIND_SENTENCE[o.label] || KIND_SENTENCE['원인'])(a, b),
   // 전후(P155/P156)는 앞선 사건에서, 인과(P828/P1542)는 원인에서 담는다.
   // 방향이 하나로 모여 있어 '다음'·'원인'이 적힌 엣지는 어느 쪽에서 읽어도
   // 뒤집히지 않는다.
@@ -102,7 +114,10 @@ export const SENTENCE = {
 // 지금 보는 노드(self)와 상대 사이의 관계 하나를 문장으로 만든다.
 export function sentence(r, self) {
   const me = { label: self.label, type: self.type };
-  const [src, dst] = r.dir === 'out' ? [me, r.other] : [r.other, me];
+  // 인과의 상대가 서술구('후금의 파약 행위')로 적혀 있었으면 그 구로 부른다 —
+  // '후금은 병자호란의 원인이 되었다'보다 '후금의 파약 행위는…'이 참에 가깝다.
+  const other = r.type === 'caused' && r.as ? { ...r.other, label: r.as } : r.other;
+  const [src, dst] = r.dir === 'out' ? [me, other] : [other, me];
   const make = SENTENCE[r.type];
   return make
     ? make(src.label, dst.label, { label: r.edge_label, srcType: src.type })
@@ -214,3 +229,41 @@ export function fmtDate(v) {
 // 접힌 높이(168px)를 넘길 만큼 길 때만 '전문 보기'를 낸다. 세 줄짜리 글에
 // 단추가 붙어 있으면 눌러도 아무 일이 없다.
 export const LONG_DESC = 220;
+
+// --- 인과 사슬 ---------------------------------------------------------------
+// 서버(`/api/chain`)가 준 나무를 화면에 세울 줄로 편다. 깊이가 들여쓰기다.
+// 원인 쪽은 이 노드를 부른 것들이라 '←', 결과 쪽은 '→' 로 읽는다.
+export function chainRows(items, depth = 0, out = []) {
+  for (const it of items || []) {
+    out.push({ id: it.id, depth, kind: it.kind, how: it.how || '', as: it.as || '',
+               evidence: it.evidence || [], sources: it.sources || [] });
+    chainRows(it.children, depth + 1, out);
+  }
+  return out;
+}
+
+// 나무의 노드 이름. 서술구가 있으면 '후금 (후금의 파약 행위)' 가 아니라
+// 서술구를 앞세운다 — 이름은 단추가, 구는 글이 말한다.
+export function chainName(row, nodes) {
+  const n = nodes?.[row.id];
+  return n ? n.label : row.id;
+}
+
+// `/api/path` 의 경로 하나를 걸음으로. 첫 걸음에는 엣지가 없다.
+export function pathSteps(path, nodes) {
+  return (path || []).map((step) => ({
+    id: step.id,
+    label: nodes?.[step.id]?.label || step.id,
+    type: nodes?.[step.id]?.type,
+    group: nodes?.[step.id]?.group,
+    year: fmtDate(nodes?.[step.id]?.start),
+    kind: step.edge?.kind || '',
+    how: step.edge?.how || '',
+    evidence: step.edge?.evidence || [],
+  }));
+}
+
+// 경로를 한 줄 글로. "임진왜란 → (배경) 후금 → (계기) 정묘호란"
+export function pathSentence(steps) {
+  return steps.map((s, i) => (i === 0 ? s.label : `→ (${s.kind}) ${s.label}`)).join(' ');
+}

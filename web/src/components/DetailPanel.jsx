@@ -4,6 +4,7 @@ import {
   groupRelations, cardsFor, sentence, whyEmpty, fmtDate, LONG_DESC,
 } from '../lib/relations.js';
 import { Glyph } from './Glyph.jsx';
+import { ChainPanel } from './ChainPanel.jsx';
 
 // 설명칸. 비어 있을 때 아무것도 그리지 않으면 "이 노드는 원래 설명이
 // 없는 것"처럼 보인다. 왜 비었는지를 대신 적는다.
@@ -102,6 +103,10 @@ export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
           </>
         )}
 
+        {/* 인과 사슬은 관계 목록보다 먼저 — 한 걸음짜리 관계보다 여러
+            걸음의 '왜'가 이 그래프가 답하려는 물음이다. */}
+        <ChainPanel node={d} onVisit={onVisit} />
+
         <div className="d-section-title">관계 {count}</div>
         {groups.length === 0 ? (
           <p className="hint">연결된 관계가 없습니다.</p>
@@ -120,7 +125,12 @@ export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
                   <span className="rel-line">
                     <span className="rel-dot" style={{ background: nodeColor(r.other.type, r.other.group) }} />
                     <span className="rel-name">{r.other.label}</span>
+                    {r.type === 'caused' && r.edge_label && <span className="chain-kind">{r.edge_label}</span>}
                   </span>
+                  {/* 인과는 이름만으로는 아무 말도 아니다 — 어떻게 이어졌는지를 같이 적는다 */}
+                  {r.type === 'caused' && (r.as || r.how) && (
+                    <span className="rel-how">{r.as && <b>{r.as}</b>}{r.as && r.how && ' · '}{r.how}</span>
+                  )}
                   {own.map((ev) => <Evidence key={ev} text={ev} />)}
                 </button>
               );

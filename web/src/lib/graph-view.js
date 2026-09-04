@@ -319,6 +319,9 @@ export class GraphView {
         ctx.strokeStyle = color;
         ctx.lineWidth = active ? 1.9 : 1.3;
       }
+      // 인과(원인 → 결과)는 다른 관계보다 굵다. 이 그래프가 온톨로지인
+      // 이유가 이 선이라, 참여·장소 선 사이에서 같은 굵기로 묻히면 안 된다.
+      if (e.type === 'caused') ctx.lineWidth += 1.2;
       // 추출로 얻은 관계(신뢰도 < 1)는 점선. 구조화 소스가 준 사실과
       // 텍스트에서 추론한 사실을 화면에서 구분하지 않으면 둘 다 못 믿는다.
       ctx.setLineDash(e.kind === 'same_as' ? [2, 4] : e.conf < 1 ? [5, 4] : []);

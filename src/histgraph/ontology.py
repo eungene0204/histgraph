@@ -98,6 +98,16 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     # 시간축. 인물·사건은 연도와 '같은 실체'가 아니므로 same_as 가 아니라
     # 엣지로 잇는다. 출생/사망/시작/종료는 엣지 label 로 구분한다.
     "dated_to": ("시점", tuple(NODE_TYPES), ("period",)),
+    # 인과. **이 그래프가 온톨로지인 이유다** — "임진왜란이 수십 년 뒤
+    # 병자호란에 어떻게 이어졌나"는 참여·장소·시대 엣지로는 답할 수 없고,
+    # 원인에서 결과로 가는 엣지를 따라가야 한다 (`causes`·`/api/chain`).
+    # 방향은 언제나 원인 → 결과. 라벨은 인과의 종류(원인·배경·계기·영향,
+    # `causes.KINDS`)고, '어떻게'는 `props.how` 한 구절과 `props.evidence`
+    # 인용이 말한다. 원인 쪽에 단체·인물·개념을 허용하는 이유: 한국사
+    # 서술의 인과는 사건끼리만 오가지 않는다 — '후금의 성장'이 정묘호란의
+    # 배경이고 '동학'이 동학농민운동의 뿌리다. 결과 쪽도 사건만이 아니다
+    # ('임진왜란 → 명의 쇠퇴'는 org 가 결과다).
+    "caused": ("원인", ("event", "org", "person", "concept"), ("event", "org", "concept")),
     "part_of": ("상위", tuple(NODE_TYPES), tuple(NODE_TYPES)),
     "related_to": ("관련", tuple(NODE_TYPES), tuple(NODE_TYPES)),
 }

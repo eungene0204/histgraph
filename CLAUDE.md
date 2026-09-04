@@ -129,6 +129,8 @@ merge<TAB>남길 id<TAB>없앨 id<TAB>근거      keep<TAB>id<TAB>id<TAB>왜 다
 수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 그래서
 수집 뒤에는 `relabel → redescribe → describe → reigns → precision → dedupe`
 를 다시 돌리고, 그 다음 `scope korea` 로 파생본을 만든다 (README "수집 뒤마다" 절).
+인과 엣지(`causes`, MLX 필요)는 `scope` 뒤에 `--sync-to data/korea.sqlite` 로
+옮긴다 — 노드를 만들지 않으므로 파생본을 다시 만들 필요가 없다.
 화면이 읽는 것은 원본이 아니라 **`data/korea.sqlite`** 다 — 원본만 고치면
 화면은 그대로다. 파생본은 저장소에 실려 배포되므로 다시 만들면 커밋한다.
 

@@ -13,6 +13,9 @@ export const api = {
   search: (q, limit = 25) => get(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   node: (id) => get(`/api/node/${encodeURIComponent(id)}`),
   timeline: (id) => get(`/api/timeline?id=${encodeURIComponent(id)}`),
+  // 인과 사슬. 한 노드의 원인·결과 나무와, 두 노드 사이의 최단 경로.
+  chain: (id, depth = 4) => get(`/api/chain?id=${encodeURIComponent(id)}&depth=${depth}`),
+  path: (from, to) => get(`/api/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   graph: (id, { depth = 2, limit = 120, includePeriod = false } = {}) =>
     get(`/api/graph?id=${encodeURIComponent(id)}&depth=${depth}`
       + `&limit=${limit}&exclude=${includePeriod ? '' : 'period'}`),

@@ -1714,7 +1714,7 @@ side = links_from_rows([
 ])
 check("사건이 적어 둔 참가자는 참여 엣지가 된다 (방향은 사람 → 사건)",
       ("Q2", "Q1", "participated_in", "") in side, str(side))
-check("원인·결과는 원인에서 결과로 한 방향", ("Q3", "Q1", "related_to", "원인") in side, str(side))
+check("원인·결과는 원인에서 결과로 한 방향 (인과 엣지)", ("Q3", "Q1", "caused", "원인") in side, str(side))
 check("원인과 결과가 같은 엣지로 접힌다",
       len([x for x in side if x[3] == "원인"]) == 1, str(side))
 check("장소는 발생 장소 엣지가 된다", ("Q1", "Q4", "occurred_at", "") in side, str(side))
@@ -3741,6 +3741,184 @@ if _dup_table.exists():
     check("판정 표가 읽힌다", len(rows) > 0)
     check("한 짝을 두 번 적지 않았다",
           len({r.key for r in rows}) == len(rows))
+
+
+# --- 인과 관문: 원인 → 결과 사슬 ---------------------------------------------
+# "온톨로지 그래프이므로 모든 노드의 인과관계를 보여줘야 한다 — 임진왜란 →
+# 명의 쇠퇴 → 여진족의 성장 → 병자호란" (사용자, 2026-09-04). 인과 엣지는
+# 산문에서 근거와 함께 뽑되, 양끝은 있는 노드로 풀리고 연대는 순방향이어야 한다.
+from histgraph import causes as causes_mod  # noqa: E402
+
+print("\n[인과 관문]")
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "c.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:JOSEON", type="org", label="조선", source="wd", start_date="1392", end_date="1897"),
+        Node(id="wd:IMJIN", type="event", label="임진왜란", source="wd", start_date="1592", end_date="1598"),
+        Node(id="wd:MING", type="org", label="명나라", source="wd", start_date="1368", end_date="1644"),
+        Node(id="wd:JIN", type="org", label="후금", source="wd", start_date="1616", end_date="1636"),
+        Node(id="wd:JM", type="event", label="정묘호란", source="wd", start_date="1627"),
+        Node(id="wd:BJ", type="event", label="병자호란", source="wd", start_date="1636", end_date="1637"),
+        Node(id="wd:GABO", type="event", label="갑오개혁", source="wd", start_date="1894"),
+        Node(id="wd:BI", type="event", label="병인박해", source="wd", start_date="1866"),
+        Node(id="wd:BY", type="event", label="병인양요", source="wd", start_date="1866"),
+        Node(id="wd:P", type="person", label="인조", source="wd", start_date="1595", end_date="1649"),
+    ])
+    store.conn.execute("INSERT INTO aliases (node_id, alias) VALUES ('wd:IMJIN', '임진전쟁')")
+    # 옛 방식으로 들어온 Wikidata 원인·결과
+    store.upsert_edges([Edge(src="wd:BI", dst="wd:BY", type="related_to", source="wd", label="원인")])
+    check("옛 '관련(원인)' 엣지를 인과 엣지로 옮긴다", causes_mod.migrate(store) == 1)
+    check("옮긴 뒤 관련 엣지는 남지 않는다",
+          store.conn.execute("SELECT type FROM edges WHERE src='wd:BI'").fetchone()["type"] == "caused")
+    check("두 번 돌려도 더 옮길 것이 없다", causes_mod.migrate(store) == 0)
+
+    conn = corpus_mod.open_corpus(Path(tmp) / "corpus.sqlite")
+    doc_text = """병자호란은 1636년 청나라가 조선을 침입한 전쟁이다.
+
+== 배경 ==
+임진왜란으로 명나라의 국력이 크게 소진되었고, 그 틈을 타 여진의 후금이 성장하였다. 정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.
+
+== 경과 ==
+인조는 남한산성으로 피신하였다.
+
+== 결과 ==
+병자호란의 결과 조선은 청과 군신 관계를 맺었다."""
+    corpus_mod.put_doc(conn, "wd:BJ", "병자호란", doc_text, source="aks")
+    corpus_mod.put_doc(conn, "wd:GABO", "갑오개혁", "갑오개혁은 1894년의 개혁이다.", source="kowiki")
+    docs = causes_mod.documents(store, conn)
+    check("말뭉치에 글이 있는 사건만 묻는다", [d["id"] for d in docs] == ["wd:BJ", "wd:GABO"], str([d["id"] for d in docs]))
+    doc = docs[0]
+    passages = causes_mod.doc_passages(conn, "wd:BJ", budget=60)
+    check("예산이 빠듯하면 인과를 말하는 절이 먼저 든다",
+          [p["section"] for p in passages] == ["배경"], str([p["section"] for p in passages]))
+    passages = causes_mod.doc_passages(conn, "wd:BJ")
+    check("예산 안이면 문서 순서 그대로", [p["section"] for p in passages] == ["", "배경", "경과", "결과"],
+          str([p["section"] for p in passages]))
+    gaz = causes_mod.gazetteer(store, doc)
+    check("알려진 개체에 그 무렵의 사건과 단체가 든다",
+          "임진왜란" in gaz["event"] and "후금" in gaz["org"] and "갑오개혁" not in gaz["event"], str(gaz))
+    prompt = causes_mod.build_prompt(doc, passages, gaz)
+    check("프롬프트에 종류·개체·원문이 다 든다", "배경:" in prompt and "후금" in prompt and "남한산성" in prompt)
+
+    answers = [
+        # 정상 — 별칭으로 풀리고 근거가 원문에 있다
+        {"cause": "임진전쟁", "cause_type": "event", "effect": "명나라", "effect_type": "org", "kind": "영향",
+         "how": "명의 국력이 소진되었다", "evidence": "임진왜란으로 명나라의 국력이 크게 소진되었고", "confidence": "certain"},
+        {"cause": "후금", "cause_type": "org", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "형제 관계를 요구하며 압박했다", "evidence": "정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.", "confidence": "probable"},
+        # 연대 역행 — 갑오개혁(1894)이 병자호란(1636)의 원인일 수 없다
+        {"cause": "갑오개혁", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "병자호란은 1636년 청나라가 조선을 침입한 전쟁이다.", "confidence": "certain"},
+        # 이름을 못 푼다 — 노드를 만들지 않는다
+        {"cause": "여진족의 성장", "cause_type": "concept", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "", "evidence": "그 틈을 타 여진의 후금이 성장하였다.", "confidence": "certain"},
+        # 서술구는 주어로 푼다 — 정묘호란(의 굴욕)이 원인, 구는 남긴다
+        {"cause": "정묘호란 뒤의 형제 관계 요구", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "형제 관계 요구가 압박이 되었다", "evidence": "정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.", "confidence": "possible"},
+        # 자국 왕조는 원인이 되지 않는다
+        {"cause": "조선의 저항", "cause_type": "org", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "", "evidence": "인조는 남한산성으로 피신하였다.", "confidence": "possible"},
+        # 근거가 원문에 없다
+        {"cause": "정묘호란", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "정묘호란의 굴욕이 병자호란을 불렀다.", "confidence": "certain"},
+        # 자기 자신
+        {"cause": "병자호란", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "병자호란의 결과 조선은 청과 군신 관계를 맺었다.", "confidence": "certain"},
+        # 결과가 인물 — 타입이 안 맞는다
+        {"cause": "병자호란", "cause_type": "event", "effect": "인조", "effect_type": "event", "kind": "영향",
+         "how": "", "evidence": "인조는 남한산성으로 피신하였다.", "confidence": "certain"},
+    ]
+    edges, why, missing = causes_mod.accept(store, doc, answers, passages, "test-model")
+    got = {(e.src, e.dst, e.label) for e in edges}
+    check("별칭으로 푼 원인과 단체 결과가 엣지가 된다", ("wd:IMJIN", "wd:MING", "영향") in got, str(got))
+    check("단체가 원인인 인과도 적는다", ("wd:JIN", "wd:BJ", "배경") in got, str(got))
+    check("연대가 역행하면 버린다", why.get("연대 역행") == 1 and ("wd:GABO", "wd:BJ", "원인") not in got, str(why))
+    check("못 푼 이름은 노드를 만들지 않고 모아 둔다", missing == ["여진족의 성장", "조선의 저항"] and why.get("이름 못 풂") == 2, str(missing))
+    jm = next(e for e in edges if e.src == "wd:JM")
+    check("서술구는 주어로 풀고 원래 구를 남긴다", jm.props["cause_as"] == "정묘호란 뒤의 형제 관계 요구" and "effect_as" not in jm.props, str(jm.props))
+    check("서술구의 주어 후보는 긴 것부터", causes_mod.heads("도요토미 히데요시의 사망") == ["도요토미 히데요시", "도요토미"], str(causes_mod.heads("도요토미 히데요시의 사망")))
+    check("한 글자 나라 이름은 긴 이름으로", causes_mod.heads("청의 연호 사용 강요")[-1] == "청나라", str(causes_mod.heads("청의 연호 사용 강요")))
+    hs = causes_mod.heads("후금(청)의 재차 침입 결심")
+    check("괄호는 떼고 보며 구 자체는 후보가 아니다", hs[-1] == "후금" and "후금(청)의 재차 침입 결심" not in hs, str(hs))
+    check("근거가 원문에 없으면 버린다", why.get("근거 없음") == 1, str(why))
+    check("자기 자신은 잇지 않는다", why.get("자기 자신") == 1, str(why))
+    check("인물은 결과가 될 수 없다", why.get("타입 안 맞음") == 1, str(why))
+    check("근거는 문장 단위로 되살린다",
+          next(e for e in edges if e.src == "wd:IMJIN").props["evidence"].endswith("성장하였다."),
+          next(e for e in edges if e.src == "wd:IMJIN").props["evidence"])
+    check("엣지에 '어떻게'와 출처 문서·모델이 남는다",
+          all(e.props["doc"] == "wd:BJ" and e.props["model"] == "test-model" for e in edges)
+          and next(e for e in edges if e.src == "wd:JIN").props["how"] == "형제 관계를 요구하며 압박했다")
+    check("스키마 밖 종류는 버린다",
+          causes_mod.accept(store, doc, [dict(answers[0], kind="이유")], passages, "m")[1] == {"종류 밖": 1})
+
+    n = causes_mod.write(store, edges)
+    check("엣지를 적는다", n == 3)
+    weaker = [Edge(src="wd:JIN", dst="wd:BJ", type="caused", source="causes", label="원인", confidence=0.5,
+                   props={"how": "다른 문서의 약한 말"})]
+    causes_mod.write(store, weaker)
+    row = store.conn.execute("SELECT label, confidence FROM edges WHERE src='wd:JIN' AND dst='wd:BJ'").fetchone()
+    check("같은 짝을 더 약하게 말한 문서는 앞의 것을 덮지 않는다", row["label"] == "배경" and row["confidence"] == 0.7, str(tuple(row)))
+    causes_mod.mark(store, doc, "test-model")
+    check("물은 문서는 다시 묻지 않는다", [d["id"] for d in causes_mod.documents(store, conn)] == ["wd:GABO"])
+    check("--redo 면 다시 묻는다", len(causes_mod.documents(store, conn, redo=True)) == 2)
+
+    # 구조화 소스가 반대 방향을 알면 추출본을 버린다
+    store.upsert_edges([Edge(src="wd:JM", dst="wd:BJ", type="caused", source="wd", label="원인")])
+    _, why2, _ = causes_mod.accept(store, doc, [
+        {"cause": "병자호란", "cause_type": "event", "effect": "정묘호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.", "confidence": "certain"}], passages, "m")
+    check("구조화 소스와 반대 방향이면 버린다 (연대보다 먼저 잡히지 않아도)",
+          why2.get("연대 역행") == 1 or why2.get("구조화 소스와 반대") == 1, str(why2))
+
+    # 사슬 — 임진왜란 → 명나라 (영향) · 후금 → 병자호란 (배경) · 정묘호란 → 병자호란 (wd)
+    store.upsert_edges([Edge(src="wd:MING", dst="wd:JIN", type="caused", source="causes", label="배경",
+                             confidence=0.7, props={"how": "명의 쇠퇴로 여진이 성장할 틈이 생겼다"})])
+    tree = causes_mod.chain(store, "wd:BJ", depth=4)
+    cause_ids = [c["id"] for c in tree["causes"]]
+    check("원인 나무의 첫 층은 직접 원인들", set(cause_ids) == {"wd:JIN", "wd:JM"}, str(cause_ids))
+    check("나무의 원인에 서술구가 붙는다", next(c for c in tree["causes"] if c["id"] == "wd:JM")["as"] == "정묘호란 뒤의 형제 관계 요구")
+    jin = next(c for c in tree["causes"] if c["id"] == "wd:JIN")
+    check("원인의 원인으로 내려간다 (후금 ← 명 ← 임진왜란)",
+          jin["children"][0]["id"] == "wd:MING" and jin["children"][0]["children"][0]["id"] == "wd:IMJIN", str(jin))
+    check("나무의 노드 요약이 한 번씩 실린다", set(tree["nodes"]) == {"wd:BJ", "wd:JIN", "wd:JM", "wd:MING", "wd:IMJIN"}, str(set(tree["nodes"])))
+    got = causes_mod.paths(store, "wd:IMJIN", "wd:BJ")
+    check("임진왜란에서 병자호란까지 최단 인과 경로를 찾는다",
+          got["found"] and [s["id"] for s in got["paths"][0]] == ["wd:IMJIN", "wd:MING", "wd:JIN", "wd:BJ"], str(got["paths"]))
+    check("경로의 걸음마다 '어떻게'가 붙는다",
+          got["paths"][0][2]["edge"]["how"] == "명의 쇠퇴로 여진이 성장할 틈이 생겼다", str(got["paths"][0][2]))
+    back = causes_mod.paths(store, "wd:BJ", "wd:IMJIN")
+    check("거꾸로 물으면 반대 방향임을 밝히고 같은 경로를 준다",
+          back["found"] and back["reversed"] and back["paths"][0][0]["id"] == "wd:IMJIN", str(back))
+    none = causes_mod.paths(store, "wd:GABO", "wd:BJ")
+    check("이어지지 않으면 없다고 한다", not none["found"] and none["paths"] == [])
+    text = causes_mod.render_chain(tree)
+    check("글로 읽을 때 원인·결과와 '어떻게'가 한글로 찍힌다",
+          "원인:" in text and "임진왜란 (1592)" in text and "명의 쇠퇴로" in text, text)
+    check("경로 글도 마찬가지", "임진왜란 (1592)" in causes_mod.render_paths(got) and "→[배경" in causes_mod.render_paths(got))
+
+    # 화면 DB 로 옮기기 — 양끝이 거기 있는 것만
+    target = GraphStore(Path(tmp) / "korea.sqlite")
+    target.upsert_nodes([Node(id="wd:JIN", type="org", label="후금", source="wd"),
+                         Node(id="wd:BJ", type="event", label="병자호란", source="wd"),
+                         Node(id="wd:JM", type="event", label="정묘호란", source="wd")])
+    moved = causes_mod.sync(store, target)
+    check("파생본에 양끝이 있는 인과 엣지만 옮긴다", moved == 3,
+          str(target.conn.execute("SELECT src, dst FROM edges").fetchall()))
+    api = GraphAPI(target, era="korea")
+    rel = next(r for r in api.node("wd:BJ")["relations"] if r["other"]["id"] == "wd:JIN")
+    check("상세에 인과 엣지가 종류·어떻게와 함께 간다",
+          rel["type"] == "caused" and rel["dir"] == "in" and rel["edge_label"] == "배경"
+          and rel["how"] == "형제 관계를 요구하며 압박했다", str(rel))
+    check("상세 관계 목록에서 인과가 맨 앞이다", api.node("wd:BJ")["relations"][0]["type"] == "caused")
+    from histgraph.server import dispatch as _dispatch
+    st, body = _dispatch(api, "/api/chain", {"id": ["wd:BJ"]})
+    check("/api/chain 이 나무를 준다", st == 200 and {c["id"] for c in body["causes"]} == {"wd:JIN", "wd:JM"}, str(body))
+    st, body = _dispatch(api, "/api/path", {"from": ["wd:JIN"], "to": ["wd:BJ"]})
+    check("/api/path 가 경로를 준다", st == 200 and body["found"] and body["nodes"]["wd:JIN"]["group"] == "actor", str(body))
+    st, _ = _dispatch(api, "/api/chain", {"id": ["없음"]})
+    check("없는 노드는 404", st == 404)
+    conn.close(); store.close(); target.close()
 
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")

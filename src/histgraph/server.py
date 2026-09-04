@@ -120,7 +120,7 @@ MAX_SPAN = {"person": 110, "event": 60}
 
 # 관계를 볼 때 사람이 먼저 궁금해하는 순서. 상세 패널의 정렬 기준이다.
 RELATION_ORDER = [
-    "participated_in", "held_position", "member_of", "created",
+    "caused", "participated_in", "held_position", "member_of", "created",
     "child_of", "spouse_of", "born_in", "died_in",
     "occurred_at", "located_in", "depicts", "part_of",
     "from_period", "occurred_during", "dated_to", "related_to",
@@ -472,8 +472,15 @@ class GraphAPI:
                     # 사용자는 0.9 짜리 엣지를 믿을지 판단할 방법이 없다.
                     "evidence": [],
                     "original_type": edge_props.get("original_type"),
+                    # 인과 엣지의 '어떻게'. 종류(edge_label)만으로는 "A 가
+                    # B 의 배경"이라는 말뿐이라 무엇이 이어졌는지 모른다.
+                    "how": edge_props.get("how") or None,
+                    # 상대가 서술구('후금의 파약 행위')로 적혀 있었으면 그 구.
+                    "as": edge_props.get("cause_as" if direction == "in" else "effect_as") or None,
                 }
             fact["confidence"] = max(fact["confidence"], r["confidence"])
+            if not fact["how"] and edge_props.get("how"):
+                fact["how"] = edge_props["how"]
             if not fact["edge_label"] and r["edge_label"]:
                 fact["edge_label"] = r["edge_label"]
             if r["source"] not in fact["sources"]:
@@ -926,6 +933,27 @@ def dispatch(
             limit=int(one("limit", str(DEFAULT_LIMIT))),
             exclude=exclude,
         )
+    # 인과 사슬. 한 노드의 원인·결과 나무, 또는 두 노드 사이의 최단 경로.
+    if path == "/api/chain":
+        from .causes import chain
+        node_id = (q.get("id") or [""])[0]
+        depth = max(1, min(int((q.get("depth") or ["4"])[0]), 6))
+        got = chain(api.store, node_id, depth=depth)
+        if got is None:
+            return 404, {"error": "not found", "id": node_id}
+        for n in got["nodes"].values():
+            n["group"] = TYPE_GROUP.get(n["type"], "thing")
+        return 200, got
+    if path == "/api/path":
+        from .causes import paths
+        src = (q.get("from") or [""])[0]
+        dst = (q.get("to") or [""])[0]
+        if not src or not dst:
+            return 400, {"error": "from 과 to 가 필요합니다"}
+        got = paths(api.store, src, dst)
+        for n in got["nodes"].values():
+            n["group"] = TYPE_GROUP.get(n["type"], "thing")
+        return 200, got
     if path == "/api/timeline":
         tl = api.timeline(one("id"))
         return (200, tl) if tl else (404, {"error": "not found"})
