@@ -1,0 +1,6 @@
+# 그래프 화면은 자바스크립트로 그려져서 로봇이 읽을 것이 없다. 대신 방침·
+# 약관 두 장은 정적 문서라 그대로 읽힌다 — 광고 심사가 보는 것도 그쪽이다.
+User-agent: *
+Allow: /
+
+Sitemap: https://www.histgraph.space/sitemap.xml
