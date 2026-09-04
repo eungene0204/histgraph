@@ -71,6 +71,23 @@ let appHtml = '';
   ok('연표 자리에 tl-head/tl-body 가 있다',
      appHtml.includes('tl-head') && appHtml.includes('tl-body'));
   ok('검색창이 있다', appHtml.includes('검색'));
+  // 광고를 실으려면 방침·약관이 어느 화면에서든 한 번에 닿아야 한다.
+  ok('바닥에 방침·약관 링크가 있다',
+     appHtml.includes('href="/privacy.html"') && appHtml.includes('href="/terms.html"')
+     && appHtml.includes('개인정보처리방침') && appHtml.includes('이용약관'),
+     appHtml.slice(appHtml.indexOf('<footer')).slice(0, 300));
+}
+
+// --- 방침·약관 (리액트 바깥의 정적 문서) ---------------------------------
+{
+  const docs = [['개인정보처리방침', 'privacy.html'], ['이용약관', 'terms.html']];
+  for (const [name, file] of docs) {
+    const html = readFileSync(join(WEB, file), 'utf-8');
+    ok(`${name} 페이지가 있다`, html.includes('<h1>') && html.length > 1000);
+    // 자바스크립트 없이 열려야 한다 — 광고 심사와 검색 로봇이 보는 페이지다.
+    ok(`${name} 은 자바스크립트 없이 읽힌다`, !/<script/.test(html));
+    ok(`${name} 에 그래프로 돌아가는 길이 있다`, html.includes('href="/"'));
+  }
 }
 
 // --- 범례: CSS 가 기대하는 평평한 목록인가 -------------------------------
@@ -224,7 +241,10 @@ let detailHtml = '';
     .replace(/<[^>]+>/g, ' ')                  // 태그를 통째로 걷어낸다
     .replace(/histgraph|same_as/g, ' ');
   const leaks = [];
-  for (const [name, html] of [['App', appHtml], ['상세', detailHtml]]) {
+  const pages = [['App', appHtml], ['상세', detailHtml],
+                 ['방침', readFileSync(join(WEB, 'privacy.html'), 'utf-8')],
+                 ['약관', readFileSync(join(WEB, 'terms.html'), 'utf-8')]];
+  for (const [name, html] of pages) {
     const found = visibleText(html).match(/[A-Za-z]{2,}/g);
     if (found) leaks.push(`${name}: ${[...new Set(found)].join(', ')}`);
   }

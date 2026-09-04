@@ -3,6 +3,9 @@
 //
 // 터미널 하나면 된다:  npm run dev   (API 까지 함께 뜬다)
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
+
+const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 
 export default {
   root: '.',
@@ -23,5 +26,15 @@ export default {
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // 화면은 한 장(index.html)이지만 문서 두 장은 따로 낸다. 광고 심사가
+    // 보는 페이지라 자바스크립트 없이 열려야 하고, 그래프 화면의 CSS(body
+    // 를 flex·overflow:hidden 으로 잡는다)를 물려받으면 글이 잘린다.
+    rollupOptions: {
+      input: {
+        main: here('index.html'),
+        privacy: here('privacy.html'),
+        terms: here('terms.html'),
+      },
+    },
   },
 };
