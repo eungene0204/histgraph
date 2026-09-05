@@ -55,7 +55,11 @@ SYSTEM_PROMPT = """당신은 한국 근현대사 문헌을 읽고 한 사람이 
 1. **문단에 서술된 것만으로 판정합니다.** 배경지식으로 아는 사실이라도 문단에 없으면 쓰지 마세요.
 2. 역할은 아래 목록에서 하나만 고릅니다. 판단이 서지 않으면 '언급'입니다.
 3. **근거 구절(evidence)은 문단에서 그대로 인용**합니다. 요약하거나 바꿔 쓰지 마세요. 한 문장이면 충분합니다.
-4. 확신도를 정직하게 매기세요. 문단이 단정하면 certain, 추정이면 probable, 암시에 그치면 possible 입니다."""
+4. 확신도를 정직하게 매기세요. 문단이 단정하면 certain, 추정이면 probable, 암시에 그치면 possible 입니다.
+5. **'주도'·'가담'은 그 사건을 일으킨 쪽의 역할입니다.** 사건의 중심 인물이라고 주도가 아닙니다.
+   - 항쟁·시위·봉기가 반대한 정권·인물(예: 6월 민주 항쟁의 전두환, 6·3 항쟁의 박정희)은 '주도'가 아니라 '표적'입니다.
+   - 계엄·반란·쿠데타를 막거나 해제한 사람(예: 계엄 해제 표결을 이끈 국회의장)은 '주도'가 아니라 '대항'입니다.
+   - 사건의 정의 문장("X는 Y가 일으킨 사건이다")은 Y 를 주도로 볼 근거이지, 그 문장에 나오는 다른 이름의 근거가 아닙니다."""
 
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -121,10 +125,18 @@ def names_of(store: GraphStore, node_id: str) -> list[str]:
     return out
 
 
-def candidates(store: GraphStore, corpus, since: int | None = None, redo: bool = False) -> list[dict]:
+def candidates(
+    store: GraphStore,
+    corpus,
+    since: int | None = None,
+    redo: bool = False,
+    only_roles: frozenset[str] | set[str] | None = None,
+) -> list[dict]:
     """판정할 엣지 — 사건으로 들어가는 인물의 participated_in.
 
-    말뭉치에 그 사건 문서가 있는 것만. 없는 사건은 물을 글이 없다."""
+    말뭉치에 그 사건 문서가 있는 것만. 없는 사건은 물을 글이 없다.
+    `only_roles` 는 다시 물을 때 그 역할로 판정됐던 엣지만 고른다 —
+    프롬프트를 고친 뒤 틀린 갈래('주도')만 다시 묻는 데 쓴다."""
     from .corpus import has_doc
     from .timeline import _year_of
 
@@ -144,6 +156,8 @@ def candidates(store: GraphStore, corpus, since: int | None = None, redo: bool =
                 continue
         props = json.loads(r["props"] or "{}")
         if not redo and props.get("role"):
+            continue
+        if only_roles is not None and props.get("role") not in only_roles:
             continue
         if not has_doc(corpus, r["dst"]):
             continue
@@ -250,10 +264,11 @@ def run(
     limit: int | None = None,
     dry_run: bool = False,
     redo: bool = False,
+    only_roles: frozenset[str] | set[str] | None = None,
 ) -> dict[str, Any]:
     """후보를 돌며 판정한다. `backend` 가 None 이거나 dry_run 이면 묻지 않고
     근거 문단이 있는지만 센다 — 말뭉치가 얼마나 답할 수 있는지 먼저 본다."""
-    todo = candidates(store, corpus, since=since, redo=redo)
+    todo = candidates(store, corpus, since=since, redo=redo or bool(only_roles), only_roles=only_roles)
     if limit:
         todo = todo[:limit]
     counts: dict[str, int] = {"후보": len(todo), "문단 있음": 0, "문단 없음": 0}

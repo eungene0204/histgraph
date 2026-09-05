@@ -3474,6 +3474,10 @@ with tempfile.TemporaryDirectory() as tmp:
         "SELECT type, label FROM edges WHERE src='wd:P2' AND dst='wd:EV'").fetchone()
     check("근거 없는 참여는 화면에 두지 않는다", none["type"] == "related_to" and none["label"] == "근거 없음")
     check("한 번 판정한 엣지는 다시 묻지 않는다", roles_mod.candidates(store, conn, since=1945) == [])
+    store.upsert_edges([Edge(src="wd:P3", dst="wd:EV", type="participated_in", source="roles",
+                             label="주도", props={"role": "주도"})])
+    check("역할을 지정하면 그 역할로 판정됐던 엣지만 다시 묻는다",
+          [c["src"] for c in roles_mod.candidates(store, conn, since=1945, redo=True, only_roles={"주도"})] == ["wd:P3"])
     api = GraphAPI(store, era="korea")
     rel = [r for r in api.node("wd:P1")["relations"] if r["other"]["id"] == "wd:EV"]
     check("화면에 역할과 근거가 함께 간다",

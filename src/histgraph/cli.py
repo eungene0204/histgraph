@@ -1251,8 +1251,9 @@ def cmd_roles(args: argparse.Namespace) -> int:
     backend = None if args.dry_run else build_backend(args.backend, args.model)
     conn = corpus_mod.open_corpus(args.corpus)
     with GraphStore(args.db) as store:
+        only = frozenset(r.strip() for r in args.redo_roles.split(",") if r.strip()) if args.redo_roles else None
         got = roles_mod.run(store, conn, backend, since=args.since, limit=args.limit,
-                            dry_run=args.dry_run, redo=args.redo)
+                            dry_run=args.dry_run, redo=args.redo, only_roles=only)
     c = got["counts"]
     print(f"  후보 {c['후보']:,}건 · 근거 문단 있음 {c['문단 있음']:,} · 없음 {c['문단 없음']:,}")
     if got["by_role"]:
