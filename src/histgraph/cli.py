@@ -1755,15 +1755,19 @@ def cmd_paraphrase(args: argparse.Namespace) -> int:
     옮긴다. 설명이 바뀐 노드는 옛 글이 저절로 무효가 되므로 수집 뒤마다
     다시 돌리면 그것만 새로 쓴다:
 
-        uv run histgraph paraphrase --sync-to data/korea.sqlite
+        uv run histgraph paraphrase --scope data/korea.sqlite --sync-to data/korea.sqlite
     """
     from . import summaries as summaries_mod
 
     with GraphStore(args.db) as store:
         if not args.sync_only:
             backend = None if args.dry_run else build_backend(args.backend, args.model)
+            only = None
+            if args.scope is not None:
+                with GraphStore(args.scope, readonly=True) as scoped:
+                    only = {r["id"] for r in scoped.conn.execute("SELECT id FROM nodes")}
             got = summaries_mod.run(store, backend, limit=args.limit,
-                                    dry_run=args.dry_run, redo=args.redo)
+                                    dry_run=args.dry_run, redo=args.redo, only=only)
             c = got["counts"]
             print(f"  후보 {c['후보']:,}건" + ("" if args.dry_run else
                   f" · 새로 씀 {c['새로 씀']:,} · 떨어짐 {c['떨어짐']:,}"))
@@ -2079,6 +2083,8 @@ def main(argv: list[str] | None = None) -> int:
     p_pp.add_argument("--sync-to", type=Path, default=None,
                       help="끝나고 새로 쓴 글을 이 파생본(화면 DB)으로 옮긴다")
     p_pp.add_argument("--sync-only", action="store_true", help="쓰지 않고 옮기기만")
+    p_pp.add_argument("--scope", type=Path, default=None,
+                      help="이 파생본에 있는 노드만 쓴다 (원본 전체는 며칠 걸린다)")
     p_pp.set_defaults(func=cmd_paraphrase)
 
     p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")

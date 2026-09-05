@@ -147,9 +147,11 @@ def accept(text: str, source: str) -> str | None:
     return None
 
 
-def candidates(store: GraphStore, redo: bool = False) -> list[dict]:
+def candidates(store: GraphStore, redo: bool = False,
+               only: set[str] | None = None) -> list[dict]:
     """새로 쓸 노드. 설명이 있고 정본이 아닌 것. 이미 쓴 것(해시가 같은 것)은
-    `redo` 가 아니면 건너뛴다."""
+    `redo` 가 아니면 건너뛴다. `only` 를 주면 그 id 만 — 원본 43,000 노드를
+    다 쓰면 하루가 아니라 며칠이다. 화면에 있는 것(파생본)부터 쓴다."""
     have = {
         r["node_id"]: r["src_hash"]
         for r in store.conn.execute("SELECT node_id, src_hash FROM summaries")
@@ -159,6 +161,8 @@ def candidates(store: GraphStore, redo: bool = False) -> list[dict]:
         "SELECT id, type, label, source, description, url, props FROM nodes"
         " WHERE COALESCE(description, '') <> '' ORDER BY id"
     ):
+        if only is not None and r["id"] not in only:
+            continue
         props = json.loads(r["props"] or "{}")
         if is_canon(r["source"], props, r["url"]):
             continue
@@ -171,10 +175,11 @@ def candidates(store: GraphStore, redo: bool = False) -> list[dict]:
 
 
 def run(store: GraphStore, backend, limit: int | None = None,
-        dry_run: bool = False, redo: bool = False) -> dict[str, Any]:
+        dry_run: bool = False, redo: bool = False,
+        only: set[str] | None = None) -> dict[str, Any]:
     from .ontology import NODE_TYPES
 
-    todo = candidates(store, redo=redo)
+    todo = candidates(store, redo=redo, only=only)
     if limit:
         todo = todo[:limit]
     counts = {"후보": len(todo), "새로 씀": 0, "떨어짐": 0}

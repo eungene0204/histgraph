@@ -90,8 +90,8 @@
   기본 35B 모델로 — 파생본 후보 6,609건.
 
 ```
-uv run histgraph paraphrase --sync-to data/korea.sqlite     # 원본에서 쓰고 화면 DB 로
-uv run histgraph --db data/korea.sqlite paraphrase          # 또는 파생본에 바로
+uv run histgraph paraphrase --scope data/korea.sqlite --sync-to data/korea.sqlite
+# --scope 없이 원본 전체를 쓰면 후보 31,876건(며칠). 화면에 있는 6,609건부터.
 ```
 
 남은 것:
