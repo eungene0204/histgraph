@@ -113,6 +113,19 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
+# 모델의 답을 그대로 둔다. 판정(`accept`)은 노드를 찾아야 하는데, 해소기가
+# 좋아지거나 노드가 새로 생기면 **묻지 않고 다시 판정**할 수 있어야 한다 —
+# 첫 두 번의 실행(문서 737건, 약 12시간)은 답을 버려서 그러지 못했다.
+ANSWERS_DDL = """
+CREATE TABLE IF NOT EXISTS causes_answers (
+    node_id  TEXT PRIMARY KEY,
+    model    TEXT NOT NULL,
+    answers  TEXT NOT NULL,
+    asked_at TEXT NOT NULL
+)"""
+
+
+
 # --- 문서 -------------------------------------------------------------------
 def documents(
     store: GraphStore,
@@ -130,8 +143,16 @@ def documents(
 
     `scope` 는 화면 DB 의 노드 id 집합이다 — 문서당 1분이라 원본 3,000건을
     다 묻기 전에 **화면에 서 있는 것부터** 묻는다 (`paraphrase --scope` 와
-    같은 이유)."""
+    같은 이유).
+
+    `redo` 는 **답이 저장되지 않은** 문서만 다시 묻는다 — 답을 버리던 때
+    물은 것이다. 답이 있는 문서는 `reresolve` 가 모델 없이 다시 판정하므로
+    묻지 않는다. 그래서 하루짜리 `--redo` 가 중간에 죽어도 같은 명령이
+    이어 돈다 (실측: 세션이 끝나며 500건 중 78건을 남기고 죽었다)."""
     from .corpus import has_doc
+
+    store.conn.execute(ANSWERS_DDL)
+    answered = {r["node_id"] for r in store.conn.execute("SELECT node_id FROM causes_answers")}
 
     marks = ",".join("?" * len(types))
     rows = store.conn.execute(
@@ -147,7 +168,7 @@ def documents(
         props = json.loads(r["props"] or "{}")
         if scope is not None and r["id"] not in scope:
             continue
-        if not redo and props.get("causes_model"):
+        if props.get("causes_model") and (not redo or r["id"] in answered):
             continue
         if not has_doc(corpus, r["id"]):
             continue
@@ -573,18 +594,6 @@ def mark(store: GraphStore, doc: dict, model: str) -> None:
     props["causes_model"] = model
     store.conn.execute("UPDATE nodes SET props = ? WHERE id = ?",
                        (json.dumps(props, ensure_ascii=False), doc["id"]))
-
-
-# 모델의 답을 그대로 둔다. 판정(`accept`)은 노드를 찾아야 하는데, 해소기가
-# 좋아지거나 노드가 새로 생기면 **묻지 않고 다시 판정**할 수 있어야 한다 —
-# 첫 두 번의 실행(문서 737건, 약 12시간)은 답을 버려서 그러지 못했다.
-ANSWERS_DDL = """
-CREATE TABLE IF NOT EXISTS causes_answers (
-    node_id  TEXT PRIMARY KEY,
-    model    TEXT NOT NULL,
-    answers  TEXT NOT NULL,
-    asked_at TEXT NOT NULL
-)"""
 
 
 def keep_answers(store: GraphStore, doc: dict, answers: list[dict], model: str) -> None:

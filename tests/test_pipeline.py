@@ -4011,6 +4011,10 @@ with tempfile.TemporaryDirectory() as tmp:
     causes_mod.mark(store, doc, "test-model")
     check("물은 문서는 다시 묻지 않는다", [d["id"] for d in causes_mod.documents(store, conn)] == ["wd:GABO"])
     check("--redo 면 다시 묻는다", len(causes_mod.documents(store, conn, redo=True)) == 2)
+    causes_mod.keep_answers(store, {"id": "wd:BJ"}, [], "m")
+    check("--redo 도 답이 저장된 문서는 다시 묻지 않는다 (reresolve 몫)",
+          [d["id"] for d in causes_mod.documents(store, conn, redo=True)] == ["wd:GABO"])
+    store.conn.execute("DELETE FROM causes_answers")
     check("--scope 를 주면 화면에 있는 노드만 묻는다",
           [d["id"] for d in causes_mod.documents(store, conn, redo=True, scope={"wd:GABO"})] == ["wd:GABO"])
 
