@@ -37,6 +37,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from .extract import complete_evidence, normalize_name, pick_candidate
@@ -118,12 +120,17 @@ def documents(
     types: tuple[str, ...] = ("event",),
     redo: bool = False,
     limit: int | None = None,
+    scope: set[str] | None = None,
 ) -> list[dict]:
     """물을 문서 — 말뭉치에 글이 있는 노드. **연결이 많은 사건부터** 묻는다.
 
     한 번 물은 문서는 `props.causes_model` 이 남아 다시 묻지 않는다.
     `ingest` 가 props 를 덮으면 표식이 사라지므로 수집 뒤에는 다시 돈다
-    (다른 파생 표식과 같은 규약)."""
+    (다른 파생 표식과 같은 규약).
+
+    `scope` 는 화면 DB 의 노드 id 집합이다 — 문서당 1분이라 원본 3,000건을
+    다 묻기 전에 **화면에 서 있는 것부터** 묻는다 (`paraphrase --scope` 와
+    같은 이유)."""
     from .corpus import has_doc
 
     marks = ",".join("?" * len(types))
@@ -138,6 +145,8 @@ def documents(
     out: list[dict] = []
     for r in rows:
         props = json.loads(r["props"] or "{}")
+        if scope is not None and r["id"] not in scope:
+            continue
         if not redo and props.get("causes_model"):
             continue
         if not has_doc(corpus, r["id"]):
@@ -292,6 +301,84 @@ def heads(phrase: str) -> list[str]:
     return out
 
 
+# 표기 차이를 지우는 열쇠. 실측(사건 478 · 단체 259 문서): 모델 답 5,000여 건
+# 중 3,237건이 '이름 못 풂'으로 버려졌는데, 그중 적잖은 것이 **있는 노드를
+# 다른 표기로** 부른 것이었다 — '대한민국임시정부'(띄어쓰기), '새마을운동',
+# '경제개발 5개년 계획', '6·29 선언'/'6.29 선언'(가운뎃점). 띄어쓰기·가운뎃점·
+# 마침표·붙임표·괄호 한정어를 지우고 견준다. 한 글자짜리 열쇠는 우연히
+# 맞으므로 쓰지 않는다.
+_LOOSE_STRIP = re.compile(r"[\s·.\-–—_'\"‘’“”]|\([^)]*\)")
+_LOOSE_TYPES = ("event", "org", "concept", "person")
+# 접미 일치는 사건·단체·개념에만 — '중앙정보부' → '대한민국 중앙정보부'.
+# 인물에 쓰면 '이황'이 '퇴계 이황'·'조선 예종(휘 이황)' 아무 데나 붙는다.
+_SUFFIX_TYPES = ("event", "org", "concept")
+
+
+def loose_key(name: str) -> str:
+    return _LOOSE_STRIP.sub("", name)
+
+
+class LooseIndex:
+    """라벨·별칭의 느슨한 열쇠 -> 노드 id. 한 번 만들어 `store` 에 붙여 둔다
+    (원본 4만 노드 + 별칭 7천 — 만드는 데 1초가 안 걸린다)."""
+
+    def __init__(self, store: GraphStore) -> None:
+        self.by_key: dict[str, set[str]] = defaultdict(set)
+        self.suffix: dict[str, list[tuple[str, str]]] = defaultdict(list)  # 타입 -> [(열쇠, id)]
+        marks = ",".join("?" * len(_LOOSE_TYPES))
+        for r in store.conn.execute(
+            f"""SELECT n.id, n.type, n.label AS name FROM nodes n WHERE n.type IN ({marks})
+                UNION ALL
+                SELECT n.id, n.type, a.alias AS name FROM aliases a JOIN nodes n ON n.id = a.node_id
+                 WHERE n.type IN ({marks})""",
+            (*_LOOSE_TYPES, *_LOOSE_TYPES),
+        ):
+            key = loose_key(r["name"] or "")
+            if len(key) < 2:
+                continue
+            self.by_key[key].add(r["id"])
+            if r["type"] in _SUFFIX_TYPES:
+                self.suffix[r["type"]].append((key, r["id"]))
+
+    def lookup(self, name: str, node_type: str) -> list[str]:
+        """느슨한 열쇠가 같은 노드들. 없으면 **그 타입의 라벨이 이 이름으로
+        끝나는** 노드들 — 단, 이름이 세 글자 넘고 후보가 셋 이하일 때만
+        ('운동'으로 끝나는 라벨은 수백이다)."""
+        key = loose_key(name)
+        if len(key) < 2:
+            return []
+        ids = self.by_key.get(key)
+        if ids:
+            return sorted(ids)
+        if len(key) < 4 or node_type not in _SUFFIX_TYPES:
+            return []
+        found = sorted({nid for k, nid in self.suffix[node_type] if k.endswith(key) and len(k) > len(key)})
+        return found if len(found) <= 3 else []
+
+
+def loose_index(store: GraphStore) -> LooseIndex:
+    """색인은 노드·별칭 수가 그대로인 동안만 쓴다 — 노드가 늘면 다시 만든다."""
+    stamp = tuple(store.conn.execute("SELECT (SELECT COUNT(*) FROM nodes), (SELECT COUNT(*) FROM aliases)").fetchone())
+    cached = getattr(store, "_causes_loose", None)
+    if cached is None or cached[0] != stamp:
+        cached = store._causes_loose = (stamp, LooseIndex(store))  # type: ignore[attr-defined]
+    return cached[1]
+
+
+def _rows(store: GraphStore, ids: list[str], node_type: str | None) -> list:
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    clause = "AND n.type = ?" if node_type else ""
+    return store.conn.execute(
+        f"""SELECT n.id, n.type, n.start_date, n.end_date,
+                   (SELECT COUNT(*) FROM edges e WHERE e.src = n.id OR e.dst = n.id) AS deg
+              FROM nodes n WHERE n.id IN ({marks}) {clause}
+          ORDER BY deg DESC, n.id""",
+        (*ids, *((node_type,) if node_type else ())),
+    ).fetchall()
+
+
 def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[str, str, str] | None:
     """이름 -> (노드 id, 타입, 실제로 맞춘 표기). 없으면 None — 노드를 만들지 않는다.
 
@@ -299,14 +386,19 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
     타입을 잘못 붙였을 수 있다). 동명이인은 `extract.pick_candidate` 가
     문서의 연대와 주인공으로 가른다. 이름 그대로 못 찾으면 서술구로 보고
     주어(`heads`)로 다시 찾는다 — 실측: 첫 3건에서 못 푼 이름 18개가
-    전부 '후금의 파약 행위' 꼴이었다."""
+    전부 '후금의 파약 행위' 꼴이었다.
+
+    그래도 없으면 **표기 차이**로 보고 느슨한 열쇠(`LooseIndex`)로 한 번
+    더 — 정확한 표기가 먼저고 느슨한 것은 그 뒤다. 자국 왕조는 어느
+    길로도 풀지 않는다."""
     from .promote import life_span
 
     name = normalize_name(name)
     if len(name) < 2:
         return None
     doc_span = life_span(doc.get("start_date"), doc.get("end_date"))
-    for candidate in [name, *heads(name)]:
+    candidates = [name, *heads(name)]
+    for candidate in candidates:
         if candidate in HOME_POLITIES:
             return None
         for clause, args in (("AND n.type = ?2", (candidate, node_type)), ("", (candidate,))):
@@ -314,6 +406,16 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
                 store.conn.execute(CANDIDATES.format(type_clause=clause), args).fetchall(),
                 doc_span, doc["id"],
             )
+            if row:
+                return row["id"], row["type"], candidate
+    idx = loose_index(store)
+    home = {loose_key(h) for h in HOME_POLITIES}
+    for candidate in candidates:
+        if loose_key(candidate) in home:
+            return None
+        ids = idx.lookup(candidate, node_type)
+        for typed in (node_type, None):
+            row = pick_candidate(_rows(store, ids, typed), doc_span, doc["id"])
             if row:
                 return row["id"], row["type"], candidate
     return None
@@ -469,6 +571,59 @@ def mark(store: GraphStore, doc: dict, model: str) -> None:
                        (json.dumps(props, ensure_ascii=False), doc["id"]))
 
 
+# 모델의 답을 그대로 둔다. 판정(`accept`)은 노드를 찾아야 하는데, 해소기가
+# 좋아지거나 노드가 새로 생기면 **묻지 않고 다시 판정**할 수 있어야 한다 —
+# 첫 두 번의 실행(문서 737건, 약 12시간)은 답을 버려서 그러지 못했다.
+ANSWERS_DDL = """
+CREATE TABLE IF NOT EXISTS causes_answers (
+    node_id  TEXT PRIMARY KEY,
+    model    TEXT NOT NULL,
+    answers  TEXT NOT NULL,
+    asked_at TEXT NOT NULL
+)"""
+
+
+def keep_answers(store: GraphStore, doc: dict, answers: list[dict], model: str) -> None:
+    store.conn.execute(ANSWERS_DDL)
+    store.conn.execute(
+        "INSERT OR REPLACE INTO causes_answers (node_id, model, answers, asked_at) VALUES (?, ?, ?, ?)",
+        (doc["id"], model, json.dumps(answers, ensure_ascii=False),
+         datetime.now(timezone.utc).isoformat(timespec="seconds")),
+    )
+
+
+def reresolve(store: GraphStore, corpus, scope: set[str] | None = None) -> dict[str, Any]:
+    """저장된 답을 모델 없이 다시 판정한다. 이미 있는 엣지는 더 확실한 것만
+    바뀌고(`write`), 새로 풀린 이름이 엣지를 더한다."""
+    store.conn.execute(ANSWERS_DDL)
+    rows = store.conn.execute(
+        """SELECT a.node_id, a.model, a.answers, n.label, n.type, n.start_date, n.end_date, n.props
+             FROM causes_answers a JOIN nodes n ON n.id = a.node_id"""
+    ).fetchall()
+    counts: dict[str, int] = {"문서": 0, "엣지": 0}
+    dropped: dict[str, int] = {}
+    unresolved: dict[str, int] = {}
+    samples: list[str] = []
+    for r in rows:
+        if scope is not None and r["node_id"] not in scope:
+            continue
+        doc = {"id": r["node_id"], "label": r["label"], "type": r["type"],
+               "start_date": r["start_date"], "end_date": r["end_date"],
+               "props": json.loads(r["props"] or "{}")}
+        passages = doc_passages(corpus, doc["id"])
+        if not passages:
+            continue
+        counts["문서"] += 1
+        edges, why, missing = accept(store, doc, json.loads(r["answers"]), passages, r["model"])
+        counts["엣지"] += write(store, edges)
+        store.conn.commit()
+        for k, v in why.items():
+            dropped[k] = dropped.get(k, 0) + v
+        for name in missing:
+            unresolved[name] = unresolved.get(name, 0) + 1
+    return {"counts": counts, "dropped": dropped, "unresolved": unresolved, "samples": samples}
+
+
 def run(
     store: GraphStore,
     corpus,
@@ -477,10 +632,14 @@ def run(
     limit: int | None = None,
     dry_run: bool = False,
     redo: bool = False,
+    scope: set[str] | None = None,
+    sync_target: GraphStore | None = None,
+    sync_every: int = 10,
 ) -> dict[str, Any]:
     """문서를 돌며 인과를 뽑는다. `backend` 가 None 이거나 dry_run 이면
-    묻지 않고 물을 문서와 분량만 센다."""
-    todo = documents(store, corpus, types=types, redo=redo, limit=limit)
+    묻지 않고 물을 문서와 분량만 센다. `sync_target` 을 주면 문서 몇 건마다
+    화면 DB 로 옮긴다 — 하루짜리 실행을 끝까지 기다리지 않아도 화면이 는다."""
+    todo = documents(store, corpus, types=types, redo=redo, limit=limit, scope=scope)
     counts: dict[str, int] = {"문서": len(todo), "엣지": 0}
     dropped: dict[str, int] = {}
     unresolved: dict[str, int] = {}
@@ -502,9 +661,13 @@ def run(
         edges, why, missing = accept(store, doc, answers, passages, model)
         n = write(store, edges)
         mark(store, doc, model)
+        keep_answers(store, doc, answers, model)
         # 문서마다 커밋한다 — 끝에서 한 번 하면 다른 세션이 잠금에 죽는다
         store.conn.commit()
         counts["엣지"] += n
+        counts["물음"] = counts.get("물음", 0) + 1
+        if sync_target is not None and counts["물음"] % sync_every == 0:
+            log.info("화면 DB 로 옮김: 인과 엣지 %d건", sync(store, sync_target))
         for k, v in why.items():
             dropped[k] = dropped.get(k, 0) + v
         for name in missing:

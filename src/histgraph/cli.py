@@ -1288,16 +1288,31 @@ def cmd_causes(args: argparse.Namespace) -> int:
     from . import causes as causes_mod
     from . import corpus as corpus_mod
 
+    scope: set[str] | None = None
+    if args.scope is not None:
+        with GraphStore(args.scope) as scoped:
+            scope = {r["id"] for r in scoped.conn.execute("SELECT id FROM nodes")}
     with GraphStore(args.db) as store:
         moved = causes_mod.migrate(store)
         if moved:
             print(f"  Wikidata 원인·결과 {moved}건을 인과 엣지로 옮겼습니다.")
-        if not args.sync_only:
+        if args.reresolve:
+            conn = corpus_mod.open_corpus(args.corpus)
+            got = causes_mod.reresolve(store, conn, scope=scope)
+            c = got["counts"]
+            print(f"  저장된 답을 다시 판정: 문서 {c['문서']:,}건 · 인과 엣지 {c['엣지']:,}건 (모델 없이)")
+        elif not args.sync_only:
             backend = None if args.dry_run else build_backend(args.backend, args.model)
             conn = corpus_mod.open_corpus(args.corpus)
             types = tuple(t.strip() for t in args.types.split(",") if t.strip())
-            got = causes_mod.run(store, conn, backend, types=types, limit=args.limit,
-                                 dry_run=args.dry_run, redo=args.redo)
+            target = GraphStore(args.sync_to) if args.sync_to is not None and not args.dry_run else None
+            try:
+                got = causes_mod.run(store, conn, backend, types=types, limit=args.limit,
+                                     dry_run=args.dry_run, redo=args.redo, scope=scope,
+                                     sync_target=target)
+            finally:
+                if target is not None:
+                    target.close()
             c = got["counts"]
             print(f"  문서 {c['문서']:,}건" + ("" if args.dry_run else f" · 인과 엣지 {c['엣지']:,}건"))
             if got["dropped"]:
@@ -1307,6 +1322,8 @@ def cmd_causes(args: argparse.Namespace) -> int:
                 print("  못 푼 이름 (노드 후보): " + " · ".join(f"{k}×{v}" if v > 1 else k for k, v in top))
             for line in got["samples"]:
                 print(f"    {line}")
+        if args.reresolve and got["dropped"]:
+            print("  버림: " + " · ".join(f"{k} {v}" for k, v in sorted(got["dropped"].items(), key=lambda x: -x[1])))
         if args.sync_to is not None:
             with GraphStore(args.sync_to) as target:
                 n = causes_mod.sync(store, target)
@@ -2333,6 +2350,10 @@ def main(argv: list[str] | None = None) -> int:
     p_ca.add_argument("--sync-to", type=Path, default=None,
                       help="끝나고 인과 엣지를 이 파생본(화면 DB)으로 옮긴다")
     p_ca.add_argument("--sync-only", action="store_true", help="묻지 않고 옮기기만")
+    p_ca.add_argument("--scope", type=Path, default=None,
+                      help="이 파생본(화면 DB)에 있는 노드만 묻는다 — 화면에 선 것부터")
+    p_ca.add_argument("--reresolve", action="store_true",
+                      help="저장된 모델 답을 모델 없이 다시 판정한다 (해소기가 좋아졌을 때)")
     p_ca.set_defaults(func=cmd_causes)
 
     p_ch = sub.add_parser("chain", help="인과 사슬을 글로 읽는다 (--to 를 주면 두 노드 사이의 경로)")

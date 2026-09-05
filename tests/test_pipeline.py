@@ -878,6 +878,17 @@ check("값이 본문으로 새지 않는다", "사도세자가" not in vals.get(
 check("날짜를 ISO 로", infobox_date(vals["날짜"]) == "1762-07-05")
 check("별칭을 가른다", infobox_aliases(vals["별칭"], "임오화변") == ["임오옥", "사도세자사건"])
 
+# 위키 주석은 편집자에게 남긴 쪽지지 별칭이 아니다. 을사사화·헤이그 특사
+# 사건의 `<!-- 잘 알려진 명칭으로, 사건 이름과 중복되면 쓰지 않음 -->` 이
+# 쉼표에서 갈려 이름표 두 개로 화면에 섰다 (2026-09-05 지적).
+memo = "<!-- 잘 알려진 명칭으로, 사건 이름과 중복되면 쓰지 않음 -->"
+check("주석은 별칭이 아니다", infobox_aliases(memo, "을사사화") == [])
+check("주석 뒤의 이름은 살린다", infobox_aliases(f"을사년의 옥사 {memo}", "을사사화") == ["을사년의 옥사"])
+eul = "{{사건 정보\n| 사건명 = 을사사화\n| 별칭 = " + memo + "\n| 날짜 = [[1545년]]\n}}"
+check("주석은 값을 읽기 전에 지운다",
+      parse_infobox_values(eul, EVENT_VALUE_FIELDS, EVENT_FIELDS).get("별칭") == "",
+      str(parse_infobox_values(eul, EVENT_VALUE_FIELDS, EVENT_FIELDS)))
+
 # 괄호 안 재위 연차를 연도로 집으면 안 된다 — 거의 모든 사건에 붙어 있다.
 check("재위 연차는 연도가 아니다", infobox_date("(영조 38)") is None)
 check("연차가 붙어도 서기를 집는다", infobox_date("[[1504년]](연산군 10년)") == "1504-01-01")
@@ -2960,6 +2971,23 @@ with tempfile.TemporaryDirectory() as tmp:
                           capture_output=True, text=True)
     check("check_korean.py 는 한글뿐이면 통과한다", good.returncode == 0, good.stdout)
 
+# 별칭은 화면에 이름표로 그대로 선다 — 로마자 표기와 마크업 조각은 세우지
+# 않는다 (2026-09-05 지적: '<!-- 잘 알려진 명칭으로' 가 이름표로 섰다).
+# 지우지는 않는다: 검색은 로마자로 친 것도 별칭으로 찾아 준다.
+check("로마자 별칭은 화면에 안 세운다",
+      not labels_mod.screen_alias("Im Ho") and not labels_mod.screen_alias("KAPF"))
+check("마크업 조각은 화면에 안 세운다",
+      not labels_mod.screen_alias("<!-- 잘 알려진 명칭으로")
+      and not labels_mod.screen_alias("사건 이름과 중복되면 쓰지 않음 -->"))
+check("한자 이름은 세운다",
+      labels_mod.screen_alias("訓民正音")
+      and labels_mod.screen_alias("金剛般若波羅蜜經<卷二∼五>"))
+check("로마자가 섞여도 한글이 있으면 세운다", labels_mod.screen_alias("제1차 KAL기 폭파"))
+# 수집 쪽 관문 — Node 를 지나는 별칭은 마크업이 붙은 채로 들어올 수 없다
+check("Node 가 마크업 별칭을 버린다",
+      Node(id="wd:Q706103", type="event", label="을사사화", source="wd",
+           aliases=["<!-- 잘 알려진 명칭으로", "을사년의 옥사"]).aliases == ["을사년의 옥사"])
+
 # --- 나무위키 개요 ------------------------------------------------------------
 # 제목만 같은 다른 작품이 흔하다. '태조 왕건' 을 그냥 열면 2000년 드라마가
 # 나오는데 우리 노드는 1970년 영화다 — 분류의 갈래·연도로 걸러야 한다.
@@ -3983,6 +4011,51 @@ with tempfile.TemporaryDirectory() as tmp:
     causes_mod.mark(store, doc, "test-model")
     check("물은 문서는 다시 묻지 않는다", [d["id"] for d in causes_mod.documents(store, conn)] == ["wd:GABO"])
     check("--redo 면 다시 묻는다", len(causes_mod.documents(store, conn, redo=True)) == 2)
+    check("--scope 를 주면 화면에 있는 노드만 묻는다",
+          [d["id"] for d in causes_mod.documents(store, conn, redo=True, scope={"wd:GABO"})] == ["wd:GABO"])
+
+    # 표기 차이 — 실측: 모델 답 5,000여 건 중 3,237건이 '이름 못 풂'이었고, 그중
+    # '대한민국임시정부'·'새마을운동'·'6.29 선언'처럼 **있는 노드를 다른 표기로**
+    # 부른 것이 적잖았다. 느슨한 열쇠로 한 번 더 풀되 정확한 표기가 먼저다.
+    store.upsert_nodes([
+        Node(id="wd:SM", type="concept", label="새마을 운동", source="wd", start_date="1970"),
+        Node(id="wd:629", type="event", label="6.29 선언", source="wd", start_date="1987"),
+        Node(id="wd:KCIA", type="org", label="대한민국 중앙정보부", source="wd", start_date="1961", end_date="1981"),
+        Node(id="wd:KPG", type="org", label="대한민국 임시정부", source="wd", start_date="1919", end_date="1948"),
+        Node(id="wd:TOEGYE", type="person", label="퇴계 이황", source="wd", start_date="1501", end_date="1570"),
+        Node(id="wd:YEJONG", type="person", label="예종", source="wd", start_date="1450", end_date="1469"),
+    ])
+    store.conn.execute("INSERT INTO aliases (node_id, alias) VALUES ('wd:YEJONG', '이황')")
+    doc_1987 = {"id": "wd:X", "start_date": "1987", "end_date": None}
+    r = causes_mod.resolve(store, "새마을운동", "concept", doc_1987)
+    check("띄어쓰기가 다른 이름을 푼다", r is not None and r[0] == "wd:SM", str(r))
+    r = causes_mod.resolve(store, "6·29 선언", "event", doc_1987)
+    check("가운뎃점·마침표가 다른 이름을 푼다", r is not None and r[0] == "wd:629", str(r))
+    r = causes_mod.resolve(store, "중앙정보부", "org", doc_1987)
+    check("한정어가 앞에 붙은 라벨을 접미로 푼다 (단체)", r is not None and r[0] == "wd:KCIA", str(r))
+    r = causes_mod.resolve(store, "중앙정보부의 공작", "org", doc_1987)
+    check("서술구의 주어도 느슨하게 푼다", r is not None and r[0] == "wd:KCIA" and r[2] == "중앙정보부", str(r))
+    check("자국 왕조는 띄어쓰기를 바꿔도 풀지 않는다", causes_mod.resolve(store, "대한민국임시정부", "org", doc_1987) is None)
+    r = causes_mod.resolve(store, "이황", "person", doc_1987)
+    check("정확한 표기가 있으면 느슨한 길은 밟지 않는다 (별칭 이황 = 예종)", r is not None and r[0] == "wd:YEJONG", str(r))
+    check("인물은 접미로 풀지 않는다 ('이황'이 '퇴계 이황'에 붙지 않는다)",
+          causes_mod.loose_index(store).lookup("황", "person") == [] and causes_mod.loose_index(store).lookup("퇴계이황", "person") == ["wd:TOEGYE"])
+    check("접미 후보가 넷 넘으면 풀지 않는다", causes_mod.LooseIndex(store).lookup("운동", "concept") == [])
+
+    # 모델 답은 저장해 두고, 해소기가 좋아지면 모델 없이 다시 판정한다
+    causes_mod.keep_answers(store, doc, answers, "test-model")
+    row = store.conn.execute("SELECT model, answers FROM causes_answers WHERE node_id = 'wd:BJ'").fetchone()
+    check("모델 답을 문서별로 저장한다", row is not None and row["model"] == "test-model" and "임진전쟁" in row["answers"])
+    store.upsert_nodes([Node(id="wd:JURCHEN", type="org", label="여진족", source="wd", start_date="1000", end_date="1636")])
+    got = causes_mod.reresolve(store, conn)
+    check("다시 판정하면 새로 생긴 노드로 풀린 인과가 더해진다",
+          got["counts"]["문서"] == 1 and store.conn.execute(
+              "SELECT 1 FROM edges WHERE src='wd:JURCHEN' AND dst='wd:BJ' AND type='caused'").fetchone() is not None,
+          str(got))
+    check("다시 판정해도 자국 왕조는 여전히 못 푼다", got["unresolved"] == {"조선의 저항": 1}, str(got["unresolved"]))
+    store.conn.execute("DELETE FROM edges WHERE src = 'wd:JURCHEN'")
+    store.conn.execute("DELETE FROM nodes WHERE id = 'wd:JURCHEN'")
+    store.conn.commit()
 
     # 구조화 소스가 반대 방향을 알면 추출본을 버린다
     store.upsert_edges([Edge(src="wd:JM", dst="wd:BJ", type="caused", source="wd", label="원인")])
