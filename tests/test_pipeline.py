@@ -4013,6 +4013,85 @@ with tempfile.TemporaryDirectory() as tmp:
 # 빈 <div> 하나다. 이 장들이 같은 자료를 글로 낸다. 재는 것은 셋이다 —
 # 글이 실제로 들어 있는가, 이웃으로 이어지는 링크가 있는가, 그리고 §1
 # 대로 **사람이 읽는 자리에 영어가 없는가**.
+# --- 다시 쓴 설명 (`paraphrase` — summaries.py) --------------------------
+#
+# 정본이 아닌 글(위키백과·나무위키·출처 모름)은 모델이 우리 말로 새로 쓰고,
+# 정본(국편·민백·국가유산청)은 손대지 않는다. 새 글은 nodes.description 이
+# 아니라 summaries 표에 두고, 원문 해시로 아직 유효한지 잰다.
+print("\n[다시 쓴 설명]")
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import summaries as sm
+    from histgraph import pages as _pages
+    from histgraph.server import GraphAPI as _GraphAPI
+
+    WIKI = ("이순신(李舜臣, 1545년 4월 28일 ~ 1598년 12월 16일)은 조선 중기의 무신이다. "
+            "본관은 덕수, 자는 여해, 시호는 충무이다. 임진왜란 때 삼도수군통제사로서 "
+            "한산도 대첩과 명량 해전에서 일본 수군을 크게 무찔렀다.")
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:LSS", type="person", label="이순신", source="wd", description=WIKI,
+             props={"desc_source": "kowiki", "kowiki_url": "https://ko.wikipedia.org/wiki/x"}),
+        Node(id="wd:KIM", type="person", label="김종서", source="wd",
+             description="김종서(金宗瑞)는 조선 전기의 문신이다. 세종 때 6진을 개척하였다.",
+             props={"canon": "nikh", "nikh_url": "https://contents.history.go.kr/x"}),
+        Node(id="wd:UNK", type="person", label="강항", source="wd",
+             description="강항(姜沆)은 조선 중기의 문신이다. 정유재란 때 일본에 잡혀갔다가 돌아왔다."),
+        Node(id="ex:X", type="person", label="이름뿐", source="extract"),
+    ])
+    cands = sm.candidates(store)
+    check("정본은 새로 쓰지 않고, 위키와 출처 모름만 후보다",
+          {c["id"] for c in cands} == {"wd:LSS", "wd:UNK"}, str([c["id"] for c in cands]))
+
+    class _Fake:
+        model = "fake"
+        def complete_json(self, system, user, schema):
+            if "이순신" in user:
+                return {"summary": "이순신은 1545년에 태어나 1598년에 죽은 조선 중기의 장수다. "
+                                   "임진왜란이 일어나자 삼도수군통제사가 되어 한산도와 명량에서 "
+                                   "일본 수군을 잇달아 물리쳤다."}
+            # 원문을 그대로 돌려주는 모델 — 요약이 아니라 베낌이다
+            return {"summary": "강항(姜沆)은 조선 중기의 문신이다. 정유재란 때 일본에 잡혀갔다가 돌아왔다. "
+                               "그는 학자였고 제자를 길렀으며 글을 남겼다."}
+
+    got = sm.run(store, _Fake())
+    check("새로 쓴 글은 받고 베낀 글은 떨어뜨린다",
+          got["counts"]["새로 씀"] == 1 and got["reasons"] == {"원문을 그대로 베낌": 1}, str(got))
+    check("nodes.description 은 그대로다",
+          store.conn.execute("SELECT description FROM nodes WHERE id='wd:LSS'").fetchone()[0] == WIKI)
+
+    api = _GraphAPI(store, era="korea")
+    d = api.node("wd:LSS")
+    check("화면은 새로 쓴 글을 받는다", d["description"].startswith("이순신은 1545년에"), d["description"][:60])
+    check("출처 줄은 '바탕으로 새로 쓴 글'이라 말한다",
+          d["desc_origin"]["rewritten"] is True
+          and "문서를 바탕으로 새로 쓴 글입니다" in _pages.node_page(api, "wd:LSS")[1])
+    check("떨어진 노드는 도입부로 물러난다",
+          api.node("wd:UNK")["description"].startswith("강항(姜沆)은") and api.node("wd:UNK")["desc_origin"] is None)
+    check("정본은 줄인 글 그대로",
+          api.node("wd:KIM")["description"].startswith("김종서(金宗瑞)는")
+          and "rewritten" not in api.node("wd:KIM")["desc_origin"])
+    check("한 번 쓴 것은 다시 묻지 않는다", [c["id"] for c in sm.candidates(store)] == ["wd:UNK"])
+
+    # 수집이 설명을 바꾸면 옛 요약은 옛 글의 요약이다 — 화면은 도입부로 돌아간다.
+    store.conn.execute("UPDATE nodes SET description = ? WHERE id = 'wd:LSS'", (WIKI + " 노량 해전에서 전사했다.",))
+    store.conn.commit()
+    check("원문이 바뀌면 옛 글은 무효다",
+          api.node("wd:LSS")["description"].startswith("이순신(李舜臣")
+          and "wd:LSS" in [c["id"] for c in sm.candidates(store)])
+
+    target = GraphStore(Path(tmp) / "t.sqlite")
+    target.upsert_nodes([Node(id="wd:LSS", type="person", label="이순신", source="wd", description=WIKI)])
+    check("파생본으로는 거기 있는 노드 것만 옮긴다", sm.sync(store, target) == 1
+          and target.conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0] == 1)
+    check("표가 없는 옛 DB 에서는 조용히 None",
+          sm.lookup(sqlite3.connect(":memory:"), "wd:LSS", WIKI) is None)
+    check("요약 규칙: 영어·짧음·위키 언급·베낌을 가른다",
+          sm.accept("King Sejong 은 왕이다. 훈민정음을 만들었다 정말로 그렇다 그렇다 그렇다.", WIKI) == "영어가 섞임"
+          and sm.accept("짧다.", WIKI).startswith("너무 짧음")
+          and sm.accept("위키백과에 따르면 이순신은 조선 중기의 장수로, 임진왜란에서 큰 공을 세워 뒷날 충무공이라 불리게 된 사람이다.", WIKI) == "'위키' 언급")
+    store.close(); target.close()
+
+
 print("\n[글로 읽는 장]")
 with tempfile.TemporaryDirectory() as tmp:
     import re as _re

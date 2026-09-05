@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import pages
+from . import pages, summaries
 from .ontology import EDGE_TYPES, NODE_TYPES
 from .provenance import desc_origin
 from .store import GraphStore
@@ -424,6 +424,12 @@ class GraphAPI:
             return None
 
         props = json.loads(row["props"] or "{}")
+        # 정본이 아닌 글은 우리 말로 새로 쓴 것(summaries)이 있으면 그것을
+        # 낸다. 출처 줄은 그때 '바탕으로 새로 쓴 글'이라 말한다.
+        rewritten = summaries.lookup(self.store.conn, row["id"], row["description"])
+        origin = desc_origin(row["source"], props, row["url"])
+        if origin and rewritten:
+            origin = {**origin, "rewritten": True}
         # 또 하나의 이름은 제목 줄에 세운다. '다른 이름' 더미에 같이 두면
         # 표기 변형과 구별되지 않아 별명처럼 읽힌다 (`co_names` 참고).
         names = _names(row)
@@ -522,7 +528,7 @@ class GraphAPI:
             # 말뭉치가 쓴다. 2026-09-05 화면에 전문을 뿌린 것이 애드센스
             # '주의 필요'(스크랩)로 돌아왔다 — 이 자리에서 전문을 다시
             # 내보내지 않는다.
-            "description": pages.summarize(row["description"]),
+            "description": rewritten or pages.summarize(row["description"]),
             # 설명이 어디서 왔는지. 'kowiki' 는 위키백과 산문, 'wd:ko' 는
             # Wikidata 한국어 한 줄, '사전' 은 영어 한 줄을 koreanize 로
             # 옮긴 것이다. 도구가 쓰라고 남겨 둔다. 화면이 그리는 것은 아래
@@ -531,7 +537,7 @@ class GraphAPI:
             # 설명 아래 한 줄로 적는 출처 — 이름·문서 주소·라이선스(한국어).
             # 남의 글을 옮겼으면 그렇다고 적는 것이 라이선스 의무다
             # (provenance.py). 모르면 None 이고, 화면은 그때 아무것도 안 적는다.
-            "desc_origin": desc_origin(row["source"], props, row["url"]),
+            "desc_origin": origin,
             # 영어 한 줄이 왔지만 사전으로 옮기지 못해 비운 노드.
             # 빈 칸의 이유를 화면이 정확히 말할 수 있게 한다.
             "desc_dropped": bool(props.get("desc_en") and not row["description"]),

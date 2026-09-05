@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS same_as (
     PRIMARY KEY (a, b)
 );
 
+-- 정본이 아닌 설명을 우리 말로 새로 쓴 글 (summaries.py). nodes.description
+-- 은 손대지 않는다 — 수집이 설명을 통째로 다시 쓰므로, 우리가 쓴 글은 따로
+-- 두고 원문 해시로 아직 유효한지 잰다.
+CREATE TABLE IF NOT EXISTS summaries (
+    node_id  TEXT PRIMARY KEY,
+    text     TEXT NOT NULL,
+    model    TEXT NOT NULL,
+    src_hash TEXT NOT NULL,
+    made_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ingest_log (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     source   TEXT NOT NULL,

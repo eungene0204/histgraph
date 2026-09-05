@@ -1746,6 +1746,41 @@ def cmd_describe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_paraphrase(args: argparse.Namespace) -> int:
+    """정본이 아닌 설명(위키백과·나무위키·출처 모름)을 우리 말로 새로 쓴다
+    (`summaries` 모듈 머리글). 정본(국편·민백·국가유산청)은 손대지 않는다.
+
+    모델은 MLX 가 기본이고 35GB 를 잡는다 — `extract`·`roles`·`causes` 와
+    함께 띄우지 말 것. 끝나면 `--sync-to data/korea.sqlite` 로 화면 DB 에
+    옮긴다. 설명이 바뀐 노드는 옛 글이 저절로 무효가 되므로 수집 뒤마다
+    다시 돌리면 그것만 새로 쓴다:
+
+        uv run histgraph paraphrase --sync-to data/korea.sqlite
+    """
+    from . import summaries as summaries_mod
+
+    with GraphStore(args.db) as store:
+        if not args.sync_only:
+            backend = None if args.dry_run else build_backend(args.backend, args.model)
+            got = summaries_mod.run(store, backend, limit=args.limit,
+                                    dry_run=args.dry_run, redo=args.redo)
+            c = got["counts"]
+            print(f"  후보 {c['후보']:,}건" + ("" if args.dry_run else
+                  f" · 새로 씀 {c['새로 씀']:,} · 떨어짐 {c['떨어짐']:,}"))
+            if got["reasons"]:
+                print("  떨어진 이유: " + " · ".join(
+                    f"{k} {v}" for k, v in sorted(got["reasons"].items(), key=lambda x: -x[1])))
+            for line in got["samples"]:
+                print(f"    {line}")
+        if args.sync_to is not None:
+            with GraphStore(args.sync_to) as target:
+                n = summaries_mod.sync(store, target)
+            print(f"  화면 DB 로 새로 쓴 글 {n:,}건을 옮겼습니다: {args.sync_to}")
+        total = store.conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
+        print(f"  새로 쓴 글 합계 {total:,}건")
+    return 0
+
+
 def cmd_dedupe(args: argparse.Namespace) -> int:
     """한 사건이 두 노드로 들어와 있는 것을 찾는다 (`duplicates` 모듈 머리글).
 
@@ -2033,6 +2068,18 @@ def main(argv: list[str] | None = None) -> int:
                           help="빈 설명을 민족문화대백과의 정의 한 문장으로 (수집 뒤마다)")
     p_ds.add_argument("--dry-run", action="store_true", help="채우지 않고 미리보기")
     p_ds.set_defaults(func=cmd_describe)
+
+    p_pp = sub.add_parser("paraphrase",
+                          help="정본이 아닌 설명(위키백과·나무위키)을 우리 말로 새로 쓴다 (MLX)")
+    p_pp.add_argument("--limit", type=int, default=None)
+    p_pp.add_argument("--backend", choices=["anthropic", "mlx"], default="mlx")
+    p_pp.add_argument("--model", default=None)
+    p_pp.add_argument("--dry-run", action="store_true", help="모델 없이 후보만 센다")
+    p_pp.add_argument("--redo", action="store_true", help="이미 쓴 것도 다시")
+    p_pp.add_argument("--sync-to", type=Path, default=None,
+                      help="끝나고 새로 쓴 글을 이 파생본(화면 DB)으로 옮긴다")
+    p_pp.add_argument("--sync-only", action="store_true", help="쓰지 않고 옮기기만")
+    p_pp.set_defaults(func=cmd_paraphrase)
 
     p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")
     p_sc.add_argument("era", nargs="+",

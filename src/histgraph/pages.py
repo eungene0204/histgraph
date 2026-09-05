@@ -304,7 +304,8 @@ def _origin_line(origin: dict | None) -> str:
     name = escape(origin["name"])
     if origin.get("url"):
         name = f'<a href="{escape(origin["url"])}" rel="nofollow">{name}</a>'
-    text = f"{name} 문서를 줄인 글입니다"
+    text = (f"{name} 문서를 바탕으로 새로 쓴 글입니다" if origin.get("rewritten")
+            else f"{name} 문서를 줄인 글입니다")
     if origin.get("license"):
         lic = escape(origin["license"])
         if origin.get("license_url"):

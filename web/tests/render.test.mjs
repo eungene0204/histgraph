@@ -222,6 +222,11 @@ let detailHtml = '';
      originHtml.includes('href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"')
      && originHtml.includes('href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"'));
   ok('출처를 모르면 아무것도 안 적는다', !detailHtml.includes('d-desc-origin'));
+  const rewrittenHtml = renderToString(h(DetailPanel, {
+    node: { ...node, desc_origin: { name: '한국어 위키백과', url: '', license: '', license_url: '', rewritten: true } },
+    prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
+  }));
+  ok('새로 쓴 글은 그렇다고 말한다', plain(rewrittenHtml).includes('한국어 위키백과 문서를 바탕으로 새로 쓴 글입니다'));
 
   // 설명이 없으면 왜 없는지를 적는다
   const emptyHtml = renderToString(h(DetailPanel, {

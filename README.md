@@ -44,7 +44,7 @@ uv run histgraph serve                           # 브라우저에서 탐색
 **`prune` 과 `reclassify` 는 선택이 아니라 필수입니다.** 아래 "스포츠 오염"과
 "개념이 사건 행세를 하고 있었다" 참조.
 
-**`relabel`·`redescribe`·`describe`·`reigns`·`precision`·`dedupe`·`causes` 는 수집 뒤마다 다시 돌려야 합니다.**
+**`relabel`·`redescribe`·`describe`·`reigns`·`precision`·`dedupe`·`causes`·`paraphrase` 는 수집 뒤마다 다시 돌려야 합니다.**
 `upsert_nodes` 는 라벨을, `upsert_edges` 는 `props` 를 통째로 덮어씁니다.
 그래서 다시 수집하면 한국어 이름이 영어로 되돌아가고, **연표 왼쪽의 왕
 재위 띠가 통째로 사라집니다** — 재위는 `held_position` 엣지의

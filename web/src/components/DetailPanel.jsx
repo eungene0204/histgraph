@@ -34,7 +34,7 @@ function Description({ d }) {
           {o.url
             ? <a href={o.url} target="_blank" rel="noopener nofollow">{o.name}</a>
             : o.name}
-          {' 문서를 줄인 글입니다'}
+          {o.rewritten ? ' 문서를 바탕으로 새로 쓴 글입니다' : ' 문서를 줄인 글입니다'}
           {o.license && (
             <>
               {' · '}

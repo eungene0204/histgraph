@@ -506,7 +506,7 @@ def extract(
     dest = GraphStore(out)
 
     ordered = sorted(keep)
-    node_rows, edge_rows, alias_rows, name_rows = [], [], [], []
+    node_rows, edge_rows, alias_rows, name_rows, summary_rows = [], [], [], [], []
     for i in range(0, len(ordered), 500):
         batch = ordered[i : i + 500]
         marks = ",".join("?" * len(batch))
@@ -529,6 +529,11 @@ def extract(
         ).fetchall()
         alias_rows += store.conn.execute(
             f"SELECT * FROM same_as WHERE a IN ({marks})", batch
+        ).fetchall()
+        # 우리 말로 새로 쓴 설명(summaries.py)도 함께 — 안 옮기면 화면이
+        # 위키 원문 도입부로 물러난다.
+        summary_rows += store.conn.execute(
+            f"SELECT * FROM summaries WHERE node_id IN ({marks})", batch
         ).fetchall()
 
     edge_rows = [r for r in edge_rows if r["dst"] in keep]
@@ -555,6 +560,10 @@ def extract(
         [(r["a"], r["b"], r["method"], r["score"]) for r in {
             (r["a"], r["b"]): r for r in alias_rows
         }.values()],
+    )
+    dest.conn.executemany(
+        "INSERT OR REPLACE INTO summaries (node_id,text,model,src_hash,made_at) VALUES (?,?,?,?,?)",
+        [(r["node_id"], r["text"], r["model"], r["src_hash"], r["made_at"]) for r in summary_rows],
     )
     dest.conn.commit()
 
