@@ -23,7 +23,7 @@
 // 대신 연표는 화면보다 길어지므로, 훑기 막대와 '고른 자리로 돌아가기'가
 // 길을 잃지 않게 받쳐 준다.
 
-import { nodeColor, TYPE_COLOR } from './graph-view.js';
+import { nodeColor } from './graph-view.js';
 
 // **왼쪽에는 왕의 재위 띠가 선다.** 조선의 시간을 사람은 절대 연도가
 // 아니라 임금으로 읽는다 — '1456년'보다 '세조 때'가 먼저 온다. 재위는
@@ -118,10 +118,51 @@ export function placeMarks(marks, { from, to, pos }) {
 // 부산진 전투(5월)가 한산도 대첩(7월)보다 아래에 섰다). 날짜를 모르는
 // 것은 앞에 둔다 — 위키데이터는 연도만 아는 날을 1월 1일로 적어 보내므로
 // 달을 따로 적어 주지는 않는다.
+//
+// **원인은 결과보다 위에 선다.** 결과의 날짜가 거칠어서(연도만) 원인의
+// 날짜(12월 9일)를 품으면, 날짜 문자열로는 결과가 먼저다 — 병자호란
+// (1636-12-09)이 그 결과인 공석신주사건(1636) 아래에 섰다 (2026-09-05
+// 지적). 거친 날짜는 '그 해 어딘가'이지 '1월 1일'이 아니므로, 원인을
+// 품는 거친 날짜는 원인 **바로 뒤**에 세운다. 고른 노드와 그 이웃 사이의
+// 인과만 안다 (서버가 `rel` 로 준다). 같은 날이어도 원인이 먼저다.
 export function sortMarks(marks) {
+  const self = marks.find((m) => m.kind === 'self');
+  const key = new Map(marks.map((m) => [m, sortKey(m, self, marks)]));
   return [...marks].sort((a, b) => a.year - b.year
-    || String(a.date || '').localeCompare(String(b.date || ''))
+    || key.get(a).localeCompare(key.get(b))
     || a.label.localeCompare(b.label, 'ko'));
+}
+
+// 거친 날짜가 고운 날짜를 품는가 — '1636' ⊇ '1636-12-09', '1920-10' ⊇
+// '1920-10-21'. 같은 날도 품는다. 날짜를 모르면('') 무엇이든 품는다.
+export function dateContains(coarse, fine) {
+  const c = String(coarse || '');
+  const f = String(fine || '');
+  return f.startsWith(c) && (f.length === c.length || f[c.length] === '-');
+}
+
+// 정렬용 날짜 열쇠. 원인을 품는 거친 날짜는 '원인 날짜 + ~' 가 되어
+// 원인 바로 뒤에 선다 ('~' 는 숫자와 '-' 보다 뒤다). 비교기는 그대로
+// 문자열 순이라 순환이 생기지 않는다.
+function sortKey(m, self, marks) {
+  const own = String(m.date || '');
+  if (!self) return own;
+  if (m === self) {
+    // 고른 노드가 결과: 그 날짜가 품는 원인들 중 가장 늦은 것 뒤.
+    let latest = null;
+    for (const n of marks) {
+      if (n.rel?.type !== 'caused' || n.rel.dir !== 'in' || n.year !== m.year) continue;
+      const d = String(n.date || '');
+      if (dateContains(own, d) && (latest === null || d > latest)) latest = d;
+    }
+    return latest === null ? own : `${latest}~`;
+  }
+  // 이웃이 결과(고른 노드가 원인): 이웃의 거친 날짜가 고른 노드를 품으면 그 뒤.
+  if (m.rel?.type === 'caused' && m.rel.dir === 'out' && m.year === self.year
+      && dateContains(own, self.date)) {
+    return `${String(self.date || '')}~`;
+  }
+  return own;
 }
 
 export class TimelineRail {
@@ -333,6 +374,15 @@ export class TimelineRail {
         <circle cx="${AX}" cy="${ty}" r="${m.kind === 'self' ? 4 : 2.6}" fill="${c}"/>`;
     }).join('');
 
+    // 원인은 오른쪽 여백에서 꺾인 선으로 고른 노드와 잇는다 (2026-09-05
+    // 사용자 요청). 축 위에 그리면 점·막대와 겹치고, 라벨 사이를 지나면
+    // 글자를 가른다 — 오른쪽 가장자리는 늘 비어 있다.
+    const W = this.body.clientWidth || (PANEL_W + lane);
+    const self_ = place.find((p) => p.m.kind === 'self');
+    const causeWires = self_
+      ? place.filter((p) => isCause(p.m)).map((p) => causeWire(p.ty, self_.ty, W)).join('')
+      : '';
+
     const items = place.map(({ m, ty }, i) => {
       const cell = yearCell(m, i ? place[i - 1].m : null);
       return `
@@ -340,7 +390,7 @@ export class TimelineRail {
               title="${esc(markName(m))} · ${esc(whenText(m))}">
         <span class="tl-y${cell.repeat ? ' rep' : ''}">${esc(cell.text)}</span>
         <span class="tl-name">${esc(markName(m))}</span>
-        ${m.rel ? `<span class="tl-rel">${esc(relHead(m.rel))}</span>` : ''}
+        ${m.rel ? `<span class="tl-rel${isCause(m) ? ' is-cause' : ''}">${esc(relHead(m.rel))}</span>` : ''}
       </button>`;
     }).join('');
 
@@ -349,12 +399,13 @@ export class TimelineRail {
       : { svg: '', items: '', named: 0 };
 
     this.body.innerHTML = `
-      <div class="tl-canvas" style="height:${H}px; --lane:${lane}px">
+      <div class="tl-canvas${causeWires ? ' has-cause' : ''}" style="height:${H}px; --lane:${lane}px">
         <svg class="tl-wires" width="100%" height="${H}" aria-hidden="true">
           <line x1="${AX}" y1="${PAD_TOP - 8}" x2="${AX}" y2="${H - PAD_BOTTOM + 8}"
                 stroke="var(--line)" stroke-width="1"/>
           ${band.svg}
           ${wires}
+          ${causeWires}
         </svg>
         ${band.items}
         ${items}
@@ -377,7 +428,6 @@ export class TimelineRail {
         : `이름을 세울 자리가 모자란 ${all - band.named}명은 막대만 있습니다`
           + ' — 막대에 마우스를 올리면 이름이 나옵니다';
     }
-    const self_ = place.find((p) => p.m.kind === 'self');
     const focus = self_ || place.find((p) => p.m.kind === 'near')
       || place[Math.floor(place.length / 2)];
     this.focusPy = focus.ty;
@@ -395,7 +445,7 @@ export class TimelineRail {
   // 고종 1907 퇴위 · 1919 사망). 재위 중에 죽은 임금은 막대 끝과 동그라미가
   // 같은 자리에 겹치고, 그때 몰년은 막대 라벨의 뒷 숫자가 곧 몰년이다.
   reignBand(reigns, at, self = {}) {
-    const c = TYPE_COLOR.person;
+    const c = REIGN_COLOR;
     const svg = [];
     const labels = [];       // {y, prio, html}
     // **고른 노드가 누구 때의 일인지 띠에서 바로 보이게 한다.** 연표가
@@ -514,10 +564,42 @@ export class TimelineRail {
 const DIR_HEAD = {
   child_of: { out: '부모', in: '자녀' },
   part_of: { out: '상위', in: '하위' },
+  // 서버는 인과의 이름을 '원인'으로만 준다. 나가는 쪽 상대는 이 노드가
+  // 부른 **결과**다 — 위화도 회군 옆에 과전법이 '원인'으로 서 있었다.
+  caused: { out: '결과', in: '원인' },
 };
 
 function relHead(rel) {
   return DIR_HEAD[rel.type]?.[rel.dir] || rel.label;
+}
+
+// 이 표시가 고른 노드의 **원인**인가. caused 엣지는 원인 → 결과이므로
+// 들어오는(in) 쪽 상대가 원인이다. 결과(out)는 잇지 않는다 — 사용자가
+// 부른 것은 원인뿐이고, 양쪽을 다 그리면 선이 어느 쪽으로 읽히는지 흐려진다.
+export function isCause(m) {
+  return m.rel?.type === 'caused' && m.rel?.dir === 'in';
+}
+
+// 원인 줄에서 오른쪽으로 나가 꺾여 내려오고(올라가고), 고른 노드의 줄로
+// 되돌아오는 ㄷ 자 선. 끝에 작은 화살촉이 고른 노드를 가리킨다 —
+// 원인이 결과로 흐른다는 방향은 색만으로는 안 읽힌다.
+//   yFrom: 원인 줄의 y · yTo: 고른 노드 줄의 y · W: 연표 캔버스 너비
+export const CAUSE_WIRE = { arm: 12, inset: 12, color: '#4f93bf' };   // --color-blue
+// 왕·대통령의 재위 띠는 파랑이다 (2026-09-06 사용자 결정: 노드 팔레트가
+// 빨강 계열로 바뀐 뒤에도 "전처럼 blue 를 유지"). 노드 색과 잇지 않는다 —
+// 인물 노드가 빨강이 됐을 때 띠까지 따라가서 지적받았다.
+export const REIGN_COLOR = '#3d84f5';
+export function causeWire(yFrom, yTo, W) {
+  const { arm, inset, color } = CAUSE_WIRE;
+  const xR = W - inset;          // 세로 선 — 스크롤바와 그림자 안쪽
+  const xS = xR - arm;           // 가로 팔이 시작하는 자리 (라벨 오른쪽 끝 + 2px)
+  const f = (v) => Number(v).toFixed(1);
+  return `<path d="M${f(xS)} ${f(yFrom)} H${f(xR)} V${f(yTo)} H${f(xS)}"
+                fill="none" stroke="${color}" stroke-width="1.2"
+                stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>
+          <path d="M${f(xS + 4)} ${f(yTo - 3)} L${f(xS)} ${f(yTo)} L${f(xS + 4)} ${f(yTo + 3)}"
+                fill="none" stroke="${color}" stroke-width="1.2"
+                stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>`;
 }
 
 // 띠 칸은 좁다. 왕조 접두어는 띠 전체가 같은 왕조라 떼어도 헷갈리지

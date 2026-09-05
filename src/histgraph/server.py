@@ -397,9 +397,14 @@ class GraphAPI:
             key = (e["src"], e["dst"], e["type"])
             row = merged.get(key)
             if row is None:
+                # 인과는 종류(배경·계기·영향)가 곧 뜻이라 엣지의 라벨 열을
+                # 그대로 보낸다. 다른 관계는 타입 이름 하나로 족하다.
+                label = EDGE_TYPES[e["type"]][0]
+                if e["type"] == "caused" and e["label"]:
+                    label = e["label"]
                 merged[key] = {
                     "s": e["src"], "t": e["dst"], "type": e["type"],
-                    "label": EDGE_TYPES[e["type"]][0],
+                    "label": label,
                     "conf": e["confidence"], "sources": [e["source"]],
                 }
             else:

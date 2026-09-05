@@ -113,6 +113,11 @@ let appHtml = '';
   ok('범례 묶음 머리가 항목과 같은 층에 있다',
      /<ul class="legend">\s*<li class="legend-group">/.test(html),
      html.slice(html.indexOf('legend') - 20, html.indexOf('legend') + 160));
+  // 인과 도면이 꺼져 있는 동안 범례의 선은 전부 글자색이다 (인과는 굵기로만 갈린다)
+  ok('범례의 인과 선은 굵은 글자색이다',
+     !html.includes('#4f93bf') && /stroke="currentColor" stroke-width="2.8"/.test(html)
+       && /stroke="currentColor" stroke-width="1.4" stroke-dasharray="5 4"/.test(html),
+     html.match(/stroke="[^"]*"/g)?.join(' '));
   // `<ul class="legend">` **다음부터** 그것이 닫히는 데까지 또 <ul> 이 없어야
   // 한다. 여는 태그 자신을 세면 늘 걸린다.
   const OPEN = '<ul class="legend">';
@@ -194,6 +199,11 @@ let detailHtml = '';
   const chainRaw = renderToString(h(ChainTree, { data: tree, onVisit: () => {} }));
   ok('사슬은 화살표 글자가 아니라 실선으로 잇는다', !chainRaw.includes('←') && !chainRaw.includes('chain-arrow') && (chainRaw.match(/chain-elbow/g) || []).length === 2, chainRaw.slice(0, 300));
   ok('둘째 걸음은 한 단 더 들어가 있다', /padding-left:28px/.test(chainRaw) && /padding-left:14px/.test(chainRaw), chainRaw.match(/padding-left:[^;"]*/g)?.join(' '));
+  // 부모(후금)의 점에서 자식(임진왜란)의 꺾인 선까지 줄기가 잇는다. 선은 점의
+  // 한가운데(STEP 배수 + 4) 에 선다 — 후금 줄의 줄기 x = 14 + 4, 임진왜란 줄의 꺾인 선 x = 14 + 4.
+  ok('자식이 있는 줄은 점 아래로 줄기를 내려 자식의 선과 잇는다',
+     (chainRaw.match(/chain-stem/g) || []).length === 1 && /chain-stem" style="left:18px"/.test(chainRaw) && /chain-elbow" style="left:18px"/.test(chainRaw),
+     chainRaw.match(/chain-(stem|elbow)" style="[^"]*"/g)?.join(' '));
   ok('비어 있으면 사슬을 그리지 않는다', renderToString(h(ChainTree, { data: { causes: [], effects: [], nodes: {} }, onVisit: () => {} })) === '');
   const pathHtml = plain(renderToString(h(PathView, { data: {
     found: true, reversed: false, nodes: tree.nodes,
@@ -261,7 +271,7 @@ let detailHtml = '';
   const html = renderToString(h(Glyph, { type: 'person', group: 'actor' }));
   ok('타입 색이 그대로 나온다', html.includes('#3d84f5'), html);
   ok('모르는 타입은 갈래 색으로 물러난다',
-     renderToString(h(Glyph, { type: 'nope', group: 'event' })).includes('#f29a50'));
+     renderToString(h(Glyph, { type: 'nope', group: 'event' })).includes('#fb6c13'));
 }
 
 // --- CSS 가 기대하는 것을 React 가 실제로 내는가 -------------------------

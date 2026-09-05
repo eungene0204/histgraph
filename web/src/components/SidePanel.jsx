@@ -36,6 +36,7 @@ const LINE_KINDS = [
   { dash: null, label: '구조화 소스 (확실)' },
   { dash: '5 4', label: '산문에서 추출 (근거 있음)' },
   { dash: '2 4', label: '동일 실체 (same_as)' },
+  // 인과 도면(App.jsx CAUSAL_DIAGRAM)을 켜면 이 줄을 도면의 파랑 #4f93bf 으로.
   { dash: null, width: 2.8, label: '인과 (원인 → 결과)' },
 ];
 
@@ -168,10 +169,10 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
           <section>
             <Legend nodeTypes={meta?.node_types} />
             <ul className="legend lines">
-              {LINE_KINDS.map(({ dash, width, label }) => (
+              {LINE_KINDS.map(({ dash, width, color, label }) => (
                 <li key={label}>
                   <svg width="26" height="10" aria-hidden="true">
-                    <line x1="1" y1="5" x2="25" y2="5" stroke="currentColor"
+                    <line x1="1" y1="5" x2="25" y2="5" stroke={color || 'currentColor'}
                           strokeWidth={width || 1.4} strokeDasharray={dash || undefined} />
                   </svg>
                   <span>{label}</span>

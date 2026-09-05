@@ -24,38 +24,49 @@ const TICK_MS = 1000 / 60;
 // 두면 색을 잃은 눈에도 차이가 남는다. `python3 tools/check_palette.py` 가
 // 이 파일의 값을 직접 읽어 잰다 (OKLab ΔE ×100, 최악 쌍):
 //
-//   정상 10.9 · 2형(deutan) 6.8 · 1형(protan) 5.5   — 눈금 5.0 을 넘긴다
+//   정상 10.7 · 2형(deutan) 9.7 · 1형(protan) 7.3   — 눈금 5.0 을 넘긴다
 //   (3형은 근사라 판정에서 뺀다. 검증기 주석에 이유를 적어 뒀다.)
 //
 // 색을 고치면 저 검증기를 다시 돌린다. 여기 적힌 숫자는 그때의 기록일 뿐
 // 이고, 실제 값은 검증기가 말한다.
 //
-// 갈래는 색상 계열로 남는다 — 인물·단체는 파랑~보라, 사건은 주황, 장소·
-// 유물·작품은 초록~노랑~분홍~청록, 시대·직위는 무채색. 화면이 먼저 네
-// 덩어리로 읽히고 그 안에서 타입이 갈린다. 뼈대(시대·직위)는 어둡게 묶어
-// 물러나 있게 했다.
+// 색은 2026-09-06 사용자가 준 여섯 색 팔레트(Coolors "skafold": 초록 004F2D
+// · 남색 003049 · 빨강 D62828 · 주황 FB6C13 · 노랑 F9C80E · 크림 F5E0B7)다.
+// 여섯으로 아홉 타입을 다 못 덮으므로 **색상은 팔레트에서만 가져오고 밝기로
+// 갈랐다.** 빨강·주황·노랑·크림 넷은 원색 그대로. 남색과 초록은 바탕
+// #1e1e1e 위에서 대비가 1.2·1.7 이라 작은 원이 보이지 않아(그대로 둔 것을
+// 그려 보고 확인했다) 같은 색상으로 밝힌 값을 쓴다. **인물만 예외로 파랑**
+// #3d84f5 다 — 팔레트를 씌운 뒤 사용자가 "인물 노드도 blue 로" 라고 했다
+// (2026-09-06). 연표의 왕·대통령 재위 띠(timeline.js REIGN_COLOR)와 같은 파랑.
+// 팔레트의 빨강 D62828 은 원색으로는 남는 자리가 없고, 작품(연빨강)에 밝힌
+// 값으로만 남는다.
+//
+// 갈래는 색상 계열로 남는다 — 인물·단체는 파랑·크림, 사건은 주황, 장소·
+// 유물·작품은 초록~노랑~연빨강~남색, 시대·직위는 남색·초록을 어둡게 누른
+// 것. 화면이 먼저 네 덩어리로 읽히고 그 안에서 타입이 갈린다. 뼈대(시대·
+// 직위)는 어둡게 묶어 물러나 있게 했다.
 //
 // 5.5 는 "다르다"이지 "나란히 놓지 않아도 읽힌다"가 아니다. 그래서 **색만
 // 으로 읽어야 하는 자리를 만들지 않는다**: 범례는 색 견본 옆에 타입 이름을
 // 적고, 노드를 고르면 상세 패널이 타입을 글자로 말한다.
 export const TYPE_COLOR = {
-  person: '#3d84f5',   // 파랑 — Obsidian 의 blue 를 바탕에 맞춰 밝힘
-  org: '#c2a4ff',      // 연보라 — 인물과 같은 계열, 밝기를 크게 벌렸다
-  event: '#f29a50',    // 주황
-  place: '#32c261',    // 초록
-  heritage: '#f4ea8a', // 노랑 — 유물·문화재
-  artwork: '#fba6d4',  // 분홍 — 예술작품
-  media: '#1fa8a6',    // 청록 — 영화·드라마. 분홍과 밝기로 갈라 어둡게 눌렀다
-  period: '#5c5c5c',   // 어두운 회색 — 뼈대라서 물러나 있어야 한다
-  role: '#a08a5f',     // 흙빛 — 뼈대의 다른 한쪽
+  person: '#3d84f5',   // 파랑 — 팔레트 밖. 사용자 결정 (재위 띠와 같은 파랑)
+  org: '#f5e0b7',      // 크림 (팔레트 원색) — 인물(파랑)과 밝기를 크게 벌렸다
+  event: '#fb6c13',    // 주황 (팔레트 원색)
+  place: '#2e9e5e',    // 초록 — 팔레트 004F2D 를 밝힘 (원색은 바탕 대비 1.7)
+  heritage: '#f9c80e', // 노랑 (팔레트 원색) — 유물·문화재
+  artwork: '#f2a0a0',  // 연빨강 — 팔레트 D62828 을 밝힘. 예술작품
+  media: '#3a7ca5',    // 남색 — 팔레트 003049 를 밝힘 (원색은 바탕 대비 1.2). 영화·드라마
+  period: '#2a5d78',   // 어두운 남색 — 뼈대라서 물러나 있어야 한다
+  role: '#1e6b45',     // 어두운 초록 — 뼈대의 다른 한쪽
 };
 
 // 갈래 색. 타입을 모를 때 물러날 자리다.
 export const GROUP_COLOR = {
   actor: '#3d84f5', // 인물·단체
-  event: '#f29a50', // 사건
-  thing: '#32c261', // 장소·유물·작품
-  frame: '#5c5c5c', // 시대·직위
+  event: '#fb6c13', // 사건
+  thing: '#2e9e5e', // 장소·유물·작품
+  frame: '#2a5d78', // 시대·직위
 };
 
 // 노드 색은 타입이 정한다. 모르는 타입은 갈래로 물러난다.
@@ -70,6 +81,36 @@ const SURFACE = '#1e1e1e';
 const EDGE_BASE = '#4a4a4a';                 // --graph-line 보다 한 단 밝다 (1px 선은 #3f3f3f 로는 안 보인다)
 const EDGE_SOFT = 'rgba(74,74,74,0.35)';     // 가리키는 동안 물러난 선
 const EDGE_SAME = '#3f3f3f';                 // 동일 실체 (same_as) — 관계가 아니라 이음이라 더 어둡다
+const EDGE_LIT = '#a8a8a8';                  // 가리킨 노드에 붙은 선 — 보라가 아니라 밝은 회색 (2026-09-05 사용자 결정)
+const EDGE_LIT_SAME = '#7a7a7a';             // 가리킨 노드의 same_as 선
+// 인과 도면의 선 — 연표의 '원인'과 같은 파랑(--color-blue) 계열. 주변
+// 관계 그래프에서는 인과도 회색 한 가지다 (2026-09-06 사용자: "처음부터
+// 보여주지 말고(그럼 너무 복잡해 보임)").
+const CAUSE_LIT = '#8cc4ea';
+
+// --- 인과 도면 ----------------------------------------------------------
+//
+// 노드를 누르면 캔버스가 **그 노드의 인과 도면**이 된다. 원인은 왼쪽 열,
+// 결과는 오른쪽 열, 열 안은 연도순. 힘 배치는 멈춘다.
+//
+// 처음엔 주변 관계(이웃 120)의 힘 배치 위에 파란 인과 선을 얹었다.
+// 2026-09-06 사용자: "인과관계 그래프가 너무 복잡하게 그려지고 있어서,
+// 아무런 정보값이 없어. 팔란티어나 다른 회사의 그래프 디자인을 검색해서
+// 공부해서 수정해봐." 찾아본 셋이 같은 말을 했다 — 팔란티어 Vertex 는
+// 그래프 배치에 '계층(좌→우)'을 따로 두고 뿌리 노드를 골라 엣지 방향대로
+// 층을 세운다. Cambridge Intelligence(KeyLines)는 힘 배치가 전체 모양만
+// 보여주므로 흐름이 있는 자료는 '순차 배치(sequential layout)'로 층을
+// 나눈다. 사건 인과 시각화 논문들(VAC2·DOMINO 등)은 인과 나무를 시간축을
+// 따라 원인 → 결과의 흐름도로 그리고, 고른 사건에서 출발해 그 사건으로
+// 이어지는 경로만 점진적으로 펼친다. 셋의 공통: **인과는 방향이 뜻이므로
+// 층으로 세우고, 그 밖의 관계는 그리지 않는다.**
+const COL = 230;   // 열(걸음) 간격
+const ROW = 58;    // 한 열 안의 줄 간격 — 이름 두 줄(이름·연도)보다 넉넉히
+// 열 머리. 걸음이 멀수록 말이 흐려진다 — '원인의 원인의 원인'은 안 읽힌다.
+const COL_CAPTION = {
+  cause: ['원인', '원인의 원인', '더 앞선 원인'],
+  effect: ['결과', '결과의 결과', '더 뒤의 결과'],
+};
 const ACCENT = '#8a6cef';                    // --color-accent
 const ACCENT_SOFT = '#af9af4';               // --color-accent-2
 const TEXT = '#dadada';                      // --text-normal
@@ -98,6 +139,11 @@ export class GraphView {
     // (0 = 늘 보임 · 1 = 많이 확대해야 보임), arrows 는 화살촉 여부.
     this.display = { nodeScale: 1, lineScale: 1, textFade: 0.3, arrows: true };
     this.hiddenEdgeTypes = new Set();   // 필터로 끈 관계 종류
+    // 인과 도면 상태 (showCausal). 도면 밖이면 null. 들어가며 접어 둔 주변
+    // 관계 그래프는 _saved 에 있다가 exitCausal 로 그대로 돌아온다.
+    this.causalView = null;
+    this._saved = null;
+    this.onCausalExit = opts.onCausalExit || (() => {});
     this.forces = { ...DEFAULT_FORCES };
 
     this._acc = 0;
@@ -129,6 +175,8 @@ export class GraphView {
   // merge=true 면 기존 배치를 유지한 채 새 노드만 얹는다. 펼치기를 할
   // 때마다 화면이 통째로 다시 튀면 사용자는 방금 보던 것을 잃는다.
   setData(payload, { merge = false } = {}) {
+    // 도면 위에 이웃을 얹지 않는다 — 검색·펼치기는 주변 관계 그래프의 일이다.
+    if (this.causalView) this.exitCausal({ restore: merge });
     const w = this.canvas.clientWidth || 800;
     const h = this.canvas.clientHeight || 600;
     if (!merge) {
@@ -165,13 +213,19 @@ export class GraphView {
       node.r = nodeRadius(node) * this.display.nodeScale;
     }
 
-    const seen = new Set(this.edges.map(edgeKey));
+    const seen = new Map(this.edges.map((e) => [edgeKey(e), e]));
     for (const e of payload.edges) {
       if (!this.byId.has(e.s) || !this.byId.has(e.t)) continue;
       const key = `${e.s}|${e.t}|${e.type}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      this.edges.push({ ...e, kind: 'edge' });
+      const have = seen.get(key);
+      if (have) {
+        // 사슬이 주는 인과의 종류(배경·계기·영향)가 '원인'보다 구체적이다
+        if (e.type === 'caused' && e.label && e.label !== '원인') have.label = e.label;
+        continue;
+      }
+      const row = { ...e, kind: 'edge' };
+      seen.set(key, row);
+      this.edges.push(row);
     }
     for (const s of payload.same_as || []) {
       if (!this.byId.has(s.a) || !this.byId.has(s.b)) continue;
@@ -188,6 +242,7 @@ export class GraphView {
       c.y = h / 2;
     }
     this.adjacency = null;
+    this._reach = null;
     this._rebuildSim(w, h);
     this.autoFit = true;   // 사용자가 화면을 움직이기 전까지는 카메라가 따라간다
     // 첫 맞춤은 즉시. 처음부터 서서히 따라가면 그래프가 화면 밖에서
@@ -197,13 +252,100 @@ export class GraphView {
     return incoming;
   }
 
+  // 인과 도면으로 들어간다. `/api/chain` 의 나무를 열로 세우고(causalLayout)
+  // 주변 관계 그래프는 접어 둔다. 인과가 없으면 false — 부르는 쪽이 전처럼
+  // 주변 관계를 편다.
+  showCausal(chain) {
+    if (!causalLayout(chain)) return false;
+    if (!this.causalView) {
+      this._saved = { nodes: this.nodes, edges: this.edges, byId: this.byId, center: this.center,
+                      tx: this.tx, ty: this.ty, k: this.k };
+    }
+    this.sim?.stop();
+    this.sim = null;
+    this.causalView = { chain, center: chain.center, causes: 0, effects: 0, depths: [] };
+    this.selected = chain.center;
+    this.hover = null;
+    this._layoutCausal();
+    return true;
+  }
+
+  // 도면을 **화면 자로** 세운다. 이름표는 배율과 무관하게 11px 인데 줄 간격을
+  // 배율로 줄이면(fitView) 글자가 겹친다. 그래서 열 간격은 화면 폭을 열 수로
+  // 나눈 것(120~230), 줄 간격은 화면 높이를 가장 긴 열의 줄 수로 나눈
+  // 것(40~58)으로 정하고 배율 1 로 둔다. 그래도 폭이 넘치면 그만큼만 줄이되
+  // 줄 간격은 화면에서 40px 아래로 안 내려가게 미리 키운다. 캔버스 크기가
+  // 바뀌면(상세 패널이 열리면 폭이 준다) 다시 잰다 (_resize).
+  _layoutCausal() {
+    const { chain } = this.causalView;
+    const W = this.canvas.clientWidth || 800;
+    const H = this.canvas.clientHeight || 600;
+    const probe = causalLayout(chain);
+    const perColumn = new Map();
+    for (const n of probe.nodes) perColumn.set(n.depth, (perColumn.get(n.depth) || 0) + 1);
+    const tallest = Math.max(...perColumn.values());
+    const cols = Math.max(probe.depths.length - 1, 1);
+    const col = Math.max(120, Math.min(COL, (W - 160) / cols));
+    const k = Math.min(1, (W - 60) / (col * cols + 100));
+    const row = Math.max(40, Math.min(ROW, (H - 170) / Math.max(tallest - 1, 1))) / k;
+    const laid = causalLayout(chain, { col, row });
+    this.nodes = laid.nodes;
+    this.edges = laid.edges;
+    this.byId = new Map(laid.nodes.map((n) => [n.id, n]));
+    this.center = chain.center;
+    Object.assign(this.causalView, { causes: laid.causes, effects: laid.effects, depths: laid.depths, col });
+    this.adjacency = null;
+    this._reach = null;
+    this._shownLabels = new Set();
+    this.autoFit = false;
+    // 도면의 상자를 화면 한가운데에 (열 머리 자리만큼 아래로)
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of laid.nodes) {
+      minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+      minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+    }
+    this.k = k;
+    this.tx = W / 2 - ((minX + maxX) / 2) * k;
+    this.ty = H / 2 - ((minY + maxY) / 2) * k + 14;
+  }
+
+  // 도면에서 주변 관계 그래프로. 접어 둔 노드·자리·카메라가 그대로 돌아온다
+  // (restore=false 면 곧 setData 가 덮어쓰므로 상태만 접는다).
+  exitCausal({ restore = true } = {}) {
+    if (!this.causalView) return;
+    const s = this._saved;
+    this._saved = null;
+    this.causalView = null;
+    this.hover = null;
+    if (restore && s) {
+      this.nodes = s.nodes; this.edges = s.edges; this.byId = s.byId; this.center = s.center;
+      this.tx = s.tx; this.ty = s.ty; this.k = s.k;
+      this.selected = null;
+      this.adjacency = null;
+      this._reach = null;
+      this._shownLabels = new Set();
+      this._rebuildSim(this.canvas.clientWidth, this.canvas.clientHeight);
+      this.sim.alpha(0.12);   // 자리는 그대로, 살짝만 데운다
+      this.onCausalExit();
+    }
+  }
+
+  // 한 노드에서 인과 엣지를 따라 위(원인)·아래(결과)로 닿는 모든 것.
+  // 도면에서 노드를 가리키면 그 노드를 지나는 경로만 밝힌다.
+  causalReachOf(id) {
+    if (this._reach?.id !== id) {
+      this._reach = { id, ...causalReach(this.edges, id, (e) => this.edgeShown(e)) };
+    }
+    return this._reach;
+  }
+
   // d3 의 forceLink 는 링크 배열을 자기 것으로 삼아 source/target 을 노드
   // 객체로 바꿔 끼운다. 그리기는 여전히 e.s / e.t 를 쓰므로 서로 밟지 않는다.
   // --- 설정 -------------------------------------------------------------
   setDisplay(patch) {
     const before = this.display.nodeScale;
     this.display = { ...this.display, ...patch };
-    if (this.display.nodeScale !== before && this.nodes.length) {
+    if (this.display.nodeScale !== before && this.nodes.length && !this.causalView) {
       for (const n of this.nodes) n.r = nodeRadius(n) * this.display.nodeScale;
       // 겹침 방지 반지름이 바뀌었으니 배치를 다시 데운다 (자리는 지킨다)
       this._rebuildSim(this.canvas.clientWidth, this.canvas.clientHeight);
@@ -213,7 +355,7 @@ export class GraphView {
 
   setForces(patch) {
     this.forces = { ...this.forces, ...patch };
-    if (!this.nodes.length) return;
+    if (!this.nodes.length || this.causalView) return;
     this._rebuildSim(this.canvas.clientWidth, this.canvas.clientHeight);
     this.sim.alpha(0.6);
   }
@@ -224,6 +366,7 @@ export class GraphView {
   setEdgeFilter(hidden) {
     this.hiddenEdgeTypes = new Set(hidden || []);
     this.adjacency = null;
+    this._reach = null;
     if (this.hover && !this.nodeShown(this.hover)) this.hover = null;
   }
 
@@ -340,6 +483,12 @@ export class GraphView {
     ctx.translate(this.tx, this.ty);
     ctx.scale(this.k, this.k);
 
+    if (this.causalView) {
+      this._drawCausal(ctx);
+      ctx.restore();
+      return;
+    }
+
     // 가리키는 동안은 hover 가, 마우스를 떼면 클릭해 둔 노드가 조명을
     // 이어받는다 — 빈 곳을 클릭하기 전까지 유지된다. 선택 노드가 화면에
     // 없으면(새 데이터 로드 뒤) 조명 없는 기본 화면으로 돌아간다.
@@ -358,28 +507,28 @@ export class GraphView {
       const b = this.byId.get(e.t);
       if (!a || !b || !this.edgeShown(e)) continue;
       const active = spot && (e.s === spot || e.t === spot);
-      // 선은 회색 한 가지다. 가리킨 노드에 붙은 선만 강조색으로 선다 —
-      // Obsidian 이 그렇다. 무엇이 무엇에게 건 관계인지는 화살촉이 말한다.
+      // 선은 회색뿐이다 — 인과도 여기서는 회색이다(인과는 노드를 누르면
+      // 도면으로 펼친다). 가리킨 노드에 붙은 선은 더 밝고 굵게 선다 —
+      // 강조색(보라)은 노드 테두리에만 둔다. 무엇이 무엇에게 건 관계인지는
+      // 화살촉이 말한다.
+      ctx.globalAlpha = 1;
       if (spot && !active) {
-        ctx.globalAlpha = 1;
         ctx.strokeStyle = EDGE_SOFT;
         ctx.lineWidth = 1;
       } else if (active) {
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = e.kind === 'same_as' ? ACCENT_SOFT : ACCENT;
+        ctx.strokeStyle = e.kind === 'same_as' ? EDGE_LIT_SAME : EDGE_LIT;
         ctx.lineWidth = 1.8;
       } else {
-        ctx.globalAlpha = 1;
         ctx.strokeStyle = e.kind === 'same_as' ? EDGE_SAME : EDGE_BASE;
         ctx.lineWidth = 1.1;
       }
-      // 인과(원인 → 결과)는 다른 관계보다 굵다. 이 그래프가 온톨로지인
-      // 이유가 이 선이라, 참여·장소 선 사이에서 같은 굵기로 묻히면 안 된다.
-      if (e.type === 'caused') ctx.lineWidth += 1.2;
       ctx.lineWidth *= this.display.lineScale;
       // 추출로 얻은 관계(신뢰도 < 1)는 점선. 구조화 소스가 준 사실과
       // 텍스트에서 추론한 사실을 화면에서 구분하지 않으면 둘 다 못 믿는다.
       ctx.setLineDash(e.kind === 'same_as' ? [2, 4] : e.conf < 1 ? [5, 4] : []);
+      // 인과(원인 → 결과)는 다른 관계보다 굵다. 이 그래프가 온톨로지인
+      // 이유가 이 선이라, 참여·장소 선 사이에서 같은 굵기로 묻히면 안 된다.
+      if (e.type === 'caused') ctx.lineWidth += 1.2 * this.display.lineScale;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
@@ -440,6 +589,72 @@ export class GraphView {
     ctx.restore();
   }
 
+  // 인과 도면 그리기. 열은 causalLayout 이 정했고 여기서는 선·점·이름·열
+  // 머리만 그린다. 가리키는 노드가 있으면 그 노드를 지나는 경로만 밝다.
+  _drawCausal(ctx) {
+    const view = this.causalView;
+    const spot = this.hover;
+    const reach = spot ? this.causalReachOf(spot) : null;
+    const lit = (id) => !spot || id === spot || reach.nodes.has(id);
+    const litEdge = (e) => !spot || reach.edges.has(edgeKey(e));
+
+    // 열 머리 — 도면의 맨 위에 흐리게. 왼쪽이 원인, 오른쪽이 결과라는 것을
+    // 글자로 한 번 더 말한다 (색만으로 뜻을 나르지 않는다).
+    let top = Infinity;
+    for (const n of this.nodes) top = Math.min(top, n.y);
+    ctx.font = `600 ${11 / this.k}px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = TEXT_DIM;
+    for (const d of view.depths) {
+      if (d === 0) continue;
+      const side = d < 0 ? COL_CAPTION.cause : COL_CAPTION.effect;
+      ctx.fillText(side[Math.min(Math.abs(d) - 1, side.length - 1)], d * view.col, top - 26 / this.k);
+    }
+
+    // 선 — 열 사이를 잇는 곡선. 곧은 선은 열을 건너뛰는 선이 중간 열의
+    // 점을 가로지르고, 곡선은 점 사이로 지나간다.
+    for (const e of this.edges) {
+      const a = this.byId.get(e.s);
+      const b = this.byId.get(e.t);
+      if (!a || !b) continue;
+      const on = litEdge(e);
+      ctx.globalAlpha = on ? 1 : 0.18;
+      ctx.strokeStyle = on ? CAUSE_LIT : EDGE_LIT;
+      ctx.lineWidth = (on ? 2 : 1) * this.display.lineScale;
+      ctx.setLineDash(e.conf < 1 ? [5, 4] : []);
+      const bend = Math.max(40, Math.abs(b.x - a.x) * 0.5);
+      const c1 = { x: a.x + bend, y: a.y };
+      const c2 = { x: b.x - bend, y: b.y };
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, b.x, b.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 화살촉은 곡선의 끝 접선(c2 → b)을 따른다
+      drawArrow(ctx, { x: c2.x, y: c2.y }, b, ctx.strokeStyle);
+      // 종류(배경·계기·영향)는 선 한가운데. 곡선의 중점은 양 끝의 평균이다.
+      // 선이 많으면 가리킨 경로에만 적는다 — 스물 넘는 글자가 열 사이에
+      // 쌓이면 선끼리 갈리지 않는다.
+      if (on && this.k > 0.35 && (spot || this.edges.length <= 24)) drawEdgeLabel(ctx, a, b, e.label, this.k, CAUSE_LIT);
+      ctx.globalAlpha = 1;
+    }
+
+    for (const node of this.nodes) {
+      drawNode(ctx, node, {
+        dim: !lit(node.id),
+        focused: node.id === spot,
+        center: node.id === view.center,
+        selected: node.id === view.center,
+      });
+    }
+    // 이름은 전부 쓴다 — 열 안 줄 간격(ROW)이 이름 두 줄보다 넓다.
+    for (const node of this.nodes) {
+      if (!lit(node.id)) continue;
+      drawLabel(ctx, node, node.id === view.center || node.id === spot, this.k, 1);
+    }
+  }
+
   // --- 상호작용 -------------------------------------------------------
   _resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -454,6 +669,7 @@ export class GraphView {
     this.dpr = dpr;
     this.canvas.width = pw;
     this.canvas.height = ph;
+    if (this.causalView) { this._layoutCausal(); return; }
     if (this.sim) {
       retarget(this.sim, { center: this.center, width: w, height: h });
       this.sim.alpha(Math.max(this.sim.alpha(), 0.35));
@@ -504,6 +720,8 @@ export class GraphView {
         const p = this.toWorld(ev.offsetX, ev.offsetY);
         dragNode.fx = p.x;
         dragNode.fy = p.y;
+        // 도면에는 시뮬레이션이 없다 — 자리를 직접 옮긴다
+        if (!this.sim) { dragNode.x = p.x; dragNode.y = p.y; }
         if (this.sim) this.sim.alpha(Math.max(this.sim.alpha(), 0.4));
         moved = true;
         return;
@@ -531,8 +749,12 @@ export class GraphView {
         dragNode.fy = null;
         this._select(dragNode);
       }
-      // 빈 곳 클릭(끌지 않은 팬)은 선택 해제 — 조명이 여기서 꺼진다
-      if (!dragNode && !moved) this.selected = null;
+      // 빈 곳 클릭(끌지 않은 팬)은 선택 해제 — 조명이 여기서 꺼진다.
+      // 도면에서는 주변 관계 그래프로 돌아가는 몸짓이다.
+      if (!dragNode && !moved) {
+        if (this.causalView) this.exitCausal();
+        else this.selected = null;
+      }
       dragNode = null;
       panning = false;
       last = null;
@@ -702,7 +924,7 @@ function drawLabel(ctx, n, strong, k, alpha = 1) {
   ctx.globalAlpha = 1;
 }
 
-function drawEdgeLabel(ctx, a, b, text, k) {
+function drawEdgeLabel(ctx, a, b, text, k, color = TEXT_DIM) {
   if (!text) return;
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
@@ -713,8 +935,141 @@ function drawEdgeLabel(ctx, a, b, text, k) {
   ctx.strokeStyle = SURFACE;
   ctx.lineJoin = 'round';
   ctx.strokeText(text, mx, my);
-  ctx.fillStyle = TEXT_DIM;
+  ctx.fillStyle = color;
   ctx.fillText(text, mx, my);
+}
+
+// 한 노드에서 `caused` 엣지를 따라 위(원인 쪽, 들어오는 선)·아래(결과 쪽,
+// 나가는 선)로 닿는 노드와 그 선. 순환이 있어도 한 번씩만 밟는다. 인과
+// 아닌 엣지와 필터로 끈 엣지는 건너뛴다.
+export function causalReach(edges, id, shown = () => true) {
+  const out = new Map();
+  const into = new Map();
+  for (const e of edges) {
+    if (e.type !== 'caused' || !shown(e)) continue;
+    if (!out.has(e.s)) out.set(e.s, []);
+    if (!into.has(e.t)) into.set(e.t, []);
+    out.get(e.s).push(e);
+    into.get(e.t).push(e);
+  }
+  const nodes = new Set([id]);
+  const keys = new Set();
+  const walk = (adj, other) => {
+    const stack = [id];
+    const seen = new Set([id]);
+    while (stack.length) {
+      const n = stack.pop();
+      for (const e of adj.get(n) || []) {
+        keys.add(edgeKey(e));
+        const m = other(e);
+        if (seen.has(m)) continue;
+        seen.add(m);
+        nodes.add(m);
+        stack.push(m);
+      }
+    }
+  };
+  walk(out, (e) => e.t);
+  walk(into, (e) => e.s);
+  return { nodes, edges: keys };
+}
+
+// 연도 한 줄. '1592-04-13' → '1592', '-0057-01-01' → '기원전 57'. 모르면 ''.
+function yearOf(date) {
+  if (!date) return '';
+  const m = String(date).match(/^(-?)(\d{1,4})/);
+  if (!m) return '';
+  const y = parseInt(m[2], 10);
+  return m[1] ? `기원전 ${y}` : String(y);
+}
+
+// `/api/chain` 의 나무를 열로 세운다. 가운데(0열)가 고른 노드, 왼쪽(-1, -2…)
+// 이 원인, 오른쪽(+1, +2…)이 결과. 열은 수기야마(Sugiyama) 층 매기기의
+// '가장 긴 경로'다 — 한 노드가 여러 가지에 나와도 한 번만 서고, 그 노드에서
+// 고른 노드까지 가장 긴 길만큼 떨어진 열에 선다. 그래야 **모든 선이
+// 왼쪽에서 오른쪽으로만** 간다 (가까운 열에 두면 후금 → 정묘호란이 같은
+// 열 안에서 위아래로 서고, 방향이 사라진다). 열 안은 연도순(모르는 것은
+// 뒤), 같은 해면 이름순. 인과가 없으면 null.
+export function causalLayout(chain, { col = COL, row = ROW } = {}) {
+  if (!chain || !(chain.causes?.length || chain.effects?.length)) return null;
+  const side = new Map([[chain.center, 0]]);   // -1 원인 쪽 · +1 결과 쪽
+  const edges = new Map();
+  const walk = (items, parent, sign) => {
+    const stack = (items || []).map((it) => [it, parent]);
+    while (stack.length) {
+      const [it, from] = stack.pop();
+      if (!chain.nodes?.[it.id]) continue;
+      if (!side.has(it.id)) side.set(it.id, sign);
+      const [s, t] = sign < 0 ? [it.id, from] : [from, it.id];
+      const key = `${s}|${t}|caused`;
+      if (!edges.has(key)) {
+        edges.set(key, { s, t, type: 'caused', kind: 'edge', label: it.kind || '원인',
+                         how: it.how || '', conf: it.confidence ?? 1, sources: it.sources || [] });
+      }
+      for (const child of it.children || []) stack.push([child, it.id]);
+    }
+  };
+  walk(chain.causes, chain.center, -1);
+  walk(chain.effects, chain.center, +1);
+
+  // 가장 긴 경로 층 매기기. 원인 쪽은 '이 노드가 부른 것' 중 가장 먼 열의
+  // 한 칸 왼쪽, 결과 쪽은 '이 노드를 부른 것' 중 가장 먼 열의 한 칸 오른쪽.
+  // 순환(두 사건이 서로를 불렀다고 적힌 경우)은 되돌아오는 선을 무시한다.
+  const next = new Map();   // 원인 쪽: s → [t…]
+  const prev = new Map();   // 결과 쪽: t → [s…]
+  for (const e of edges.values()) {
+    if (side.get(e.s) === -1 && side.get(e.t) !== 1) (next.get(e.s) || next.set(e.s, []).get(e.s)).push(e.t);
+    if (side.get(e.t) === 1 && side.get(e.s) !== -1) (prev.get(e.t) || prev.set(e.t, []).get(e.t)).push(e.s);
+  }
+  const depthOf = new Map([[chain.center, 0]]);
+  const onPath = new Set();
+  const depth = (id, adj, sign) => {
+    if (depthOf.has(id)) return depthOf.get(id);
+    if (onPath.has(id)) return 0;          // 순환 — 이 선은 층에 안 들어간다
+    onPath.add(id);
+    let far = 0;
+    for (const other of adj.get(id) || []) far = Math.max(far, Math.abs(depth(other, adj, sign)));
+    onPath.delete(id);
+    const d = sign * (far + 1);
+    depthOf.set(id, d);
+    return d;
+  };
+  for (const [id, s] of side) {
+    if (s === -1) depth(id, next, -1);
+    else if (s === 1) depth(id, prev, 1);
+  }
+
+  const columns = new Map();
+  for (const [id, d] of depthOf) {
+    if (!columns.has(d)) columns.set(d, []);
+    columns.get(d).push(id);
+  }
+  const nodes = [];
+  const info = (id) => chain.nodes?.[id] || { id, label: id, type: 'event' };
+  for (const [d, ids] of columns) {
+    ids.sort((p, q) => {
+      const a = info(p).start || '', b = info(q).start || '';
+      if (a && b && a !== b) return a < b ? -1 : 1;
+      if (!!a !== !!b) return a ? -1 : 1;
+      return (info(p).label || '').localeCompare(info(q).label || '', 'ko');
+    });
+    ids.forEach((id, i) => {
+      const n = info(id);
+      nodes.push({
+        ...n,
+        names: [n.label, yearOf(n.start)].filter(Boolean),
+        degree: n.degree || 0,
+        depth: d,
+        x: d * col,
+        y: (i - (ids.length - 1) / 2) * row,
+        vx: 0, vy: 0,
+        r: d === 0 ? 10 : 7,
+      });
+    });
+  }
+  const depths = [...columns.keys()].sort((a, b) => a - b);
+  const count = (sign) => [...depthOf.values()].filter((d) => Math.sign(d) === sign).length;
+  return { nodes, edges: [...edges.values()], depths, causes: count(-1), effects: count(1) };
 }
 
 function drawArrow(ctx, a, b, color) {

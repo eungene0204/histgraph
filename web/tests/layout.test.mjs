@@ -6,7 +6,8 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, isCause, causeWire, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
+import { causalReach, causalLayout } from '../src/lib/graph-view.js';
 
 let pass = 0;
 let fail = 0;
@@ -289,6 +290,105 @@ console.log('\n배치 (d3-force)');
      yearCell({ year: 1381, date: '1381-03' }, a).text === '1381');
   ok('기원전은 접두어를 줄여 적는다',
      yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '전57');
+}
+
+// 원인은 결과보다 위에 선다. 결과의 거친 날짜(연도만)가 원인의 날짜를
+// 품으면 원인 바로 뒤에 세운다 — 병자호란(12월 9일)이 공석신주사건(1636)
+// 아래에 섰던 것 (2026-09-05 지적).
+{
+  const self = { id: 's', kind: 'self', year: 1636, date: '1636', label: '공석신주사건' };
+  const cause = { id: 'c', kind: 'near', year: 1636, date: '1636-12-09', label: '병자호란', rel: { type: 'caused', dir: 'in' } };
+  const other = { id: 'o', kind: 'anchor', year: 1636, date: '1636-03', label: '다른 일' };
+  const order = sortMarks([self, other, cause]).map((m) => m.id);
+  ok('연도만 아는 결과는 그 해의 원인 바로 뒤에 선다', order.join() === 'o,c,s', order.join());
+  // 고른 노드가 원인이고 이웃이 거친 날짜의 결과일 때도 같다
+  const self2 = { id: 's', kind: 'self', year: 1907, date: '1907-08-01', label: '군대해산' };
+  const effect = { id: 'e', kind: 'near', year: 1907, date: '1907', label: '정미의병', rel: { type: 'caused', dir: 'out' } };
+  const order2 = sortMarks([effect, self2]).map((m) => m.id);
+  ok('연도만 아는 결과 이웃은 원인인 고른 노드 뒤에 선다', order2.join() === 's,e', order2.join());
+  // 같은 날이면 원인이 먼저
+  const same = { id: 'e', kind: 'near', year: 1907, date: '1907-08-01', label: '남대문 전투', rel: { type: 'caused', dir: 'out' } };
+  ok('같은 날이면 원인이 먼저다', sortMarks([same, self2]).map((m) => m.id).join() === 's,e');
+  // 인과가 아닌 이웃은 날짜 순 그대로
+  const plain = { id: 'p', kind: 'near', year: 1636, date: '1636-12-09', label: '남한산성', rel: { type: 'took_place_in', dir: 'out' } };
+  ok('인과가 아니면 거친 날짜는 여전히 앞이다', sortMarks([self, plain]).map((m) => m.id).join() === 's,p');
+  ok('거친 날짜가 고운 날짜를 품는다', dateContains('1636', '1636-12-09') && dateContains('1920-10', '1920-10-21')
+     && dateContains('1907-08-01', '1907-08-01') && !dateContains('1636-1', '1636-12-09') && !dateContains('1637', '1636-12'));
+}
+
+// 원인은 caused 엣지의 들어오는 쪽이다. 결과(out)와 다른 관계는 잇지 않는다.
+// 선은 원인 줄에서 오른쪽으로 나가 꺾여 고른 노드 줄로 돌아온다 — 세로
+// 선은 캔버스 오른쪽 여백 안에 서고, 화살촉은 고른 노드 줄에 찍힌다.
+{
+  ok('caused 의 들어오는 쪽이 원인이다',
+     isCause({ rel: { type: 'caused', dir: 'in' } }) === true);
+  ok('결과(out)와 다른 관계는 원인이 아니다',
+     isCause({ rel: { type: 'caused', dir: 'out' } }) === false
+     && isCause({ rel: { type: 'part_of', dir: 'in' } }) === false
+     && isCause({}) === false);
+  const w = causeWire(100, 160, 252);
+  const xR = 252 - CAUSE_WIRE.inset, xS = xR - CAUSE_WIRE.arm;
+  ok('선은 원인 줄에서 나가 오른쪽 여백에서 꺾여 고른 노드 줄로 돌아온다',
+     w.includes(`M${xS}.0 100.0 H${xR}.0 V160.0 H${xS}.0`));
+  ok('화살촉은 고른 노드 줄에 찍힌다', w.includes(`L${xS}.0 160.0`));
+  ok('선은 파랗다', w.includes(CAUSE_WIRE.color) && CAUSE_WIRE.color === '#4f93bf');
+}
+
+// --- 인과 사슬 조명 (graph-view.js causalReach) ------------------------------
+// 2026-09-06 사용자: "노드를 클릭하면 인과관계를 보여주는 그래프를 인과관계
+// 엣지를 연결해서 보여줘". 고른 노드에서 caused 엣지를 따라 위·아래로 닿는
+// 것이 모두 밝아야 임진왜란 → 후금 → 정묘호란 → 병자호란이 한 조명에 선다.
+{
+  const c = (s, t) => ({ s, t, type: 'caused' });
+  const edges = [
+    c('임진왜란', '후금'), c('후금', '정묘호란'), c('정묘호란', '병자호란'), c('병자호란', '정축하성'),
+    { s: '인조', t: '병자호란', type: 'participated_in' },   // 인과가 아니다
+    c('갑', '을'), c('을', '갑'),                            // 순환
+    c('병자호란', '숨김'),
+  ];
+  const r = causalReach(edges, '병자호란', (e) => e.t !== '숨김');
+  ok('원인 쪽으로 세 걸음까지 닿는다', ['정묘호란', '후금', '임진왜란'].every((id) => r.nodes.has(id)), [...r.nodes].join(' '));
+  ok('결과 쪽도 닿는다', r.nodes.has('정축하성'));
+  ok('인과 아닌 엣지는 따라가지 않는다', !r.nodes.has('인조'));
+  ok('필터로 끈 인과는 따라가지 않는다', !r.nodes.has('숨김'));
+  ok('사슬 밖 인과는 밝히지 않는다', !r.nodes.has('갑') && !r.nodes.has('을'));
+  ok('밝힐 선은 사슬 위의 인과 넷', r.edges.size === 4 && r.edges.has('후금|정묘호란|caused'), [...r.edges].join(' '));
+  const loop = causalReach([c('갑', '을'), c('을', '갑')], '갑');
+  ok('순환이 있어도 한 번씩만 밟는다', loop.nodes.size === 2 && loop.edges.size === 2);
+}
+
+// --- 인과 도면 배치 (graph-view.js causalLayout) -----------------------------
+// 2026-09-06 사용자: 이웃 위에 얹은 인과는 "너무 복잡하게 그려지고 있어서
+// 아무런 정보값이 없어". 팔란티어 Vertex 의 계층(좌→우)·KeyLines 의 순차
+// 배치처럼 원인은 왼쪽 열, 결과는 오른쪽 열에 세운다.
+{
+  const it = (id, kind, children = []) => ({ id, kind, how: '', as: '', evidence: [], confidence: 0.8, sources: [], children });
+  const chain = {
+    center: 'BJ',
+    causes: [ it('JMH', '배경', [ it('JIN', '배경', [ it('IMJIN', '배경') ]) ]), it('JIN', '원인') ],
+    effects: [ it('JCH', '결과'), it('GB', '결과', [ it('X', '영향') ]) ],
+    nodes: { BJ: { id: 'BJ', label: '병자호란', type: 'event', start: '1636-12-09' },
+             JMH: { id: 'JMH', label: '정묘호란', type: 'event', start: '1627' },
+             JIN: { id: 'JIN', label: '후금', type: 'org', start: '1616' },
+             IMJIN: { id: 'IMJIN', label: '임진왜란', type: 'event', start: '1592' },
+             JCH: { id: 'JCH', label: '정축하성', type: 'event', start: '1637' },
+             GB: { id: 'GB', label: '강빈옥사', type: 'event', start: '1646' },
+             X: { id: 'X', label: '무엇', type: 'event' } },
+  };
+  const L = causalLayout(chain);
+  const at = (id) => L.nodes.find((n) => n.id === id);
+  ok('고른 노드가 0열 한가운데', at('BJ').x === 0 && at('BJ').y === 0 && at('BJ').depth === 0);
+  ok('원인은 왼쪽 열, 결과는 오른쪽 열', at('JMH').x < 0 && at('JCH').x > 0 && at('GB').x > 0);
+  ok('걸음마다 한 열씩', at('IMJIN').x < at('JIN').x && at('JIN').x < at('JMH').x && at('X').x > at('GB').x);
+  ok('두 가지에 나온 노드는 한 번만, 가장 긴 길만큼 왼쪽에', L.nodes.filter((n) => n.id === 'JIN').length === 1 && at('JIN').depth === -2, String(at('JIN').depth));
+  ok('열 안은 연도순', at('JCH').y < at('GB').y);
+  ok('엣지는 늘 원인 → 결과', L.edges.every((e) => at(e.s).x < at(e.t).x) && L.edges.some((e) => e.s === 'JIN' && e.t === 'BJ'), JSON.stringify(L.edges.map((e) => `${e.s}>${e.t}`)));
+  ok('엣지에 종류가 실린다', L.edges.find((e) => e.s === 'JMH' && e.t === 'BJ').label === '배경');
+  ok('이름 아래 연도가 선다', at('BJ').names[1] === '1636' && at('X').names.length === 1, JSON.stringify(at('BJ').names));
+  ok('원인·결과 수를 센다', L.causes === 3 && L.effects === 3, `${L.causes} ${L.effects}`);
+  ok('열 목록은 왼쪽부터', L.depths.join(',') === '-3,-2,-1,0,1,2');
+  ok('기원전은 글자로', causalLayout({ center: 'a', causes: [it('b', '원인')], effects: [], nodes: { a: { id: 'a', label: '가', type: 'event', start: '-0057-01-01' }, b: { id: 'b', label: '나', type: 'event' } } }).nodes.find((n) => n.id === 'a').names[1] === '기원전 57');
+  ok('인과가 없으면 도면도 없다', causalLayout({ center: 'a', causes: [], effects: [], nodes: {} }) === null);
 }
 
 console.log('\n==============================================');

@@ -228,6 +228,7 @@ console.log('\n인과');
   ok('a1 은 0단 선이 지나가고 1단에도 형제(a2)가 남았다', guides[1].lines[0] === true && guides[1].lines[1] === true && guides[1].last === false, JSON.stringify(guides[1]));
   ok('a2 는 그 단의 마지막이라 1단 선이 끊긴다', guides[2].lines[0] === true && guides[2].lines[1] === false && guides[2].last === true, JSON.stringify(guides[2]));
   ok('b 는 뿌리 단의 마지막이다', guides[3].lines[0] === false && guides[3].last === true, JSON.stringify(guides[3]));
+  ok('자식이 있는 줄(a)만 점 아래로 줄기를 내린다', guides[0].stem === true && guides[1].stem === false && guides[2].stem === false && guides[3].stem === false, JSON.stringify(guides.map((g) => g.stem)));
   const steps = pathSteps([{ id: 'wd:IMJIN', edge: null }, { id: 'wd:JIN', edge: { kind: '배경', how: '명의 쇠퇴' } }, { id: 'wd:BJ', edge: { kind: '원인', how: '' } }], tree.nodes);
   eq('경로를 글로 읽는다', pathSentence(steps), '임진왜란 → (배경) 후금 → (원인) 병자호란');
   eq('걸음에 연도가 붙는다', steps[0].year, '1592년');

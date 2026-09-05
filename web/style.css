@@ -22,6 +22,10 @@
   --color-accent:   hsl(var(--accent-h) var(--accent-s) var(--accent-l));
   --color-accent-1: hsl(var(--accent-h) var(--accent-s) 73%);
   --color-accent-2: hsl(var(--accent-h) var(--accent-s) 78%);
+  /* 파랑 — 연표의 '원인' (2026-09-05 사용자 요청: 원인은 blue). 노드 팔레트의
+     남색(003049)을 글자가 읽히도록 밝힌 것. 인물 노드가 빨강이 된 뒤로 노드
+     색과는 무관하다. */
+  --color-blue: #4f93bf;
 
   /* --- 뜻을 가진 이름 --- */
   --background-primary:       var(--color-base-00);   /* 본문·캔버스 */
@@ -76,8 +80,8 @@
   /* 로고 표식 = 노드 팔레트의 축소판. graph-view.js 의 TYPE_COLOR
      person·event·place 를 그대로 옮긴 것 — 두 벌 두면 한쪽만 고쳐진다. */
   --mark-actor: #3d84f5;
-  --mark-event: #f29a50;
-  --mark-thing: #32c261;
+  --mark-event: #fb6c13;
+  --mark-thing: #2e9e5e;
 
   /* 옛 이름 다리. timeline.js 가 var(--line)·var(--surface-2) 를 직접 쓴다. */
   --surface:   var(--background-primary);
@@ -418,6 +422,11 @@ button, input, select { font-family: inherit; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tl-rel { flex: none; font-size: 10.5px; color: var(--text-faint); }
+/* 원인 — 파랗게, 그리고 오른쪽 여백의 꺾인 선(causeWire)이 고른 노드와 잇는다.
+   선이 지나는 자리만큼 줄을 짧게 접어 글자와 선이 겹치지 않게 한다
+   (24 = inset 12 + arm 12). 원인이 없는 연표는 줄이 그대로 넓다. */
+.tl-rel.is-cause { color: var(--color-blue); }
+.tl-canvas.has-cause .tl-mark { right: 24px; }
 /* 고른 노드 자신 — 열린 문서처럼 밝고 굵다. */
 .tl-mark.k-self { color: var(--text-normal); font-weight: 600; }
 .tl-mark.k-self .tl-y { color: var(--text-muted); }
@@ -584,8 +593,11 @@ button, input, select { font-family: inherit; }
 
 /* 인과 사슬 — 들여쓰기가 걸음 수고, 그 여백에 나무 안내선을 실선으로 긋는다.
    세로선(.chain-line)은 한 단의 줄들을 위아래로 잇고, 꺾인 선(.chain-elbow)이
-   그 선에서 이 줄의 점으로 들어온다. 줄 사이 가로 구분선은 세로선과 엇갈려
-   지저분해지므로 두지 않는다 (2026-09-06: '←' 글자 대신 실선으로). */
+   그 선에서 이 줄의 점으로 들어온다. 자식이 있는 줄은 점 바로 아래에서
+   줄기(.chain-stem)를 내려 다음 줄의 꺾인 선과 잇는다 — 선은 점의 한가운데
+   (STEP 배수 + 점 반지름 4px) 에 선다. 줄 사이 가로 구분선은 세로선과 엇갈려
+   지저분해지므로 두지 않는다 (2026-09-06: '←' 글자 대신 실선으로. 같은 날
+   다시: 부모의 점과 자식의 선이 떨어져 있었다 → 줄기). */
 .chain { margin-bottom: 12px; }
 .chain-head { font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); margin: 6px 0 2px; padding-left: 6px; }
 .chain-row {
@@ -594,9 +606,14 @@ button, input, select { font-family: inherit; }
   padding: 3px 0;
 }
 .chain-guides { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; pointer-events: none; }
-.chain-line, .chain-elbow { position: absolute; top: 0; box-sizing: border-box; border: 0 solid var(--color-base-50); }
+.chain-line, .chain-elbow, .chain-stem { position: absolute; top: 0; box-sizing: border-box; border: 0 solid var(--color-base-50); }
 .chain-line { bottom: 0; width: 0; border-left-width: 1.5px; }
-.chain-elbow { height: 15px; width: 11px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: 5px; }
+/* 꺾인 선은 점의 한가운데(y 15px)에서 가로로 나가 점의 왼쪽 가장자리(다음
+   STEP)에 닿는다: 너비 = STEP 14 − 반지름 4. */
+.chain-elbow { height: 15px; width: 10px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: 5px; }
+/* 줄기는 점의 아래 가장자리(15 + 4)에서 줄 바닥까지 — 설명 글이 있어도
+   그 옆을 지나 다음 줄(자식)의 꺾인 선 꼭대기에 닿는다. */
+.chain-stem { top: 19px; bottom: 0; width: 0; border-left-width: 1.5px; }
 .chain-node {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   background: none; border: 0; padding: 2px 6px; margin: 0 -6px; border-radius: var(--radius-s);

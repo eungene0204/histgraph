@@ -13,19 +13,24 @@ import { Glyph } from './Glyph.jsx';
 
 // 한 단의 들여쓰기(px). 안내선도 같은 간격으로 선다.
 const STEP = 14;
+// 점(.rel-dot 8px)의 반지름. 세로선은 점의 한가운데 아래로 선다 — 점의
+// 왼쪽 가장자리에 세우면 부모의 점과 자식의 선이 어긋나 끊겨 보인다.
+const DOT_R = 4;
 
 // 줄 하나. 왼쪽 여백에 나무 안내선을 실선으로 긋는다 — 위 단에서 내려온
 // 세로선이 이 줄의 점 앞에서 꺾여 들어오고(ㄴ), 아래에 형제가 더 있으면
-// 세로선이 그대로 지나간다(ㅏ). 화살표 글자는 쓰지 않는다.
+// 세로선이 그대로 지나간다(ㅏ). 자식이 있으면 이 줄의 점 아래로 줄기를
+// 내려(.chain-stem) 다음 줄의 꺾인 선과 잇는다. 화살표 글자는 쓰지 않는다.
 function Row({ row, guide, nodes, onVisit }) {
   const n = nodes?.[row.id] || {};
   return (
     <div className="chain-row" style={{ paddingLeft: (row.depth + 1) * STEP }}>
       <span className="chain-guides" aria-hidden="true">
         {guide.lines.map((on, level) => (on
-          ? <i key={level} className="chain-line" style={{ left: level * STEP }} />
+          ? <i key={level} className="chain-line" style={{ left: level * STEP + DOT_R }} />
           : null))}
-        <i className="chain-elbow" style={{ left: row.depth * STEP }} />
+        <i className="chain-elbow" style={{ left: row.depth * STEP + DOT_R }} />
+        {guide.stem && <i className="chain-stem" style={{ left: (row.depth + 1) * STEP + DOT_R }} />}
       </span>
       <button className="chain-node" onClick={() => onVisit(row.id, { nest: true })}>
         <span className="rel-dot" style={{ background: nodeColor(n.type, n.group) }} />

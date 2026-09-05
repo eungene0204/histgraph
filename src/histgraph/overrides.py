@@ -17,6 +17,7 @@ CI)은 잊었는지를 묻지만, 잊을 수 있는 구조 자체는 그대로�
     target  node | edge
     key     노드 id · 엣지는 'src\\tdst\\ttype' (모든 소스에 같이 건다)
     field   label · description · start_date · end_date · props.<키> · merged_into
+            엣지는 여기에 deleted 가 더 있다 — '이 엣지는 없다' (연대 판정이 지운 인과)
     value   JSON. NULL 은 '비운다'
     origin  relabel · redescribe · describe · precision · reigns · dedupe · nikh …
     apply_when  always — 언제나 이긴다 (사람 표·정본)
@@ -28,7 +29,9 @@ CI)은 잊었는지를 묻지만, 잊을 수 있는 구조 자체는 그대로�
 고친 이유가 사라졌을 때 고친 값도 물러난다.
 
 `merged_into` 는 노드가 아니라 **없어졌다는 사실**이다. 수집이 없앤 노드를
-id 로 되살리면 (`ingest`·`nikh` 가 그런다) 여기서 다시 합친다.
+id 로 되살리면 (`ingest`·`nikh` 가 그런다) 여기서 다시 합친다. 엣지의
+`deleted` 도 같다 — `chronology` 가 지운 인과를 `causes` 가 같은 문서에서
+다시 뽑아 오면 여기서 다시 지운다.
 """
 
 from __future__ import annotations
@@ -72,7 +75,7 @@ def _check_field(target: str, field_name: str) -> None:
     if target == "node":
         ok = field_name in NODE_COLUMNS or field_name.startswith("props.") or field_name == "merged_into"
     elif target == "edge":
-        ok = field_name in EDGE_COLUMNS or field_name.startswith("props.")
+        ok = field_name in EDGE_COLUMNS or field_name.startswith("props.") or field_name == "deleted"
     else:
         raise OverrideError(f"target 은 node 또는 edge: {target!r}")
     if not ok:
@@ -301,6 +304,12 @@ def _apply_edge(conn, key: str, fld: str, value, when: str, rep: ReapplyReport) 
         return 0
     src, dst, etype = parts
     where, params = "src = ? AND dst = ? AND type = ?", (src, dst, etype)
+    if fld == "deleted":
+        # '없다'는 사실. 모든 소스의 같은 엣지를 지운다 — 방향이 뒤집힌 인과는
+        # 어느 소스가 냈든 뒤집힌 것이다.
+        if not value:
+            return 0
+        return conn.execute(f"DELETE FROM edges WHERE {where}", params).rowcount
     if fld in EDGE_COLUMNS:
         rows = conn.execute(f"SELECT rowid, {fld} FROM edges WHERE {where}", params).fetchall()
         changed = 0

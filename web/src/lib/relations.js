@@ -249,9 +249,14 @@ export function chainRows(items, depth = 0, out = []) {
 
 // 줄마다 세울 안내선. 나무를 줄로 편 뒤라 '아래에 형제가 더 있나'를 다시
 // 세어야 선을 이을지 끊을지 안다 — `lines[L]` 은 L 단(0…depth) 의 세로선이
-// 이 줄을 지나 아래로 이어지는지, `last` 는 같은 단의 마지막 줄인지다.
+// 이 줄을 지나 아래로 이어지는지, `last` 는 같은 단의 마지막 줄인지,
+// `stem` 은 바로 아래 줄이 이 줄의 자식이라 이 줄의 점에서 줄기를 내려야
+// 하는지다.
 // 2026-09-06 지적: '←' 글자로는 무엇이 무엇을 불렀는지 눈에 안 들어와
-// 실선으로 잇는다.
+// 실선으로 잇는다. 같은 날 다시 지적: 자식 단의 세로선이 자식 줄에서만
+// 시작해 부모의 점과 떨어져 있었다 — "심하전투에 후금이 영향을 줬으면
+// 저 트리선이 심하전투에 완전히 연결". 부모 줄이 점 아래로 줄기를 내려
+// 자식의 꺾인 선과 잇는다.
 export function chainGuides(rows) {
   const continues = (i, level) => {
     for (let j = i + 1; j < rows.length; j += 1) {
@@ -263,7 +268,8 @@ export function chainGuides(rows) {
   return rows.map((r, i) => {
     const lines = [];
     for (let level = 0; level <= r.depth; level += 1) lines.push(continues(i, level));
-    return { lines, last: !lines[r.depth] };
+    const stem = i + 1 < rows.length && rows[i + 1].depth === r.depth + 1;
+    return { lines, last: !lines[r.depth], stem };
   });
 }
 

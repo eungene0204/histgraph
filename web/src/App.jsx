@@ -9,6 +9,11 @@ import { Search } from './components/Search.jsx';
 // 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
 // 더할 때마다 두 곳을 고쳐야 하고, 빠뜨린 하나가 화면에 영어로 뜬다.
 
+// 인과 도면 스위치. 2026-09-06 사용자: "인과관계 그래프를 지우진 말고 기능
+// 꺼두자." 켜면 노드를 눌렀을 때 캔버스가 그 노드의 인과 도면이 된다
+// (design.md §4 '인과 도면'). 꺼져 있으면 전처럼 그 노드의 주변 관계를 편다.
+export const CAUSAL_DIAGRAM = false;
+
 function hashId() {
   return location.hash ? decodeURIComponent(location.hash.slice(1)) : '';
 }
@@ -50,6 +55,9 @@ export default function App() {
   // --- 연표 ------------------------------------------------------------
   // 연표의 주인공은 **지금 보고 있는 노드**다. 검색으로 옮겨가든 캔버스에서
   // 누르든 상세를 타고 들어가든, 화면 한가운데가 바뀌면 연표도 따라간다.
+  // 도면에서 돌아올 때 되살릴 주변 관계 안내 칩
+  const worldNoteRef = useRef(null);
+
   const showTimeline = useCallback(async (id) => {
     if (!settingsRef.current.showRail || timelineIdRef.current === id) return;
     timelineIdRef.current = id;
@@ -61,6 +69,7 @@ export default function App() {
   }, []);
 
   // --- 그래프 적재 -----------------------------------------------------
+  //
   const load = useCallback(async (id, { merge = false } = {}) => {
     const view = viewRef.current;
     if (!view) return;
@@ -82,13 +91,39 @@ export default function App() {
     view.focusOn(id);
 
     const label = data.nodes.find((n) => n.id === id)?.label || id;
-    setNote(
+    const text = (
       <>
         {label} 주변 · 노드 {data.nodes.length} · 관계 {data.edges.length}
         {data.truncated && <> · <b>차수 상위만 표시</b></>}
-      </>,
+      </>
     );
+    worldNoteRef.current = text;
+    setNote(text);
   }, [showTimeline]);
+
+  // --- 인과 도면 -------------------------------------------------------
+  //
+  // **노드를 누르면 캔버스가 그 노드의 인과 도면이 된다** (2026-09-06 사용자:
+  // "노드를 클릭하면 인과관계를 보여주는 그래프를", 그리고 이웃 위에 얹어
+  // 보였더니 "너무 복잡하게 그려지고 있어서 아무런 정보값이 없어"). 원인은
+  // 왼쪽 열, 결과는 오른쪽 열 (design.md §4 '인과 도면'). 인과가 없는
+  // 노드(대부분의 인물)는 전처럼 그 노드의 주변 관계를 편다. 빈 곳을
+  // 누르면 접어 둔 주변 관계 그래프로 돌아온다.
+  const openCausal = useCallback(async (id) => {
+    const view = viewRef.current;
+    if (!view) return;
+    if (!CAUSAL_DIAGRAM) { load(id, { merge: true }); return; }
+    // 두 걸음만 편다 — 네 걸음(사슬 패널)을 도면에 다 세우면 심하전투의
+    // 원인 31개가 한 화면에 겹친다. 더 앞은 도면 안의 노드를 눌러 이어 간다.
+    const chain = await api.chain(id, 2).catch(() => null);
+    if (chain && !chain.error && view.showCausal(chain)) {
+      const v = view.causalView;
+      const label = chain.nodes?.[id]?.label || id;
+      setNote(<>{label}의 인과 · 원인 {v.causes} · 결과 {v.effects} · 노드를 누르면 그 노드의 인과로, 빈 곳을 누르면 주변 관계로</>);
+      return;
+    }
+    load(id, { merge: true });
+  }, [load]);
 
   // --- 상세 패널 -------------------------------------------------------
   //
@@ -121,17 +156,21 @@ export default function App() {
     setDetail(null);
     setTrail([]);
     detailRef.current = null;
+    viewRef.current?.exitCausal();   // Esc 는 도면도 접는다
     // 연표는 남긴다 — 상세를 닫아도 화면 한가운데 그 노드는 그대로 있고,
     // '언제 사람인가'는 관계 목록과 달리 계속 붙어 있어야 할 정보다.
   }, []);
 
-  // 화면에 있는 노드면 그리로 옮기고, 없으면 그 주변을 새로 편다.
+  // 상세·연표에서 고른 노드 — 도면이 켜져 있으면 캔버스에서 누른 것과 같이
+  // 인과 도면을 열고(안 서면 주변 관계), 꺼져 있으면 화면에 있는 노드면
+  // 그리로 옮기고 없으면 그 주변을 새로 편다.
   const visit = useCallback((id, opts = {}) => {
     const view = viewRef.current;
-    if (view?.byId.has(id)) { view.select(id); view.focusOn(id); }
+    if (CAUSAL_DIAGRAM) openCausal(id);
+    else if (view?.byId.has(id)) { view.select(id); view.focusOn(id); }
     else load(id, { merge: true });
     showDetail(id, opts);
-  }, [load, showDetail]);
+  }, [load, openCausal, showDetail]);
 
   // 되짚어 올라가기 — 그래프에도 그 노드가 다시 보여야 '돌아왔다'가 된다.
   const backDetail = useCallback(() => {
@@ -243,9 +282,11 @@ export default function App() {
           // 그 노드가 우연히 들고 온 엣지 한두 개만 남는다 — 조선 화면에서
           // 정종을 누르면 '한씨'와의 선 하나뿐이고, 아버지 태조도 형제인 태종도
           // 안 보인다. 실제로는 관계가 25건 있는데 화면이 못 보여준 것이다.
-          onSelect={(node) => { showDetail(node.id); load(node.id, { merge: true }); }}
-          // 더블클릭은 자리를 지킨 채 이웃만 얹는다 (지금 보던 배치를 잃지 않는다)
-          onExpand={(node) => load(node.id, { merge: true })}
+          onSelect={(node) => { showDetail(node.id); openCausal(node.id); }}
+          // 더블클릭은 자리를 지킨 채 이웃만 얹는다 (지금 보던 배치를 잃지 않는다).
+          // 도면에서는 도면을 접고 그 노드의 이웃을 편다.
+          onExpand={(node) => { viewRef.current?.exitCausal(); load(node.id, { merge: true }); }}
+          onCausalExit={() => setNote(worldNoteRef.current)}
         />
         <SidePanel
           open={sideOpen}

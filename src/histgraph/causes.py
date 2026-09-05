@@ -847,9 +847,17 @@ def chain(store: GraphStore, node_id: str, depth: int = 4) -> dict | None:
     """한 노드의 원인 나무와 결과 나무. 노드 요약은 `nodes` 에 한 번씩."""
     if store.conn.execute("SELECT 1 FROM nodes WHERE id = ?", (node_id,)).fetchone() is None:
         return None
-    budget = [TREE_BUDGET]
-    causes = _tree(store, node_id, "in", depth, budget)
-    effects = _tree(store, node_id, "out", depth, budget)
+    # 예산은 두 쪽이 나눠 쓴다. 한 예산을 원인이 먼저 쓰면 원인이 많은
+    # 사건(심하전투 31건)의 결과가 빈손이 된다 — 연표에는 정묘호란·인조반정이
+    # 결과로 서 있는데 사슬은 '결과 0'이었다 (2026-09-06). 적은 쪽이 남긴
+    # 예산은 많은 쪽이 이어 쓴다.
+    half = TREE_BUDGET // 2
+    left = [half]
+    effects = _tree(store, node_id, "out", depth, left)
+    rest = [half + left[0]]                    # 제 몫 + 결과가 남긴 것
+    causes = _tree(store, node_id, "in", depth, rest)
+    if rest[0] > 0 and left[0] == 0:           # 결과가 모자랐고 원인이 남겼다
+        effects = _tree(store, node_id, "out", depth, [half + rest[0]])
     ids: set[str] = {node_id}
 
     def walk(items: list[dict]) -> None:

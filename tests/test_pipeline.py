@@ -1501,6 +1501,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("왕조 노드가 그래프의 중심", api.root() == "wd:Q28179")
     check("시작점 맨 위가 왕조", api.seeds(5)[0]["id"] == "wd:Q28179")
     check("모르는 시대는 중심 없음", GraphAPI(store, era="").root() is None)
+    # 인과의 종류(배경·계기·영향)는 그래프 화면이 선 위에 적는다 — 타입 이름
+    # '원인'으로 뭉개 보내면 사슬 패널과 그래프가 다른 말을 한다.
+    store.upsert_edges([Edge(src="wd:Q2", dst="wd:Q1", type="caused", source="causes", label="배경", confidence=0.8)])
+    g3 = api.graph("wd:Q1", depth=1)
+    caused = [e for e in g3["edges"] if e["type"] == "caused"]
+    check("그래프의 인과 엣지는 종류를 라벨로 준다", len(caused) == 1 and caused[0]["label"] == "배경", str(caused))
     store.close()
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -4115,6 +4121,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("원인의 원인으로 내려간다 (후금 ← 명 ← 임진왜란)",
           jin["children"][0]["id"] == "wd:MING" and jin["children"][0]["children"][0]["id"] == "wd:IMJIN", str(jin))
     check("나무의 노드 요약이 한 번씩 실린다", set(tree["nodes"]) == {"wd:BJ", "wd:JIN", "wd:JM", "wd:MING", "wd:IMJIN"}, str(set(tree["nodes"])))
+    # 예산은 두 쪽이 나눠 쓴다 — 원인이 많은 사건의 결과가 빈손이 되지 않게
+    # (실측: 심하전투 원인 31건에 결과 0, 연표에는 정묘호란·인조반정이 결과)
+    store.upsert_nodes([Node(id="wd:MANY", type="event", label="원인 많은 일", source="wd")]
+                       + [Node(id=f"wd:C{i}", type="event", label=f"원인 {i}", source="wd") for i in range(5)]
+                       + [Node(id="wd:E1", type="event", label="결과 하나", source="wd")])
+    store.upsert_edges([Edge(src=f"wd:C{i}", dst="wd:MANY", type="caused", source="wd", label="원인") for i in range(5)]
+                       + [Edge(src="wd:MANY", dst="wd:E1", type="caused", source="wd", label="원인")])
+    saved_budget = causes_mod.TREE_BUDGET
+    causes_mod.TREE_BUDGET = 4
+    many = causes_mod.chain(store, "wd:MANY", depth=2)
+    causes_mod.TREE_BUDGET = saved_budget
+    check("원인이 예산을 다 써도 결과는 선다", len(many["effects"]) == 1 and len(many["causes"]) == 3,
+          f"원인 {len(many['causes'])} 결과 {len(many['effects'])}")
     got = causes_mod.paths(store, "wd:IMJIN", "wd:BJ")
     check("임진왜란에서 병자호란까지 최단 인과 경로를 찾는다",
           got["found"] and [s["id"] for s in got["paths"][0]] == ["wd:IMJIN", "wd:MING", "wd:JIN", "wd:BJ"], str(got["paths"]))
@@ -4686,6 +4705,82 @@ with tempfile.TemporaryDirectory() as _d:
         check("모르는 타입은 표를 거부한다", False)
     except ValueError:
         check("모르는 타입은 표를 거부한다", True)
+    store.close()
+
+print("\n[연대 — 원인은 결과보다 먼저다 (chronology)]")
+with tempfile.TemporaryDirectory() as _d:
+    from histgraph import chronology as _ch
+
+    store = GraphStore(Path(_d) / "ch.sqlite")
+    def _ev(i, label, start, end=None):
+        return Node(id=i, type="event", label=label, source="wd", description=f"{label} 설명",
+                    start_date=start, end_date=end)
+    store.upsert_nodes([
+        _ev("wd:H", "병자호란", "1636-12-09"), _ev("wd:G", "공석신주사건", "1636", "1636"),
+        _ev("wd:Y", "요동 정벌", "1388"), _ev("wd:W", "위화도 회군", "1388-06-11"),
+        _ev("wd:S", "서울의 봄", "1979-10-27"), _ev("wd:K", "5·18", "1980-05-18"),
+        _ev("wd:M", "만주사변", "1931-09-18"), _ev("wd:N", "신사참배", "1931"),
+    ])
+    _c = lambda a, b, **kw: Edge(src=a, dst=b, type="caused", source="causes", label="원인",
+                                 confidence=0.8, props={"evidence": "…", "doc": a}, **kw)
+    store.upsert_edges([_c("wd:H", "wd:G"), _c("wd:W", "wd:Y"), _c("wd:K", "wd:S"), _c("wd:M", "wd:N")])
+
+    check("거친 결과 날짜가 원인을 품으면 within", _ch.order("1636-12-09", "1636") == "within")
+    check("같은 날도 within", _ch.order("1907-08-01", "1907-08-01") == "within")
+    check("원인이 결과보다 뒤면 after", _ch.order("1980-05-18", "1979-10-27") == "after"
+          and _ch.order("1388-06-11", "1388-05") == "after")
+    check("원인이 앞이면 ok, 모르면 unknown", _ch.order("1388-05", "1388-06-11") == "ok"
+          and _ch.order("", "1636") == "unknown")
+    check("기원전은 뒤집히지 않는다", _ch.order("-0100", "-0057") == "ok")
+    rep = _ch.find(store.conn)
+    # 위화도 회군(06-11) → 요동 정벌(1388)은 방향이 뒤집혔지만 날짜로는 못
+    # 잡는다 — 결과의 거친 날짜가 원인을 품는다. 그래서 표(flip)가 있다.
+    check("찾기: 원인이 뒤인 것만 backwards, 품는 것은 within",
+          [s.effect for s in rep.backwards] == ["서울의 봄"]
+          and sorted(s.effect for s in rep.within) == ["공석신주사건", "신사참배", "요동 정벌"],
+          f"{[s.effect for s in rep.backwards]} {[s.effect for s in rep.within]}")
+
+    tbl = Path(_d) / "chronology.tsv"
+    tbl.write_text(
+        "# 주석\n"
+        "date\twd:G\t1638-01\t\t민백: 1638년 1월 탄핵\n"
+        "date\twd:Y\t1388-05\t\t음력 4월 출정\n"
+        "drop\twd:K\twd:S\t끝낸 것이지 원인이 아니다\n"
+        "flip\twd:W\twd:Y\t배경\t정벌군이 회군했다\n"
+        "date\twd:NOPE\t1900\t\t없는 노드\n",
+        encoding="utf-8")
+    table = _ch.load_table(tbl)
+    check("표를 읽는다 (주석 건너뜀)", len(table) == 5 and table[0].action == "date" and table[3].c == "배경")
+    bad = Path(_d) / "bad.tsv"
+    bad.write_text("date\twd:G\t언젠가\t\t근거\n", encoding="utf-8")
+    try:
+        _ch.load_table(bad); check("날짜가 아니면 거부한다", False)
+    except _ch.ChronologyTableError:
+        check("날짜가 아니면 거부한다", True)
+    bad.write_text("drop\twd:K\twd:S\n", encoding="utf-8")
+    try:
+        _ch.load_table(bad); check("근거가 없으면 거부한다", False)
+    except _ch.ChronologyTableError:
+        check("근거가 없으면 거부한다", True)
+
+    ap = _ch.apply(store, table)
+    d = lambda i: store.conn.execute("SELECT start_date, end_date FROM nodes WHERE id=?", (i,)).fetchone()
+    e = lambda a, b: store.conn.execute(
+        "SELECT source, label FROM edges WHERE src=? AND dst=? AND type='caused'", (a, b)).fetchall()
+    check("날짜를 씌운다 — 새 시작보다 앞선 옛 끝은 비운다", tuple(d("wd:G")) == ("1638-01", None) and d("wd:Y")[0] == "1388-05",
+          f"{tuple(d('wd:G'))} {tuple(d('wd:Y'))}")
+    check("지운 인과는 없다", e("wd:K", "wd:S") == [])
+    check("뒤집은 인과는 결과 → 원인으로 선다", e("wd:W", "wd:Y") == [] and [tuple(r) for r in e("wd:Y", "wd:W")] == [("chronology", "배경")],
+          str(e("wd:Y", "wd:W")))
+    check("없는 노드는 세어 보고만 한다", [r.a for r in ap.absent] == ["wd:NOPE"] and ap.dated == 2 and ap.dropped == 1 and ap.flipped == 1)
+    check("씌운 뒤에는 원인이 뒤인 것이 없다", _ch.find(store.conn).backwards == [])
+    # 수집이 옛 날짜와 지운 엣지를 되살려도 편집 계층이 다시 씌운다
+    store.upsert_nodes([_ev("wd:G", "공석신주사건", "1636", "1636")])
+    store.upsert_edges([_c("wd:K", "wd:S"), _c("wd:W", "wd:Y")])
+    check("재수집 뒤에도 날짜는 표의 것이다", tuple(d("wd:G")) == ("1638-01", None), str(tuple(d("wd:G"))))
+    check("재수집이 되살린 인과는 다시 지워진다", e("wd:K", "wd:S") == [] and e("wd:W", "wd:Y") == [])
+    check("두 번 돌려도 뒤집은 엣지는 하나다", len(e("wd:Y", "wd:W")) == 1 and _ch.apply(store, table).flipped == 1
+          and len(e("wd:Y", "wd:W")) == 1)
     store.close()
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")

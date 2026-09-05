@@ -164,7 +164,7 @@ STYLE = """
   --text: var(--text-normal); --text-2: var(--text-muted); --text-3: var(--text-faint);
   --accent: var(--color-accent);
   --font: var(--font-interface);
-  --actor: #3d84f5; --event: #f29a50; --thing: #32c261; --frame: #666666;
+  --actor: #3d84f5; --event: #fb6c13; --thing: #2e9e5e; --frame: #2a5d78;
 }
 * { box-sizing: border-box; }
 html { background: var(--background-primary); }

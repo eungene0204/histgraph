@@ -32,6 +32,7 @@ DEFAULT_CACHE = ROOT / "data" / "cache"
 DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
 DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
 DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
+DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -2053,6 +2054,58 @@ def cmd_dedupe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_chronology(args: argparse.Namespace) -> int:
+    """원인이 결과보다 뒤인 인과를 찾고, 표의 판정을 씌운다 (`chronology` 모듈 머리글).
+
+    연대가 어긋난 것은 엣지가 틀렸거나 날짜가 틀린 것이다. 어느 쪽인지는
+    정본을 읽고 표에 적는다. 수집이 날짜를 되돌려도 편집 계층이 다시
+    씌우지만, 새 인과가 들어오면 다시 돌린다:
+
+        uv run histgraph chronology --apply
+        uv run histgraph --db data/korea.sqlite chronology --apply
+    """
+    from . import chronology as chrono
+
+    try:
+        table = chrono.load_table(args.table)
+    except (OSError, chrono.ChronologyTableError) as err:
+        print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
+        return 1
+
+    with GraphStore(args.db) as store:
+        applied = chrono.apply(store, table) if args.apply else None
+        rep = chrono.find(store.conn)
+
+    dates = sum(1 for r in table if r.action == "date")
+    drops = sum(1 for r in table if r.action == "drop")
+    flips = len(table) - dates - drops
+    print(f"  표 {len(table):,}줄 (날짜 {dates:,} · 지움 {drops:,} · 뒤집음 {flips:,})")
+    if applied is not None:
+        print(f"  씌움: 날짜 {applied.dated:,} · 지움 {applied.dropped:,} · 뒤집음 {applied.flipped:,}")
+        if applied.absent:
+            # 파생본에는 원본의 노드가 다 있지 않다. 시대 그래프에서는 정상이다.
+            print(f"  이 그래프에 없는 대상 {len(applied.absent):,}줄"
+                  f" (예: {', '.join(r.a for r in applied.absent[:3])})")
+    print(f"  결과의 거친 날짜가 원인을 품는 것 {len(rep.within):,}건"
+          f" (연표가 원인 뒤에 세운다) · 연대를 모르는 것 {rep.unknown:,}건")
+    if args.show and rep.within:
+        for s in rep.within[:args.show]:
+            print(f"    {s.cause}({s.cause_date}) → {s.effect}({s.effect_date})")
+
+    if rep.backwards:
+        print(f"\n  ⚠ 원인이 결과보다 뒤인 인과 {len(rep.backwards):,}건 — 날짜가 틀렸는지"
+              f" 엣지가 틀렸는지 정본을 읽고 표에 적어야 합니다 ({args.table}):")
+        for s in rep.backwards[:args.show or len(rep.backwards)]:
+            print(f"    {s.cause}({s.cause_date}) → {s.effect}({s.effect_date})"
+                  f"   {s.src} → {s.dst}")
+        print("\n    date<TAB>id<TAB>시작<TAB>끝<TAB>근거   /   drop<TAB>원인<TAB>결과<TAB>근거"
+              "   /   flip<TAB>원인<TAB>결과<TAB>종류<TAB>근거")
+        return 1
+
+    print("\n  원인이 결과보다 뒤인 인과가 없습니다.")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """그래프 탐색 화면을 띄운다."""
     from . import server
@@ -2251,6 +2304,16 @@ def main(argv: list[str] | None = None) -> int:
                       help="표의 merge 줄을 실제로 합친다 (기본은 세기만)")
     p_dp.add_argument("--show", type=int, default=20, help="출력할 후보 수")
     p_dp.set_defaults(func=cmd_dedupe)
+
+    p_ch = sub.add_parser(
+        "chronology", help="원인이 결과보다 뒤인 인과를 찾는다 (연대 관문)"
+    )
+    p_ch.add_argument("--table", type=Path, default=DEFAULT_CHRONOLOGY,
+                      help="판정 표 (기본: data/chronology.tsv)")
+    p_ch.add_argument("--apply", action="store_true",
+                      help="표의 판정을 편집 계층에 적고 씌운다 (기본은 세기만)")
+    p_ch.add_argument("--show", type=int, default=20, help="출력할 건수")
+    p_ch.set_defaults(func=cmd_chronology)
 
     p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
     p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")

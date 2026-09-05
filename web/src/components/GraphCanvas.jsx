@@ -4,20 +4,23 @@ import { GraphView } from '../lib/graph-view.js';
 // 캔버스는 React 가 그리지 않는다. 초당 60번 다시 그려지는 곳이라 가상
 // DOM 을 통과시킬 이유가 없다 — React 는 자리를 잡아주고 GraphView 의
 // 수명만 관리한다.
-export function GraphCanvas({ viewRef, onSelect, onExpand, settings, note, empty, offline }) {
+export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, settings, note, empty, offline }) {
   const canvasRef = useRef(null);
   // **콜백을 ref 에 담아 넘긴다.** 그냥 넘기면 onSelect 가 바뀔 때마다
   // GraphView 를 새로 만들어야 하고, 그러면 매번 배치가 처음부터 다시
   // 튄다. 안에서는 늘 최신 것을 부르되 인스턴스는 하나로 둔다.
-  const handlers = useRef({ onSelect, onExpand });
-  handlers.current = { onSelect, onExpand };
+  const handlers = useRef({ onSelect, onExpand, onCausalExit });
+  handlers.current = { onSelect, onExpand, onCausalExit };
 
   useEffect(() => {
     const view = new GraphView(canvasRef.current, {
       onSelect: (node) => handlers.current.onSelect(node),
       onExpand: (node) => handlers.current.onExpand(node),
+      onCausalExit: () => handlers.current.onCausalExit?.(),
     });
     viewRef.current = view;
+    // 헤드리스 크롬(CDP)으로 화면을 검증할 때 붙잡을 손잡이. 화면 코드는 쓰지 않는다.
+    window.__histgraphView = view;
     return () => {
       view.destroy();
       if (viewRef.current === view) viewRef.current = null;
