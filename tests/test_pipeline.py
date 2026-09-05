@@ -4041,6 +4041,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("인물은 접미로 풀지 않는다 ('이황'이 '퇴계 이황'에 붙지 않는다)",
           causes_mod.loose_index(store).lookup("황", "person") == [] and causes_mod.loose_index(store).lookup("퇴계이황", "person") == ["wd:TOEGYE"])
     check("접미 후보가 넷 넘으면 풀지 않는다", causes_mod.LooseIndex(store).lookup("운동", "concept") == [])
+    store.upsert_nodes([Node(id="wd:4G6J", type="event", label="4군 6진 개척", source="wd", start_date="1433")])
+    r = causes_mod.resolve(store, "4군 6진", "event", {"id": "wd:X", "start_date": "1440", "end_date": None})
+    check("이름이 라벨의 앞머리면 접두로 푼다 ('4군 6진' → '4군 6진 개척')", r is not None and r[0] == "wd:4G6J", str(r))
 
     # 모델 답은 저장해 두고, 해소기가 좋아지면 모델 없이 다시 판정한다
     causes_mod.keep_answers(store, doc, answers, "test-model")

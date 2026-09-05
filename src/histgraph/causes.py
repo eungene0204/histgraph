@@ -342,8 +342,9 @@ class LooseIndex:
 
     def lookup(self, name: str, node_type: str) -> list[str]:
         """느슨한 열쇠가 같은 노드들. 없으면 **그 타입의 라벨이 이 이름으로
-        끝나는** 노드들 — 단, 이름이 세 글자 넘고 후보가 셋 이하일 때만
-        ('운동'으로 끝나는 라벨은 수백이다)."""
+        끝나거나 시작하는** 노드들 — '중앙정보부' → '대한민국 중앙정보부',
+        '4군 6진' → '4군 6진 개척'. 단, 이름이 세 글자 넘고 후보가 셋 이하일
+        때만 ('운동'으로 끝나는 라벨은 수백이고 '고려'로 시작하는 라벨도 그렇다)."""
         key = loose_key(name)
         if len(key) < 2:
             return []
@@ -352,8 +353,11 @@ class LooseIndex:
             return sorted(ids)
         if len(key) < 4 or node_type not in _SUFFIX_TYPES:
             return []
-        found = sorted({nid for k, nid in self.suffix[node_type] if k.endswith(key) and len(k) > len(key)})
-        return found if len(found) <= 3 else []
+        for match in (lambda k: k.endswith(key), lambda k: k.startswith(key)):
+            found = sorted({nid for k, nid in self.suffix[node_type] if len(k) > len(key) and match(k)})
+            if found:
+                return found if len(found) <= 3 else []
+        return []
 
 
 def loose_index(store: GraphStore) -> LooseIndex:
