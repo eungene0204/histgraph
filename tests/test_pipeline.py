@@ -3247,6 +3247,22 @@ with tempfile.TemporaryDirectory() as tmp:
           nikh.pick_target(nidx, e_imjin, [1592])[0] == "wd:E1")
     nid, orphans, _ = nikh.pick_target(nidx, ev, [1443])
     check("이름이 같은 추출 고아는 흡수 대상이다", nid is None and orphans == ["ex:event:훈민정음 창제"], str((nid, orphans)))
+    # 라벨의 정체 낱말이 항목의 시대와 다르면 후보가 아니다 — 고려 원종 항목이
+    # '조선 원종'(정원군)에 씌워졌던 사고 (2026-09-05)
+    store.upsert_nodes([
+        Node(id="wd:W1", type="person", label="조선 원종", source="wd", start_date="1580", aliases=["원종"]),
+        Node(id="wd:W2", type="person", label="고려 원종", source="wd", aliases=["원종"]),
+    ])
+    store.upsert_edges([Edge(src="wd:W1", dst="wd:E1", type="participated_in", source="wd"),
+                        Edge(src="wd:W1", dst="wd:E2", type="participated_in", source="wd"),
+                        Edge(src="wd:W1", dst="wd:P", type="child_of", source="wd")])
+    nidx = nikh.NodeIndex(store)
+    p_goryeo = nikh.Entity("kc_n203300", "인물", "원종", "元宗", "")
+    check("고려 항목의 '원종'은 차수가 커도 조선 원종에게 가지 않는다",
+          nikh.pick_target(nidx, p_goryeo)[0] == "wd:W2", str(nikh.pick_target(nidx, p_goryeo)))
+    check("정체 낱말이 없는 라벨은 관문에 걸리지 않는다",
+          not nikh.polity_mismatch("원종", "고려") and nikh.polity_mismatch("조선 원종", "고려")
+          and not nikh.polity_mismatch("고려 원종", "고려"))
     store.close()
 
 

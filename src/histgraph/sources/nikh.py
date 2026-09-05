@@ -686,6 +686,18 @@ class NodeIndex:
         return list(self.by_key.get((node_type, label), []))
 
 
+# 라벨 앞머리의 정체 낱말. '조선 원종'·'고려 원종'처럼 동명 왕을 가르는 관례다.
+POLITY_WORDS = ("고구려", "고려", "조선", "신라", "백제", "발해", "가야", "대한제국", "대한민국")
+
+
+def polity_mismatch(label: str, era_name: str | None) -> bool:
+    """라벨이 정체 낱말로 시작하는데 항목의 시대와 다른 나라인가."""
+    if not era_name:
+        return False
+    head = label.split(" ", 1)[0] if " " in label else ""
+    return head in POLITY_WORDS and head != era_name
+
+
 def pick_target(
     index: NodeIndex, ent: Entity, years: Iterable[int] | None = None,
     birth: int | None = None,
@@ -698,9 +710,16 @@ def pick_target(
     real = [r for r in rows if not r["id"].startswith("ex:")]
     years = list(years or [])
 
-    _, (lo, hi) = ERA_DIGIT.get(ent.era_digit, (None, (-9999, 9999)))
+    era_name, (lo, hi) = ERA_DIGIT.get(ent.era_digit, (None, (-9999, 9999)))
     fit: list[dict] = []
     for r in real:
+        # **라벨이 다른 나라를 말하면 후보가 아니다.** 국편의 고려 원종
+        # (kc_n203300) 항목이 '조선 원종'(정원군)에 씌워졌다 — 둘 다 별칭이
+        # '원종'이고 한자도 元宗 이라 이름으로는 못 가르는데, 라벨의 '조선'
+        # 은 정체를 말하고 있었다 (2026-09-05 실측: 정원군의 설명이 고려
+        # 24대 왕의 것이 되고 개경 환도·삼별초가 그에게 붙었다).
+        if polity_mismatch(r["label"], era_name):
+            continue
         y = _year_of(r["start_date"])
         if y is None:
             fit.append(r)
