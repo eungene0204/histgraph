@@ -6,6 +6,7 @@
 //
 // React 가 감싸긴 하지만 이 클래스는 React 를 모른다. 캔버스는 매 프레임
 // 60번 다시 그려지는 곳이라 가상 DOM 을 통과시킬 이유가 없다.
+import { isLight } from './theme.js';
 import { buildSimulation, retarget, nodeRadius, DEFAULT_FORCES } from './layout.js';
 
 const TAU = Math.PI * 2;
@@ -69,24 +70,72 @@ export const GROUP_COLOR = {
   frame: '#2a5d78', // 시대·직위
 };
 
-// 노드 색은 타입이 정한다. 모르는 타입은 갈래로 물러난다.
+// 라이트 테마의 노드 색. **색상은 그대로, 밝기만 뒤집었다** — 흰 바탕에서는
+// 밝힌 값(크림·노랑·연빨강)이 사라지므로 팔레트 원색(빨강 D62828·남색
+// 003049)이나 어둡게 누른 값으로 돌아가고, 뼈대(시대·직위)는 반대로 옅어져
+// 물러난다. 인물 파랑과 사건 주황은 두 바탕에서 다 읽혀 그대로다.
+export const TYPE_COLOR_LIGHT = {
+  person: '#3d84f5',
+  org: '#b08a45',      // 크림을 어둡게 누른 황갈색
+  event: '#fb6c13',
+  place: '#22854c',    // 초록 — 원색 004F2D 보다 한 단 밝다 (직위와 갈리게)
+  heritage: '#cfa300', // 노랑을 어둡게 — 흰 바탕의 F9C80E 는 대비 1.4
+  artwork: '#d62828',  // 팔레트 원색 빨강
+  media: '#003049',    // 팔레트 원색 남색
+  period: '#a9c4d6',   // 옅은 남색 — 뼈대는 물러난다
+  role: '#a3cdb6',     // 옅은 초록
+};
+export const GROUP_COLOR_LIGHT = {
+  actor: '#3d84f5',
+  event: '#fb6c13',
+  thing: '#22854c',
+  frame: '#a9c4d6',
+};
+
+// 노드 색은 타입이 정한다. 모르는 타입은 갈래로 물러난다. 테마는 그릴 때마다
+// 읽는다 — 캔버스는 매 프레임 다시 그리므로 단추를 누르면 다음 프레임부터
+// 새 색이다. 상세·연표의 색 점은 React 가 다시 그릴 때 따라온다.
 export function nodeColor(type, group) {
-  return TYPE_COLOR[type] || GROUP_COLOR[group] || GROUP_COLOR.thing;
+  const [T, G] = isLight() ? [TYPE_COLOR_LIGHT, GROUP_COLOR_LIGHT] : [TYPE_COLOR, GROUP_COLOR];
+  return T[type] || G[group] || G.thing;
 }
 
 // Obsidian 의 그래프 뷰를 따른다 (design.md §3). 바탕은 --background-primary,
 // 선은 --graph-line (회색 한 가지), 가리킨 노드의 선과 테두리만 강조색.
 // 선에 타입 색을 입히던 것을 걷어냈다 — 색은 점에만 있고 선은 조용하다.
-const SURFACE = '#1e1e1e';
-const EDGE_BASE = '#4a4a4a';                 // --graph-line 보다 한 단 밝다 (1px 선은 #3f3f3f 로는 안 보인다)
-const EDGE_SOFT = 'rgba(74,74,74,0.35)';     // 가리키는 동안 물러난 선
-const EDGE_SAME = '#3f3f3f';                 // 동일 실체 (same_as) — 관계가 아니라 이음이라 더 어둡다
-const EDGE_LIT = '#a8a8a8';                  // 가리킨 노드에 붙은 선 — 보라가 아니라 밝은 회색 (2026-09-05 사용자 결정)
-const EDGE_LIT_SAME = '#7a7a7a';             // 가리킨 노드의 same_as 선
-// 인과 도면의 선 — 연표의 '원인'과 같은 파랑(--color-blue) 계열. 주변
-// 관계 그래프에서는 인과도 회색 한 가지다 (2026-09-06 사용자: "처음부터
-// 보여주지 말고(그럼 너무 복잡해 보임)").
-const CAUSE_LIT = '#8cc4ea';
+// 두 벌이다 — CSS 변수를 캔버스가 못 읽으므로 style.css 의 값을 여기 옮겨 적었다.
+const DARK = {
+  surface: '#1e1e1e',                     // --background-primary
+  edgeBase: '#4a4a4a',                    // --graph-line 보다 한 단 밝다 (1px 선은 #3f3f3f 로는 안 보인다)
+  edgeSoft: 'rgba(74,74,74,0.35)',        // 가리키는 동안 물러난 선
+  edgeSame: '#3f3f3f',                    // 동일 실체 (same_as) — 관계가 아니라 이음이라 더 어둡다
+  edgeLit: '#a8a8a8',                     // 가리킨 노드에 붙은 선 — 보라가 아니라 밝은 회색 (2026-09-05 사용자 결정)
+  edgeLitSame: '#7a7a7a',                 // 가리킨 노드의 same_as 선
+  // 인과 도면의 선 — 연표의 '원인'과 같은 파랑(--color-blue) 계열. 주변
+  // 관계 그래프에서는 인과도 회색 한 가지다 (2026-09-06 사용자: "처음부터
+  // 보여주지 말고(그럼 너무 복잡해 보임)").
+  causeLit: '#8cc4ea',
+  accent: '#8a6cef',                      // --color-accent
+  accentSoft: '#af9af4',                  // --color-accent-2
+  text: '#dadada',                        // --text-normal
+  textDim: 'rgba(218,218,218,0.62)',      // --text-muted 와 같은 무게
+  ring: 'rgba(218,218,218,0.45)',         // 중심 노드의 테두리
+};
+const LIGHT = {
+  surface: '#ffffff',
+  edgeBase: '#c4c4c4',
+  edgeSoft: 'rgba(196,196,196,0.35)',
+  edgeSame: '#d8d8d8',
+  edgeLit: '#5a5a5a',
+  edgeLitSame: '#8a8a8a',
+  causeLit: '#2f6f9f',                    // --color-blue (라이트)
+  accent: '#8a5cf5',                      // hsl(258 88% 66%)
+  accentSoft: '#ac8cf8',                  // hsl(258 88% 76%)
+  text: '#222222',
+  textDim: 'rgba(34,34,34,0.62)',
+  ring: 'rgba(34,34,34,0.45)',
+};
+function chrome() { return isLight() ? LIGHT : DARK; }
 
 // --- 인과 도면 ----------------------------------------------------------
 //
@@ -111,10 +160,6 @@ const COL_CAPTION = {
   cause: ['원인', '원인의 원인', '더 앞선 원인'],
   effect: ['결과', '결과의 결과', '더 뒤의 결과'],
 };
-const ACCENT = '#8a6cef';                    // --color-accent
-const ACCENT_SOFT = '#af9af4';               // --color-accent-2
-const TEXT = '#dadada';                      // --text-normal
-const TEXT_DIM = 'rgba(218,218,218,0.62)';   // --text-muted 와 같은 무게
 
 export class GraphView {
   constructor(canvas, opts = {}) {
@@ -513,13 +558,13 @@ export class GraphView {
       // 화살촉이 말한다.
       ctx.globalAlpha = 1;
       if (spot && !active) {
-        ctx.strokeStyle = EDGE_SOFT;
+        ctx.strokeStyle = chrome().edgeSoft;
         ctx.lineWidth = 1;
       } else if (active) {
-        ctx.strokeStyle = e.kind === 'same_as' ? EDGE_LIT_SAME : EDGE_LIT;
+        ctx.strokeStyle = e.kind === 'same_as' ? chrome().edgeLitSame : chrome().edgeLit;
         ctx.lineWidth = 1.8;
       } else {
-        ctx.strokeStyle = e.kind === 'same_as' ? EDGE_SAME : EDGE_BASE;
+        ctx.strokeStyle = e.kind === 'same_as' ? chrome().edgeSame : chrome().edgeBase;
         ctx.lineWidth = 1.1;
       }
       ctx.lineWidth *= this.display.lineScale;
@@ -605,7 +650,7 @@ export class GraphView {
     ctx.font = `600 ${11 / this.k}px ${FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillStyle = TEXT_DIM;
+    ctx.fillStyle = chrome().textDim;
     for (const d of view.depths) {
       if (d === 0) continue;
       const side = d < 0 ? COL_CAPTION.cause : COL_CAPTION.effect;
@@ -620,7 +665,7 @@ export class GraphView {
       if (!a || !b) continue;
       const on = litEdge(e);
       ctx.globalAlpha = on ? 1 : 0.18;
-      ctx.strokeStyle = on ? CAUSE_LIT : EDGE_LIT;
+      ctx.strokeStyle = on ? chrome().causeLit : chrome().edgeLit;
       ctx.lineWidth = (on ? 2 : 1) * this.display.lineScale;
       ctx.setLineDash(e.conf < 1 ? [5, 4] : []);
       const bend = Math.max(40, Math.abs(b.x - a.x) * 0.5);
@@ -636,7 +681,7 @@ export class GraphView {
       // 종류(배경·계기·영향)는 선 한가운데. 곡선의 중점은 양 끝의 평균이다.
       // 선이 많으면 가리킨 경로에만 적는다 — 스물 넘는 글자가 열 사이에
       // 쌓이면 선끼리 갈리지 않는다.
-      if (on && this.k > 0.35 && (spot || this.edges.length <= 24)) drawEdgeLabel(ctx, a, b, e.label, this.k, CAUSE_LIT);
+      if (on && this.k > 0.35 && (spot || this.edges.length <= 24)) drawEdgeLabel(ctx, a, b, e.label, this.k, chrome().causeLit);
       ctx.globalAlpha = 1;
     }
 
@@ -816,7 +861,7 @@ function drawNode(ctx, n, { dim, focused, center, selected }) {
 
   // 배경색 링 — 노드가 겹쳐도 서로 먹히지 않는다
   ctx.lineWidth = 2;
-  ctx.strokeStyle = SURFACE;
+  ctx.strokeStyle = chrome().surface;
   ctx.beginPath();
   ctx.arc(n.x, n.y, n.r + 1, 0, TAU);
   ctx.stroke();
@@ -829,13 +874,13 @@ function drawNode(ctx, n, { dim, focused, center, selected }) {
   // 고른 노드·중심·가리킨 노드의 테두리 — Obsidian 은 초점 노드를 강조색으로
   // 칠하지만 우리 노드는 타입 색을 지고 있으므로 테두리로 두른다.
   if (selected || center) {
-    ctx.strokeStyle = selected ? ACCENT : 'rgba(218,218,218,0.45)';
+    ctx.strokeStyle = selected ? chrome().accent : chrome().ring;
     ctx.lineWidth = selected ? 2 : 1.5;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r + 4.5, 0, TAU);
     ctx.stroke();
   } else if (focused) {
-    ctx.strokeStyle = ACCENT_SOFT;
+    ctx.strokeStyle = chrome().accentSoft;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r + 3.5, 0, TAU);
@@ -905,10 +950,10 @@ function drawLabel(ctx, n, strong, k, alpha = 1) {
   const y = n.y + n.r + 4 / k;
   // 글자에 배경색 외곽선을 둘러 선 위에서도 읽히게 한다
   ctx.lineWidth = 3 / k;
-  ctx.strokeStyle = SURFACE;
+  ctx.strokeStyle = chrome().surface;
   ctx.lineJoin = 'round';
   ctx.strokeText(n.label, n.x, y);
-  ctx.fillStyle = strong ? TEXT : TEXT_DIM;
+  ctx.fillStyle = strong ? chrome().text : chrome().textDim;
   ctx.fillText(n.label, n.x, y);
 
   const co = coName(n);
@@ -916,15 +961,15 @@ function drawLabel(ctx, n, strong, k, alpha = 1) {
     const size = labelFont(ctx, strong, k);
     const y2 = y + size * 1.1;
     coFont(ctx, k);
-    ctx.strokeStyle = SURFACE;
+    ctx.strokeStyle = chrome().surface;
     ctx.strokeText(co, n.x, y2);
-    ctx.fillStyle = TEXT_DIM;
+    ctx.fillStyle = chrome().textDim;
     ctx.fillText(co, n.x, y2);
   }
   ctx.globalAlpha = 1;
 }
 
-function drawEdgeLabel(ctx, a, b, text, k, color = TEXT_DIM) {
+function drawEdgeLabel(ctx, a, b, text, k, color = chrome().textDim) {
   if (!text) return;
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
@@ -932,7 +977,7 @@ function drawEdgeLabel(ctx, a, b, text, k, color = TEXT_DIM) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 3 / k;
-  ctx.strokeStyle = SURFACE;
+  ctx.strokeStyle = chrome().surface;
   ctx.lineJoin = 'round';
   ctx.strokeText(text, mx, my);
   ctx.fillStyle = color;

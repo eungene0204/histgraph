@@ -86,10 +86,12 @@ let appHtml = '';
     const html = readFileSync(join(WEB, file), 'utf-8');
     ok(`${name} 페이지가 있다`, html.includes('<h1>') && html.length > 1000);
     // 본문이 스크립트에 기대면 안 된다 — 광고 심사와 검색 로봇이 빈 페이지를
-    // 본다. 광고를 부르는 한 줄은 예외다 (본문은 그것 없이도 이미 다 있다).
+    // 본다. 예외는 둘: 광고를 부르는 한 줄, 테마(라이트/다크)를 첫 그림 전에
+    // 박는 한 줄. 둘 다 없어도 본문은 그대로 읽힌다 (테마는 어두운 기본값).
     const scripts = html.match(/<script[^>]*>/g) || [];
     ok(`${name} 은 본문이 스크립트에 기대지 않는다`,
-       scripts.every((tag) => tag.includes('adsbygoogle.js')), scripts.join(' '));
+       scripts.every((tag) => tag.includes('adsbygoogle.js') || tag.includes('/theme-boot.js')), scripts.join(' '));
+    ok(`${name} 이 테마 설정을 따른다`, html.includes('src="/theme-boot.js"'));
     ok(`${name} 이 광고를 부른다`, html.includes('adsbygoogle.js?client=ca-pub-'));
     ok(`${name} 에 그래프로 돌아가는 길이 있다`, html.includes('href="/"'));
   }
@@ -299,6 +301,23 @@ let detailHtml = '';
      /#root\s*\{[^}]*flex[^}]*\}/.test(css)
      && /#root\s*\{[^}]*min-height:\s*0/.test(css),
      css.match(/#root\s*\{[^}]*\}/)?.[0] || '#root 규칙이 없다');
+}
+
+// --- 라이트/다크 --------------------------------------------------------
+// 진실은 <html data-theme> 하나다. CSS 는 선택자로, 캔버스는 isLight() 로 읽는다.
+{
+  ok('머리 줄 오른쪽에 테마 단추가 있다',
+     appHtml.includes('class="clickable-icon theme-toggle"') && appHtml.includes('밝은 화면으로'),
+     appHtml.slice(appHtml.indexOf('<header')).slice(0, 400));
+  const css = readFileSync(join(WEB, 'style.css'), 'utf-8');
+  ok('style.css 에 라이트 토큰이 있다', /:root\[data-theme="light"\]\s*\{[^}]*--color-base-00:\s*#ffffff/.test(css));
+  ok('doc.css 에도 라이트 토큰이 있다',
+     /:root\[data-theme="light"\]/.test(readFileSync(join(WEB, 'doc.css'), 'utf-8')));
+  const boot = readFileSync(join(WEB, 'public/theme-boot.js'), 'utf-8');
+  ok('부팅 스크립트가 저장값과 운영체제 설정을 읽는다',
+     boot.includes("getItem('theme')") && boot.includes('prefers-color-scheme') && boot.includes('dataset.theme'));
+  ok('index.html 이 첫 그림 전에 테마를 박는다',
+     readFileSync(join(WEB, 'index.html'), 'utf-8').includes('src="/theme-boot.js"'));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------
