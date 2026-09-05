@@ -379,7 +379,7 @@ arrows }` · `hiddenEdgeTypes` · `forces = { center, repel, link }`. 각각
 ## 5. 배치
 
 ```
-┌ .top  머리 줄 (secondary, 44px) ────────────────────────────────────┐
+┌ .top  머리 줄 (secondary, 52px) ────────────────────────────────────┐
 │ ● histgraph  [조선~대한민국]   [검색 ─────────────]                  │
 ├───────────┬──────────────────────────────────────┬──────────────────┤
 │ .timeline │ .stage-wrap                          │ .detail          │
@@ -397,8 +397,8 @@ arrows }` · `hiddenEdgeTypes` · `forces = { center, repel, link }`. 각각
 
 | 자리 | Obsidian 의 무엇 | 클래스 | 정한 것 |
 |---|---|---|---|
-| 머리 줄 | 탭 머리 줄 | `.top` | 44px, secondary 바탕. 시대 이름은 열린 문서 탭처럼 보이는 단추(`.era`) — 누르면 중심으로 |
-| 검색 | 빠른 전환(quick switcher) | `.search`, `.results` | 입력칸은 form-field 바탕·5px·30px 높이. 결과는 primary 바탕·12px·`--shadow-l`. 고른 줄은 hover 바탕 + 강조색 글자 |
+| 머리 줄 | 탭 머리 줄 | `.top` | 52px, secondary 바탕. 세 칸 격자(1fr · 640px · 1fr)라 검색이 화면 한가운데 온다. 시대 이름은 열린 문서 탭처럼 보이는 단추(`.era`) — 누르면 중심으로 |
+| 검색 | 빠른 전환(quick switcher) | `.search`, `.results` | 입력칸은 form-field 바탕·5px·38px 높이·15px 글자 (09-06: 작아서 있는 줄 모른다는 지적). 결과는 primary 바탕·12px·`--shadow-l`. 고른 줄은 hover 바탕 + 강조색 글자 |
 | 연표 | 왼쪽 사이드바의 파일 트리 | `.timeline` | §6 |
 | 캔버스 | 그래프 뷰 | `.stage`, `#canvas` | §4. 왼쪽 아래 안내 칩(`.stage-note`), 비었으면 가운데 안내 |
 | 설정 상자 | graph-controls | `.graph-controls`, `.graph-controls-toggle` | 캔버스 **왼쪽 위**(Obsidian 과 같은 자리), 240px, `--shadow-s`. **기본 접힘** — 조절 단추(lucide sliders)만 남는다. 절은 `<details>` 라 따로 접힌다. 아래 표 |

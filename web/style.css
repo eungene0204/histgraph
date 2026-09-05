@@ -142,11 +142,14 @@ button, input, select { font-family: inherit; }
 .clickable-icon svg { width: 16px; height: 16px; }
 
 /* --- 상단 (Obsidian 의 탭 머리 줄) --- */
+/* 세 칸 격자: 상표 | 검색 | (빈 칸). 양옆 1fr 이 같아 검색이 화면 한가운데 온다 —
+   상표 폭에 밀리지 않는다. 검색은 눈에 띄어야 해서 머리 줄도 조금 높다. */
 .top {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 640px) 1fr;
   align-items: center;
   gap: 16px;
-  height: 44px;
+  height: 52px;
   padding: 0 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
@@ -169,17 +172,17 @@ button, input, select { font-family: inherit; }
 }
 .era:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 
-.search { position: relative; flex: 1; max-width: 520px; }
+.search { position: relative; grid-column: 2; width: 100%; }
 .search input {
   width: 100%;
-  height: 30px;
-  padding: 0 10px;
+  height: 38px;
+  padding: 0 14px;
   border-radius: var(--input-radius);
   border: 1px solid var(--background-modifier-border);
   background: var(--background-modifier-form-field);
   color: var(--text-normal);
   font: inherit;
-  font-size: var(--font-ui-small);
+  font-size: var(--font-ui-medium);
 }
 .search input::placeholder { color: var(--text-faint); }
 .search input:hover { border-color: var(--background-modifier-border-hover); }
