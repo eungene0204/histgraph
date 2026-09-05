@@ -41,6 +41,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .ontology import EDGE_TYPES, MAX_TARGETS, Edge
@@ -360,6 +361,64 @@ def run_model(store, backend, rep: Report, *, limit: int | None = None,
         if i % log_every == 0:
             store.conn.commit()
             log.info("판정 %d/%d · 타입 %d · none %d", i, len(rows), len(rep.typed), rep.none)
+    store.conn.commit()
+    return rep
+
+
+# --- 3-2. 표 — 사람(또는 Claude)이 직접 판정한 것 ----------------------------
+# 로컬 모델을 쓰지 않고 판정할 때의 길이다 (2026-09-05 사용자 요청 "우리 로컬
+# llm 을 사용하지 말고 너가 직접 해줘"). 후보를 표로 뽑아(`export_candidates`)
+# 근거 문장을 읽고 판정을 적으면(`data/untangle.tsv`), `run_table` 이 모델
+# 대신 그 표를 읽는다. 표는 (src, dst) 가 키라 원본과 파생본에 같은 판정이
+# 가고, 다음 수집이 같은 related_to 를 다시 내도 다시 묻지 않는다 — 표는
+# 언제나 기계를 이긴다 (CLAUDE.md §1-4 와 같은 규칙).
+#
+#     src<TAB>dst<TAB>type<TAB>direction<TAB>confidence<TAB>메모
+#     type 은 CHOICES 의 키 또는 none · direction 은 A→B / B→A · confidence 는 certain/probable/possible
+
+TABLE_MODEL = "claude-fable-5-1 (표)"
+
+
+def export_candidates(conn: sqlite3.Connection, path, *, redo: bool = False) -> int:
+    """모델에 물을 후보를 표로 뽑는다 — A·B 의 이름과 타입, 근거, 고를 수 있는 타입."""
+    rows = candidates(conn, redo=redo)
+    lines = ["# src\tdst\tA\tA타입\tB\tB타입\t고를 수 있는 것\t근거"]
+    for r in rows:
+        ev = (json.loads(r["props"] or "{}").get("evidence") or "").replace("\t", " ").replace("\n", " ")
+        ch = " ".join(f"{t}:{d}" for t, d, _ in choices_for(r["a_type"], r["b_type"]))
+        lines.append("\t".join([r["src"], r["dst"], r["a_label"], r["a_type"], r["b_label"], r["b_type"], ch, ev]))
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(rows)
+
+
+def load_verdicts(path) -> dict[tuple[str, str], dict]:
+    out: dict[tuple[str, str], dict] = {}
+    for lineno, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = raw.rstrip("\n").split("\t")
+        if len(parts) < 5:
+            raise ValueError(f"{path}:{lineno} 다섯 칸(src·dst·type·direction·confidence)이 필요합니다: {raw!r}")
+        src, dst, t, d, c = (x.strip() for x in parts[:5])
+        if t != "none" and t not in CHOICES:
+            raise ValueError(f"{path}:{lineno} 모르는 타입 {t!r}")
+        if d not in ("A→B", "B→A"):
+            raise ValueError(f"{path}:{lineno} 방향은 A→B 또는 B→A: {d!r}")
+        if c not in CONFIDENCE:
+            raise ValueError(f"{path}:{lineno} 확신도는 certain/probable/possible: {c!r}")
+        out[(src, dst)] = {"type": t, "direction": d, "confidence": c,
+                           "note": parts[5].strip() if len(parts) > 5 else ""}
+    return out
+
+
+def run_table(store, table: dict[tuple[str, str], dict], rep: Report, *, redo: bool = False) -> Report:
+    """표에 있는 후보만 판정한다. 표에 없는 것은 그대로 남아 다음 표를 기다린다."""
+    rows = candidates(store.conn, redo=redo)
+    hit = [r for r in rows if (r["src"], r["dst"]) in table]
+    rep.asked = len(hit)
+    for r in hit:
+        apply_verdict(store, r, table[(r["src"], r["dst"])], TABLE_MODEL, rep)
     store.conn.commit()
     return rep
 

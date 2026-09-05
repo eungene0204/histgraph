@@ -1,0 +1,1371 @@
+# related_to 갈라 내기 — 직접 판정 (2026-09-05, Claude). 근거 문장만 보고 골랐다.
+# src	dst	type	direction	confidence	메모 (A ~ B · 근거 앞머리)
+ex:org:원산노동연합회	wd:Q623533	none	A→B	certain	원산노동연합회 ~ 신간회
+ex:person:윤지경	wd:Q490348	participated_in	A→B	probable	윤지경 ~ 정묘호란 · 보덕 윤지경(尹知敬)이 임진강을 죽을 각오로 지키겠다고 하고 피난하지 말고 사력을 다해 도성을 지켜야 한다고
+ex:person:이화일	wd:Q12600153	participated_in	A→B	certain	이화일 ~ 삼둔자 전투 · 독립군 연합부대 사령부는 1개 소대를 삼둔자 서남쪽 봉화리(烽火里)에 매복시키고, 이화일(李化日) 소대장이 
+nikh:kc_i301710	wd:Q17	none	A→B	certain	기유약조 ~ 일본
+nikh:kc_i301710	wd:Q205662	none	A→B	certain	기유약조 ~ 에도 막부
+wd:Q11265994	ex:org:외솔회	none	A→B	certain	이상재 ~ 외솔회
+wd:Q11265994	wd:Q16171569	none	A→B	certain	이상재 ~ 서재필
+wd:Q11265994	wd:Q171684	taught	A→B	probable	이상재 ~ 이승만 · 그는 후일 대한민국의 대통령을 역임한 이승만의 정치적 스승 중의 한사람이었다.
+wd:Q11265994	wd:Q192111	none	A→B	certain	이상재 ~ 윤치호
+wd:Q11265994	wd:Q7781655	none	A→B	certain	이상재 ~ 박정양
+wd:Q123701540	ex:person:윤성시	none	A→B	certain	김일경 ~ 윤성시
+wd:Q123701540	wd:Q112027811	none	A→B	certain	김일경 ~ 이진유
+wd:Q123701540	wd:Q12595426	none	A→B	certain	김일경 ~ 목호룡
+wd:Q123701540	wd:Q16184234	none	A→B	certain	김일경 ~ 조태구
+wd:Q123701540	wd:Q484995	taught	A→B	certain	김일경 ~ 조선 경종 · 1687년 사마양시에 합격한 뒤 1699년과 1702년 그리고 1707년에 세 번 과거에 급제하고 정언(正言
+wd:Q123701540	wd:Q485009	none	A→B	certain	김일경 ~ 조선 영조
+wd:Q123701540	wd:Q497077	none	A→B	certain	김일경 ~ 김집
+wd:Q123701540	wd:Q497127	none	A→B	certain	김일경 ~ 김장생
+wd:Q12582796	wd:Q31179932	none	A→B	certain	강동진 ~ 원산 총파업
+wd:Q12584053	wd:Q12588965	none	A→B	certain	고경명 ~ 김천일
+wd:Q12584053	wd:Q12602921	none	A→B	certain	고경명 ~ 송순
+wd:Q12584053	wd:Q12617154	none	A→B	certain	고경명 ~ 조헌
+wd:Q12584053	wd:Q16171934	none	A→B	certain	고경명 ~ 최경회
+wd:Q12584053	wd:Q6748069	none	A→B	certain	고경명 ~ 백인걸
+wd:Q12586747	wd:Q188712	participated_in	B→A	certain	기유각서 ~ 일본 제국 · 〈대한제국 사법 및 감옥사무 위탁에 관한 각서〉(大韓帝國司法및監獄事務委託에關한覺書) 통칭 기유각서(己酉覺書)
+wd:Q12586747	wd:Q486062	participated_in	B→A	certain	기유각서 ~ 소네 아라스케 · 이 조약은 대한제국의 내각총리대신인 친일파 이완용과 일본의 제2대 한국 통감으로 발령받았던 소네 아라스케 사
+wd:Q12586875	ex:person:송희옥	none	A→B	certain	김개남 ~ 송희옥
+wd:Q12586875	ex:person:조시영	none	A→B	certain	김개남 ~ 조시영
+wd:Q12586875	ex:person:황헌주	none	A→B	certain	김개남 ~ 황헌주
+wd:Q12586875	wd:Q110115390	none	A→B	certain	김개남 ~ 손화중
+wd:Q12586875	wd:Q112020784	none	A→B	certain	김개남 ~ 호영
+wd:Q12586875	wd:Q11274270	none	A→B	certain	김개남 ~ 최시형
+wd:Q12586875	wd:Q114037932	none	A→B	certain	김개남 ~ 김환
+wd:Q12586875	wd:Q12601432	none	A→B	certain	김개남 ~ 서장옥
+wd:Q12586875	wd:Q12613828	none	A→B	certain	김개남 ~ 임병찬
+wd:Q12586875	wd:Q16183565	none	A→B	certain	김개남 ~ 임병욱
+wd:Q12586875	wd:Q16631060	none	A→B	certain	김개남 ~ 이건영
+wd:Q12586875	wd:Q39963	none	A→B	certain	김개남 ~ 박경리
+wd:Q12586875	wd:Q469432	none	A→B	certain	김개남 ~ 흥선대원군
+wd:Q12586875	wd:Q483541	none	A→B	certain	김개남 ~ 김기범
+wd:Q12586875	wd:Q486273	none	A→B	certain	김개남 ~ 이준용
+wd:Q12586875	wd:Q489758	none	A→B	certain	김개남 ~ 전봉준
+wd:Q12586875	wd:Q624523	none	A→B	certain	김개남 ~ 박동진
+wd:Q12589000	wd:Q2945181	member_of	A→B	certain	김춘택 ~ 노론 · 이 과정 중, 피의자들이 효종의 딸이자 숙종에겐 고모가 되는 숙안공주·숙명공주·숙휘공주가 노론의 대표인 김춘
+wd:Q12590382	wd:Q334308	none	A→B	certain	노사신 ~ 조선 세조
+wd:Q12595343	wd:Q12589996	member_of	A→B	certain	목내선 ~ 남인 · 이 기사환국으로 영의정 권대운, 좌의정 목내선, 우의정 민암, 이조판서 이현일, 호조판서 오시복, 예조판서 
+wd:Q12603383	wd:Q2945181	none	A→B	certain	숙안공주 ~ 노론
+wd:Q12603397	wd:Q2945181	none	A→B	certain	숙휘공주 ~ 노론
+wd:Q12604086	wd:Q490348	none	A→B	certain	신경진 ~ 정묘호란
+wd:Q12604333	wd:Q12587347	none	A→B	certain	신석린 ~ 김명준 (1870년)
+wd:Q12606285	wd:Q109547418	none	A→B	certain	양성지 ~ 기곡제
+wd:Q12611648	wd:Q388037	participated_in	A→B	probable	이상설 ~ 만국평화회의 · 이준은 고종의 신임장을 들고 만주의 이상설, 러시아의 이위종과 차례로 합류하여 헤이그로 향했다.
+wd:Q12611695	wd:Q490348	none	A→B	certain	이서 ~ 정묘호란
+wd:Q12612320	nikh:kc_o403300	member_of	A→B	certain	이윤재 ~ 조선어학회 · 장지영, 이윤재, 최현배 등이 중심이 되어 활동했으며, 1932년에 학회지 ‘한글’ 창간하고 한글맞춤법 통일
+wd:Q12613430	wd:Q484044	none	A→B	certain	인조반정 ~ 인목왕후
+wd:Q12613430	wd:Q624010	none	A→B	certain	인조반정 ~ 정인홍
+wd:Q12614706	nikh:kc_o403300	member_of	A→B	certain	장지영 ~ 조선어학회 · 장지영, 이윤재, 최현배 등이 중심이 되어 활동했으며, 1932년에 학회지 ‘한글’ 창간하고 한글맞춤법 통일
+wd:Q12616107	nikh:kc_o403300	member_of	A→B	certain	정태진 ~ 조선어학회 · 김학준은 영생고등여학교의 공민 선생으로 재직 중이었고, 정태진은 1941년 5월에 7년간 재직하던 영생고등여
+wd:Q12624078	wd:Q12587347	none	A→B	certain	한상룡 ~ 김명준 (1870년)
+wd:Q142	wd:Q12586787	none	A→B	certain	프랑스 ~ 기해박해
+wd:Q14356	wd:Q233254	none	A→B	certain	박정희 ~ 을사조약
+wd:Q16083384	wd:Q14356	none	A→B	certain	서중석 ~ 박정희
+wd:Q16083384	wd:Q483128	none	A→B	certain	서중석 ~ 장도영
+wd:Q16167522	wd:Q12589996	member_of	A→B	certain	권대운 ~ 남인 · 이 기사환국으로 영의정 권대운, 좌의정 목내선, 우의정 민암, 이조판서 이현일, 호조판서 오시복, 예조판서 
+wd:Q16171544	wd:Q12599058	member_of	A→B	certain	서일 ~ 북로군정서 · 또한, 서일의 지도 아래 북로군정서가 설립되었고, 김좌진은 사관학교에서 400명 이상의 독립 투사들을 지휘했
+wd:Q16171569	wd:Q11265994	none	A→B	certain	서재필 ~ 이상재
+wd:Q16172022	wd:Q12589996	member_of	A→B	certain	민암 ~ 남인 · 이 과정 중, 피의자들이 효종의 딸이자 숙종에겐 고모가 되는 숙안공주·숙명공주·숙휘공주가 노론의 대표인 김춘
+wd:Q16173005	wd:Q334308	none	A→B	certain	윤필상 ~ 조선 세조
+wd:Q16173431	ex:place:봉오동	none	A→B	certain	최진동 ~ 봉오동
+wd:Q16173431	wd:Q12600153	participated_in	A→B	probable	최진동 ~ 삼둔자 전투 · 1920년 6월 4일 독립군 홍범도 부대와 최진동 부대의 예하 1개 소대가 각각 동간도 화룡현(和龍縣) 삼둔
+wd:Q16176447	wd:Q11287782	none	A→B	certain	정약전 ~ 황사영
+wd:Q17	wd:Q12586747	none	A→B	certain	일본 ~ 기유각서
+wd:Q17	wd:Q884	none	A→B	certain	일본 ~ 대한민국
+wd:Q171684	wd:Q11265994	taught	B→A	probable	이승만 ~ 이상재 · 그는 후일 대한민국의 대통령을 역임한 이승만의 정치적 스승 중의 한사람이었다.
+wd:Q171684	wd:Q233254	none	A→B	certain	이승만 ~ 을사조약
+wd:Q179935	ex:person:정철상	none	A→B	certain	정하상 ~ 정철상
+wd:Q179935	wd:Q12611195	none	A→B	certain	정하상 ~ 이덕일
+wd:Q179935	wd:Q12619660	none	A→B	certain	정하상 ~ 최양업
+wd:Q179935	wd:Q16172279	none	A→B	certain	정하상 ~ 최방제
+wd:Q179935	wd:Q3158519	none	A→B	certain	정하상 ~ 자크 오노레 샤스탕
+wd:Q179935	wd:Q343569	none	A→B	certain	정하상 ~ 김대건
+wd:Q179935	wd:Q43727	none	A→B	certain	정하상 ~ 교황 레오 12세
+wd:Q179935	wd:Q43734	none	A→B	certain	정하상 ~ 교황 그레고리오 16세
+wd:Q179935	wd:Q4533464	none	A→B	certain	정하상 ~ 유진길 아우구스티노
+wd:Q179935	wd:Q844097	none	A→B	certain	정하상 ~ 피에르 모방
+wd:Q179935	wd:Q9253103	none	A→B	certain	정하상 ~ 정정혜
+wd:Q179935	wd:Q989	none	A→B	certain	정하상 ~ 교황 요한 바오로 2세
+wd:Q188712	wd:Q28233	none	A→B	certain	일본 제국 ~ 대한제국
+wd:Q188712	wd:Q707951	participated_in	A→B	certain	일본 제국 ~ 제1차 한일 협약 · 1904년 8월 22일, 대한제국과 일본 제국은 제1차 한일 협약을 체결했다.
+wd:Q192049	wd:Q14362	none	A→B	certain	윤보선 ~ 전두환
+wd:Q192049	wd:Q242651	none	A→B	certain	윤보선 ~ 노태우
+wd:Q192111	wd:Q11265994	none	A→B	certain	윤치호 ~ 이상재
+wd:Q192111	wd:Q707951	participated_in	A→B	certain	윤치호 ~ 제1차 한일 협약 · 이해 8월 10일 러일전쟁이 종식된 후 8월 22일에는 외부대신 서리였던 윤치호와 당시 주한 일본공사로 있던
+wd:Q19349276	wd:Q6811500	none	A→B	certain	김준 ~ 최의
+wd:Q22974749	wd:Q8017829	none	A→B	certain	이준경 ~ 서인
+wd:Q256246	wd:Q107109674	none	A→B	certain	정약용 ~ 정문섭
+wd:Q256246	wd:Q11270126	none	A→B	certain	정약용 ~ 정약종
+wd:Q256246	wd:Q11287782	none	A→B	certain	정약용 ~ 황사영
+wd:Q256246	wd:Q12610453	none	A→B	certain	정약용 ~ 윤지충
+wd:Q256246	wd:Q12610818	none	A→B	certain	정약용 ~ 이가환
+wd:Q256246	wd:Q12611195	none	A→B	certain	정약용 ~ 이덕일
+wd:Q256246	wd:Q16176447	none	A→B	certain	정약용 ~ 정약전
+wd:Q256246	wd:Q16262558	none	A→B	certain	정약용 ~ 유수원
+wd:Q256246	wd:Q26530	none	A→B	certain	정약용 ~ 조선 정조
+wd:Q256246	wd:Q379653	none	A→B	certain	정약용 ~ 이이
+wd:Q256246	wd:Q485025	none	A→B	certain	정약용 ~ 이승훈
+wd:Q256246	wd:Q486492	none	A→B	certain	정약용 ~ 유형원
+wd:Q256246	wd:Q495259	none	A→B	certain	정약용 ~ 이익
+wd:Q27953950	wd:Q12589996	none	A→B	certain	목창명 ~ 남인
+wd:Q28233	wd:Q188712	none	A→B	certain	대한제국 ~ 일본 제국
+wd:Q315559	wd:Q334111	none	A→B	certain	데라우치 마사타케 ~ 대한제국 순종
+wd:Q3270739	ex:place:정주	none	A→B	certain	박천 전투 ~ 정주
+wd:Q3270739	wd:Q423	none	A→B	certain	박천 전투 ~ 조선민주주의인민공화국
+wd:Q3270739	wd:Q499266	occurred_at	A→B	probable	박천 전투 ~ 청천강 · 중국인민지원군의 진격을 저지하기 위해, 제27영연방여단은 우측 상류에 있는 미 제24보병사단과 협력하여 후방
+wd:Q3277310	wd:Q12591942	member_of	A→B	certain	홍범도 ~ 대한독립군 · 예를 들어, 이전 의병 지도자였던 홍범도는 대한독립군을 창설하고 옌지시에서 소위 독립 투사들을 훈련시켰다.
+wd:Q3277310	wd:Q12600153	none	A→B	certain	홍범도 ~ 삼둔자 전투
+wd:Q33391	wd:Q855	none	A→B	certain	레프 트로츠키 ~ 이오시프 스탈린
+wd:Q334111	wd:Q705888	none	A→B	certain	대한제국 순종 ~ 헤이그 특사 사건
+wd:Q334308	ex:person:영풍군	none	A→B	certain	조선 세조 ~ 영풍군
+wd:Q334308	wd:Q12586496	none	A→B	certain	조선 세조 ~ 금성대군
+wd:Q334308	wd:Q16171523	none	A→B	certain	조선 세조 ~ 한남군
+wd:Q334308	wd:Q16174423	none	A→B	certain	조선 세조 ~ 김문기
+wd:Q334308	wd:Q16726364	none	A→B	certain	조선 세조 ~ 김숙자
+wd:Q334308	wd:Q470122	none	A→B	certain	조선 세조 ~ 신숙주
+wd:Q334308	wd:Q483026	none	A→B	certain	조선 세조 ~ 권람
+wd:Q334308	wd:Q483821	none	A→B	certain	조선 세조 ~ 조선 문종
+wd:Q334308	wd:Q485023	none	A→B	certain	조선 세조 ~ 조선 단종
+wd:Q334308	wd:Q486278	none	A→B	certain	조선 세조 ~ 김종직
+wd:Q334308	wd:Q486298	none	A→B	certain	조선 세조 ~ 한명회
+wd:Q334308	wd:Q488374	none	A→B	certain	조선 세조 ~ 성삼문
+wd:Q334308	wd:Q494175	none	A→B	certain	조선 세조 ~ 정인지
+wd:Q334308	wd:Q5636450	none	A→B	certain	조선 세조 ~ 하위지
+wd:Q334308	wd:Q624197	none	A→B	certain	조선 세조 ~ 안평대군
+wd:Q334308	wd:Q626748	none	A→B	certain	조선 세조 ~ 정창손
+wd:Q334308	wd:Q6408890	none	A→B	certain	조선 세조 ~ 김질
+wd:Q334308	wd:Q6799467	none	A→B	certain	조선 세조 ~ 혜빈 양씨
+wd:Q334308	wd:Q7125373	none	A→B	certain	조선 세조 ~ 박팽년
+wd:Q334308	wd:Q7451580	none	A→B	certain	조선 세조 ~ 성승
+wd:Q334308	wd:Q8053448	none	A→B	certain	조선 세조 ~ 이개
+wd:Q334308	wd:Q8059913	none	A→B	certain	조선 세조 ~ 유응부
+wd:Q334308	wd:Q8059964	none	A→B	certain	조선 세조 ~ 유성원
+wd:Q3565175	wd:Q388037	participated_in	A→B	probable	이위종 ~ 만국평화회의 · 이준은 고종의 신임장을 들고 만주의 이상설, 러시아의 이위종과 차례로 합류하여 헤이그로 향했다.
+wd:Q36014	wd:Q172640	none	A→B	certain	호찌민 ~ 베트남 민주공화국
+wd:Q36014	wd:Q881	none	A→B	certain	호찌민 ~ 베트남
+wd:Q379649	wd:Q12587864	none	A→B	certain	윤선도 ~ 김수항
+wd:Q379649	wd:Q12589331	none	A→B	certain	윤선도 ~ 김홍욱
+wd:Q379649	wd:Q12596347	none	A→B	certain	윤선도 ~ 민회빈 강씨
+wd:Q379649	wd:Q12597009	none	A→B	certain	윤선도 ~ 박인로
+wd:Q379649	wd:Q12602921	none	A→B	certain	윤선도 ~ 송순
+wd:Q379649	wd:Q12610402	child_of	B→A	certain	윤선도 ~ 윤인미 · 그의 장남 윤인미(尹仁美)는 또한 학식이 많기로 알려져 명성이 있었다.
+wd:Q379649	wd:Q16167918	none	A→B	certain	윤선도 ~ 권시
+wd:Q379649	wd:Q256246	none	A→B	certain	윤선도 ~ 정약용
+wd:Q379649	wd:Q379647	none	A→B	certain	윤선도 ~ 송시열
+wd:Q379649	wd:Q483181	none	A→B	certain	윤선도 ~ 소현세자
+wd:Q379649	wd:Q483603	none	A→B	certain	윤선도 ~ 장렬왕후
+wd:Q379649	wd:Q484253	none	A→B	certain	윤선도 ~ 조선 현종
+wd:Q379649	wd:Q484446	none	A→B	certain	윤선도 ~ 조선 효종
+wd:Q379649	wd:Q484453	none	A→B	certain	윤선도 ~ 조선 인조
+wd:Q379649	wd:Q484978	none	A→B	certain	윤선도 ~ 정철
+wd:Q379649	wd:Q497092	none	A→B	certain	윤선도 ~ 송준길
+wd:Q379649	wd:Q8061186	none	A→B	certain	윤선도 ~ 윤두서
+wd:Q379655	wd:Q109547418	none	A→B	certain	허목 ~ 기곡제
+wd:Q379659	wd:Q12604652	none	A→B	certain	원균 ~ 신충식
+wd:Q379659	wd:Q12609316	none	A→B	certain	원균 ~ 원연
+wd:Q379659	wd:Q12609323	none	A→B	certain	원균 ~ 원유철
+wd:Q379659	wd:Q12611200	none	A→B	certain	원균 ~ 이덕형
+wd:Q379659	wd:Q12612110	none	A→B	certain	원균 ~ 이예춘
+wd:Q379659	wd:Q12612410	none	A→B	certain	원균 ~ 이일
+wd:Q379659	wd:Q12612415	none	A→B	certain	원균 ~ 이일재
+wd:Q379659	wd:Q12612468	none	A→B	certain	원균 ~ 이재범
+wd:Q379659	wd:Q16180502	none	A→B	certain	원균 ~ 고설봉
+wd:Q379659	wd:Q17159017	none	A→B	certain	원균 ~ 최성호
+wd:Q379659	wd:Q2372706	none	A→B	certain	원균 ~ 한상민
+wd:Q379659	wd:Q484359	none	A→B	certain	원균 ~ 조선 선조
+wd:Q379659	wd:Q497310	none	A→B	certain	원균 ~ 이원희
+wd:Q379659	wd:Q50184	none	A→B	certain	원균 ~ 이순신
+wd:Q379659	wd:Q624683	none	A→B	certain	원균 ~ 손현주
+wd:Q379659	wd:Q625555	none	A→B	certain	원균 ~ 최재성
+wd:Q379659	wd:Q6408827	none	A→B	certain	원균 ~ 김인호
+wd:Q388037	time:2000	none	A→B	certain	만국평화회의 ~ 2000년
+wd:Q433065	ex:person:이동기	none	A→B	certain	논개 ~ 이동기
+wd:Q433065	ex:place:의기사	none	A→B	certain	논개 ~ 의기사
+wd:Q433065	wd:Q11243413	none	A→B	certain	논개 ~ 박종화
+wd:Q433065	wd:Q11269988	none	A→B	certain	논개 ~ 정문부
+wd:Q433065	wd:Q12588355	none	A→B	certain	논개 ~ 김은호
+wd:Q433065	wd:Q12588965	none	A→B	certain	논개 ~ 김천일
+wd:Q433065	wd:Q12610352	none	A→B	certain	논개 ~ 윤여환
+wd:Q433065	wd:Q16080783	none	A→B	certain	논개 ~ 김흥국
+wd:Q433065	wd:Q3148846	none	A→B	certain	논개 ~ 임동권
+wd:Q433065	wd:Q487161	none	A→B	certain	논개 ~ 한용운
+wd:Q433065	wd:Q625788	none	A→B	certain	논개 ~ 모윤숙
+wd:Q4537533	wd:Q334111	none	A→B	certain	야마가타 이사부로 ~ 대한제국 순종
+wd:Q45785	wd:Q624238	none	A→B	certain	김대중 ~ 6.29 선언
+wd:Q464485	ex:person:신명인	none	A→B	certain	신사임당 ~ 신명인
+wd:Q464485	ex:person:어숙권	none	A→B	certain	신사임당 ~ 어숙권
+wd:Q464485	wd:Q1036353	none	A→B	certain	신사임당 ~ 안견
+wd:Q464485	wd:Q10940999	none	A→B	certain	신사임당 ~ 태임
+wd:Q464485	wd:Q12604086	none	A→B	certain	신사임당 ~ 신경진
+wd:Q464485	wd:Q12613161	none	A→B	certain	신사임당 ~ 이형규
+wd:Q464485	wd:Q16262078	none	A→B	certain	신사임당 ~ 이행
+wd:Q464485	wd:Q379647	none	A→B	certain	신사임당 ~ 송시열
+wd:Q464485	wd:Q464510	none	A→B	certain	신사임당 ~ 황진이
+wd:Q464485	wd:Q483227	none	A→B	certain	신사임당 ~ 신립
+wd:Q464485	wd:Q485595	none	A→B	certain	신사임당 ~ 이명진
+wd:Q464485	wd:Q486266	none	A→B	certain	신사임당 ~ 윤원형
+wd:Q464485	wd:Q486283	none	A→B	certain	신사임당 ~ 조광조
+wd:Q464485	wd:Q486286	none	A→B	certain	신사임당 ~ 문정왕후
+wd:Q464485	wd:Q486388	none	A→B	certain	신사임당 ~ 기묘사화
+wd:Q464485	wd:Q486563	none	A→B	certain	신사임당 ~ 이기
+wd:Q464485	wd:Q491778	none	A→B	certain	신사임당 ~ 정난정
+wd:Q464485	wd:Q496594	none	A→B	certain	신사임당 ~ 신익희
+wd:Q464485	wd:Q5103807	none	A→B	certain	신사임당 ~ 최만리
+wd:Q464485	wd:Q625567	none	A→B	certain	신사임당 ~ 신숭겸
+wd:Q464485	wd:Q6514999	none	A→B	certain	신사임당 ~ 이승일
+wd:Q464485	wd:Q702588	none	A→B	certain	신사임당 ~ 장녹수
+wd:Q464485	wd:Q706103	none	A→B	certain	신사임당 ~ 을사사화
+wd:Q464485	wd:Q8053465	child_of	B→A	certain	신사임당 ~ 이매창 · 어머니를 닮아 서화에 뛰어난 솜씨를 보이며 이름을 날린 막내아들 이우와 큰딸 이매창이 그들이다.
+wd:Q464510	ex:artwork:가곡원류	none	A→B	certain	황진이 ~ 가곡원류
+wd:Q464510	ex:artwork:금계필담	none	A→B	certain	황진이 ~ 금계필담
+wd:Q464510	ex:artwork:대동풍아	none	A→B	certain	황진이 ~ 대동풍아
+wd:Q464510	ex:artwork:어우야담	none	A→B	certain	황진이 ~ 어우야담
+wd:Q464510	ex:artwork:해동가요	none	A→B	certain	황진이 ~ 해동가요
+wd:Q464510	khs:12-11-0021650000000	none	A→B	certain	황진이 ~ 청구영언
+wd:Q464510	wd:Q117196164	none	A→B	certain	황진이 ~ 황진
+wd:Q464510	wd:Q17095009	none	A→B	certain	황진이 ~ 이종숙
+wd:Q464510	wd:Q31178565	none	A→B	certain	황진이 ~ 벽계수
+wd:Q464510	wd:Q61095263	none	A→B	certain	황진이 ~ 소세양
+wd:Q464510	wd:Q6783907	none	A→B	certain	황진이 ~ 박연폭포
+wd:Q464510	wd:Q7451459	none	A→B	certain	황진이 ~ 서경덕
+wd:Q469396	ex:place:도성축조도감	none	A→B	certain	정도전 ~ 도성축조도감
+wd:Q469396	wd:Q14304	none	A→B	certain	정도전 ~ 태종
+wd:Q469396	wd:Q16173161	none	A→B	certain	정도전 ~ 설장수
+wd:Q469396	wd:Q326917	none	A→B	certain	정도전 ~ 랴오둥반도
+wd:Q469396	wd:Q378483	none	A→B	certain	정도전 ~ 조선 태조
+wd:Q469396	wd:Q482485	none	A→B	certain	정도전 ~ 경복궁
+wd:Q469396	wd:Q624467	none	A→B	certain	정도전 ~ 한성부
+wd:Q469415	wd:Q186500	none	A→B	certain	허정 ~ 장면
+wd:Q469415	wd:Q192049	none	A→B	certain	허정 ~ 윤보선
+wd:Q469450	wd:Q12608920	none	A→B	certain	허균 ~ 우성전
+wd:Q469450	wd:Q12611171	taught	B→A	certain	허균 ~ 이달 · 손곡 이달과 서애 류성룡 문인이다.
+wd:Q469450	wd:Q16176142	none	A→B	certain	허균 ~ 허성
+wd:Q470047	wd:Q171684	none	A→B	certain	윤치영 ~ 이승만
+wd:Q482645	wd:Q41117	none	A→B	certain	김일 ~ 김일성
+wd:Q482748	ex:person:한세진	none	A→B	certain	김정호 ~ 한세진
+wd:Q482748	ex:place:소행성	none	A→B	certain	김정호 ~ 소행성
+wd:Q482748	wd:Q12619924	none	A→B	certain	김정호 ~ 최한기
+wd:Q482748	wd:Q16099294	none	A→B	certain	김정호 ~ 고산자로
+wd:Q482748	wd:Q469432	none	A→B	certain	김정호 ~ 흥선대원군
+wd:Q482850	wd:Q11175295	none	A→B	certain	조선 철종 ~ 인평대군
+wd:Q482850	wd:Q257425	none	A→B	certain	조선 철종 ~ 대한제국 고종
+wd:Q482850	wd:Q26530	none	A→B	certain	조선 철종 ~ 조선 정조
+wd:Q482850	wd:Q334111	none	A→B	certain	조선 철종 ~ 대한제국 순종
+wd:Q482850	wd:Q378483	none	A→B	certain	조선 철종 ~ 조선 태조
+wd:Q482850	wd:Q459964	none	A→B	certain	조선 철종 ~ 조선 순조
+wd:Q482850	wd:Q469432	none	A→B	certain	조선 철종 ~ 흥선대원군
+wd:Q482850	wd:Q484446	none	A→B	certain	조선 철종 ~ 조선 효종
+wd:Q482850	wd:Q484966	none	A→B	certain	조선 철종 ~ 조선 헌종
+wd:Q482850	wd:Q489514	none	A→B	certain	조선 철종 ~ 조선 문조
+wd:Q482850	wd:Q492998	none	A→B	certain	조선 철종 ~ 조선 장조
+wd:Q482850	wd:Q625890	none	A→B	certain	조선 철종 ~ 조선 진종
+wd:Q482850	wd:Q6454483	none	A→B	certain	조선 철종 ~ 은신군
+wd:Q482850	wd:Q6780884	none	A→B	certain	조선 철종 ~ 남연군
+wd:Q482850	wd:Q884	none	A→B	certain	조선 철종 ~ 대한민국
+wd:Q482922	nikh:kc_o403300	member_of	A→B	certain	주시경 ~ 조선어학회 · 1908년 8월 31일 주시경 선생을 주축으로 하여 ‘국어연구학회’가 창립된 이래, ‘배달말글몯음’(1911
+wd:Q484002	wd:Q233254	none	A→B	certain	이준 ~ 을사조약
+wd:Q484002	wd:Q388037	none	A→B	certain	이준 ~ 만국평화회의
+wd:Q484006	wd:Q16167043	none	A→B	certain	조선 성종 ~ 월산대군
+wd:Q484006	wd:Q6648114	none	A→B	certain	조선 성종 ~ 제안대군
+wd:Q484267	wd:Q257425	none	A→B	certain	헌경왕후 ~ 대한제국 고종
+wd:Q484267	wd:Q42160	none	A→B	certain	헌경왕후 ~ 화성시
+wd:Q484267	wd:Q459964	none	A→B	certain	헌경왕후 ~ 조선 순조
+wd:Q484267	wd:Q626306	none	A→B	certain	헌경왕후 ~ 융건릉
+wd:Q484359	wd:Q379653	none	A→B	certain	조선 선조 ~ 이이
+wd:Q484359	wd:Q486266	none	A→B	certain	조선 선조 ~ 윤원형
+wd:Q484359	wd:Q486283	none	A→B	certain	조선 선조 ~ 조광조
+wd:Q484359	wd:Q488694	none	A→B	certain	조선 선조 ~ 조선 예종
+wd:Q484359	wd:Q498626	none	A→B	certain	조선 선조 ~ 남곤
+wd:Q484453	ex:person:김양언	none	A→B	certain	조선 인조 ~ 김양언
+wd:Q484453	ex:person:송덕영	none	A→B	certain	조선 인조 ~ 송덕영
+wd:Q484453	ex:person:양진국	none	A→B	certain	조선 인조 ~ 양진국
+wd:Q484453	ex:person:장돈	none	A→B	certain	조선 인조 ~ 장돈
+wd:Q484453	ex:person:함응수	none	A→B	certain	조선 인조 ~ 함응수
+wd:Q484453	wd:Q12587609	none	A→B	certain	조선 인조 ~ 김상헌
+wd:Q484453	wd:Q12589998	none	A→B	certain	조선 인조 ~ 남이흥
+wd:Q484453	wd:Q12612546	none	A→B	certain	조선 인조 ~ 이정구
+wd:Q484453	wd:Q12625472	none	A→B	certain	조선 인조 ~ 홍익한
+wd:Q484453	wd:Q16172048	none	A→B	certain	조선 인조 ~ 민영
+wd:Q484453	wd:Q16172802	none	A→B	certain	조선 인조 ~ 윤집
+wd:Q484453	wd:Q16175397	none	A→B	certain	조선 인조 ~ 이귀
+wd:Q484453	wd:Q16176181	none	A→B	certain	조선 인조 ~ 허완
+wd:Q484453	wd:Q16176335	none	A→B	certain	조선 인조 ~ 김언수
+wd:Q484453	wd:Q16176503	none	A→B	certain	조선 인조 ~ 정온
+wd:Q484453	wd:Q18815353	none	A→B	certain	조선 인조 ~ 권정길
+wd:Q484453	wd:Q19349276	none	A→B	certain	조선 인조 ~ 김준
+wd:Q484453	wd:Q296367	none	A→B	certain	조선 인조 ~ 숭덕제
+wd:Q484453	wd:Q379647	none	A→B	certain	조선 인조 ~ 송시열
+wd:Q484453	wd:Q379653	none	A→B	certain	조선 인조 ~ 이이
+wd:Q484453	wd:Q379655	none	A→B	certain	조선 인조 ~ 허목
+wd:Q484453	wd:Q496891	none	A→B	certain	조선 인조 ~ 성혼
+wd:Q484453	wd:Q497077	none	A→B	certain	조선 인조 ~ 김집
+wd:Q484453	wd:Q497127	none	A→B	certain	조선 인조 ~ 김장생
+wd:Q484453	wd:Q5363423	none	A→B	certain	조선 인조 ~ 모문룡
+wd:Q484453	wd:Q623637	none	A→B	certain	조선 인조 ~ 최명길
+wd:Q484608	wd:Q14304	none	A→B	certain	이종무 ~ 태종
+wd:Q484608	wd:Q37682	none	A→B	certain	이종무 ~ 조선 세종
+wd:Q484608	wd:Q488700	none	A→B	certain	이종무 ~ 회안대군
+wd:Q484608	wd:Q626092	none	A→B	certain	이종무 ~ 김훈
+wd:Q484608	wd:Q6514229	none	A→B	certain	이종무 ~ 이적
+wd:Q485556	ex:place:인덕궁	none	A→B	certain	조선 정종 ~ 인덕궁
+wd:Q485556	wd:Q109079	none	A→B	certain	조선 정종 ~ 개성시
+wd:Q485556	wd:Q1373095	none	A→B	certain	조선 정종 ~ 융닝현
+wd:Q485556	wd:Q14304	none	A→B	certain	조선 정종 ~ 태종
+wd:Q485556	wd:Q302096	none	A→B	certain	조선 정종 ~ 고려 우왕
+wd:Q485556	wd:Q486262	none	A→B	certain	조선 정종 ~ 이인임
+wd:Q485556	wd:Q490391	none	A→B	certain	조선 정종 ~ 최영
+wd:Q485556	wd:Q704821	none	A→B	certain	조선 정종 ~ 신천군
+wd:Q485556	wd:Q85983131	none	A→B	certain	조선 정종 ~ 왕안덕
+wd:Q485599	ex:person:김은휘	none	A→B	certain	인현왕후 ~ 김은휘
+wd:Q485599	ex:person:이단상	none	A→B	certain	인현왕후 ~ 이단상
+wd:Q485599	ex:person:홍처윤	none	A→B	certain	인현왕후 ~ 홍처윤
+wd:Q485599	ex:person:홍처후	none	A→B	certain	인현왕후 ~ 홍처후
+wd:Q485599	wd:Q12586947	none	A→B	certain	인현왕후 ~ 김계휘
+wd:Q485599	wd:Q12589712	none	A→B	certain	인현왕후 ~ 낙선군
+wd:Q485599	wd:Q12596275	none	A→B	certain	인현왕후 ~ 민정중
+wd:Q485599	wd:Q12596322	none	A→B	certain	인현왕후 ~ 민진후
+wd:Q485599	wd:Q12596325	none	A→B	certain	인현왕후 ~ 민진원
+wd:Q485599	wd:Q16172022	none	A→B	certain	인현왕후 ~ 민암
+wd:Q485599	wd:Q16176263	none	A→B	certain	인현왕후 ~ 박태보
+wd:Q485599	wd:Q16179409	none	A→B	certain	인현왕후 ~ 홍명원
+wd:Q485599	wd:Q16184469	none	A→B	certain	인현왕후 ~ 남구만
+wd:Q485599	wd:Q21825445	none	A→B	certain	인현왕후 ~ 해평 윤씨
+wd:Q485599	wd:Q27953023	none	A→B	certain	인현왕후 ~ 서문중
+wd:Q485599	wd:Q379647	none	A→B	certain	인현왕후 ~ 송시열
+wd:Q485599	wd:Q485057	none	A→B	certain	인현왕후 ~ 희빈 장씨
+wd:Q485599	wd:Q49249721	none	A→B	certain	인현왕후 ~ 홍수헌
+wd:Q485599	wd:Q496510	none	A→B	certain	인현왕후 ~ 김만중
+wd:Q485599	wd:Q6381135	none	A→B	certain	인현왕후 ~ 인경왕후
+wd:Q485599	wd:Q6513568	none	A→B	certain	인현왕후 ~ 이은상
+wd:Q485604	wd:Q14356	none	A→B	certain	덕혜옹주 ~ 박정희
+wd:Q485604	wd:Q16177763	none	A→B	certain	덕혜옹주 ~ 김을한
+wd:Q485604	wd:Q484866	none	A→B	certain	덕혜옹주 ~ 의민황태자
+wd:Q485604	wd:Q51029	none	A→B	certain	덕혜옹주 ~ 이방자
+wd:Q485604	wd:Q6636943	none	A→B	certain	덕혜옹주 ~ 도쿠가와 요시치카
+wd:Q486062	wd:Q334111	none	A→B	certain	소네 아라스케 ~ 대한제국 순종
+wd:Q486257	ex:person:이준민	none	A→B	certain	조식 ~ 이준민
+wd:Q486257	wd:Q12586641	none	A→B	certain	조식 ~ 기대승
+wd:Q486257	wd:Q12596825	none	A→B	certain	조식 ~ 박승임
+wd:Q486257	wd:Q12611327	none	A→B	certain	조식 ~ 이만규
+wd:Q486257	wd:Q16174098	taught	A→B	certain	조식 ~ 성운 · 그밖에 대곡 성운의 편지를 전하거나, 문하생이자 외손녀사위이기도 한 김우옹의 소식을 전하기도 했다.
+wd:Q486257	wd:Q16176503	none	A→B	certain	조식 ~ 정온
+wd:Q486257	wd:Q16745710	taught	A→B	certain	조식 ~ 김우옹 · 그밖에 대곡 성운의 편지를 전하거나, 문하생이자 외손녀사위이기도 한 김우옹의 소식을 전하기도 했다.
+wd:Q486257	wd:Q379647	none	A→B	certain	조식 ~ 송시열
+wd:Q486257	wd:Q379653	none	A→B	certain	조식 ~ 이이
+wd:Q486257	wd:Q379655	none	A→B	certain	조식 ~ 허목
+wd:Q486257	wd:Q486278	none	A→B	certain	조식 ~ 김종직
+wd:Q486257	wd:Q488694	none	A→B	certain	조식 ~ 조선 예종
+wd:Q486257	wd:Q495259	none	A→B	certain	조식 ~ 이익
+wd:Q486257	wd:Q496891	none	A→B	certain	조식 ~ 성혼
+wd:Q486257	wd:Q496942	taught	A→B	certain	조식 ~ 김효원 · 그의 제자로 김효원, 동강 김우옹, 한강 정구 등 저명한 학자들과 정인홍 등과 같은 관료학자, 의병장 곽재우
+wd:Q486257	wd:Q498626	none	A→B	certain	조식 ~ 남곤
+wd:Q486257	wd:Q624010	taught	A→B	certain	조식 ~ 정인홍 · 그러나 제자 정인홍의 회·퇴배척(晦退排斥)과 독주로 인해 남명학파의 한 축이던 정구가 떨어져 나가고 정온(鄭
+wd:Q486257	wd:Q6681013	none	A→B	certain	조식 ~ 김굉필
+wd:Q486257	wd:Q6685004	none	A→B	certain	조식 ~ 정여창
+wd:Q486257	wd:Q709450	taught	A→B	certain	조식 ~ 정구 · 그의 문인들은 정인홍, 이이첨 등 대부분 북인 붕당을 형성하였으나 제자 정구의 문하생 중 허목 등 일부는 남
+wd:Q486257	wd:Q7451459	none	A→B	certain	조식 ~ 서경덕
+wd:Q486266	wd:Q16172885	none	A→B	certain	윤원형 ~ 윤춘년
+wd:Q486266	wd:Q338403	none	A→B	certain	윤원형 ~ 윤임
+wd:Q486266	wd:Q483631	none	A→B	certain	윤원형 ~ 조선 인종
+wd:Q486266	wd:Q495458	none	A→B	certain	윤원형 ~ 이완용
+wd:Q486266	wd:Q496942	none	A→B	certain	윤원형 ~ 김효원
+wd:Q486266	wd:Q6814586	none	A→B	certain	윤원형 ~ 윤원로
+wd:Q486266	wd:Q705336	none	A→B	certain	윤원형 ~ 심의겸
+wd:Q486266	wd:Q712850	none	A→B	certain	윤원형 ~ 사림
+wd:Q486278	ex:person:왕통	none	A→B	certain	김종직 ~ 왕통
+wd:Q486278	ex:place:이은대	none	A→B	certain	김종직 ~ 이은대
+wd:Q486278	wd:Q12591515	none	A→B	certain	김종직 ~ 대방군부인 송씨
+wd:Q486278	wd:Q12596825	none	A→B	certain	김종직 ~ 박승임
+wd:Q486278	wd:Q12622652	none	A→B	certain	김종직 ~ 학조
+wd:Q486278	wd:Q16178121	taught	A→B	certain	김종직 ~ 김일손 · 사후 6년 뒤인 1498년(연산군 4) 제자 김일손이 사관으로 있으면서 사초(史草)에 수록한 〈조의제문 弔義
+wd:Q486278	wd:Q26530	none	A→B	certain	김종직 ~ 조선 정조
+wd:Q486278	wd:Q2945181	none	A→B	certain	김종직 ~ 노론
+wd:Q486278	wd:Q334308	none	A→B	certain	김종직 ~ 조선 세조
+wd:Q486278	wd:Q3374951	none	A→B	certain	김종직 ~ 주희
+wd:Q486278	wd:Q379647	none	A→B	certain	김종직 ~ 송시열
+wd:Q486278	wd:Q485009	none	A→B	certain	김종직 ~ 조선 영조
+wd:Q486278	wd:Q496891	none	A→B	certain	김종직 ~ 성혼
+wd:Q486278	wd:Q497178	none	A→B	certain	김종직 ~ 유자광
+wd:Q486278	wd:Q6653890	none	A→B	certain	김종직 ~ 홍봉한
+wd:Q486278	wd:Q704929	none	A→B	certain	김종직 ~ 소론
+wd:Q486278	wd:Q712850	none	A→B	certain	김종직 ~ 사림
+wd:Q486283	ex:place:서운태	none	A→B	certain	조광조 ~ 서운태
+wd:Q486283	ex:place:쌍봉사	none	A→B	certain	조광조 ~ 쌍봉사
+wd:Q486283	ex:place:천일대	none	A→B	certain	조광조 ~ 천일대
+wd:Q486283	wd:Q12590727	died_in	A→B	probable	조광조 ~ 능주군 · 권력을 잡게 된 심정과 남곤 그리고 홍경주는 조광조를 살려두려 하지 않아서 중종은 결국 음력 12월 20일 
+wd:Q486283	wd:Q18459	none	A→B	certain	조광조 ~ 용인시
+wd:Q486283	wd:Q483509	none	A→B	certain	조광조 ~ 단경왕후
+wd:Q486283	wd:Q50345	none	A→B	certain	조광조 ~ 화순군
+wd:Q486283	wd:Q55734558	none	A→B	certain	조광조 ~ 죽수서원
+wd:Q486283	wd:Q624894	none	A→B	certain	조광조 ~ 이언적
+wd:Q486283	wd:Q6681013	none	A→B	certain	조광조 ~ 김굉필
+wd:Q486283	wd:Q6685004	none	A→B	certain	조광조 ~ 정여창
+wd:Q486283	wd:Q8016893	none	A→B	certain	조광조 ~ 훈구파
+wd:Q486291	ex:person:남세건	none	A→B	certain	이황 ~ 남세건
+wd:Q486291	wd:Q122846639	none	A→B	certain	이황 ~ 임진왜란
+wd:Q486291	wd:Q12587941	none	A→B	certain	이황 ~ 김안국
+wd:Q486291	wd:Q12589996	none	A→B	certain	이황 ~ 남인
+wd:Q486291	wd:Q12590390	none	A→B	certain	이황 ~ 노수신
+wd:Q486291	wd:Q12603522	none	A→B	certain	이황 ~ 숭선군
+wd:Q486291	wd:Q12613135	none	A→B	certain	이황 ~ 이현보
+wd:Q486291	wd:Q24859745	none	A→B	certain	이황 ~ 김저
+wd:Q486291	wd:Q486283	none	A→B	certain	이황 ~ 조광조
+wd:Q486291	wd:Q486563	none	A→B	certain	이황 ~ 이기
+wd:Q486291	wd:Q61095127	none	A→B	certain	이황 ~ 신광한
+wd:Q486291	wd:Q624894	none	A→B	certain	이황 ~ 이언적
+wd:Q486291	wd:Q6677192	none	A→B	certain	이황 ~ 김인후
+wd:Q486311	wd:Q626755	none	A→B	certain	이수형 ~ 김류
+wd:Q486558	wd:Q12589996	none	A→B	certain	이산해 ~ 남인
+wd:Q486558	wd:Q12611399	none	A→B	certain	이산해 ~ 이몽학의 난
+wd:Q486558	wd:Q18815364	none	A→B	certain	이산해 ~ 김공량
+wd:Q486558	wd:Q379659	none	A→B	certain	이산해 ~ 원균
+wd:Q486558	wd:Q482874	none	A→B	certain	이산해 ~ 조선 광해군
+wd:Q486558	wd:Q484359	none	A→B	certain	이산해 ~ 조선 선조
+wd:Q486558	wd:Q484978	none	A→B	certain	이산해 ~ 정철
+wd:Q486558	wd:Q486240	none	A→B	certain	이산해 ~ 이이첨
+wd:Q486558	wd:Q487191	none	A→B	certain	이산해 ~ 류성룡
+wd:Q486558	wd:Q50184	none	A→B	certain	이산해 ~ 이순신
+wd:Q486558	wd:Q8017829	none	A→B	certain	이산해 ~ 서인
+wd:Q486973	ex:person:임상원	none	A→B	certain	정발 ~ 임상원
+wd:Q486973	ex:person:조세환	none	A→B	certain	정발 ~ 조세환
+wd:Q486973	ex:person:황신	none	A→B	certain	정발 ~ 황신
+wd:Q486973	wd:Q379647	none	A→B	certain	정발 ~ 송시열
+wd:Q486973	wd:Q379659	none	A→B	certain	정발 ~ 원균
+wd:Q486973	wd:Q482906	none	A→B	certain	정발 ~ 이억기
+wd:Q486973	wd:Q4845522	none	A→B	certain	정발 ~ 송상현
+wd:Q486973	wd:Q50184	none	A→B	certain	정발 ~ 이순신
+wd:Q486973	wd:Q942553	none	A→B	certain	정발 ~ 고니시 유키나가
+wd:Q487161	wd:Q11257521	none	A→B	certain	한용운 ~ 안재홍
+wd:Q487161	wd:Q12587206	none	A→B	certain	한용운 ~ 김동삼
+wd:Q487161	wd:Q12597567	none	A→B	certain	한용운 ~ 방응모
+wd:Q487161	wd:Q12615941	none	A→B	certain	한용운 ~ 정인보
+wd:Q487161	wd:Q137797940	none	A→B	certain	한용운 ~ 박광
+wd:Q487161	wd:Q208203	none	A→B	certain	한용운 ~ 김성수
+wd:Q487161	wd:Q488304	none	A→B	certain	한용운 ~ 조만식
+wd:Q487161	wd:Q488527	none	A→B	certain	한용운 ~ 신채호
+wd:Q487161	wd:Q497184	none	A→B	certain	한용운 ~ 송진우
+wd:Q487161	wd:Q623533	member_of	A→B	certain	한용운 ~ 신간회 · 그 결과 1927년 2월 조선일보 사장 이상재를 회장으로 동아일보의 송진우를 비롯해 허헌, 김병로, 한용운 
+wd:Q487161	wd:Q624491	none	A→B	certain	한용운 ~ 홍명희
+wd:Q487161	wd:Q626601	none	A→B	certain	한용운 ~ 최남선
+wd:Q487161	wd:Q6749099	none	A→B	certain	한용운 ~ 만공
+wd:Q488115	wd:Q17095038	none	A→B	certain	화완옹주 ~ 정휘량
+wd:Q488115	wd:Q26530	none	A→B	certain	화완옹주 ~ 조선 정조
+wd:Q488115	wd:Q27953684	none	A→B	certain	화완옹주 ~ 정우량
+wd:Q488115	wd:Q492998	none	A→B	certain	화완옹주 ~ 조선 장조
+wd:Q488115	wd:Q6536159	child_of	B→A	certain	화완옹주 ~ 정후겸 · 정후겸은 그의 양자이다.
+wd:Q488374	wd:Q12590112	none	A→B	certain	성삼문 ~ 남효온
+wd:Q488374	wd:Q12601921	none	A→B	certain	성삼문 ~ 성담수
+wd:Q488374	wd:Q133271810	none	A→B	certain	성삼문 ~ 성담년
+wd:Q488374	wd:Q14304	none	A→B	certain	성삼문 ~ 태종
+wd:Q488374	wd:Q16090182	none	A→B	certain	성삼문 ~ 박종우
+wd:Q488374	wd:Q16170055	none	A→B	certain	성삼문 ~ 유자미
+wd:Q488374	wd:Q24865253	none	A→B	certain	성삼문 ~ 박호
+wd:Q488374	wd:Q37682	none	A→B	certain	성삼문 ~ 조선 세종
+wd:Q488374	wd:Q379647	none	A→B	certain	성삼문 ~ 송시열
+wd:Q488374	wd:Q379653	none	A→B	certain	성삼문 ~ 이이
+wd:Q488374	wd:Q470122	none	A→B	certain	성삼문 ~ 신숙주
+wd:Q488374	wd:Q483008	none	A→B	certain	성삼문 ~ 조선 중종
+wd:Q488374	wd:Q484006	none	A→B	certain	성삼문 ~ 조선 성종
+wd:Q488374	wd:Q485023	none	A→B	certain	성삼문 ~ 조선 단종
+wd:Q488374	wd:Q486278	none	A→B	certain	성삼문 ~ 김종직
+wd:Q488374	wd:Q486283	none	A→B	certain	성삼문 ~ 조광조
+wd:Q488374	wd:Q5636450	none	A→B	certain	성삼문 ~ 하위지
+wd:Q488374	wd:Q8059964	none	A→B	certain	성삼문 ~ 유성원
+wd:Q4886893	wd:Q11287972	none	A→B	certain	이원경 ~ 회평군
+wd:Q488700	wd:Q14304	none	A→B	certain	회안대군 ~ 태종
+wd:Q489527	ex:org:의성단	member_of	A→B	certain	양기탁 ~ 의성단 · 1923년 10월 만주에서 편강렬(片康烈), 남정(南正) 등 동지들을 규합하여 무장 독립운동 단체 의성단(義
+wd:Q489527	wd:Q12598403	member_of	A→B	certain	양기탁 ~ 보안회 · 1905년 궁내부에서 근무하고 신문을 발행할 때 러일전쟁에서 승리한 일본이 대한제국에 황무지 개척권을 요구하
+wd:Q489758	ex:person:윤영기	none	A→B	certain	전봉준 ~ 윤영기
+wd:Q489758	wd:Q110115390	none	A→B	certain	전봉준 ~ 손화중
+wd:Q489758	wd:Q11274270	none	A→B	certain	전봉준 ~ 최시형
+wd:Q489758	wd:Q12586875	none	A→B	certain	전봉준 ~ 김개남
+wd:Q489758	wd:Q12612184	none	A→B	certain	전봉준 ~ 이용태
+wd:Q489758	wd:Q16179283	none	A→B	certain	전봉준 ~ 조병갑
+wd:Q489758	wd:Q16181741	none	A→B	certain	전봉준 ~ 조병식
+wd:Q489758	wd:Q469432	none	A→B	certain	전봉준 ~ 흥선대원군
+wd:Q489758	wd:Q488752	none	A→B	certain	전봉준 ~ 손병희
+wd:Q489758	wd:Q49249790	none	A→B	certain	전봉준 ~ 최경선
+wd:Q489778	wd:Q128674	none	A→B	certain	이동휘 ~ 훈춘시
+wd:Q489792	ex:person:김평묵	none	A→B	certain	최익현 ~ 김평묵
+wd:Q489792	ex:person:윤취	none	A→B	certain	최익현 ~ 윤취
+wd:Q489792	wd:Q12595343	none	A→B	certain	최익현 ~ 목내선
+wd:Q489792	wd:Q12612404	none	A→B	certain	최익현 ~ 이인좌
+wd:Q489792	wd:Q12613068	taught	B→A	certain	최익현 ~ 이항로 · 그는 그의 스승 이항로의 도덕적 원리를 실현하고자 하는 단호한 면모가 있었다.
+wd:Q489792	wd:Q12613144	none	A→B	certain	최익현 ~ 이현일
+wd:Q489792	wd:Q12616209	none	A→B	certain	최익현 ~ 정희량
+wd:Q489792	wd:Q12624375	none	A→B	certain	최익현 ~ 한효순
+wd:Q489792	wd:Q13958591	none	A→B	certain	최익현 ~ 홍순목
+wd:Q489792	wd:Q257425	none	A→B	certain	최익현 ~ 대한제국 고종
+wd:Q489792	wd:Q27953621	none	A→B	certain	최익현 ~ 한계원
+wd:Q489792	wd:Q464503	none	A→B	certain	최익현 ~ 명성황후
+wd:Q489792	wd:Q469396	none	A→B	certain	최익현 ~ 정도전
+wd:Q489792	wd:Q469432	none	A→B	certain	최익현 ~ 흥선대원군
+wd:Q489792	wd:Q498626	none	A→B	certain	최익현 ~ 남곤
+wd:Q489792	wd:Q624010	none	A→B	certain	최익현 ~ 정인홍
+wd:Q489792	wd:Q6409023	taught	B→A	certain	최익현 ~ 김기현 · 김기현과 이항로의 문하에서 수학하였으며, 노론 화서학파의 지도자이자 위정척사파의 중심 인물이었고, 흥선대원군
+wd:Q490156	wd:Q12600580	none	A→B	certain	청산리 전투 ~ 상해 임시정부
+wd:Q490362	wd:Q12601057	none	A→B	certain	김시민 ~ 서예원
+wd:Q490362	wd:Q12611171	none	A→B	certain	김시민 ~ 이달
+wd:Q490362	wd:Q16174274	none	A→B	certain	김시민 ~ 김면
+wd:Q490362	wd:Q16175244	none	A→B	certain	김시민 ~ 이광악
+wd:Q490362	wd:Q18815728	none	A→B	certain	김시민 ~ 정언신
+wd:Q490362	wd:Q485556	none	A→B	certain	김시민 ~ 조선 정종
+wd:Q490362	wd:Q496866	none	A→B	certain	김시민 ~ 곽재우
+wd:Q490362	wd:Q5954097	none	A→B	certain	김시민 ~ 김성일
+wd:Q490362	wd:Q6180267	none	A→B	certain	김시민 ~ 정기룡
+wd:Q490362	wd:Q624130	none	A→B	certain	김시민 ~ 김방경
+wd:Q491130	wd:Q488547	none	A→B	certain	강홍립 ~ 사르후 전투
+wd:Q491778	wd:Q16177140	none	A→B	certain	정난정 ~ 정준
+wd:Q491778	wd:Q16182734	none	A→B	certain	정난정 ~ 보우
+wd:Q491778	wd:Q19795003	none	A→B	certain	정난정 ~ 정종영
+wd:Q491778	wd:Q486286	none	A→B	certain	정난정 ~ 문정왕후
+wd:Q492979	wd:Q484792	none	A→B	certain	조선 덕종 ~ 한확
+wd:Q492990	wd:Q109079	none	A→B	certain	조선 원종 ~ 개성시
+wd:Q492990	wd:Q12613430	none	A→B	certain	조선 원종 ~ 인조반정
+wd:Q492990	wd:Q482874	none	A→B	certain	조선 원종 ~ 조선 광해군
+wd:Q492990	wd:Q494786	none	A→B	certain	조선 원종 ~ 강화도
+wd:Q492990	wd:Q711	none	A→B	certain	조선 원종 ~ 몽골
+wd:Q492990	wd:Q711051	none	A→B	certain	조선 원종 ~ 삼별초
+wd:Q494175	wd:Q16168094	taught	B→A	certain	정인지 ~ 권우 · 권우(權遇)의 문인이다.
+wd:Q494175	wd:Q16174338	none	A→B	certain	정인지 ~ 의숙공주
+wd:Q494175	wd:Q334308	none	A→B	certain	정인지 ~ 조선 세조
+wd:Q494175	wd:Q37682	none	A→B	certain	정인지 ~ 조선 세종
+wd:Q494175	wd:Q470122	none	A→B	certain	정인지 ~ 신숙주
+wd:Q494175	wd:Q484006	none	A→B	certain	정인지 ~ 조선 성종
+wd:Q494175	wd:Q485023	none	A→B	certain	정인지 ~ 조선 단종
+wd:Q494175	wd:Q486298	none	A→B	certain	정인지 ~ 한명회
+wd:Q494175	wd:Q488694	none	A→B	certain	정인지 ~ 조선 예종
+wd:Q494175	wd:Q6408970	none	A→B	certain	정인지 ~ 김종서
+wd:Q494787	ex:org:시사책진회	member_of	A→B	certain	이시영 ~ 시사책진회 · 1922년 7월 김구, 신익희, 안창호, 조소앙, 여운형 등 50여 명과 함께 시사책진회(時事策進會)를 조직
+wd:Q494787	ex:org:한국노병회	member_of	A→B	certain	이시영 ~ 한국노병회 · 1922년 10월 김구, 이유필, 여운형 등과 한국노병회(韓國勞兵會) 결성에 참여, 노병회 회원이 되었다.
+wd:Q494787	wd:Q105706121	child_of	B→A	certain	이시영 ~ 이규열 · 사인에 관련해서는 부산 피난지에서 아들 이규열을 잃고 충격으로 사망했다는 주장도 있다.
+wd:Q494787	wd:Q112020872	none	A→B	certain	이시영 ~ 이철영
+wd:Q494787	wd:Q11271317	none	A→B	certain	이시영 ~ 조성환
+wd:Q494787	wd:Q12611027	none	A→B	certain	이시영 ~ 이규창
+wd:Q494787	wd:Q134411657	none	A→B	certain	이시영 ~ 이규학
+wd:Q494787	wd:Q16176835	none	A→B	certain	이시영 ~ 정이형
+wd:Q494787	wd:Q16178187	none	A→B	certain	이시영 ~ 이석영
+wd:Q494787	wd:Q16184512	none	A→B	certain	이시영 ~ 이항복
+wd:Q494787	wd:Q16631060	none	A→B	certain	이시영 ~ 이건영
+wd:Q494787	wd:Q24859210	none	A→B	certain	이시영 ~ 이호영
+wd:Q494787	wd:Q3228934	none	A→B	certain	이시영 ~ 이소영
+wd:Q494787	wd:Q483362	none	A→B	certain	이시영 ~ 이회영
+wd:Q494787	wd:Q496594	none	A→B	certain	이시영 ~ 신익희
+wd:Q494787	wd:Q624795	none	A→B	certain	이시영 ~ 이종찬
+wd:Q495259	ex:person:이병휴	none	A→B	certain	이익 ~ 이병휴
+wd:Q495259	wd:Q12586136	none	A→B	certain	이익 ~ 권일신
+wd:Q495259	wd:Q12604754	none	A→B	certain	이익 ~ 신후담
+wd:Q495259	wd:Q12610219	none	A→B	certain	이익 ~ 윤동규
+wd:Q495259	wd:Q12610542	none	A→B	certain	이익 ~ 윤휘
+wd:Q495259	wd:Q12610818	none	A→B	certain	이익 ~ 이가환
+wd:Q495259	wd:Q12612765	none	A→B	certain	이익 ~ 이중환
+wd:Q495259	wd:Q12613144	none	A→B	certain	이익 ~ 이현일
+wd:Q495259	wd:Q16168278	none	A→B	certain	이익 ~ 권철신
+wd:Q495259	wd:Q256246	none	A→B	certain	이익 ~ 정약용
+wd:Q495259	wd:Q379655	none	A→B	certain	이익 ~ 허목
+wd:Q495259	wd:Q469396	none	A→B	certain	이익 ~ 정도전
+wd:Q495259	wd:Q486492	none	A→B	certain	이익 ~ 유형원
+wd:Q495259	wd:Q486549	none	A→B	certain	이익 ~ 이서우
+wd:Q495259	wd:Q488694	none	A→B	certain	이익 ~ 조선 예종
+wd:Q495259	wd:Q492443	none	A→B	certain	이익 ~ 장현광
+wd:Q495259	wd:Q6821059	none	A→B	certain	이익 ~ 안정복
+wd:Q495259	wd:Q6902149	none	A→B	certain	이익 ~ 채제공
+wd:Q495259	wd:Q709450	none	A→B	certain	이익 ~ 정구
+wd:Q495259	wd:Q7451459	none	A→B	certain	이익 ~ 서경덕
+wd:Q495458	ex:person:이공정	none	A→B	certain	이완용 ~ 이공정
+wd:Q495458	wd:Q1041485	none	A→B	certain	이완용 ~ 카를 베베르
+wd:Q495458	wd:Q1195299	none	A→B	certain	이완용 ~ 하세가와 요시미치
+wd:Q495458	wd:Q12590034	none	A→B	certain	이완용 ~ 남정철
+wd:Q495458	wd:Q12596960	none	A→B	certain	이완용 ~ 박원문
+wd:Q495458	wd:Q12610536	none	A→B	certain	이완용 ~ 윤효정
+wd:Q495458	wd:Q12612319	none	A→B	certain	이완용 ~ 이윤용
+wd:Q495458	wd:Q12613066	child_of	B→A	certain	이완용 ~ 이항구 · 1924년에는 그의 아들 이항구도 남작이 되어, 조선인으로는 거의 드문 부자(父子) 귀족이 되기도 했다.
+wd:Q495458	wd:Q12625127	none	A→B	certain	이완용 ~ 협성회
+wd:Q495458	wd:Q12967	none	A→B	certain	이완용 ~ 레오폴 2세
+wd:Q495458	wd:Q16176269	none	A→B	certain	이완용 ~ 이도재
+wd:Q495458	wd:Q18156442	child_of	B→A	certain	이완용 ~ 이승구 · 독립협회의 모토이자 하부 청년조직인 협성회에는 장남 이승구(李升九)도 창립회원으로 활동중이었는데 이완용이 캘
+wd:Q495458	wd:Q257425	none	A→B	certain	이완용 ~ 대한제국 고종
+wd:Q495458	wd:Q315559	none	A→B	certain	이완용 ~ 데라우치 마사타케
+wd:Q495458	wd:Q334111	none	A→B	certain	이완용 ~ 대한제국 순종
+wd:Q495458	wd:Q464503	none	A→B	certain	이완용 ~ 명성황후
+wd:Q495458	wd:Q482413	none	A→B	certain	이완용 ~ 안중근
+wd:Q495458	wd:Q4857764	none	A→B	certain	이완용 ~ 윤덕영
+wd:Q495458	wd:Q4857994	none	A→B	certain	이완용 ~ 조중응
+wd:Q495458	wd:Q496199	none	A→B	certain	이완용 ~ 박영효
+wd:Q495458	wd:Q505508	none	A→B	certain	이완용 ~ 호러스 뉴턴 앨런
+wd:Q496216	wd:Q14304	none	A→B	certain	이구지 ~ 태종
+wd:Q496216	wd:Q16170211	none	A→B	certain	이구지 ~ 서산군
+wd:Q496216	wd:Q484006	none	A→B	certain	이구지 ~ 조선 성종
+wd:Q496216	wd:Q486278	none	A→B	certain	이구지 ~ 김종직
+wd:Q496686	wd:Q11265994	none	A→B	certain	김옥균 ~ 이상재
+wd:Q496686	wd:Q16171569	none	A→B	certain	김옥균 ~ 서재필
+wd:Q496686	wd:Q192111	none	A→B	certain	김옥균 ~ 윤치호
+wd:Q496866	ex:person:이준민	none	A→B	certain	곽재우 ~ 이준민
+wd:Q496866	ex:place:망우정	died_in	A→B	certain	곽재우 ~ 망우정 · 당시, 여러 차례 경상도 병마절도사·수군통제사 등의 고위 무관직을 제의받았으나 대부분 사양하다 1617년 망
+wd:Q496866	ex:place:의령 가태동	none	A→B	certain	곽재우 ~ 의령 가태동
+wd:Q496866	khs:11-37-0001320000000	none	A→B	certain	곽재우 ~ 징비록
+wd:Q496866	wd:Q12611398	none	A→B	certain	곽재우 ~ 이몽학
+wd:Q496866	wd:Q16173751	none	A→B	certain	곽재우 ~ 김덕령
+wd:Q496866	wd:Q21575799	none	A→B	certain	곽재우 ~ 김수
+wd:Q496866	wd:Q482874	none	A→B	certain	곽재우 ~ 조선 광해군
+wd:Q496866	wd:Q485664	none	A→B	certain	곽재우 ~ 조선 숙종
+wd:Q496866	wd:Q486558	none	A→B	certain	곽재우 ~ 이산해
+wd:Q496866	wd:Q50184	none	A→B	certain	곽재우 ~ 이순신
+wd:Q496866	wd:Q5954097	none	A→B	certain	곽재우 ~ 김성일
+wd:Q496866	wd:Q623886	none	A→B	certain	곽재우 ~ 영창대군
+wd:Q497092	wd:Q12596322	none	A→B	certain	송준길 ~ 민진후
+wd:Q497092	wd:Q12610304	none	A→B	certain	송준길 ~ 윤선거
+wd:Q497092	wd:Q16174919	none	A→B	certain	송준길 ~ 정경세
+wd:Q497092	wd:Q379647	none	A→B	certain	송준길 ~ 송시열
+wd:Q497092	wd:Q464503	none	A→B	certain	송준길 ~ 명성황후
+wd:Q497092	wd:Q497077	none	A→B	certain	송준길 ~ 김집
+wd:Q497092	wd:Q497127	taught	B→A	certain	송준길 ~ 김장생 · 송시열과 동종(同宗)이면서 학문경향을 같이한 성리학자로 이이의 학설을 지지하였고, 특히 예학(禮學)에 밝아 
+wd:Q497092	wd:Q6408970	none	A→B	certain	송준길 ~ 김종서
+wd:Q497101	ex:person:이형장	none	A→B	certain	김자점 ~ 이형장
+wd:Q497101	wd:Q12609285	none	A→B	certain	김자점 ~ 원두표
+wd:Q497101	wd:Q13515671	none	A→B	certain	김자점 ~ 효명옹주
+wd:Q497101	wd:Q16175397	none	A→B	certain	김자점 ~ 이귀
+wd:Q497101	wd:Q3565525	none	A→B	certain	김자점 ~ 임경업
+wd:Q497101	wd:Q380573	none	A→B	certain	김자점 ~ 도르곤
+wd:Q497101	wd:Q483181	none	A→B	certain	김자점 ~ 소현세자
+wd:Q497101	wd:Q484446	none	A→B	certain	김자점 ~ 조선 효종
+wd:Q497101	wd:Q484453	none	A→B	certain	김자점 ~ 조선 인조
+wd:Q497101	wd:Q626755	none	A→B	certain	김자점 ~ 김류
+wd:Q497101	wd:Q709174	none	A→B	certain	김자점 ~ 안방준
+wd:Q497153	wd:Q12611355	none	A→B	certain	이광식 ~ 이명남
+wd:Q497153	wd:Q12612463	none	A→B	certain	이광식 ~ 이재명
+wd:Q497153	wd:Q12613304	none	A→B	certain	이광식 ~ 이희헌
+wd:Q497153	wd:Q16180872	none	A→B	certain	이광식 ~ 이윤경
+wd:Q497153	wd:Q22974749	none	A→B	certain	이광식 ~ 이준경
+wd:Q497153	wd:Q483641	none	A→B	certain	이광식 ~ 조선 명종
+wd:Q497153	wd:Q486549	none	A→B	certain	이광식 ~ 이서우
+wd:Q497153	wd:Q486910	none	A→B	certain	이광식 ~ 이복남
+wd:Q497153	wd:Q61092179	none	A→B	certain	이광식 ~ 정사룡
+wd:Q497153	wd:Q61094898	none	A→B	certain	이광식 ~ 김광준
+wd:Q497153	wd:Q61094941	none	A→B	certain	이광식 ~ 이인녕
+wd:Q497178	ex:person:박효원	none	A→B	certain	유자광 ~ 박효원
+wd:Q497178	wd:Q12590382	none	A→B	certain	유자광 ~ 노사신
+wd:Q497178	wd:Q12611051	none	A→B	certain	유자광 ~ 이극돈
+wd:Q497178	wd:Q16173005	none	A→B	certain	유자광 ~ 윤필상
+wd:Q497178	wd:Q16173229	none	A→B	certain	유자광 ~ 한치형
+wd:Q497178	wd:Q334308	none	A→B	certain	유자광 ~ 조선 세조
+wd:Q497178	wd:Q470084	none	A→B	certain	유자광 ~ 조선 연산군
+wd:Q497178	wd:Q484006	none	A→B	certain	유자광 ~ 조선 성종
+wd:Q497178	wd:Q497108	none	A→B	certain	유자광 ~ 임사홍
+wd:Q497184	wd:Q623533	none	A→B	certain	송진우 ~ 신간회
+wd:Q497338	ex:person:윤경립	none	A→B	certain	박진 ~ 윤경립
+wd:Q497338	ex:person:정세아	none	A→B	certain	박진 ~ 정세아
+wd:Q497338	wd:Q12586129	none	A→B	certain	박진 ~ 권응수
+wd:Q497338	wd:Q12624309	none	A→B	certain	박진 ~ 한준겸
+wd:Q497338	wd:Q138498618	none	A→B	certain	박진 ~ 정대임
+wd:Q497338	wd:Q484359	none	A→B	certain	박진 ~ 조선 선조
+wd:Q497338	wd:Q485009	none	A→B	certain	박진 ~ 조선 영조
+wd:Q497338	wd:Q49252551	none	A→B	certain	박진 ~ 이대수
+wd:Q497338	wd:Q5954097	none	A→B	certain	박진 ~ 김성일
+wd:Q5103807	wd:Q492060	none	A→B	certain	최만리 ~ 중림동
+wd:Q5520922	ex:person:김형렬	none	A→B	certain	강일순 ~ 김형렬
+wd:Q5520922	wd:Q16091603	none	A→B	certain	강일순 ~ 정남기
+wd:Q5520922	wd:Q489758	none	A→B	certain	강일순 ~ 전봉준
+wd:Q5520922	wd:Q55734706	none	A→B	certain	강일순 ~ 차경석
+wd:Q5520922	wd:Q55734721	none	A→B	certain	강일순 ~ 차치구
+wd:Q55732195	wd:Q12589996	none	A→B	certain	오시복 ~ 남인
+wd:Q5969001	wd:Q12589331	none	A→B	certain	예송 ~ 김홍욱
+wd:Q5969001	wd:Q12611695	none	A→B	certain	예송 ~ 이서
+wd:Q5969001	wd:Q16167918	participated_in	B→A	probable	예송 ~ 권시 · 송시열의 사돈이며 윤선거의 사돈인 탄옹 권시는 송시열과 송준길이 장악한 조정에서 바른말을 하는 것이 무슨 죄
+wd:Q5969001	wd:Q16175397	none	A→B	certain	예송 ~ 이귀
+wd:Q5969001	wd:Q484253	participated_in	B→A	probable	예송 ~ 조선 현종 · 서인 부제학 유계는 윤선도의 상소를 불태울 것을 주장하여, 현종이 상소를 돌려주었는데도 결국 불살르게 한다.
+wd:Q5969001	wd:Q484453	none	A→B	certain	예송 ~ 조선 인조
+wd:Q5969001	wd:Q485664	none	A→B	certain	예송 ~ 조선 숙종
+wd:Q5969001	wd:Q497101	none	A→B	certain	예송 ~ 김자점
+wd:Q5969001	wd:Q61095463	participated_in	B→A	probable	예송 ~ 조경 · 송시열의 사돈이며 윤선거의 사돈인 탄옹 권시는 송시열과 송준길이 장악한 조정에서 바른말을 하는 것이 무슨 죄
+wd:Q5969001	wd:Q626755	none	A→B	certain	예송 ~ 김류
+wd:Q5969001	wd:Q8053450	none	A→B	certain	예송 ~ 이괄
+wd:Q623391	wd:Q12607723	participated_in	B→A	probable	강화도 조약 ~ 오경석 · 총 세 번의 회의를 열었는데, 조선 정부에서는 흥선대원군 일파와 유생들의 반대로 의견이 제각각이었으나 박규수
+wd:Q623391	wd:Q378517	participated_in	B→A	probable	강화도 조약 ~ 이홍장 · 총 세 번의 회의를 열었는데, 조선 정부에서는 흥선대원군 일파와 유생들의 반대로 의견이 제각각이었으나 박규수
+wd:Q623391	wd:Q469432	participated_in	B→A	probable	강화도 조약 ~ 흥선대원군 · 총 세 번의 회의를 열었는데, 조선 정부에서는 흥선대원군 일파와 유생들의 반대로 의견이 제각각이었으나 박규수
+wd:Q624197	ex:person:이우직	child_of	B→A	certain	안평대군 ~ 이우직 · 이후 그의 아들 이우직 역시 연좌제에 의해 처형되었고, 아내는 관비가 되었으며 의춘군의 아내이자 며느리인 오
+wd:Q624197	wd:Q12586496	none	A→B	certain	안평대군 ~ 금성대군
+wd:Q624197	wd:Q12615747	none	A→B	certain	안평대군 ~ 정소공주
+wd:Q624197	wd:Q12615920	none	A→B	certain	안평대군 ~ 정의공주
+wd:Q624197	wd:Q334308	none	A→B	certain	안평대군 ~ 조선 세조
+wd:Q624197	wd:Q483821	none	A→B	certain	안평대군 ~ 조선 문종
+wd:Q624491	wd:Q495454	none	A→B	certain	홍명희 ~ 이광수
+wd:Q624491	wd:Q623533	none	A→B	certain	홍명희 ~ 신간회
+wd:Q624521	wd:Q11452034	none	A→B	certain	안용복 ~ 소 요시미치
+wd:Q624521	wd:Q11552098	none	A→B	certain	안용복 ~ 이케다 쓰나키요
+wd:Q624521	wd:Q14356	none	A→B	certain	안용복 ~ 박정희
+wd:Q624521	wd:Q153638	none	A→B	certain	안용복 ~ 동해
+wd:Q624521	wd:Q16166463	none	A→B	certain	안용복 ~ 군
+wd:Q624521	wd:Q16184469	none	A→B	certain	안용복 ~ 남구만
+wd:Q624521	wd:Q495259	none	A→B	certain	안용복 ~ 이익
+wd:Q624521	wd:Q6513568	none	A→B	certain	안용복 ~ 이은상
+wd:Q624754	ex:org:조선임전보국단	member_of	A→B	certain	장덕수 ~ 조선임전보국단 · 1941년 일제 침략전쟁의 협력단체인 조선임전보국단의 발기인과 이사로 활동하였으며, 1945년 7월 해방 직
+wd:Q624976	ex:artwork:순오지	none	A→B	certain	이지란 ~ 순오지
+wd:Q624976	ex:artwork:화원악보	none	A→B	certain	이지란 ~ 화원악보
+wd:Q624976	wd:Q11657344	none	A→B	certain	이지란 ~ 아지발도
+wd:Q624976	wd:Q12585852	none	A→B	certain	이지란 ~ 국정환
+wd:Q624976	wd:Q12588262	none	A→B	certain	이지란 ~ 김원경
+wd:Q624976	wd:Q12601671	none	A→B	certain	이지란 ~ 선동혁
+wd:Q624976	wd:Q12604162	none	A→B	certain	이지란 ~ 신덕왕후
+wd:Q624976	wd:Q12604842	none	A→B	certain	이지란 ~ 심덕부
+wd:Q624976	wd:Q12617008	none	A→B	certain	이지란 ~ 조인옥
+wd:Q624976	wd:Q12625367	none	A→B	certain	이지란 ~ 홍만종
+wd:Q624976	wd:Q138479816	none	A→B	certain	이지란 ~ 박기현
+wd:Q624976	wd:Q14304	none	A→B	certain	이지란 ~ 태종
+wd:Q624976	wd:Q16184008	none	A→B	certain	이지란 ~ 조준
+wd:Q624976	wd:Q16262090	child_of	B→A	certain	이지란 ~ 이화영 · 판우군부사(判右軍府事) 이화영(李和英) 졸(卒)하였다. 화영은 여진인이요, 태조의 개국 공신(開國功臣) 청해
+wd:Q624976	wd:Q17487310	none	A→B	certain	이지란 ~ 신병주
+wd:Q624976	wd:Q265160	child_of	B→A	certain	이지란 ~ 이효정 · 그 외 아들은 이효량(李孝良)·이효정(李孝貞)·이효온(李孝溫)·이효검(李孝儉)·이효양(李孝讓)·이효강(李孝綱
+wd:Q624976	wd:Q302096	none	A→B	certain	이지란 ~ 고려 우왕
+wd:Q624976	wd:Q378483	none	A→B	certain	이지란 ~ 조선 태조
+wd:Q624976	wd:Q42155	none	A→B	certain	이지란 ~ 포천시
+wd:Q624976	wd:Q469396	none	A→B	certain	이지란 ~ 정도전
+wd:Q624976	wd:Q485556	none	A→B	certain	이지란 ~ 조선 정종
+wd:Q624976	wd:Q489727	none	A→B	certain	이지란 ~ 강민호
+wd:Q624976	wd:Q55734929	none	A→B	certain	이지란 ~ 청해사
+wd:Q624976	wd:Q8512766	none	A→B	certain	이지란 ~ 의안대군
+wd:Q625258	ex:person:이일직	none	A→B	certain	홍종우 ~ 이일직
+wd:Q625258	wd:Q1140643	none	A→B	certain	홍종우 ~ 도야마 미쓰루
+wd:Q625258	wd:Q12612171	none	A→B	certain	홍종우 ~ 이용익
+wd:Q625258	wd:Q16171569	none	A→B	certain	홍종우 ~ 서재필
+wd:Q625258	wd:Q16179045	none	A→B	certain	홍종우 ~ 민영소
+wd:Q625258	wd:Q171684	none	A→B	certain	홍종우 ~ 이승만
+wd:Q625258	wd:Q192111	none	A→B	certain	홍종우 ~ 윤치호
+wd:Q625258	wd:Q210329	none	A→B	certain	홍종우 ~ 위안스카이
+wd:Q625258	wd:Q257425	none	A→B	certain	홍종우 ~ 대한제국 고종
+wd:Q625258	wd:Q496686	none	A→B	certain	홍종우 ~ 김옥균
+wd:Q625537	wd:Q12585498	none	A→B	certain	송병준 ~ 구연수
+wd:Q625537	wd:Q12596332	none	A→B	certain	송병준 ~ 민태호
+wd:Q625537	wd:Q12610342	none	A→B	certain	송병준 ~ 윤시병
+wd:Q625537	wd:Q12624078	none	A→B	certain	송병준 ~ 한상룡
+wd:Q625537	wd:Q257425	none	A→B	certain	송병준 ~ 대한제국 고종
+wd:Q625537	wd:Q495458	none	A→B	certain	송병준 ~ 이완용
+wd:Q625537	wd:Q496686	none	A→B	certain	송병준 ~ 김옥균
+wd:Q625537	wd:Q625931	none	A→B	certain	송병준 ~ 이용구
+wd:Q625537	wd:Q6862620	none	A→B	certain	송병준 ~ 민영환
+wd:Q625567	wd:Q20927	none	A→B	certain	신숭겸 ~ 대구광역시
+wd:Q625567	wd:Q93352	none	A→B	certain	신숭겸 ~ 연안
+wd:Q625567	wd:Q956	none	A→B	certain	신숭겸 ~ 베이징시
+wd:Q625938	nikh:kc_o403300	member_of	A→B	certain	최현배 ~ 조선어학회 · 장지영, 이윤재, 최현배 등이 중심이 되어 활동했으며, 1932년에 학회지 ‘한글’ 창간하고 한글맞춤법 통일
+wd:Q626276	wd:Q12617154	none	A→B	certain	황윤길 ~ 조헌
+wd:Q626276	wd:Q1328807	none	A→B	certain	황윤길 ~ 소 요시토시
+wd:Q626276	wd:Q187550	none	A→B	certain	황윤길 ~ 도요토미 히데요시
+wd:Q626276	wd:Q20736427	none	A→B	certain	황윤길 ~ 야나가와 시게노부
+wd:Q626276	wd:Q379653	none	A→B	certain	황윤길 ~ 이이
+wd:Q626276	wd:Q484359	none	A→B	certain	황윤길 ~ 조선 선조
+wd:Q626276	wd:Q484978	none	A→B	certain	황윤길 ~ 정철
+wd:Q626276	wd:Q487191	none	A→B	certain	황윤길 ~ 류성룡
+wd:Q626276	wd:Q496891	none	A→B	certain	황윤길 ~ 성혼
+wd:Q626276	wd:Q5954097	none	A→B	certain	황윤길 ~ 김성일
+wd:Q626310	wd:Q12588940	none	A→B	certain	김조순 ~ 김창집
+wd:Q626310	wd:Q26530	none	A→B	certain	김조순 ~ 조선 정조
+wd:Q626310	wd:Q484974	none	A→B	certain	김조순 ~ 정순왕후
+wd:Q6408890	ex:person:김황	none	A→B	certain	김질 ~ 김황
+wd:Q6408890	wd:Q215737	none	A→B	certain	김질 ~ 김구
+wd:Q6408890	wd:Q4798146	none	A→B	certain	김질 ~ 귀성군
+wd:Q6408890	wd:Q484006	none	A→B	certain	김질 ~ 조선 성종
+wd:Q6408890	wd:Q486278	none	A→B	certain	김질 ~ 김종직
+wd:Q6408890	wd:Q497101	none	A→B	certain	김질 ~ 김자점
+wd:Q6515066	wd:Q12604259	none	A→B	certain	이시애 ~ 신면
+wd:Q6584412	wd:Q16171878	none	A→B	certain	윤호 ~ 윤번
+wd:Q6584412	wd:Q16173005	none	A→B	certain	윤호 ~ 윤필상
+wd:Q6584412	wd:Q491773	none	A→B	certain	윤호 ~ 정희왕후
+wd:Q6584412	wd:Q77831	none	A→B	certain	윤호 ~ 윤사로
+wd:Q6648114	ex:person:유수	none	A→B	certain	제안대군 ~ 유수
+wd:Q6648114	ex:place:두모포 정자	none	A→B	certain	제안대군 ~ 두모포 정자
+wd:Q6648114	wd:Q12597178	none	A→B	certain	제안대군 ~ 박중선
+wd:Q6648114	wd:Q12621807	child_of	A→B	probable	제안대군 ~ 평원대군 · 1474년(성종 5년) 증조부 세종의 적7남인 평원대군의 봉사손으로 출계하였다.
+wd:Q6648114	wd:Q37682	none	A→B	certain	제안대군 ~ 조선 세종
+wd:Q6648114	wd:Q470084	none	A→B	certain	제안대군 ~ 조선 연산군
+wd:Q6648114	wd:Q483008	none	A→B	certain	제안대군 ~ 조선 중종
+wd:Q6648114	wd:Q484006	none	A→B	certain	제안대군 ~ 조선 성종
+wd:Q6648114	wd:Q491773	none	A→B	certain	제안대군 ~ 정희왕후
+wd:Q6648114	wd:Q492979	none	A→B	certain	제안대군 ~ 조선 덕종
+wd:Q6648114	wd:Q702588	none	A→B	certain	제안대군 ~ 장녹수
+wd:Q6681013	wd:Q12587941	taught	A→B	certain	김굉필 ~ 김안국 · 평소 육경(六經) 연구에 몰두하여 성리학에 통달했으며, 문하에서 조광조·이장곤(李長坤)·김안국(金安國)·이연
+wd:Q6681013	wd:Q12597871	none	A→B	certain	김굉필 ~ 백이정
+wd:Q6681013	wd:Q12612024	taught	A→B	certain	김굉필 ~ 이연경 · 평소 육경(六經) 연구에 몰두하여 성리학에 통달했으며, 문하에서 조광조·이장곤(李長坤)·김안국(金安國)·이연
+wd:Q6681013	wd:Q16261986	taught	A→B	certain	김굉필 ~ 이장곤 · 평소 육경(六經) 연구에 몰두하여 성리학에 통달했으며, 문하에서 조광조·이장곤(李長坤)·김안국(金安國)·이연
+wd:Q6681013	wd:Q16726364	none	A→B	certain	김굉필 ~ 김숙자
+wd:Q6681013	wd:Q469423	none	A→B	certain	김굉필 ~ 정몽주
+wd:Q6681013	wd:Q483908	none	A→B	certain	김굉필 ~ 길재
+wd:Q6681013	wd:Q486283	taught	A→B	certain	김굉필 ~ 조광조 · 평소 육경(六經) 연구에 몰두하여 성리학에 통달했으며, 문하에서 조광조·이장곤(李長坤)·김안국(金安國)·이연
+wd:Q6681013	wd:Q488694	none	A→B	certain	김굉필 ~ 조선 예종
+wd:Q6681013	wd:Q495964	none	A→B	certain	김굉필 ~ 안향
+wd:Q6681013	wd:Q497120	none	A→B	certain	김굉필 ~ 이제현
+wd:Q6681013	wd:Q624894	none	A→B	certain	김굉필 ~ 이언적
+wd:Q6681013	wd:Q6685004	none	A→B	certain	김굉필 ~ 정여창
+wd:Q6681013	wd:Q8053468	none	A→B	certain	김굉필 ~ 이색
+wd:Q6749099	ex:person:전강	taught	A→B	certain	만공 ~ 전강 · 만공스님의 문하에서는 보월(寶月), 전강(田岡), 용음(龍吟), 고봉(古峰), 포산당 혜천(惠天) 금봉, 혜
+wd:Q6749099	ex:person:현문	taught	A→B	certain	만공 ~ 현문 · 그후 1929년 수덕사 현문(玄門 1884~1985)스님은 [語默動靜] 화두로 대각견성하여 당시 조실(祖室)
+wd:Q6749099	wd:Q12587730	none	A→B	certain	만공 ~ 김성숙 (1898년)
+wd:Q6749099	wd:Q137593009	taught	A→B	certain	만공 ~ 혜암 · 그후 1929년 수덕사 현문(玄門 1884~1985)스님은 [語默動靜] 화두로 대각견성하여 당시 조실(祖室)
+wd:Q6749099	wd:Q466477	none	A→B	certain	만공 ~ 나혜석
+wd:Q6749099	wd:Q483055	taught	B→A	certain	만공 ~ 경허 · 1884년(고종 20년) 경허(鏡虛, 성우 1849 ~ 1912)의 인도로 서산군 천장사(天藏寺)에서 태허(
+wd:Q6749099	wd:Q487161	none	A→B	certain	만공 ~ 한용운
+wd:Q6749099	wd:Q487187	taught	A→B	certain	만공 ~ 춘성 · 춘성은 한때 그의 문하에서 수행하기도 했다.
+wd:Q6780848	wd:Q16188659	none	A→B	certain	흥안군 (조선 중기) ~ 인성군
+wd:Q6780848	wd:Q484044	none	A→B	certain	흥안군 (조선 중기) ~ 인목왕후
+wd:Q6784406	ex:person:박태유	none	A→B	certain	박세채 ~ 박태유
+wd:Q6784406	ex:person:유직	none	A→B	certain	박세채 ~ 유직
+wd:Q6784406	wd:Q12587609	taught	B→A	certain	박세채 ~ 김상헌 · 그 뒤 성균관을 나와 다시 청음 김상헌의 문하에 찾아가 성리학을 연구하고 송시열, 송준길과도 학문 교류를 하
+wd:Q6784406	wd:Q12596773	none	A→B	certain	박세채 ~ 박세당
+wd:Q6784406	wd:Q16176263	none	A→B	certain	박세채 ~ 박태보
+wd:Q6784406	wd:Q379647	none	A→B	certain	박세채 ~ 송시열
+wd:Q6784406	wd:Q379653	none	A→B	certain	박세채 ~ 이이
+wd:Q6784406	wd:Q379655	none	A→B	certain	박세채 ~ 허목
+wd:Q6784406	wd:Q484446	none	A→B	certain	박세채 ~ 조선 효종
+wd:Q6784406	wd:Q486384	none	A→B	certain	박세채 ~ 윤증
+wd:Q6784406	wd:Q488694	none	A→B	certain	박세채 ~ 조선 예종
+wd:Q6784406	wd:Q496891	none	A→B	certain	박세채 ~ 성혼
+wd:Q6784406	wd:Q497077	taught	B→A	certain	박세채 ~ 김집 · 1638년(인조 16) 아버지 박의에게 글을 배우며 가학을 수학하다가 김집과 청음 김상헌의 문하에서 성리학을
+wd:Q6784406	wd:Q497092	none	A→B	certain	박세채 ~ 송준길
+wd:Q6784406	wd:Q497114	none	A→B	certain	박세채 ~ 김익훈
+wd:Q6784406	wd:Q497137	none	A→B	certain	박세채 ~ 김석주
+wd:Q6784406	wd:Q624894	none	A→B	certain	박세채 ~ 이언적
+wd:Q6788865	ex:role:세자	none	A→B	certain	소헌왕후 ~ 세자
+wd:Q6853912	wd:Q12596201	none	A→B	certain	원경왕후 ~ 민무구
+wd:Q6853912	wd:Q12596202	none	A→B	certain	원경왕후 ~ 민무질
+wd:Q6853912	wd:Q12596206	none	A→B	certain	원경왕후 ~ 민무회
+wd:Q6853912	wd:Q378483	none	A→B	certain	원경왕후 ~ 조선 태조
+wd:Q6853912	wd:Q485556	none	A→B	certain	원경왕후 ~ 조선 정종
+wd:Q6853912	wd:Q488700	none	A→B	certain	원경왕후 ~ 회안대군
+wd:Q702964	wd:Q145	none	A→B	certain	가쓰라-태프트 밀약 ~ 영국
+wd:Q702964	wd:Q483134	none	A→B	certain	가쓰라-태프트 밀약 ~ 한반도
+wd:Q706103	ex:person:나숙	none	A→B	certain	을사사화 ~ 나숙
+wd:Q706103	ex:person:나식	none	A→B	certain	을사사화 ~ 나식
+wd:Q706103	ex:person:박광우	none	A→B	certain	을사사화 ~ 박광우
+wd:Q706103	ex:person:이덕응	none	A→B	certain	을사사화 ~ 이덕응
+wd:Q706103	ex:person:이문건	none	A→B	certain	을사사화 ~ 이문건
+wd:Q706103	ex:person:이중열	none	A→B	certain	을사사화 ~ 이중열
+wd:Q706103	ex:person:임백령	participated_in	B→A	certain	을사사화 ~ 임백령 · 즉 예조참의로 있던 윤원형은 자신을 지지하는 세력을 만회하기 위하여 평소 대윤파와 사감(私感)이 있던 지중추
+wd:Q706103	ex:person:정희등	none	A→B	certain	을사사화 ~ 정희등
+wd:Q706103	wd:Q109464540	none	A→B	certain	을사사화 ~ 계림군
+wd:Q706103	wd:Q27952865	none	A→B	certain	을사사화 ~ 성세창
+wd:Q706103	wd:Q338403	participated_in	B→A	certain	을사사화 ~ 윤임 · 을사사화(乙巳士禍)는 1545년(명종 즉위년) 조선 왕실의 외척인 대윤(大尹) 윤임과 소윤(小尹) 윤원형의 
+wd:Q706103	wd:Q470084	none	A→B	certain	을사사화 ~ 조선 연산군
+wd:Q706103	wd:Q483008	none	A→B	certain	을사사화 ~ 조선 중종
+wd:Q706103	wd:Q483143	none	A→B	certain	을사사화 ~ 장경왕후
+wd:Q706103	wd:Q483631	none	A→B	certain	을사사화 ~ 조선 인종
+wd:Q706103	wd:Q483641	none	A→B	certain	을사사화 ~ 조선 명종
+wd:Q706103	wd:Q8016893	none	A→B	certain	을사사화 ~ 훈구파
+wd:Q709174	ex:person:박광전	taught	B→A	certain	안방준 ~ 박광전 · 일찍이 박광전(朴光前)·박종정(朴宗挺)의 문하에서 성리학을 수학하였다.
+wd:Q709174	wd:Q11266243	none	A→B	certain	안방준 ~ 이시애의 난
+wd:Q709174	wd:Q12611662	none	A→B	certain	안방준 ~ 이상익
+wd:Q709174	wd:Q12613891	none	A→B	certain	안방준 ~ 임억령
+wd:Q709174	wd:Q12617003	none	A→B	certain	안방준 ~ 조익
+wd:Q709174	wd:Q12617154	none	A→B	certain	안방준 ~ 조헌
+wd:Q709174	wd:Q16175397	none	A→B	certain	안방준 ~ 이귀
+wd:Q709174	wd:Q379647	none	A→B	certain	안방준 ~ 송시열
+wd:Q709174	wd:Q483509	none	A→B	certain	안방준 ~ 단경왕후
+wd:Q709174	wd:Q484978	taught	B→A	probable	안방준 ~ 정철 · 그는 서인 우계 성혼, 송강 정철(鄭澈), 조헌(趙憲) 등의 문하에 출입했던 서인계 사람이었으나 벼슬자리에 
+wd:Q709174	wd:Q488694	none	A→B	certain	안방준 ~ 조선 예종
+wd:Q709174	wd:Q496891	taught	B→A	certain	안방준 ~ 성혼 · 그 뒤 매형 박종정의 영향으로 1591년 경기도 파주의 성혼선생을 찾아가게 된다.
+wd:Q709174	wd:Q497077	none	A→B	certain	안방준 ~ 김집
+wd:Q709174	wd:Q497101	none	A→B	certain	안방준 ~ 김자점
+wd:Q709174	wd:Q624087	none	A→B	certain	안방준 ~ 김육
+wd:Q709174	wd:Q626755	none	A→B	certain	안방준 ~ 김류
+wd:Q709174	wd:Q6677192	none	A→B	certain	안방준 ~ 김인후
+wd:Q7738364	khs:11-11-0001530000000	none	A→B	certain	상계군 ~ 일성록
+wd:Q7738364	khs:11-11-0003030000000	none	A→B	certain	상계군 ~ 승정원일기
+wd:Q7738364	wd:Q26530	none	A→B	certain	상계군 ~ 조선 정조
+wd:Q7738364	wd:Q491768	none	A→B	certain	상계군 ~ 순원왕후
+wd:Q7738364	wd:Q491783	none	A→B	certain	상계군 ~ 홍국영
+wd:Q7781655	wd:Q11265994	none	A→B	certain	박정양 ~ 이상재
+wd:Q7821144	wd:Q490348	none	A→B	certain	박동선 ~ 정묘호란
+wd:Q8006	wd:Q16176384	none	A→B	certain	구로사와 아키라 ~ 간토 대학살
+wd:Q8017829	wd:Q705336	member_of	B→A	certain	서인 ~ 심의겸 · 그러나 후에 사림이 김효원(金孝元)을 지지하는 사람들이 모인 동인과 심의겸(沈義謙)을 지지하는 사람들이 모인
+wd:Q855406	wd:Q707951	participated_in	A→B	certain	하야시 곤스케 ~ 제1차 한일 협약 · 이해 8월 10일 러일전쟁이 종식된 후 8월 22일에는 외부대신 서리였던 윤치호와 당시 주한 일본공사로 있던
+wd:Q8683	wd:Q11708	none	A→B	certain	냉전 ~ 동남아시아
+wd:Q8683	wd:Q13426199	none	A→B	certain	냉전 ~ 중화민국 대륙 시기
+wd:Q8683	wd:Q142	none	A→B	certain	냉전 ~ 프랑스
+wd:Q8683	wd:Q145	none	A→B	certain	냉전 ~ 영국
+wd:Q8683	wd:Q188712	none	A→B	certain	냉전 ~ 일본 제국
+wd:Q8683	wd:Q30	none	A→B	certain	냉전 ~ 미국
+wd:Q8683	wd:Q41117	none	A→B	certain	냉전 ~ 김일성
+wd:Q8683	wd:Q884	none	A→B	certain	냉전 ~ 대한민국
+wd:Q884	wd:Q12586747	none	A→B	certain	대한민국 ~ 기유각서
+wd:Q884	wd:Q17	none	A→B	certain	대한민국 ~ 일본
+wd:Q942553	wd:Q1328807	none	A→B	certain	고니시 유키나가 ~ 소 요시토시
+wd:Q942553	wd:Q484359	none	A→B	certain	고니시 유키나가 ~ 조선 선조
+wd:Q942553	wd:Q5371058	none	A→B	certain	고니시 유키나가 ~ 심유경
+wd:Q942553	wd:Q712027	none	A→B	certain	고니시 유키나가 ~ 이여송
+wd:Q942553	wd:Q7561065	none	A→B	certain	고니시 유키나가 ~ 송응창
+wd:Q942553	wd:Q907019	none	A→B	certain	고니시 유키나가 ~ 구로다 요시타카
+ex:event:유고내전	ex:person:크로아티아	none	A→B	certain	유고내전 ~ 크로아티아
+ex:org:사직단	wd:Q109547418	none	A→B	certain	사직단 ~ 기곡제
+ex:org:선농단	wd:Q109547418	none	A→B	certain	선농단 ~ 기곡제
+ex:org:안동김씨 문중	wd:Q9592	none	A→B	certain	안동김씨 문중 ~ 로마 가톨릭교회
+ex:org:원산노동연합회	ex:org:원산노동청년회	none	A→B	certain	원산노동연합회 ~ 원산노동청년회
+ex:org:원산노동연합회	ex:org:조선사회단체중앙협의회	none	A→B	certain	원산노동연합회 ~ 조선사회단체중앙협의회
+ex:org:원산노동연합회	ex:org:함남노동회	none	A→B	certain	원산노동연합회 ~ 함남노동회
+ex:org:원산노동연합회	ex:person:객주조합	none	A→B	certain	원산노동연합회 ~ 객주조합
+ex:org:원산노동연합회	ex:person:원산상의	none	A→B	certain	원산노동연합회 ~ 원산상의
+ex:org:이성계 일파	ex:event:세력 강화	none	A→B	certain	이성계 일파 ~ 세력 강화
+ex:org:제암리 감리교회	ex:event:기독교적 정신	none	A→B	certain	제암리 감리교회 ~ 기독교적 정신
+ex:org:제암리 감리교회	ex:event:문맹퇴치	none	A→B	certain	제암리 감리교회 ~ 문맹퇴치
+ex:org:제암리 감리교회	ex:event:민족저항운동	none	A→B	certain	제암리 감리교회 ~ 민족저항운동
+ex:org:제암리 감리교회	ex:event:민족정신	none	A→B	certain	제암리 감리교회 ~ 민족정신
+ex:org:제암리 감리교회	ex:event:민중저변의 의식화	none	A→B	certain	제암리 감리교회 ~ 민중저변의 의식화
+ex:org:제암리 감리교회	ex:org:구국동지회	none	A→B	certain	제암리 감리교회 ~ 구국동지회
+ex:org:제암리 감리교회	ex:person:김교철	member_of	B→A	certain	제암리 감리교회 ~ 김교철 · 이러한 학술적 진척에도 불구하고 당시 역사가 통일되고 정리되지 않고 있다.) 만세 운동은 팔탄면 가재리의 유
+ex:org:제암리 감리교회	ex:person:김정헌	member_of	B→A	certain	제암리 감리교회 ~ 김정헌 · 일본군 수비대는 주재소로 다가서는 군중들에게 칼을 휘두르기 시작했으며, 이정근과 그의 동생 등 3명이 칼에 
+ex:org:제암리 감리교회	ex:person:김흥렬	none	A→B	certain	제암리 감리교회 ~ 김흥렬
+ex:org:제암리 감리교회	ex:person:백낙렬	none	A→B	certain	제암리 감리교회 ~ 백낙렬
+ex:org:제암리 감리교회	ex:person:사사카	none	A→B	certain	제암리 감리교회 ~ 사사카
+ex:org:제암리 감리교회	ex:person:안상용	none	A→B	certain	제암리 감리교회 ~ 안상용
+ex:org:제암리 감리교회	ex:person:안씨	none	A→B	certain	제암리 감리교회 ~ 안씨
+ex:org:제암리 감리교회	ex:person:안종후	member_of	B→A	certain	제암리 감리교회 ~ 안종후 · 일본군 수비대는 주재소로 다가서는 군중들에게 칼을 휘두르기 시작했으며, 이정근과 그의 동생 등 3명이 칼에 
+ex:org:제암리 감리교회	ex:person:안진순	member_of	B→A	certain	제암리 감리교회 ~ 안진순 · 일본군 수비대는 주재소로 다가서는 군중들에게 칼을 휘두르기 시작했으며, 이정근과 그의 동생 등 3명이 칼에 
+ex:org:제암리 감리교회	ex:person:일제	none	A→B	certain	제암리 감리교회 ~ 일제
+ex:org:제암리 감리교회	ex:person:조희창	none	A→B	certain	제암리 감리교회 ~ 조희창
+ex:org:제암리 감리교회	ex:person:홍순진	none	A→B	certain	제암리 감리교회 ~ 홍순진
+ex:org:제암리 감리교회	wd:Q16169270	member_of	B→A	certain	제암리 감리교회 ~ 안봉순 · 일본군 수비대는 주재소로 다가서는 군중들에게 칼을 휘두르기 시작했으며, 이정근과 그의 동생 등 3명이 칼에 
+ex:org:제암리 감리교회	wd:Q17361576	none	A→B	certain	제암리 감리교회 ~ 이정근
+ex:org:제암리 감리교회	wd:Q31179462	none	A→B	certain	제암리 감리교회 ~ 홍원식
+ex:org:제암리 감리교회	wd:Q513638	none	A→B	certain	제암리 감리교회 ~ 천도교
+ex:org:제암리 감리교회	wd:Q55736737	none	A→B	certain	제암리 감리교회 ~ 김성렬
+ex:org:제암리 감리교회	wd:Q65271495	none	A→B	certain	제암리 감리교회 ~ 안정옥
+ex:org:제암리 감리교회	wd:Q6824112	none	A→B	certain	제암리 감리교회 ~ 강성민
+ex:org:제암리 감리교회	wd:Q7044334	none	A→B	certain	제암리 감리교회 ~ 노경태
+ex:org:제암리 감리교회	wd:Q852377	none	A→B	certain	제암리 감리교회 ~ 신문화운동
+ex:person:V.S. 팔게르	ex:org:내집단과 외집단	none	A→B	certain	V.S. 팔게르 ~ 내집단과 외집단
+ex:person:게리 R. 존슨	ex:org:내집단과 외집단	none	A→B	certain	게리 R. 존슨 ~ 내집단과 외집단
+ex:person:김광운	wd:Q495459	none	A→B	certain	김광운 ~ 조선공산당
+ex:person:김영두	wd:Q495459	none	A→B	certain	김영두 ~ 조선공산당
+ex:person:김충렬	wd:Q31179932	none	A→B	certain	김충렬 ~ 원산 총파업
+ex:person:남베트남	wd:Q30	none	A→B	certain	남베트남 ~ 미국
+ex:person:동인	wd:Q496942	none	A→B	certain	동인 ~ 김효원
+ex:person:명경대왕대비 김씨	ex:person:안동 김씨	none	A→B	certain	명경대왕대비 김씨 ~ 안동 김씨
+ex:person:미국 중앙정보국	ex:person:캐나다	none	A→B	certain	미국 중앙정보국 ~ 캐나다
+ex:person:박기석	wd:Q624154	participated_in	A→B	probable	박기석 ~ 광주 학생 항일 운동 · 장재성은 광주학생들을 설득하는 유인물을 작성했으며, 인쇄를 맡은 오쾌일에 의해서 등사판을 이용하여 박기석의 
+ex:person:박승환	ex:person:호국인물	none	A→B	certain	박승환 ~ 호국인물
+ex:person:박유건	wd:Q490348	participated_in	A→B	probable	박유건 ~ 정묘호란 · 음력 1월 20일 : 능한산성(凌漢山城) 대장 김진(金搢), 선천 부사(宣川府使) 기협(奇恊), 곽산 군수(
+ex:person:북베트남	wd:Q148	none	A→B	certain	북베트남 ~ 중화인민공화국
+ex:person:북베트남	wd:Q15180	none	A→B	certain	북베트남 ~ 소련
+ex:person:셀리아 그린	ex:org:내집단과 외집단	none	A→B	certain	셀리아 그린 ~ 내집단과 외집단
+ex:person:숙명공주	wd:Q2945181	none	A→B	certain	숙명공주 ~ 노론
+ex:person:아민	wd:Q490348	participated_in	A→B	certain	아민 ~ 정묘호란 · 1627년(인조 5년) 1월 13일(양력 2월 28일), 홍타이지는 광해군을 위하여 보복한다는 구실을 내세우
+ex:person:오가작통법	wd:Q9592	none	A→B	certain	오가작통법 ~ 로마 가톨릭교회
+ex:person:왕온	wd:Q711051	participated_in	A→B	probable	왕온 ~ 삼별초 · 삼별초는 왕족인 왕온을 추대하여 왕으로 삼고, 강화도의 거의 모든 재산과 사람들을 태운 대선단을 이끌고 진도
+ex:person:요나라	ex:place:보주	none	A→B	certain	요나라 ~ 보주
+ex:person:요나라	ex:place:여진	none	A→B	certain	요나라 ~ 여진
+ex:person:요나라	wd:Q28208	none	A→B	certain	요나라 ~ 고려
+ex:person:요나라	wd:Q28322	none	A→B	certain	요나라 ~ 발해
+ex:person:요나라	wd:Q5066	none	A→B	certain	요나라 ~ 금나라
+ex:person:요나라	wd:Q707128	none	A→B	certain	요나라 ~ 정안국
+ex:person:요나라	wd:Q7462	none	A→B	certain	요나라 ~ 송나라
+ex:person:요나라	wd:Q9087402	none	A→B	certain	요나라 ~ 강동 6주
+ex:person:이시도	wd:Q704929	none	A→B	certain	이시도 ~ 소론
+ex:person:이철학	wd:Q495459	none	A→B	certain	이철학 ~ 조선공산당
+ex:person:장 디케티	ex:event:거울신경세포	none	A→B	certain	장 디케티 ~ 거울신경세포
+ex:person:장희재	wd:Q704929	none	A→B	certain	장희재 ~ 소론
+ex:person:존 마즐러프	ex:person:까마귀	none	A→B	certain	존 마즐러프 ~ 까마귀
+ex:person:풍양 조씨	wd:Q624353	none	A→B	certain	풍양 조씨 ~ 신정왕후
+ex:person:피아제	ex:event:심리학적인 관점	none	A→B	certain	피아제 ~ 심리학적인 관점
+ex:person:한중혁	wd:Q704929	none	A→B	certain	한중혁 ~ 소론
+ex:place:경성감옥	ex:person:계몽운동세력	none	A→B	certain	경성감옥 ~ 계몽운동세력
+ex:place:경성감옥	ex:person:의병세력	none	A→B	certain	경성감옥 ~ 의병세력
+ex:place:이익선생묘	ex:event:경기도 기념물 제 40호	none	A→B	certain	이익선생묘 ~ 경기도 기념물 제 40호
+wd:Q106234557	ex:person:국유지	none	A→B	certain	조선총독부 ~ 국유지
+wd:Q106234557	ex:person:농민	none	A→B	certain	조선총독부 ~ 농민
+wd:Q106234557	ex:person:대지주	none	A→B	certain	조선총독부 ~ 대지주
+wd:Q106234557	ex:person:소작농	none	A→B	certain	조선총독부 ~ 소작농
+wd:Q106234557	ex:person:소작인	none	A→B	certain	조선총독부 ~ 소작인
+wd:Q106234557	ex:person:역둔토	none	A→B	certain	조선총독부 ~ 역둔토
+wd:Q106234557	ex:person:일본인	none	A→B	certain	조선총독부 ~ 일본인
+wd:Q106234557	ex:person:자유노동자	none	A→B	certain	조선총독부 ~ 자유노동자
+wd:Q106234557	ex:person:지주	none	A→B	certain	조선총독부 ~ 지주
+wd:Q106234557	ex:person:지주대표	none	A→B	certain	조선총독부 ~ 지주대표
+wd:Q106234557	ex:person:지주총대	none	A→B	certain	조선총독부 ~ 지주총대
+wd:Q106234557	ex:person:화전민	none	A→B	certain	조선총독부 ~ 화전민
+wd:Q106234557	ex:person:황무지	none	A→B	certain	조선총독부 ~ 황무지
+wd:Q10855629	ex:org:탁치반대국민총동원위원회	member_of	A→B	certain	권동진 ~ 탁치반대국민총동원위원회 · 김구가 모스크바 3상회담에 반발, 강력한 반탁운동을 추진하자 12월 30일 결성된 신탁통치반대 국민총동원위원
+wd:Q109547418	ex:org:환구단	none	A→B	certain	기곡제 ~ 환구단
+wd:Q11265994	ex:org:만민공동회	none	A→B	certain	이상재 ~ 만민공동회
+wd:Q11265994	ex:org:황성기독교청년회 야유회	none	A→B	certain	이상재 ~ 황성기독교청년회 야유회
+wd:Q11286597	ex:org:형평사전국대회	none	A→B	certain	형평사 운동 ~ 형평사전국대회
+wd:Q11286597	ex:org:형평사통일대회	none	A→B	certain	형평사 운동 ~ 형평사통일대회
+wd:Q11286597	ex:org:형평사혁신동맹창립총회	none	A→B	certain	형평사 운동 ~ 형평사혁신동맹창립총회
+wd:Q11286597	ex:org:형평청년회	none	A→B	certain	형평사 운동 ~ 형평청년회
+wd:Q1156288	ex:person:시마즈	none	A→B	certain	시마즈 요시히로 ~ 시마즈
+wd:Q1156288	ex:person:시마즈 가	none	A→B	certain	시마즈 요시히로 ~ 시마즈 가
+wd:Q1156288	ex:person:시마즈 가문	none	A→B	certain	시마즈 요시히로 ~ 시마즈 가문
+wd:Q1156288	ex:person:시마즈군	none	A→B	certain	시마즈 요시히로 ~ 시마즈군
+wd:Q11643899	ex:person:방지용	none	A→B	certain	정지 ~ 방지용
+wd:Q11643899	ex:person:유만수	none	A→B	certain	정지 ~ 유만수
+wd:Q11643899	wd:Q16172256	none	A→B	certain	정지 ~ 윤송
+wd:Q12586875	ex:person:경주 김씨	none	A→B	certain	김개남 ~ 경주 김씨
+wd:Q12586875	ex:person:김개주	none	A→B	certain	김개남 ~ 김개주
+wd:Q12586875	ex:person:김백술	child_of	B→A	certain	김개남 ~ 김백술 · 아들 김백술(金伯述)(? ~ 1952): 경주김씨와 결혼하여 2남 5녀를 둠
+wd:Q12586875	ex:person:김송현	none	A→B	certain	김개남 ~ 김송현
+wd:Q12586875	ex:person:송도용	none	A→B	certain	김개남 ~ 송도용
+wd:Q12586875	ex:person:우관선사	none	A→B	certain	김개남 ~ 우관선사
+wd:Q12586875	ex:person:윤씨 부인	none	A→B	certain	김개남 ~ 윤씨 부인
+wd:Q12586875	ex:person:정인덕	none	A→B	certain	김개남 ~ 정인덕
+wd:Q12586875	ex:person:호준	none	A→B	certain	김개남 ~ 호준
+wd:Q12587347	ex:org:각파유지연맹 강연회	none	A→B	certain	김명준 (1870년) ~ 각파유지연맹 강연회
+wd:Q12587347	ex:org:국민협회 창립 1주년 기념 시국대연설회	none	A→B	certain	김명준 (1870년) ~ 국민협회 창립 1주년 기념 시국대연설회
+wd:Q12587347	ex:org:조선인 참정권 관련 시국간담회	none	A→B	certain	김명준 (1870년) ~ 조선인 참정권 관련 시국간담회
+wd:Q12595428	ex:person:원	none	A→B	certain	목호의 난 ~ 원
+wd:Q12595428	wd:Q9903	none	A→B	certain	목호의 난 ~ 명나라
+wd:Q12613430	ex:org:대북	none	A→B	certain	인조반정 ~ 대북
+wd:Q16176384	ex:person:조선인	none	A→B	certain	간토 대학살 ~ 조선인
+wd:Q16176384	ex:person:중국인	none	A→B	certain	간토 대학살 ~ 중국인
+wd:Q179935	ex:event:두산세계대백과사전	none	A→B	certain	정하상 ~ 두산세계대백과사전
+wd:Q179935	ex:event:생활성서	none	A→B	certain	정하상 ~ 생활성서
+wd:Q179935	ex:event:일기도	none	A→B	certain	정하상 ~ 일기도
+wd:Q179935	ex:event:정보록	none	A→B	certain	정하상 ~ 정보록
+wd:Q179935	ex:event:한겨레 21	none	A→B	certain	정하상 ~ 한겨레 21
+wd:Q179935	ex:event:한국민족문화대백과사전	none	A→B	certain	정하상 ~ 한국민족문화대백과사전
+wd:Q179935	ex:person:고 발바라 교우	none	A→B	certain	정하상 ~ 고 발바라 교우
+wd:Q179935	ex:person:권영례 데레사	none	A→B	certain	정하상 ~ 권영례 데레사
+wd:Q179935	ex:person:브루기에르 주교	none	A→B	certain	정하상 ~ 브루기에르 주교
+wd:Q179935	ex:person:샤를 달레	none	A→B	certain	정하상 ~ 샤를 달레
+wd:Q179935	ex:person:유방제 신부	none	A→B	certain	정하상 ~ 유방제 신부
+wd:Q179935	ex:person:조숙 베드로	none	A→B	certain	정하상 ~ 조숙 베드로
+wd:Q179935	ex:person:홍콩 천주교의 약망(若望)주교	none	A→B	certain	정하상 ~ 홍콩 천주교의 약망(若望)주교
+wd:Q188712	ex:event:대한시설강령	participated_in	A→B	certain	일본 제국 ~ 대한시설강령 · 5월에는 일제가 한일의정서를 기반해서 세부적인 대한제국 경영 방안을 작성하고, 일본 각의의 결정을 거쳐 실행
+wd:Q188712	ex:event:제2차 한일 협약	participated_in	A→B	probable	일본 제국 ~ 제2차 한일 협약 · 이 고문정치는 뒷날, 1905년 제2차 한일 협약으로 통감부가 설치되면서 이른바 '통감정치'로 바뀌었으며, 
+wd:Q188712	nikh:kc_i403500	none	A→B	certain	일본 제국 ~ 한일의정서
+wd:Q214259	ex:org:남조선인민대표자대회	none	A→B	certain	김규식 ~ 남조선인민대표자대회
+wd:Q214259	ex:org:제2차 전조선 제정당사회단체 지도자협의회	none	A→B	certain	김규식 ~ 제2차 전조선 제정당사회단체 지도자협의회
+wd:Q214259	ex:org:통일독립촉진회	member_of	A→B	certain	김규식 ~ 통일독립촉진회 · 이후 김구·김규식은 남한만의 단독선거가 실시된 후에도 한독당과 민족자주연맹을 중심으로 단정 반대세력을 규합하
+wd:Q215737	ex:org:남조선인민대표자대회	none	A→B	certain	김구 ~ 남조선인민대표자대회
+wd:Q215737	ex:org:제2차 전조선 제정당사회단체 지도자협의회	none	A→B	certain	김구 ~ 제2차 전조선 제정당사회단체 지도자협의회
+wd:Q215737	ex:org:통일독립촉진회	member_of	A→B	certain	김구 ~ 통일독립촉진회 · 이후 김구·김규식은 남한만의 단독선거가 실시된 후에도 한독당과 민족자주연맹을 중심으로 단정 반대세력을 규합하
+wd:Q22974749	ex:person:동인	none	A→B	certain	이준경 ~ 동인
+wd:Q256246	ex:person:정대림	none	A→B	certain	정약용 ~ 정대림
+wd:Q256246	ex:person:홍화보	none	A→B	certain	정약용 ~ 홍화보
+wd:Q28208	ex:person:요나라	none	A→B	certain	고려 ~ 요나라
+wd:Q28208	wd:Q28057	none	A→B	certain	고려 ~ 탐라
+wd:Q282172	ex:person:다치바나 소이치	none	A→B	certain	오스기 사카에 ~ 다치바나 소이치
+wd:Q28233	ex:event:대한시설강령	none	A→B	certain	대한제국 ~ 대한시설강령
+wd:Q28233	ex:event:제2차 한일 협약	none	A→B	certain	대한제국 ~ 제2차 한일 협약
+wd:Q28322	ex:person:요나라	none	A→B	certain	발해 ~ 요나라
+wd:Q28322	wd:Q28208	none	A→B	certain	발해 ~ 고려
+wd:Q28322	wd:Q28456	none	A→B	certain	발해 ~ 신라
+wd:Q302096	ex:event:요동 원정	participated_in	A→B	probable	고려 우왕 ~ 요동 원정 · 이 우왕 14년 철령위 설치문제로 인해 명과 고려의 관계는 급속히 냉각되었고, 우왕과 최영은 요동 원정을 계
+wd:Q310462	wd:Q423	none	A→B	certain	사이고 다카모리 ~ 조선민주주의인민공화국
+wd:Q31178586	wd:Q711051	participated_in	A→B	certain	노영희 ~ 삼별초 · 마침내 1270년 음력 6월 초, 개경 환도를 앞둔 시점에서 삼별초의 지도자였던 배중손과 노영희 등 삼별초 
+wd:Q3270739	ex:place:매은정동	occurred_at	A→B	probable	박천 전투 ~ 매은정동 · 이른 아침까지 중국인민지원군의 공격은 저지되었고, 오스트레일리아 왕립 연대 제3대대는 매은정동 북쪽 철도 건
+wd:Q3270739	ex:place:박천-신안주 도로	none	A→B	certain	박천 전투 ~ 박천-신안주 도로
+wd:Q3270739	ex:place:청천강 전선	none	A→B	certain	박천 전투 ~ 청천강 전선
+wd:Q3270739	wd:Q17486945	none	A→B	certain	박천 전투 ~ 구진
+wd:Q3270739	wd:Q483102	none	A→B	certain	박천 전투 ~ 북위 38도선
+wd:Q3270739	wd:Q7674900	occurred_at	A→B	certain	박천 전투 ~ 대령강 · 이 전투는 영국 및 오스트레일리아군과 미군 전차 및 포병이 지원하는 제27보병여단과 제39군 예하의 제117
+wd:Q34479	wd:Q163244	participated_in	A→B	probable	쇼와 천황 ~ 포츠담 선언 · 일본의 항복(영어: Surrender of Japan, 일본어: 日本の降伏)은 일본 제국이 1945년 8월 
+wd:Q378483	ex:person:친이성계 문인	none	A→B	certain	조선 태조 ~ 친이성계 문인
+wd:Q379649	ex:person:석견	none	A→B	certain	윤선도 ~ 석견
+wd:Q379659	ex:person:원몽	none	A→B	certain	원균 ~ 원몽
+wd:Q379659	ex:person:원전	none	A→B	certain	원균 ~ 원전
+wd:Q379659	ex:person:원주 원씨 원성백파	none	A→B	certain	원균 ~ 원주 원씨 원성백파
+wd:Q388037	ex:period:1939년경	none	A→B	certain	만국평화회의 ~ 1939년경
+wd:Q388037	ex:person:네덜란드 외무부	none	A→B	certain	만국평화회의 ~ 네덜란드 외무부
+wd:Q41117	ex:org:제2차 전조선 제정당사회단체 지도자협의회	none	A→B	certain	김일성 ~ 제2차 전조선 제정당사회단체 지도자협의회
+wd:Q423	ex:person:인민경제 향상을 위한 1차 7개년 계획	none	A→B	certain	조선민주주의인민공화국 ~ 인민경제 향상을 위한 1차 7개년 계획
+wd:Q423	wd:Q705043	none	A→B	certain	조선민주주의인민공화국 ~ 메이지 6년 정변
+wd:Q433065	ex:person:남덕하	none	A→B	certain	논개 ~ 남덕하
+wd:Q433065	ex:person:다산 정약용	none	A→B	certain	논개 ~ 다산 정약용
+wd:Q433065	ex:person:수주 변영로	none	A→B	certain	논개 ~ 수주 변영로
+wd:Q433065	ex:person:임종성	none	A→B	certain	논개 ~ 임종성
+wd:Q433065	ex:person:정대륭	none	A→B	certain	논개 ~ 정대륭
+wd:Q433065	ex:person:정연보	none	A→B	certain	논개 ~ 정연보
+wd:Q433065	ex:person:주달무	none	A→B	certain	논개 ~ 주달무
+wd:Q433065	ex:person:주대룡	none	A→B	certain	논개 ~ 주대룡
+wd:Q43734	wd:Q485193	none	A→B	certain	교황 그레고리오 16세 ~ 천주교 서울대교구
+wd:Q464485	ex:artwork:동계만록	none	A→B	certain	신사임당 ~ 동계만록
+wd:Q464485	ex:person:권씨	none	A→B	certain	신사임당 ~ 권씨
+wd:Q464485	ex:person:신상	none	A→B	certain	신사임당 ~ 신상
+wd:Q464485	ex:person:신숙권	none	A→B	certain	신사임당 ~ 신숙권
+wd:Q464485	ex:person:오귀환	none	A→B	certain	신사임당 ~ 오귀환
+wd:Q464485	ex:person:윤회	none	A→B	certain	신사임당 ~ 윤회
+wd:Q464485	ex:person:이의석	none	A→B	certain	신사임당 ~ 이의석
+wd:Q464485	ex:person:이추	none	A→B	certain	신사임당 ~ 이추
+wd:Q464510	ex:artwork:나, 황진이	none	A→B	certain	황진이 ~ 나, 황진이
+wd:Q464510	ex:artwork:동국시선	none	A→B	certain	황진이 ~ 동국시선
+wd:Q464510	ex:person:이사종	none	A→B	certain	황진이 ~ 이사종
+wd:Q464510	ex:person:이생	none	A→B	certain	황진이 ~ 이생
+wd:Q464510	ex:person:이진이	none	A→B	certain	황진이 ~ 이진이
+wd:Q464510	ex:person:지족선사	none	A→B	certain	황진이 ~ 지족선사
+wd:Q464510	ex:person:진랑	none	A→B	certain	황진이 ~ 진랑
+wd:Q464510	ex:person:진현금	none	A→B	certain	황진이 ~ 진현금
+wd:Q464510	ex:person:황씨	none	A→B	certain	황진이 ~ 황씨
+wd:Q469396	ex:event:경제문감	none	A→B	certain	정도전 ~ 경제문감
+wd:Q469396	ex:event:경제문감별집	none	A→B	certain	정도전 ~ 경제문감별집
+wd:Q469396	ex:event:불씨잡변	none	A→B	certain	정도전 ~ 불씨잡변
+wd:Q469396	ex:event:역대부병시위지제	none	A→B	certain	정도전 ~ 역대부병시위지제
+wd:Q469396	ex:person:세자 방석	taught	A→B	certain	정도전 ~ 세자 방석 · 정도전은 어린 세자 방석을 교육시켜 재상이 중심이 되는 왕도 정치(재상 정치)의 실현을 꿈꾸었지만, 왕권과 
+wd:Q469396	ex:person:이치	none	A→B	certain	정도전 ~ 이치
+wd:Q469396	ex:person:조유인	none	A→B	certain	정도전 ~ 조유인
+wd:Q469396	ex:person:하률	none	A→B	certain	정도전 ~ 하률
+wd:Q469415	ex:person:그린	none	A→B	certain	허정 ~ 그린
+wd:Q469415	ex:person:매그루더	none	A→B	certain	허정 ~ 매그루더
+wd:Q469450	ex:person:이필진	none	A→B	certain	허균 ~ 이필진
+wd:Q470047	ex:event:노태우 대표위원에 의한 민주화 선언	none	A→B	certain	윤치영 ~ 노태우 대표위원에 의한 민주화 선언
+wd:Q483055	ex:event:길없는 길	none	A→B	certain	경허 ~ 길없는 길
+wd:Q483055	ex:person:만공스님	taught	A→B	certain	경허 ~ 만공스님 · 천장암에서 경허의 '삼월(三月)'로 불리는 수월스님과 혜월스님과 만공스님이 출가하여 함께 수행하게 된다.
+wd:Q483055	ex:person:수월스님	taught	A→B	certain	경허 ~ 수월스님 · 천장암에서 경허의 '삼월(三月)'로 불리는 수월스님과 혜월스님과 만공스님이 출가하여 함께 수행하게 된다.
+wd:Q483055	ex:person:혜월스님	taught	A→B	certain	경허 ~ 혜월스님 · 천장암에서 경허의 '삼월(三月)'로 불리는 수월스님과 혜월스님과 만공스님이 출가하여 함께 수행하게 된다.
+wd:Q4841202	wd:Q711051	participated_in	A→B	certain	배중손 ~ 삼별초 · 배중손은 전 신의군의 우두머리로 삼별초에서도 지휘자를 맡아 삼별초를 총지휘했다.
+wd:Q484267	ex:event:한중록	none	A→B	certain	헌경왕후 ~ 한중록
+wd:Q484267	ex:person:한산부인 이씨	child_of	A→B	certain	헌경왕후 ~ 한산부인 이씨 · 1735년(영조 11년) 6월 18일, 한성부 반송방에서 홍봉한과 한산부부인 이씨의 둘째 딸로 태어났다.
+wd:Q484453	ex:person:심연은	none	A→B	certain	조선 인조 ~ 심연은
+wd:Q484453	ex:person:아민	none	A→B	certain	조선 인조 ~ 아민
+wd:Q484453	ex:person:얀얀스벨테브레이	none	A→B	certain	조선 인조 ~ 얀얀스벨테브레이
+wd:Q484608	ex:person:노이	none	A→B	certain	이종무 ~ 노이
+wd:Q484966	ex:person:척사윤음	none	A→B	certain	조선 헌종 ~ 척사윤음
+wd:Q485556	ex:person:노비변정도감	none	A→B	certain	조선 정종 ~ 노비변정도감
+wd:Q485556	ex:person:도만호	none	A→B	certain	조선 정종 ~ 도만호
+wd:Q485556	ex:person:순군만호부	none	A→B	certain	조선 정종 ~ 순군만호부
+wd:Q485556	ex:person:의흥삼군부	none	A→B	certain	조선 정종 ~ 의흥삼군부
+wd:Q485556	ex:person:의흥친군위	none	A→B	certain	조선 정종 ~ 의흥친군위
+wd:Q485556	ex:person:조례상정도감	none	A→B	certain	조선 정종 ~ 조례상정도감
+wd:Q485556	ex:person:집현전	none	A→B	certain	조선 정종 ~ 집현전
+wd:Q485599	ex:person:김광택	none	A→B	certain	인현왕후 ~ 김광택
+wd:Q485599	ex:person:김만균	none	A→B	certain	인현왕후 ~ 김만균
+wd:Q485599	ex:person:김만기	none	A→B	certain	인현왕후 ~ 김만기
+wd:Q485599	ex:person:남양 홍씨	none	A→B	certain	인현왕후 ~ 남양 홍씨
+wd:Q485599	ex:person:이만창	none	A→B	certain	인현왕후 ~ 이만창
+wd:Q485599	ex:person:장희재	none	A→B	certain	인현왕후 ~ 장희재
+wd:Q485604	ex:person:소 다케위키	none	A→B	certain	덕혜옹주 ~ 소 다케위키
+wd:Q485604	ex:person:이공재	none	A→B	certain	덕혜옹주 ~ 이공재
+wd:Q486257	ex:person:고재우	none	A→B	certain	조식 ~ 고재우
+wd:Q486266	ex:org:소윤	member_of	A→B	certain	윤원형 ~ 소윤 · 당시에는 어좌를 두고 파평 윤씨 일가의 당쟁이 극에 달하였는데 윤임을 중심으로 하는 대윤과 윤원형을 중심으로
+wd:Q486266	ex:person:동인	none	A→B	certain	윤원형 ~ 동인
+wd:Q486266	ex:person:이조민	none	A→B	certain	윤원형 ~ 이조민
+wd:Q486266	ex:person:척신	none	A→B	certain	윤원형 ~ 척신
+wd:Q486278	ex:person:송씨	none	A→B	certain	김종직 ~ 송씨
+wd:Q486278	ex:person:영응대군 부인 송씨	none	A→B	certain	김종직 ~ 영응대군 부인 송씨
+wd:Q486278	ex:person:한유	none	A→B	certain	김종직 ~ 한유
+wd:Q486283	ex:person:능성현령	none	A→B	certain	조광조 ~ 능성현령
+wd:Q486283	ex:person:동방사현	none	A→B	certain	조광조 ~ 동방사현
+wd:Q486283	ex:person:정암	none	A→B	certain	조광조 ~ 정암
+wd:Q486388	ex:person:기묘명현	none	A→B	certain	기묘사화 ~ 기묘명현
+wd:Q486558	ex:org:대북	none	A→B	certain	이산해 ~ 대북
+wd:Q486558	ex:person:동인	none	A→B	certain	이산해 ~ 동인
+wd:Q486558	ex:person:북인	none	A→B	certain	이산해 ~ 북인
+wd:Q486558	ex:person:소북	none	A→B	certain	이산해 ~ 소북
+wd:Q486558	ex:person:예문관	none	A→B	certain	이산해 ~ 예문관
+wd:Q486558	ex:person:홍문관	none	A→B	certain	이산해 ~ 홍문관
+wd:Q487161	ex:org:광주학생운동 민중대회	none	A→B	certain	한용운 ~ 광주학생운동 민중대회
+wd:Q487161	ex:org:승려대회	none	A→B	certain	한용운 ~ 승려대회
+wd:Q487161	ex:org:이회광 규탄 및 승려결기대회	none	A→B	certain	한용운 ~ 이회광 규탄 및 승려결기대회
+wd:Q487161	ex:person:김벽산	none	A→B	certain	한용운 ~ 김벽산
+wd:Q487161	ex:person:영숙	child_of	B→A	certain	한용운 ~ 영숙 · 다음 해에 딸 영숙(1934년 9월 1일)이 태어났으며, 1935년에 완공되자 입주하여 심우장에서 여생을 보
+wd:Q487161	ex:person:한창국	none	A→B	certain	한용운 ~ 한창국
+wd:Q488115	ex:person:정원달	none	A→B	certain	화완옹주 ~ 정원달
+wd:Q488374	ex:event:절의	none	A→B	certain	성삼문 ~ 절의
+wd:Q488374	ex:event:충군	none	A→B	certain	성삼문 ~ 충군
+wd:Q488374	ex:event:학문	none	A→B	certain	성삼문 ~ 학문
+wd:Q488374	ex:person:맹년	child_of	B→A	certain	성삼문 ~ 맹년 · 둘째아들 맹년의 딸은 유성원의 일족인 서산공 유자미가 비밀리에 피신시켜 길러서 자신의 일곱째 며느리(柳輯 부
+wd:Q488374	ex:person:성삼고	none	A→B	certain	성삼문 ~ 성삼고
+wd:Q488374	ex:person:성삼빙	none	A→B	certain	성삼문 ~ 성삼빙
+wd:Q488374	ex:person:성삼성	none	A→B	certain	성삼문 ~ 성삼성
+wd:Q488374	ex:person:성성금	none	A→B	certain	성삼문 ~ 성성금
+wd:Q488374	ex:person:성옥동	none	A→B	certain	성삼문 ~ 성옥동
+wd:Q488374	ex:person:효옥	child_of	B→A	certain	성삼문 ~ 효옥 · 아내 차산과 미혼의 장녀 효옥은 박종우의 노비가 되었다.
+wd:Q488694	ex:person:남세건	none	A→B	certain	조선 예종 ~ 남세건
+wd:Q488694	ex:person:동인	none	A→B	certain	조선 예종 ~ 동인
+wd:Q488694	ex:person:북인	none	A→B	certain	조선 예종 ~ 북인
+wd:Q488694	ex:person:송재 이우	none	A→B	certain	조선 예종 ~ 송재 이우
+wd:Q488694	wd:Q122846639	none	A→B	certain	조선 예종 ~ 임진왜란
+wd:Q488694	wd:Q12587941	none	A→B	certain	조선 예종 ~ 김안국
+wd:Q488694	wd:Q12589996	none	A→B	certain	조선 예종 ~ 남인
+wd:Q488694	wd:Q12590390	none	A→B	certain	조선 예종 ~ 노수신
+wd:Q488694	wd:Q12603522	none	A→B	certain	조선 예종 ~ 숭선군
+wd:Q488694	wd:Q12613135	none	A→B	certain	조선 예종 ~ 이현보
+wd:Q488694	wd:Q24859745	none	A→B	certain	조선 예종 ~ 김저
+wd:Q488694	wd:Q486283	none	A→B	certain	조선 예종 ~ 조광조
+wd:Q488694	wd:Q486563	none	A→B	certain	조선 예종 ~ 이기
+wd:Q488694	wd:Q61095127	none	A→B	certain	조선 예종 ~ 신광한
+wd:Q488694	wd:Q624894	none	A→B	certain	조선 예종 ~ 이언적
+wd:Q488694	wd:Q6677192	none	A→B	certain	조선 예종 ~ 김인후
+wd:Q488694	wd:Q706103	none	A→B	certain	조선 예종 ~ 을사사화
+wd:Q488700	ex:person:의령군 맹중	child_of	B→A	certain	회안대군 ~ 의령군 맹중 · 형 정종에게 적장자가 없자, 왕위 계승에 대한 야심이 있던 그는 1400년(정종 2년)에 제2차 왕자의 난 
+wd:Q489527	ex:org:대한협동회	member_of	A→B	certain	양기탁 ~ 대한협동회 · 1905년 궁내부에서 근무하고 신문을 발행할 때 러일전쟁에서 승리한 일본이 대한제국에 황무지 개척권을 요구하
+wd:Q489527	ex:org:만민공동회	member_of	A→B	certain	양기탁 ~ 만민공동회 · 1898년에는 만민공동회에 참여하여 연사가 되어 열변을 토하였으며, 만민공동회의 부총무장(副總務長)급으로 적
+wd:Q489758	ex:person:대원군	none	A→B	certain	전봉준 ~ 대원군
+wd:Q489758	ex:person:박원명	none	A→B	certain	전봉준 ~ 박원명
+wd:Q489792	ex:person:강노	none	A→B	certain	최익현 ~ 강노
+wd:Q489792	ex:person:민씨 일족	none	A→B	certain	최익현 ~ 민씨 일족
+wd:Q489792	ex:person:여흥 민씨 척족 세력들	none	A→B	certain	최익현 ~ 여흥 민씨 척족 세력들
+wd:Q490001	ex:person:사관학교	none	A→B	certain	김좌진 ~ 사관학교
+wd:Q490156	ex:org:적화방지단	none	A→B	certain	청산리 전투 ~ 적화방지단
+wd:Q490156	ex:person:한국 독립군	participated_in	B→A	certain	청산리 전투 ~ 한국 독립군 · 가장 중요한 것은 청산리 전투였는데, 약 400명의 한국 독립군이 4일간의 치열한 전투에서 더 잘 훈련된 일
+wd:Q490362	ex:person:니탕개	none	A→B	certain	김시민 ~ 니탕개
+wd:Q490362	ex:person:평소태	none	A→B	certain	김시민 ~ 평소태
+wd:Q490391	ex:event:요동 원정	participated_in	A→B	probable	최영 ~ 요동 원정 · 이 우왕 14년 철령위 설치문제로 인해 명과 고려의 관계는 급속히 냉각되었고, 우왕과 최영은 요동 원정을 계
+wd:Q490391	ex:person:고려 왕실	none	A→B	certain	최영 ~ 고려 왕실
+wd:Q490391	ex:person:고려군	none	A→B	certain	최영 ~ 고려군
+wd:Q490391	ex:person:고려인	none	A→B	certain	최영 ~ 고려인
+wd:Q490391	ex:person:무장들	none	A→B	certain	최영 ~ 무장들
+wd:Q490391	ex:person:사람들	none	A→B	certain	최영 ~ 사람들
+wd:Q490391	ex:person:왜구	none	A→B	certain	최영 ~ 왜구
+wd:Q490391	ex:person:장졸	none	A→B	certain	최영 ~ 장졸
+wd:Q494175	ex:person:정몽주의 학통	none	A→B	certain	정인지 ~ 정몽주의 학통
+wd:Q494175	ex:person:정승충	none	A→B	certain	정인지 ~ 정승충
+wd:Q494787	ex:org:독립촉성중앙회	member_of	A→B	certain	이시영 ~ 독립촉성중앙회 · 이후 이시영은 10월에 귀국한 임정 주미대사 이승만(李承晩)이 만든 독립촉성중앙회에 가입하여 우파 정치인으로
+wd:Q494787	ex:org:임시 정부 환영회	none	A→B	certain	이시영 ~ 임시 정부 환영회
+wd:Q494787	ex:person:신규희	none	A→B	certain	이시영 ~ 신규희
+wd:Q494787	ex:person:신재희	none	A→B	certain	이시영 ~ 신재희
+wd:Q494787	ex:person:이시영 (1882~1919)	none	A→B	certain	이시영 ~ 이시영 (1882~1919)
+wd:Q494787	ex:person:조정구	none	A→B	certain	이시영 ~ 조정구
+wd:Q495458	ex:org:만민공동회	none	A→B	certain	이완용 ~ 만민공동회
+wd:Q495458	ex:org:이토 히로부미 추도회	none	A→B	certain	이완용 ~ 이토 히로부미 추도회
+wd:Q495458	ex:person:스페에르	none	A→B	certain	이완용 ~ 스페에르
+wd:Q496216	ex:person:이흔	none	A→B	certain	이구지 ~ 이흔
+wd:Q496216	ex:person:준비	none	A→B	certain	이구지 ~ 준비
+wd:Q496216	ex:person:천례	none	A→B	certain	이구지 ~ 천례
+wd:Q496216	ex:person:허계	none	A→B	certain	이구지 ~ 허계
+wd:Q496216	wd:Q68477415	none	A→B	certain	이구지 ~ 이씨
+wd:Q496866	ex:event:기강 전투	none	A→B	certain	곽재우 ~ 기강 전투
+wd:Q496866	ex:person:문화의 인물	none	A→B	certain	곽재우 ~ 문화의 인물
+wd:Q496866	ex:person:보덕각	none	A→B	certain	곽재우 ~ 보덕각
+wd:Q496866	ex:person:불멸의 이순신	none	A→B	certain	곽재우 ~ 불멸의 이순신
+wd:Q496866	ex:person:예연서원	none	A→B	certain	곽재우 ~ 예연서원
+wd:Q496866	ex:person:왕의 여자	none	A→B	certain	곽재우 ~ 왕의 여자
+wd:Q496866	ex:person:조선왕조 오백년 - 임진왜란	none	A→B	certain	곽재우 ~ 조선왕조 오백년 - 임진왜란
+wd:Q496866	ex:person:충익공망우곽재우유허비	none	A→B	certain	곽재우 ~ 충익공망우곽재우유허비
+wd:Q496866	ex:person:충현사	none	A→B	certain	곽재우 ~ 충현사
+wd:Q497092	ex:person:김종흥	none	A→B	certain	송준길 ~ 김종흥
+wd:Q497092	ex:person:윤계순	none	A→B	certain	송준길 ~ 윤계순
+wd:Q497101	ex:person:김대충	none	A→B	certain	김자점 ~ 김대충
+wd:Q497101	ex:person:김성동	none	A→B	certain	김자점 ~ 김성동
+wd:Q497101	ex:person:김세룡	none	A→B	certain	김자점 ~ 김세룡
+wd:Q497101	ex:person:김억령	none	A→B	certain	김자점 ~ 김억령
+wd:Q497101	ex:person:김옥함	child_of	A→B	certain	김자점 ~ 김옥함 · 경기도 이천군 백족산에 있던 그의 아버지 김옥함의 묘소와 선산 분묘도 모두 파헤쳐져서 부관참시되었다.
+wd:Q497101	ex:person:이여순	none	A→B	certain	김자점 ~ 이여순
+wd:Q497101	ex:person:조인필	none	A→B	certain	김자점 ~ 조인필
+wd:Q497153	ex:person:이봉녕	none	A→B	certain	이광식 ~ 이봉녕
+wd:Q497153	ex:person:이전	child_of	B→A	certain	이광식 ~ 이전 · 엄격했던 그는 나이 40을 바라보는 셋째 아들 이전이 승지가 되었을 때에도 잘못을 하면 허물을 물어 종아리를
+wd:Q497338	ex:person:김효우	none	A→B	certain	박진 ~ 김효우
+wd:Q497338	ex:person:누승선	none	A→B	certain	박진 ~ 누승선
+wd:Q497338	ex:person:이각	none	A→B	certain	박진 ~ 이각
+wd:Q497338	ex:person:홍의로	none	A→B	certain	박진 ~ 홍의로
+wd:Q5520922	ex:org:강문회	none	A→B	certain	강일순 ~ 강문회
+wd:Q5520922	ex:person:고덕삼	none	A→B	certain	강일순 ~ 고덕삼
+wd:Q623391	ex:org:민씨 일파	none	A→B	certain	강화도 조약 ~ 민씨 일파
+wd:Q624197	ex:person:이우량	child_of	B→A	certain	안평대군 ~ 이우량 · 1453년 1월 28일(1452년 음력 12월 19일) 아들 이우량이 병사하였고 1453년 5월 31일(음력
+wd:Q624491	ex:org:남조선인민대표자대회	none	A→B	certain	홍명희 ~ 남조선인민대표자대회
+wd:Q624491	ex:org:임정개선환영대회	none	A→B	certain	홍명희 ~ 임정개선환영대회
+wd:Q624521	ex:event:강치	none	A→B	certain	안용복 ~ 강치
+wd:Q624521	ex:event:동해 구름밖에 한 조각 외로운 섬	none	A→B	certain	안용복 ~ 동해 구름밖에 한 조각 외로운 섬
+wd:Q624521	ex:event:부산 수영사적공원	none	A→B	certain	안용복 ~ 부산 수영사적공원
+wd:Q624521	ex:event:안용복 장군 충혼비	none	A→B	certain	안용복 ~ 안용복 장군 충혼비
+wd:Q624521	ex:event:안용복의 충혼탑	none	A→B	certain	안용복 ~ 안용복의 충혼탑
+wd:Q624521	ex:event:적굴	none	A→B	certain	안용복 ~ 적굴
+wd:Q624521	ex:org:안용복기념사업회	none	A→B	certain	안용복 ~ 안용복기념사업회
+wd:Q624521	ex:org:안용복장군 기념사업회	none	A→B	certain	안용복 ~ 안용복장군 기념사업회
+wd:Q624521	ex:person:오충추	none	A→B	certain	안용복 ~ 오충추
+wd:Q624754	ex:org:국민의용대 조선총사령부	member_of	A→B	certain	장덕수 ~ 국민의용대 조선총사령부 · 1941년 일제 침략전쟁의 협력단체인 조선임전보국단의 발기인과 이사로 활동하였으며, 1945년 7월 해방 직
+wd:Q624754	ex:org:내지순례단	member_of	A→B	certain	장덕수 ~ 내지순례단 · 1940년 5월 시국대응전선사상보국연맹 '내지순례단'의 일원으로 일본 각지의 '성지' 순례 및 총후 각오를 
+wd:Q624754	ex:org:만찬회	none	A→B	certain	장덕수 ~ 만찬회
+wd:Q624754	ex:org:임전대책협의회	none	A→B	certain	장덕수 ~ 임전대책협의회
+wd:Q624754	ex:org:제2차 시국순회 강연회	none	A→B	certain	장덕수 ~ 제2차 시국순회 강연회
+wd:Q624754	ex:org:학병제도 실시 사기앙양대회	none	A→B	certain	장덕수 ~ 학병제도 실시 사기앙양대회
+wd:Q624976	ex:artwork:개국	depicts	B→A	certain	이지란 ~ 개국 · 《개국》(KBS 1983년~1983년, 배우:강민호)
+wd:Q624976	ex:artwork:대풍수	depicts	B→A	certain	이지란 ~ 대풍수 · 《대풍수》(SBS, 2012년~2013년, 배우:김구택)
+wd:Q624976	ex:artwork:용의 눈물	depicts	B→A	certain	이지란 ~ 용의 눈물 · 《용의 눈물》(KBS, 1996년~1998년, 배우:강인덕)
+wd:Q624976	ex:artwork:육룡이 나르샤	depicts	B→A	certain	이지란 ~ 육룡이 나르샤 · 《육룡이 나르샤》(SBS, 2015년~2015년, 배우:박해수)
+wd:Q624976	ex:artwork:이지란신도비	depicts	B→A	certain	이지란 ~ 이지란신도비 · 영조 50년(1774년)에 세워진 《이지란신도비》에는, 이지란이 이성계와 의형제를 맺게 된 내막에 대해서 이
+wd:Q624976	ex:artwork:장수군도	depicts	B→A	certain	이지란 ~ 장수군도 · 이성계, 심덕부, 이지란이 위화도 회군 직전 서로 의형제를 맺고 회군을 결의한 기록화인 장수군도가 새로 발견
+wd:Q624976	ex:artwork:추동궁 마마	depicts	B→A	certain	이지란 ~ 추동궁 마마 · 《추동궁 마마》(MBC-조선왕조오백년, 1983년~1983년, 배우:국정환)
+wd:Q624976	ex:person:강씨	none	A→B	certain	이지란 ~ 강씨
+wd:Q624976	ex:person:강인덕	none	A→B	certain	이지란 ~ 강인덕
+wd:Q624976	ex:person:김구택	none	A→B	certain	이지란 ~ 김구택
+wd:Q624976	ex:person:박해수	none	A→B	certain	이지란 ~ 박해수
+wd:Q624976	ex:person:악비	none	A→B	certain	이지란 ~ 악비
+wd:Q624976	ex:person:여진족	none	A→B	certain	이지란 ~ 여진족
+wd:Q624976	ex:person:이응백	none	A→B	certain	이지란 ~ 이응백
+wd:Q624976	ex:person:이효강	child_of	B→A	certain	이지란 ~ 이효강 · 그 외 아들은 이효량(李孝良)·이효정(李孝貞)·이효온(李孝溫)·이효검(李孝儉)·이효양(李孝讓)·이효강(李孝綱
+wd:Q624976	ex:person:이효검	child_of	B→A	certain	이지란 ~ 이효검 · 그 외 아들은 이효량(李孝良)·이효정(李孝貞)·이효온(李孝溫)·이효검(李孝儉)·이효양(李孝讓)·이효강(李孝綱
+wd:Q624976	ex:person:이효량	child_of	B→A	certain	이지란 ~ 이효량 · 그 외 아들은 이효량(李孝良)·이효정(李孝貞)·이효온(李孝溫)·이효검(李孝儉)·이효양(李孝讓)·이효강(李孝綱
+wd:Q624976	ex:person:이효양	child_of	B→A	certain	이지란 ~ 이효양 · 그 외 아들은 이효량(李孝良)·이효정(李孝貞)·이효온(李孝溫)·이효검(李孝儉)·이효양(李孝讓)·이효강(李孝綱
+wd:Q624976	ex:person:이효온	child_of	B→A	certain	이지란 ~ 이효온 · 그 외 아들은 이효량(李孝良)·이효정(李孝貞)·이효온(李孝溫)·이효검(李孝儉)·이효양(李孝讓)·이효강(李孝綱
+wd:Q624976	ex:person:청해 이씨	none	A→B	certain	이지란 ~ 청해 이씨
+wd:Q625258	ex:org:만민공동회	none	A→B	certain	홍종우 ~ 만민공동회
+wd:Q625537	ex:person:오오쿠라	none	A→B	certain	송병준 ~ 오오쿠라
+wd:Q625567	ex:event:고창 전투	none	A→B	certain	신숭겸 ~ 고창 전투
+wd:Q625567	ex:event:도이장가	none	A→B	certain	신숭겸 ~ 도이장가
+wd:Q625567	ex:org:순절단	none	A→B	certain	신숭겸 ~ 순절단
+wd:Q625567	ex:period:예종 15년	none	A→B	certain	신숭겸 ~ 예종 15년
+wd:Q625567	ex:place:광해주 비방동	none	A→B	certain	신숭겸 ~ 광해주 비방동
+wd:Q625567	ex:place:대구지방	none	A→B	certain	신숭겸 ~ 대구지방
+wd:Q625567	ex:place:덕양서원	none	A→B	certain	신숭겸 ~ 덕양서원
+wd:Q625567	ex:place:도포서원	none	A→B	certain	신숭겸 ~ 도포서원
+wd:Q625567	ex:place:독좌암	none	A→B	certain	신숭겸 ~ 독좌암
+wd:Q625567	ex:place:동양서원	none	A→B	certain	신숭겸 ~ 동양서원
+wd:Q625567	ex:place:백안	none	A→B	certain	신숭겸 ~ 백안
+wd:Q625567	ex:place:살내	none	A→B	certain	신숭겸 ~ 살내
+wd:Q625567	ex:place:안심	none	A→B	certain	신숭겸 ~ 안심
+wd:Q625567	ex:place:왕산	none	A→B	certain	신숭겸 ~ 왕산
+wd:Q625567	ex:place:용산재	none	A→B	certain	신숭겸 ~ 용산재
+wd:Q625567	ex:place:지묘사	none	A→B	certain	신숭겸 ~ 지묘사
+wd:Q625567	ex:place:춘천시 비방동	none	A→B	certain	신숭겸 ~ 춘천시 비방동
+wd:Q625567	ex:place:태백산성사	none	A→B	certain	신숭겸 ~ 태백산성사
+wd:Q625567	ex:place:파군재	none	A→B	certain	신숭겸 ~ 파군재
+wd:Q625567	ex:place:표충사	none	A→B	certain	신숭겸 ~ 표충사
+wd:Q625567	wd:Q12597425	none	A→B	certain	신숭겸 ~ 반야월
+wd:Q625567	wd:Q334312	none	A→B	certain	신숭겸 ~ 고려 태조
+wd:Q625567	wd:Q85974733	none	A→B	certain	신숭겸 ~ 김낙
+wd:Q6408890	ex:person:김억령	none	A→B	certain	김질 ~ 김억령
+wd:Q6408890	ex:person:김종준	none	A→B	certain	김질 ~ 김종준
+wd:Q6515066	ex:person:이시합	none	A→B	certain	이시애 ~ 이시합
+wd:Q6648114	ex:person:김수말	none	A→B	certain	제안대군 ~ 김수말
+wd:Q6681013	ex:person:김정국	none	A→B	certain	김굉필 ~ 김정국
+wd:Q6749099	ex:person:금봉	taught	A→B	certain	만공 ~ 금봉 · 만공스님의 문하에서는 보월(寶月), 전강(田岡), 용음(龍吟), 고봉(古峰), 포산당 혜천(惠天) 금봉, 혜
+wd:Q6749099	ex:person:금오	taught	A→B	certain	만공 ~ 금오 · 1924년 12월 보월선사가 죽자 보월선사의 스승인 만공선사(滿空禪師)가 1925년 2월 덕숭산 정혜사(定慧
+wd:Q6749099	ex:person:묘봉	none	A→B	certain	만공 ~ 묘봉
+wd:Q6749099	ex:person:보월	taught	A→B	certain	만공 ~ 보월 · 1924년 12월 보월선사가 죽자 보월선사의 스승인 만공선사(滿空禪師)가 1925년 2월 덕숭산 정혜사(定慧
+wd:Q6749099	ex:person:용음	taught	A→B	certain	만공 ~ 용음 · 만공스님의 문하에서는 보월(寶月), 전강(田岡), 용음(龍吟), 고봉(古峰), 포산당 혜천(惠天) 금봉, 혜
+wd:Q6749099	ex:person:일엽	taught	A→B	certain	만공 ~ 일엽 · 그는 실연 후 찾아온 일엽이 승려가 되지 않으리라고 내다봤으나 그가 승려가 되기를 굳게 결심하여 문하로 받아
+wd:Q6780848	ex:person:경평군	none	A→B	certain	흥안군 (조선 중기) ~ 경평군
+wd:Q6780848	ex:person:완순군	none	A→B	certain	흥안군 (조선 중기) ~ 완순군
+wd:Q6780848	ex:person:유장영	none	A→B	certain	흥안군 (조선 중기) ~ 유장영
+wd:Q6784406	ex:person:나량좌	none	A→B	certain	박세채 ~ 나량좌
+wd:Q6842476	ex:org:남조선인민대표자대회	none	A→B	certain	여운홍 ~ 남조선인민대표자대회
+wd:Q6853912	ex:person:민무휘	none	A→B	certain	원경왕후 ~ 민무휘
+wd:Q702964	wd:Q159	none	A→B	certain	가쓰라-태프트 밀약 ~ 러시아
+wd:Q702964	wd:Q27231	none	A→B	certain	가쓰라-태프트 밀약 ~ 동아시아
+wd:Q705155	wd:Q711051	participated_in	A→B	certain	김통정 ~ 삼별초 · 살아남은 삼별초 병사들은 김통정의 지휘 아래 혼란을 수습하고 제주도로 후퇴한다.
+wd:Q706103	ex:org:당파	none	A→B	certain	을사사화 ~ 당파
+wd:Q706103	ex:org:소윤	participated_in	B→A	certain	을사사화 ~ 소윤 · 을사사화(乙巳士禍)는 1545년(명종 즉위년) 조선 왕실의 외척인 대윤(大尹) 윤임과 소윤(小尹) 윤원형의 
+wd:Q706103	ex:person:이휘	none	A→B	certain	을사사화 ~ 이휘
+wd:Q709174	ex:event:소현세자 사건	none	A→B	certain	안방준 ~ 소현세자 사건
+wd:Q709174	ex:person:귀인신씨	none	A→B	certain	안방준 ~ 귀인신씨
+wd:Q709174	ex:person:박종정	taught	B→A	certain	안방준 ~ 박종정 · 일찍이 박광전(朴光前)·박종정(朴宗挺)의 문하에서 성리학을 수학하였다.
+wd:Q709174	ex:person:안민	none	A→B	certain	안방준 ~ 안민
+wd:Q709174	ex:person:안범	none	A→B	certain	안방준 ~ 안범
+wd:Q709174	ex:person:안중돈	child_of	A→B	certain	안방준 ~ 안중돈 · 안축에게는 중관(重寬)·중홍(重洪)·중돈(重敦)의 세 아들이 있었는데, 원래 안방준은 장남인 중관의 둘째 아
+wd:Q709174	ex:person:최영성	none	A→B	certain	안방준 ~ 최영성
+wd:Q712012	wd:Q6811500	none	A→B	certain	최충헌 ~ 최의
+wd:Q7738364	ex:event:조선왕조 오백년 - 파문	none	A→B	certain	상계군 ~ 조선왕조 오백년 - 파문
+wd:Q85974733	ex:event:도이장가	none	A→B	certain	김낙 ~ 도이장가
+wd:Q8683	ex:person:나치 독일	none	A→B	certain	냉전 ~ 나치 독일
+wd:Q8683	ex:person:서독	none	A→B	certain	냉전 ~ 서독
+wd:Q8683	ex:person:이탈리아 왕국	none	A→B	certain	냉전 ~ 이탈리아 왕국
+wd:Q8683	wd:Q12585	none	A→B	certain	냉전 ~ 라틴아메리카
+wd:Q8683	wd:Q148	none	A→B	certain	냉전 ~ 중화인민공화국
+wd:Q8683	wd:Q7184	none	A→B	certain	냉전 ~ 북대서양 조약 기구
+wd:Q942553	ex:person:마쓰우라 시게노부	none	A→B	certain	고니시 유키나가 ~ 마쓰우라 시게노부
+wd:Q989	ex:person:디미테르 찬체프	none	A→B	certain	교황 요한 바오로 2세 ~ 디미테르 찬체프
+wd:Q989	ex:person:마이클 레딘	none	A→B	certain	교황 요한 바오로 2세 ~ 마이클 레딘
+wd:Q989	ex:person:마이클 파렌티	none	A→B	certain	교황 요한 바오로 2세 ~ 마이클 파렌티
+wd:Q989	ex:person:무에진 아자	none	A→B	certain	교황 요한 바오로 2세 ~ 무에진 아자
+wd:Q989	ex:person:볼프강 아흐트너	none	A→B	certain	교황 요한 바오로 2세 ~ 볼프강 아흐트너
+wd:Q989	ex:person:세르게이 안토노프	none	A→B	certain	교황 요한 바오로 2세 ~ 세르게이 안토노프
+wd:Q989	ex:person:안토니오 마리니	none	A→B	certain	교황 요한 바오로 2세 ~ 안토니오 마리니
+wd:Q989	ex:person:압디 이페크치	none	A→B	certain	교황 요한 바오로 2세 ~ 압디 이페크치
+wd:Q989	ex:person:에드워드 S. 허먼	none	A→B	certain	교황 요한 바오로 2세 ~ 에드워드 S. 허먼
+wd:Q989	ex:person:장 루이 브루기에르	none	A→B	certain	교황 요한 바오로 2세 ~ 장 루이 브루기에르
+wd:Q989	ex:person:질로 바실레프	none	A→B	certain	교황 요한 바오로 2세 ~ 질로 바실레프
+wd:Q989	ex:person:카밀로 치빈	none	A→B	certain	교황 요한 바오로 2세 ~ 카밀로 치빈
+wd:Q989	ex:person:크리스티앙 루를레	none	A→B	certain	교황 요한 바오로 2세 ~ 크리스티앙 루를레
+wd:Q989	ex:person:클레어 스털링	none	A→B	certain	교황 요한 바오로 2세 ~ 클레어 스털링
+wd:Q989	ex:person:파올로 구잔티	none	A→B	certain	교황 요한 바오로 2세 ~ 파올로 구잔티
+wd:Q989	wd:Q11860	none	A→B	certain	교황 요한 바오로 2세 ~ 실비오 베를루스코니
+wd:Q989	wd:Q1231345	none	A→B	certain	교황 요한 바오로 2세 ~ 폴 카가메
+wd:Q989	wd:Q181938	none	A→B	certain	교황 요한 바오로 2세 ~ 메흐메트 알리 아카
+wd:Q989	wd:Q38484	none	A→B	certain	교황 요한 바오로 2세 ~ 로마노 프로디

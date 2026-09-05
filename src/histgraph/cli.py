@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "data" / "histgraph.sqlite"
 DEFAULT_CACHE = ROOT / "data" / "cache"
 DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
+DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
 DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 
 
@@ -1517,13 +1518,23 @@ def cmd_untangle(args: argparse.Namespace) -> int:
               + (" · ".join(f"{t} {n}" for t, n in sorted(by_new.items(), key=lambda kv: -kv[1])) or "없음"))
         print(f"  뜻 있는 엣지가 이미 있어 접{'을' if args.dry_run else '은'} 것 {rep.folded:,}건")
 
+        if args.export:
+            n = unt.export_candidates(store.conn, args.export, redo=args.redo)
+            print(f"  후보 {n:,}건을 {args.export} 에 뽑았습니다 — 판정을 {DEFAULT_UNTANGLE.name} 에 적고 --table 로 적용")
+            return 0
+        table_path = args.table if args.table else (DEFAULT_UNTANGLE if DEFAULT_UNTANGLE.exists() else None)
         backend = None
-        if not args.rules_only and not args.dry_run:
+        if table_path is not None and not args.dry_run:
+            table = unt.load_verdicts(table_path)
+            unt.run_table(store, table, rep, redo=args.redo)
+            print(f"  표 {len(table):,}줄")
+        elif not args.rules_only and not args.dry_run:
             from .backends import build_backend
             backend = build_backend(args.backend, args.model)
-        unt.run_model(store, backend, rep, limit=args.limit, redo=args.redo,
-                      dry_run=args.dry_run or args.rules_only)
-        if args.dry_run or args.rules_only:
+        if table_path is None:
+            unt.run_model(store, backend, rep, limit=args.limit, redo=args.redo,
+                          dry_run=args.dry_run or args.rules_only)
+        if args.dry_run or (args.rules_only and table_path is None):
             print(f"  모델에 물을 것 {rep.asked:,}건" + (" (묻지 않았다)" if rep.asked else ""))
         else:
             print(f"  모델 판정 {rep.asked:,}건 → 타입 {len(rep.typed):,} · none {rep.none:,}"
@@ -2381,6 +2392,9 @@ def main(argv: list[str] | None = None) -> int:
     p_un.add_argument("--redo", action="store_true", help="이미 판정한 것도 다시 묻는다")
     p_un.add_argument("--rules-only", action="store_true", help="모델 없이 규칙과 겹침만")
     p_un.add_argument("--dry-run", action="store_true", help="바꾸지 않고 센다")
+    p_un.add_argument("--export", type=Path, default=None, help="모델에 물을 후보를 이 표로 뽑기만 한다")
+    p_un.add_argument("--table", type=Path, default=None,
+                      help=f"직접 판정한 표 (기본: {DEFAULT_UNTANGLE} 이 있으면 모델 대신 그것)")
     p_un.set_defaults(func=cmd_untangle)
 
     p_cd = sub.add_parser("cardinality", help="출생지가 둘인 사람처럼 카디널리티를 넘는 노드를 센다 (보고만)")

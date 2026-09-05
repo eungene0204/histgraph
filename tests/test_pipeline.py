@@ -4633,5 +4633,39 @@ with tempfile.TemporaryDirectory() as _d:
     check("남는 것을 갈래별로 센다", rem.get("모델이 확신하지 못한 것") == 1, str(rem))
     store.close()
 
+# 표 경로 — 로컬 모델 대신 사람(또는 Claude)이 적은 판정 (data/untangle.tsv)
+with tempfile.TemporaryDirectory() as _d:
+    store = GraphStore(Path(_d) / "unt2.sqlite")
+    N = lambda i, t, l: Node(id=i, type=t, label=l, source="wd")
+    store.upsert_nodes([N("wd:T", "person", "이항로"), N("wd:S", "person", "최익현"),
+                        N("wd:X", "person", "김평묵"), N("wd:W", "artwork", "용의 눈물")])
+    store.upsert_edges([
+        Edge(src="wd:S", dst="wd:T", type="related_to", source="extract", props={"evidence": "그의 스승 이항로"}),
+        Edge(src="wd:S", dst="wd:X", type="related_to", source="extract", props={"evidence": "친구 김평묵"}),
+        Edge(src="wd:S", dst="wd:W", type="related_to", source="extract", props={"evidence": "배우: 아무개"}),
+    ])
+    tbl = Path(_d) / "untangle.tsv"
+    tbl.write_text("# 머리\nwd:S\twd:T\ttaught\tB→A\tcertain\t스승\nwd:S\twd:X\tnone\tA→B\tcertain\t친구\n"
+                   "wd:S\twd:W\tdepicts\tB→A\tcertain\t배역\n", encoding="utf-8")
+    table = _unt.load_verdicts(tbl)
+    check("표를 (src, dst) 로 읽는다", set(table) == {("wd:S", "wd:T"), ("wd:S", "wd:X"), ("wd:S", "wd:W")})
+    rep = _unt.Report()
+    _unt.run_table(store, table, rep)
+    e = lambda s_, d, t: store.conn.execute(
+        "SELECT 1 FROM edges WHERE src=? AND dst=? AND type=?", (s_, d, t)).fetchone() is not None
+    check("표의 스승 판정은 taught 이항로 → 최익현", e("wd:T", "wd:S", "taught") and not e("wd:S", "wd:T", "related_to"))
+    check("표의 none 은 related_to 로 남고 판정 표식이 붙는다", e("wd:S", "wd:X", "related_to")
+          and '"untangled": "none"' in store.conn.execute("SELECT props FROM edges WHERE dst='wd:X'").fetchone()[0])
+    check("작품 → 인물은 depicts 로 뒤집힌다", e("wd:W", "wd:S", "depicts"))
+    check("표에 있는 것만 묻고 모델 이름은 표로 적는다", rep.asked == 3 and _unt.TABLE_MODEL in
+          store.conn.execute("SELECT props FROM edges WHERE src='wd:T' AND type='taught'").fetchone()[0])
+    try:
+        (Path(_d) / "bad.tsv").write_text("wd:S\twd:T\tfriend_of\tA→B\tcertain\n", encoding="utf-8")
+        _unt.load_verdicts(Path(_d) / "bad.tsv")
+        check("모르는 타입은 표를 거부한다", False)
+    except ValueError:
+        check("모르는 타입은 표를 거부한다", True)
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
