@@ -174,7 +174,7 @@ let detailHtml = '';
        node, prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
      })).match(/d-title[^>]*>([^<]*)/)?.[1] ?? '') === '조선 세종');
   ok('부모와 자녀가 갈려 있다', detailHtml.includes('부모') && detailHtml.includes('자녀'));
-  ok('관계 수가 적힌다', /관계 4/.test(plain(detailHtml)));
+  ok('관계 수가 적힌다', /관계\s*(<[^>]*>)*4/.test(plain(detailHtml)));   // 수는 칩(.flair)에 든다
   ok('인과 카드에 종류와 어떻게가 적힌다',
      detailHtml.includes('rel-how') && plain(detailHtml).includes('집현전 설치') && plain(detailHtml).includes('집현전을 세워 학자를 길렀다'),
      detailHtml.match(/rel-how[\s\S]{0,160}/)?.[0]);
@@ -204,9 +204,20 @@ let detailHtml = '';
   ok('근거 구절이 따옴표 안에 들어간다', plain(detailHtml).includes('“세종이 훈민정음을 만들었다”'));
   ok('돌아가기 단추가 있다', detailHtml.includes('d-back'));
 
-  // 서버가 요약을 주므로 화면은 접지 않고 '전문 보기'도 없다 — 전문을
-  // 화면에 내지 않는다 (2026-09-05 애드센스 '주의 필요').
-  ok('전문 보기가 없다', !detailHtml.includes('전문 보기') && !detailHtml.includes('d-more'));
+  // 긴 설명은 접어 둔다 (다섯 줄). 여는 것은 **서버가 이미 보낸 요약**의
+  // 나머지지 전문이 아니다 — 전문은 화면에 내지 않는다 (2026-09-05
+  // 애드센스 '주의 필요').
+  ok('짧은 설명에는 전체 보기가 없다',
+     !detailHtml.includes('전체 보기') && !detailHtml.includes('d-desc-more'));
+  ok('짧은 설명은 접히지 않는다', detailHtml.includes('d-desc open'));
+  const longHtml = renderToString(h(DetailPanel, {
+    node: { ...node, description: '가'.repeat(400) },
+    prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
+  }));
+  ok('긴 설명에는 전체 보기가 붙는다', longHtml.includes('전체 보기'));
+  ok('긴 설명은 접힌 채로 그려진다',
+     longHtml.includes('class="d-desc"') && !longHtml.includes('d-desc open'),
+     longHtml.match(/d-desc[^>]*/)?.[0]);
   // 출처는 설명 아래 한 줄 — 이름은 문서로, 라이선스는 그 조문으로 이어진다.
   const originHtml = renderToString(h(DetailPanel, {
     node: { ...node, desc_origin: {
@@ -245,9 +256,9 @@ let detailHtml = '';
 // --- 색 견본 ------------------------------------------------------------
 {
   const html = renderToString(h(Glyph, { type: 'person', group: 'actor' }));
-  ok('타입 색이 그대로 나온다', html.includes('#4a6ad8'), html);
+  ok('타입 색이 그대로 나온다', html.includes('#3d84f5'), html);
   ok('모르는 타입은 갈래 색으로 물러난다',
-     renderToString(h(Glyph, { type: 'nope', group: 'event' })).includes('#ec7e3e'));
+     renderToString(h(Glyph, { type: 'nope', group: 'event' })).includes('#f29a50'));
 }
 
 // --- CSS 가 기대하는 것을 React 가 실제로 내는가 -------------------------

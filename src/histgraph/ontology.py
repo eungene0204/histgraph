@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -140,6 +141,12 @@ class OntologyError(ValueError):
     pass
 
 
+# 이름표에 남아서는 안 되는 자국. 위키 주석·틀·링크·각주가 조각난 채로
+# 별칭 칸에 들어오는 일이 있다. 꺾쇠는 국가유산 지정명(`金剛般若波羅蜜經
+# <卷二∼五>`)에도 쓰이므로 **주석 자국만** 잡는다.
+_MARKUP_LEFTOVER = re.compile(r"<!--|-->|\{\{|\}\}|\[\[|\]\]|<ref")
+
+
 @dataclass(slots=True)
 class Node:
     """정규화된 노드.
@@ -176,6 +183,12 @@ class Node:
         # 안 되기 때문이다.
         if self.description and not has_hangul(self.description):
             self.description = to_korean(self.description)
+        # **별칭에 마크업이 섞여 들어오는 것도 여기서 막는다.** 별칭은
+        # 화면에 이름표로 그대로 서므로 지우다 만 위키 문법이 남으면
+        # 곧바로 보인다 — 을사사화의 '다른 이름' 칸에 있던 편집자 쪽지
+        # (`<!-- 잘 알려진 명칭으로 …`)가 이름표 두 개로 섰다 (2026-09-05).
+        # 소스마다 따로 검사하면 언젠가 하나가 빠진다.
+        self.aliases = [a for a in self.aliases if not _MARKUP_LEFTOVER.search(a)]
         # **작품은 무슨 매체인지 모른 채 들어올 수 없다.** 설명과 달리 이건
         # 나중에 채울 수 있는 값이 아니다 — 비어 있으면 화면에서 영화와
         # 드라마와 게임이 한 덩어리가 되고, 그 상태를 알아볼 방법도 없다.

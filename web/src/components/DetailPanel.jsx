@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { nodeColor } from '../lib/graph-view.js';
 import {
-  groupRelations, cardsFor, sentence, whyEmpty, fmtDate,
+  groupRelations, cardsFor, sentence, whyEmpty, fmtDate, LONG_DESC,
 } from '../lib/relations.js';
 import { Glyph } from './Glyph.jsx';
 import { ChainPanel } from './ChainPanel.jsx';
@@ -11,19 +11,29 @@ import { ChainPanel } from './ChainPanel.jsx';
 //
 // 서버가 주는 설명은 **요약**이다 (첫 절 제목 앞의 도입부, 360자). 전문은
 // 화면에 내지 않는다 — 2026-09-05 전문을 뿌린 것이 애드센스 '주의 필요'
-// (스크랩)로 돌아왔다. 그래서 '전문 보기'도 없다.
+// (스크랩)로 돌아왔다. 여기 '전체 보기'가 여는 것은 **서버가 이미 보낸
+// 요약의 나머지**지 전문이 아니다 — 단추를 눌러도 새로 받아오지 않는다.
+//
+// 요약이라도 열세 줄이 되면 그 아래 관계 목록이 화면 밖으로 밀린다. 그래서
+// 다섯 줄만 두고 접는다 (2026-09-05 지적).
 //
 // 출처는 **설명 아래 한 줄**에만 적는다 (`desc_origin`, 서버가 판정). 남의
 // 글을 옮겨 왔으면 그렇다고 적는 것이 라이선스 의무라서 두는 §1 의 예외다.
 // 서버가 출처를 모르면 아무것도 안 적는다 — 틀린 출처는 없는 것보다 나쁘다.
 function Description({ d }) {
+  const [open, setOpen] = useState(false);
+
+  // 다른 노드로 옮겨가면 접힌 상태로 되돌린다
+  useEffect(() => { setOpen(false); }, [d.id]);
+
   if (!d.description) {
     return <p className="d-nodesc">설명 없음 — {whyEmpty(d)}</p>;
   }
   const o = d.desc_origin;
+  const long = d.description.length > LONG_DESC;
   return (
     <>
-      <div className="d-desc open">{d.description}</div>
+      <div className={`d-desc${long && !open ? '' : ' open'}`}>{d.description}</div>
       {/* 넘겨주기를 따라온 글은 이 노드를 설명하는 글이 아닐 수 있다
           ('판의금부사' → '의금부'). 읽는 사람이 알고 읽어야 한다. */}
       {d.desc_via && (
@@ -44,6 +54,14 @@ function Description({ d }) {
             </>
           )}
         </p>
+      )}
+      {/* 출처 한 줄은 설명 **바로 아래**여야 한다 (§1 의 예외) — 단추는
+          그 밑에 선다. */}
+      {long && (
+        <button className="d-more d-desc-more" aria-expanded={open}
+                onClick={() => setOpen((v) => !v)}>
+          {open ? '접기' : '전체 보기'}
+        </button>
       )}
     </>
   );
@@ -72,7 +90,12 @@ export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
 
   return (
     <aside className="detail" ref={boxRef}>
-      <button className="close" aria-label="닫기" onClick={onClose}>✕</button>
+      <button className="clickable-icon close" aria-label="닫기" onClick={onClose}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+             strokeLinecap="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+      </button>
       <div>
         {prev && (
           <button className="d-back" title={`${prev.label}(으)로 돌아가기`} onClick={onBack}>
@@ -115,7 +138,7 @@ export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
             걸음의 '왜'가 이 그래프가 답하려는 물음이다. */}
         <ChainPanel node={d} onVisit={onVisit} />
 
-        <div className="d-section-title">관계 {count}</div>
+        <div className="d-section-title">관계 <span className="flair">{count}</span></div>
         {groups.length === 0 ? (
           <p className="hint">연결된 관계가 없습니다.</p>
         ) : groups.map((g) => (

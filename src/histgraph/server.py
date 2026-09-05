@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import pages, summaries
+from .labels import screen_alias
 from .ontology import EDGE_TYPES, NODE_TYPES
 from .provenance import desc_origin
 from .store import GraphStore
@@ -433,12 +434,15 @@ class GraphAPI:
         # 또 하나의 이름은 제목 줄에 세운다. '다른 이름' 더미에 같이 두면
         # 표기 변형과 구별되지 않아 별명처럼 읽힌다 (`co_names` 참고).
         names = _names(row)
+        # 별칭 칸에는 로마자 표기와 마크업 조각이 섞여 들어온다 — 화면에
+        # 세울 수 있는 것만 고른다 (`labels.screen_alias`). 지우지 않는
+        # 이유는 검색이 별칭으로도 찾기 때문이다.
         aliases = [
             r["alias"]
             for r in self.store.conn.execute(
                 "SELECT alias FROM aliases WHERE node_id = ? ORDER BY alias", (node_id,)
             )
-            if r["alias"] not in names
+            if r["alias"] not in names and screen_alias(r["alias"])
         ]
         rows = self.store.conn.execute(
             """SELECT e.src, e.dst, e.type, e.source, e.confidence, e.props,

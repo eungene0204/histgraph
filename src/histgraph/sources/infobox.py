@@ -165,6 +165,19 @@ def _template_spans(wikitext: str) -> list[str]:
     return spans
 
 
+# 위키 주석(`<!-- … -->`)은 **값이 아니라 편집자에게 남긴 쪽지**다. 을사사화·
+# 헤이그 특사 사건의 `| 다른 이름 = <!-- 잘 알려진 명칭으로, 사건 이름과
+# 중복되면 쓰지 않음 -->` 이 별칭 두 개로 화면에 섰다 (2026-09-05 지적) —
+# 쉼표에서 갈리는 바람에 `<…>` 를 지우는 규칙이 짝을 잃었다. 조각난 뒤에
+# 지우려 하면 늦으니 **틀을 읽기 전에** 통째로 지운다.
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def strip_comments(wikitext: str) -> str:
+    """위키 주석을 지운다. 닫히지 않은 주석은 그 뒤가 통째로 쪽지다."""
+    return re.sub(r"<!--(?!.*?-->).*", "", _COMMENT.sub("", wikitext), flags=re.S)
+
+
 def infobox_span(wikitext: str, fields: dict | None = None) -> str:
     """대상 필드를 담고 있는 틀의 안쪽만 돌려준다.
 
@@ -184,7 +197,7 @@ def infobox_span(wikitext: str, fields: dict | None = None) -> str:
     `{{font color|…}}` 같은 중첩 틀이 있으므로 단순히 첫 `}}` 를 찾으면
     안 된다."""
     names = fields if fields is not None else EVENT_FIELDS
-    spans = _template_spans(wikitext)
+    spans = _template_spans(strip_comments(wikitext))
     if not spans:
         return ""
     for span in spans:
@@ -254,8 +267,12 @@ def infobox_aliases(value: str, label: str = "") -> list[str]:
         return []
     value = _PIPED_LINK.sub(r"\1", value)
     out: list[str] = []
-    for part in _ALIAS_SPLIT.split(value):
+    for part in _ALIAS_SPLIT.split(strip_comments(value)):
         name = _MARKUP.sub("", part).strip().strip("·,")
+        # 꺾쇠가 남아 있으면 이름이 아니라 지우다 만 마크업이다. 별칭은
+        # 화면에 그대로 서는 글자라 반쪽짜리를 들여보내면 안 된다.
+        if "<" in name or ">" in name:
+            continue
         # 한 글자는 본문 아무 데나 걸리고, 너무 길면 이름이 아니라 설명이다
         if 2 <= len(name) <= 40 and name != label and name not in out:
             out.append(name)
