@@ -465,8 +465,13 @@ def backwards(store: GraphStore, cause: str, effect: str, effect_type: str) -> b
     cause_year = c_start if c_start is not None else c_end
     if effect_type == "event":
         effect_year = e_start if e_start is not None else e_end
+    elif e_end is None:
+        # 아직 존속하는(또는 끝을 모르는) 나라·단체·개념은 언제든 영향을
+        # 받을 수 있다 — 시작 연도로 재면 '5·16 → 재향군인회(1952~) 해산'
+        # 같은 참인 인과가 역행으로 버려진다.
+        return False
     else:
-        effect_year = e_end if e_end is not None else e_start
+        effect_year = e_end
     if cause_year is None or effect_year is None:
         return False
     return cause_year > effect_year + 1
@@ -603,6 +608,48 @@ def keep_answers(store: GraphStore, doc: dict, answers: list[dict], model: str) 
         (doc["id"], model, json.dumps(answers, ensure_ascii=False),
          datetime.now(timezone.utc).isoformat(timespec="seconds")),
     )
+
+
+def ingest_answers(store: GraphStore, corpus, items: list[dict], model: str) -> dict[str, Any]:
+    """사람(또는 Claude)이 문서를 읽고 적은 답을 모델 답과 **같은 관문**으로
+    넣는다 — 근거가 원문에 있어야 하고, 양끝은 있는 노드로 풀려야 하고,
+    연대는 순방향이어야 하고, 상하위와 겹치지 않아야 한다.
+
+    `items` 는 `{"doc": 노드 id, "relations": [OUTPUT_SCHEMA 의 항목…]}` 의
+    목록. 답은 `causes_answers` 에 남고 문서에는 `causes_model` 표식이 붙는다
+    (2026-09-05 사용자: "우리 llm 을 쓰지 말고 네가 직접 해석해서 만들어줘")."""
+    counts: dict[str, int] = {"문서": 0, "엣지": 0}
+    dropped: dict[str, int] = {}
+    unresolved: dict[str, int] = {}
+    samples: list[str] = []
+    for item in items:
+        row = store.conn.execute(
+            "SELECT id, label, type, start_date, end_date, props FROM nodes WHERE id = ?", (item["doc"],)
+        ).fetchone()
+        if row is None:
+            dropped["문서 없음"] = dropped.get("문서 없음", 0) + 1
+            continue
+        doc = dict(row, props=json.loads(row["props"] or "{}"))
+        passages = doc_passages(corpus, doc["id"])
+        if not passages:
+            dropped["글 없음"] = dropped.get("글 없음", 0) + 1
+            continue
+        answers = list(item.get("relations") or [])
+        edges, why, missing = accept(store, doc, answers, passages, model)
+        n = write(store, edges)
+        mark(store, doc, model)
+        keep_answers(store, doc, answers, model)
+        store.conn.commit()
+        counts["문서"] += 1
+        counts["엣지"] += n
+        for k, v in why.items():
+            dropped[k] = dropped.get(k, 0) + v
+        for name in missing:
+            unresolved[name] = unresolved.get(name, 0) + 1
+        if why or missing:
+            samples.append(f"{doc['label']}: 답 {len(answers)} · 엣지 {n} · 버림 {why}"
+                           + (f" · 못 푼 이름 {missing}" if missing else ""))
+    return {"counts": counts, "dropped": dropped, "unresolved": unresolved, "samples": samples}
 
 
 def reresolve(store: GraphStore, corpus, scope: set[str] | None = None) -> dict[str, Any]:

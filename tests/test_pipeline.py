@@ -3982,6 +3982,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("별칭으로 푼 원인과 단체 결과가 엣지가 된다", ("wd:IMJIN", "wd:MING", "영향") in got, str(got))
     check("단체가 원인인 인과도 적는다", ("wd:JIN", "wd:BJ", "배경") in got, str(got))
     check("연대가 역행하면 버린다", why.get("연대 역행") == 1 and ("wd:GABO", "wd:BJ", "원인") not in got, str(why))
+    store.upsert_nodes([Node(id="wd:ONGOING", type="org", label="재향군인회", source="wd", start_date="1952")])
+    check("끝을 모르는 단체가 결과면 연대로 막지 않는다 (시작 연도로 재면 참인 인과가 사라진다)",
+          not causes_mod.backwards(store, "wd:GABO", "wd:ONGOING", "org"))
+    check("끝난 단체가 결과면 그 끝보다 늦은 원인은 역행이다", causes_mod.backwards(store, "wd:GABO", "wd:JIN", "org"))
+    store.conn.execute("DELETE FROM nodes WHERE id = 'wd:ONGOING'")
     check("못 푼 이름은 노드를 만들지 않고 모아 둔다", missing == ["여진족의 성장", "조선의 저항"] and why.get("이름 못 풂") == 2, str(missing))
     jm = next(e for e in edges if e.src == "wd:JM")
     check("서술구는 주어로 풀고 원래 구를 남긴다", jm.props["cause_as"] == "정묘호란 뒤의 형제 관계 요구" and "effect_as" not in jm.props, str(jm.props))
