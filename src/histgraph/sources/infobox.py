@@ -109,10 +109,10 @@ PERSON_FIELDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "자녀": ("child_of", ("person",), IN),
     "출생지": ("born_in", ("place",), OUT),
     "사망지": ("died_in", ("place",), OUT),
-    # 사제 관계는 온톨로지에 전용 타입이 없다. 한국사에서 학맥은 당파와
-    # 직결되므로(성혼 문인 -> 서인) 버리지 않고 related_to 로 남긴다.
-    "스승": ("related_to", ("person",), OUT),
-    "제자": ("related_to", ("person",), IN),
+    # 사제 (`taught`, 스승 → 제자). '스승' 칸의 값이 스승이므로 값 → 문서
+    # 주인공(IN), '제자' 칸은 주인공 → 값(OUT).
+    "스승": ("taught", ("person",), IN),
+    "제자": ("taught", ("person",), OUT),
 }
 
 FIELDS_BY_TYPE: dict[str, dict[str, tuple[str, tuple[str, ...], str]]] = {

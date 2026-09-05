@@ -73,6 +73,12 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     "about": ("주제", ("media", "artwork"), ("concept",)),
     "child_of": ("자녀", ("person",), ("person",)),
     "spouse_of": ("배우자", ("person",), ("person",)),
+    # 사제. 방향은 스승 → 제자. 한국사에서 학맥은 당파와 직결된다(성혼 문인
+    # → 서인)는 이유로 인포박스의 '스승'·'제자'를 버리지 않고 related_to 로
+    # 남겨 뒀는데, 그 뜻이 라벨에도 없어 화면은 '관련 있다'밖에 못 했다.
+    # 추출이 related_to 로 낸 인물끼리의 관계 761건 중 학맥이 가장 큰 갈래다
+    # (`untangle`, 2026-09-05).
+    "taught": ("사제", ("person",), ("person",)),
     "member_of": ("소속", ("person",), ("org",)),
     "held_position": ("직위", ("person",), ("role", "org")),
     # 한국사에서 시대 구분은 왕조와 같다 — '조선시대'는 '조선'이라는 정체가

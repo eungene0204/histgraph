@@ -6,6 +6,8 @@
 // 상대가 자녀다. 방향별 이름이 있는 타입만 바꿔 부른다.
 export const DIR_HEAD = {
   child_of: { out: '부모', in: '자녀' },
+  // 사제는 스승 → 제자다. 나가는 상대는 제자, 들어오는 상대가 스승이다.
+  taught: { out: '제자', in: '스승' },
   part_of: { out: '상위', in: '하위' },
   // 인과는 언제나 원인 → 결과다. 나가는 상대는 이 노드가 부른 결과,
   // 들어오는 상대는 이 노드를 부른 원인이다.
@@ -78,6 +80,7 @@ export const SENTENCE = {
   located_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 있다`,
   depicts: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 다룬다`,
   spouse_of: (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 부부다`,
+  taught: (a, b) => `${a}${pt(a, '이', '가')} ${b}${pt(b, '을', '를')} 가르쳤다`,
   member_of: (a, b) => `${a}${pt(a, '은', '는')} ${b} 소속이다`,
   held_position: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지냈다`,
   part_of: (a, b) => `${a}${pt(a, '은', '는')} ${b}의 일부다`,
@@ -217,6 +220,11 @@ export function whyEmpty(d) {
   if (d.no_kowiki) return '한국어 위키백과에 문서가 없습니다.';
   return '아직 서사를 받아오지 않았습니다.';
 }
+
+// 접힌 높이(다섯 줄)를 넘길 만큼 길 때만 '전체 보기'를 낸다. 세 줄짜리
+// 글에 단추가 붙어 있으면 눌러도 아무 일이 없다. 한 줄에 스물여덟 자쯤
+// 들어가므로 다섯 줄이 140자다.
+export const LONG_DESC = 140;
 
 export function fmtDate(v) {
   if (!v) return '';

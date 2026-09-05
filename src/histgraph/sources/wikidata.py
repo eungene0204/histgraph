@@ -456,7 +456,11 @@ def _resolve_targets(
         allowed_dst = EDGE_TYPES[e.type][2]
         if actual_type.get(e.dst, "") not in allowed_dst:
             e.props["original_type"] = e.type
-            e.type = "related_to"
+            # 뜻이 살아 있는 완화가 있으면 그쪽으로 (`untangle.RELAX` — 같은 표).
+            # 출생지가 '조선'(단체)이면 조선 사람이라는 말이고, 3·1 운동의
+            # 구성원이면 참여자다. related_to 는 아무 질문에도 답하지 못한다.
+            relaxed = relax_type(e.type, actual_type.get(e.dst, ""))
+            e.type = relaxed or "related_to"
             downgraded += 1
     if downgraded:
         log.info("스키마 불일치 엣지 %d개를 related_to 로 완화", downgraded)
@@ -1146,6 +1150,16 @@ def fetch_aliases(
     if failures:
         log.warning("별칭 조회 실패 %d구간", len(failures))
     return out
+
+
+def relax_type(edge_type: str, dst_type: str) -> str | None:
+    """스키마에 안 맞는 엣지를 뜻이 남는 타입으로. 없으면 None (related_to)."""
+    from ..untangle import RELAX
+
+    new = RELAX.get((edge_type, dst_type))
+    if new and dst_type in EDGE_TYPES[new][2]:
+        return new
+    return None
 
 
 def fetch_place_ancestors(

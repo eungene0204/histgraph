@@ -1473,6 +1473,60 @@ def cmd_reigns(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_untangle(args: argparse.Namespace) -> int:
+    """`related_to` 를 뜻 있는 타입으로 갈라 낸다 (`untangle` 모듈 머리글).
+
+    규칙(완화·인포박스 사제) → 겹침 접기 → 모델 판정(근거 있는 추출 엣지)
+    순서다. 모델은 MLX 가 기본이고 35GB 를 잡는다 — `extract`·`paraphrase`
+    와 함께 띄우지 말 것. `--rules-only` 면 모델 없이 앞 둘만 한다.
+
+        uv run histgraph untangle --dry-run
+        uv run histgraph untangle --rules-only
+        uv run histgraph --db data/korea.sqlite untangle --limit 50
+    """
+    from . import untangle as unt
+
+    with GraphStore(args.db) as store:
+        before = store.conn.execute("SELECT COUNT(*) FROM edges WHERE type = 'related_to'").fetchone()[0]
+        rep = unt.Report()
+        unt.apply_rules(store, rep, dry_run=args.dry_run)
+        unt.fold_redundant(store, rep, dry_run=args.dry_run)
+        head = "바꿀" if args.dry_run else "바꿈"
+        by_new: dict[str, int] = {}
+        for *_, new in rep.relaxed:
+            by_new[new] = by_new.get(new, 0) + 1
+        print(f"  related_to {before:,}건")
+        print(f"  규칙으로 {head} {len(rep.relaxed):,}건: "
+              + (" · ".join(f"{t} {n}" for t, n in sorted(by_new.items(), key=lambda kv: -kv[1])) or "없음"))
+        print(f"  뜻 있는 엣지가 이미 있어 접{'을' if args.dry_run else '은'} 것 {rep.folded:,}건")
+
+        backend = None
+        if not args.rules_only and not args.dry_run:
+            from .backends import build_backend
+            backend = build_backend(args.backend, args.model)
+        unt.run_model(store, backend, rep, limit=args.limit, redo=args.redo,
+                      dry_run=args.dry_run or args.rules_only)
+        if args.dry_run or args.rules_only:
+            print(f"  모델에 물을 것 {rep.asked:,}건" + (" (묻지 않았다)" if rep.asked else ""))
+        else:
+            print(f"  모델 판정 {rep.asked:,}건 → 타입 {len(rep.typed):,} · none {rep.none:,}"
+                  f" · 확신 부족 {rep.weak:,}")
+            by_t: dict[str, int] = {}
+            for *_, t in rep.typed:
+                by_t[t] = by_t.get(t, 0) + 1
+            if by_t:
+                print("    " + " · ".join(f"{t} {n}" for t, n in sorted(by_t.items(), key=lambda kv: -kv[1])))
+        if rep.over_cardinality:
+            print(f"  카디널리티를 넘어 적지 않은 것 {len(rep.over_cardinality):,}건 (예: "
+                  + ", ".join(f"{s}→{d} {t}" for s, d, t in rep.over_cardinality[:3]) + ")")
+        if not args.dry_run:
+            after = store.conn.execute("SELECT COUNT(*) FROM edges WHERE type = 'related_to'").fetchone()[0]
+            print(f"\n  남은 related_to {after:,}건 (전 {before:,}):")
+            for key, n in unt.remaining(store.conn).items():
+                print(f"    {n:>6,}  {key}")
+    return 0
+
+
 def cmd_cardinality(args: argparse.Namespace) -> int:
     """카디널리티를 넘는 노드 — 출생지가 둘인 사람, 부모가 셋인 사람
     (`cardinality` 모듈 머리글). 지우지 않고 보여 준다: 충돌은 동명이인
@@ -2298,6 +2352,15 @@ def main(argv: list[str] | None = None) -> int:
     p_pr.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_pr.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_pr.set_defaults(func=cmd_precision)
+
+    p_un = sub.add_parser("untangle", help="related_to 를 뜻 있는 타입으로 갈라 낸다 (규칙 → 겹침 → 모델)")
+    p_un.add_argument("--backend", choices=["anthropic", "mlx", "ollama"], default="mlx")
+    p_un.add_argument("--model", default=None)
+    p_un.add_argument("--limit", type=int, default=None, help="모델에 물을 최대 건수")
+    p_un.add_argument("--redo", action="store_true", help="이미 판정한 것도 다시 묻는다")
+    p_un.add_argument("--rules-only", action="store_true", help="모델 없이 규칙과 겹침만")
+    p_un.add_argument("--dry-run", action="store_true", help="바꾸지 않고 센다")
+    p_un.set_defaults(func=cmd_untangle)
 
     p_cd = sub.add_parser("cardinality", help="출생지가 둘인 사람처럼 카디널리티를 넘는 노드를 센다 (보고만)")
     p_cd.add_argument("--type", default=None, help="엣지 타입 (쉼표). 기본은 MAX_TARGETS 전부")

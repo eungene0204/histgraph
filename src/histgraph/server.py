@@ -123,7 +123,7 @@ MAX_SPAN = {"person": 110, "event": 60}
 # 관계를 볼 때 사람이 먼저 궁금해하는 순서. 상세 패널의 정렬 기준이다.
 RELATION_ORDER = [
     "caused", "participated_in", "held_position", "member_of", "created",
-    "child_of", "spouse_of", "born_in", "died_in",
+    "child_of", "spouse_of", "taught", "born_in", "died_in",
     "occurred_at", "located_in", "depicts", "part_of",
     "from_period", "occurred_during", "dated_to", "related_to",
 ]

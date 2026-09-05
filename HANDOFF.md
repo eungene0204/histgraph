@@ -11,7 +11,7 @@
 화면 그래프   노드 9,973 · 엣지 24,998 · 별칭 3,972 (data/korea.sqlite ← 화면이 읽는 것)
 추출 고아     ex: 노드 2,251 (인물 1,207 · 사건 462 · 직위 253 · 장소 162 · 그 외 167)
 화면          uv run histgraph serve  →  http://127.0.0.1:8100 (이 프로젝트 전용 포트)
-테스트        897/897 통과   uv run tests/test_pipeline.py · 화면 48/48 (cd web && npm test)
+테스트        946/946 통과   uv run tests/test_pipeline.py · 화면 48/48 (cd web && npm test)
 환경          uv (Python 3.11) — `uv sync --extra mlx` 로 잡는다
 ```
 
@@ -41,6 +41,13 @@
 분석해봐" → "우리가 팔란티어 설계에서 배울게 있나?" → "1,2,3번 순서대로
 진행 하자". 배울 것 셋 — (1) 고친 값은 원천 위에 겹쳐 두고 읽을 때 합친다,
 (2) 엣지 타입에 카디널리티를 선언한다, (3) `related_to` 를 갈라 낸다.
+
+**(3) 규칙·겹침 끝, 모델 단계 대기.** 새 타입 `taught`(사제, 스승 → 제자),
+`histgraph untangle` (`src/histgraph/untangle.py`). 파생본 `related_to`
+1,417 → 1,096 (규칙 127 · 겹침 194). **다음 세션이 할 일**: MLX 가 비면
+`uv run histgraph --db data/korea.sqlite untangle` 과 원본에 한 번 — 895건을
+묻는다 (인물끼리 761). `paraphrase` 와 함께 띄우지 말 것. README
+"`related_to` 갈라 내기" 절.
 
 **(2) 끝.** `ontology.MAX_TARGETS` (출생지 1 · 사망지 1 · 발생 시기 1 · 부모 2),
 `_persist` 의 쓰기 전 경고, `histgraph cardinality [--fetch-places] [--list]`
@@ -76,6 +83,14 @@ design.md 파일을 만들어서 디자인 내용을 기록해줘."
 
 테스트 `npm test` 48/48 (관계 수 검사는 칩 `.flair` 를 건너뛰게 고침),
 `test_pipeline.py` 897/897. 아직 커밋 안 함.
+
+같은 날 두 번째 요청: "obsidian-better-graph-view 를 참고해서 다시 반영".
+그 플러그인은 테마가 아니라 Obsidian 그래프 내부를 후킹해 **관계 종류로
+선을 거르는** 것이 핵심이다. 옮긴 것 — 설정 상자를 Obsidian 자리(왼쪽 위)로,
+절을 Obsidian 그래프 설정과 같은 필터·범례·표시·힘으로. 필터에 관계 종류
+체크 목록(`setEdgeFilter`), 표시에 화살촉·이름표 흐림 문턱·노드 크기·선 굵기
+슬라이더(`setDisplay`, `labelAlpha`), 힘에 중심·반발·링크 거리 배율
+(`layout.js` `forces`, 계수는 그대로고 곱만 한다). design.md §4·§5.
 
 ## 2026-09-05 — 연표는 조선 건국에서 시작한다
 

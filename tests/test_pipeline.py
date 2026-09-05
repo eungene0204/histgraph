@@ -4463,5 +4463,95 @@ _rows = [{"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value"
          {"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q1"}}]
 check("상위 행정구역 응답을 QID 집합으로 읽고 자기 자신은 뺀다", _afr(_rows) == {"Q1": {"Q2", "Q3"}}, str(_afr(_rows)))
 
+
+print("\n[related_to 갈라 내기 — 뜻 없는 선을 뜻 있는 타입으로]")
+from histgraph import untangle as _unt
+from histgraph.sources.wikidata import relax_type as _relax
+check("출생지가 단체(조선)면 from_period 로 완화한다", _relax("born_in", "org") == "from_period")
+check("단체의 구성원이 사건이면 참여로 완화한다", _relax("member_of", "event") == "participated_in")
+check("갈 데 없는 불일치는 None (related_to)", _relax("held_position", "person") is None)
+_ch = _unt.choices_for("person", "person")
+check("인물끼리는 자녀·배우자·사제만 고를 수 있다",
+      {t for t, _, _ in _ch} == {"child_of", "spouse_of", "taught"}, str(_ch))
+check("비대칭 관계는 양방향, 부부는 한 방향", sum(1 for t, _, _ in _ch if t == "taught") == 2
+      and sum(1 for t, _, _ in _ch if t == "spouse_of") == 1)
+check("인물→장소는 출생지·사망지", {t for t, _, _ in _unt.choices_for("person", "place")} == {"born_in", "died_in"})
+check("인과는 선택지에 없다 (별도 계약)", "caused" not in _unt.CHOICES)
+
+with tempfile.TemporaryDirectory() as _d:
+    store = GraphStore(Path(_d) / "unt.sqlite")
+    N = lambda i, t, l: Node(id=i, type=t, label=l, source="wd")
+    store.upsert_nodes([
+        N("wd:S", "person", "성혼"), N("wd:J", "person", "조헌"), N("wd:K", "person", "김집"),
+        N("wd:Y", "person", "이이"), N("wd:JO", "org", "조선"), N("wd:E", "event", "3·1 운동"),
+        N("wd:P", "person", "손병희"), N("wd:A", "person", "정약용"), N("wd:B", "person", "정약전"),
+        N("wd:PL", "place", "강진군"),
+    ])
+    store.upsert_edges([
+        # 인포박스 스승: 예전 매핑 OUT (주인공 조헌 → 스승 성혼)
+        Edge(src="wd:J", dst="wd:S", type="related_to", source="kowiki:infobox", props={"infobox_field": "스승"}),
+        # Wikidata 완화: 출생지 '조선'
+        Edge(src="wd:Y", dst="wd:JO", type="related_to", source="wd", label="출생지",
+             props={"original_type": "born_in", "wikidata_property": "P19"}),
+        Edge(src="wd:P", dst="wd:E", type="related_to", source="wd", label="소속",
+             props={"original_type": "member_of"}),
+        # 겹침: 정약전은 이미 정약용의 형(child_of 는 없지만 spouse 아님) — 뜻 있는 엣지가 있는 짝
+        Edge(src="wd:A", dst="wd:B", type="related_to", source="extract", props={"evidence": "형 정약전"}),
+        Edge(src="wd:B", dst="wd:A", type="taught", source="kowiki:infobox"),
+        # 모델에 물을 것
+        Edge(src="wd:K", dst="wd:Y", type="related_to", source="extract",
+             props={"evidence": "김집은 이이의 문인이다.", "extracted_from": "wd:K"}),
+        Edge(src="wd:A", dst="wd:PL", type="related_to", source="extract",
+             props={"evidence": "정약용은 강진에서 18년을 유배 살았다."}),
+    ])
+    rep = _unt.Report()
+    _unt.apply_rules(store, rep)
+    e = lambda s_, d, t: store.conn.execute(
+        "SELECT 1 FROM edges WHERE src=? AND dst=? AND type=?", (s_, d, t)).fetchone() is not None
+    check("인포박스 스승은 taught 로, 방향은 스승 → 제자", e("wd:S", "wd:J", "taught") and not e("wd:J", "wd:S", "related_to"))
+    check("출생지 '조선'은 from_period 조선으로", e("wd:Y", "wd:JO", "from_period") and not e("wd:Y", "wd:JO", "related_to"))
+    check("3·1 운동의 구성원은 참여자로", e("wd:P", "wd:E", "participated_in"))
+    check("규칙 보고는 셋", len(rep.relaxed) == 3, str(rep.relaxed))
+    _unt.fold_redundant(store, rep)
+    check("뜻 있는 엣지가 있는 짝의 related_to 는 접는다", rep.folded == 1 and not e("wd:A", "wd:B", "related_to"))
+    mp = store.conn.execute("SELECT props FROM edges WHERE src='wd:B' AND dst='wd:A' AND type='taught'").fetchone()[0]
+    check("접을 때 근거는 뜻 있는 쪽으로 옮긴다", "형 정약전" in mp, mp)
+    cands = _unt.candidates(store.conn)
+    check("모델에 물을 것은 근거 있는 추출 엣지 둘", {(r["src"], r["dst"]) for r in cands} == {("wd:K", "wd:Y"), ("wd:A", "wd:PL")})
+
+    class _FakeBackend:
+        model = "fake"
+        def __init__(self, answers): self.answers = answers
+        def complete_json(self, system, user, schema):
+            for key, ans in self.answers.items():
+                if key in user:
+                    assert ans["type"] in schema["properties"]["type"]["enum"], (ans, schema["properties"]["type"]["enum"])
+                    return ans
+            return {"type": "none", "direction": "A→B", "confidence": "certain"}
+    fake = _FakeBackend({
+        "김집": {"type": "taught", "direction": "B→A", "confidence": "certain"},
+        "강진": {"type": "born_in", "direction": "A→B", "confidence": "possible"},
+    })
+    _unt.run_model(store, fake, rep)
+    check("문인 관계는 스승(이이) → 제자(김집) taught 가 된다", e("wd:Y", "wd:K", "taught") and not e("wd:K", "wd:Y", "related_to"))
+    check("확신이 '가능'뿐이면 적지 않고 판정만 남긴다", e("wd:A", "wd:PL", "related_to") and rep.weak == 1)
+    left = store.conn.execute("SELECT props FROM edges WHERE src='wd:A' AND dst='wd:PL'").fetchone()[0]
+    check("판정은 원래 줄에 남는다", '"untangled": "born_in/possible"' in left, left)
+    check("다시 돌리면 판정한 것은 묻지 않는다", _unt.candidates(store.conn) == [])
+    check("--redo 면 다시 묻는다", len(_unt.candidates(store.conn, redo=True)) == 1)
+    # 카디널리티: 이미 출생지가 있는 사람에게 두 번째 출생지를 주지 않는다
+    store.upsert_nodes([N("wd:PL2", "place", "광주"), N("wd:C", "person", "김성우")])
+    store.upsert_edges([
+        Edge(src="wd:C", dst="wd:PL2", type="born_in", source="wd"),
+        Edge(src="wd:C", dst="wd:PL", type="related_to", source="extract", props={"evidence": "강진 출생"}),
+    ])
+    rep2 = _unt.Report()
+    _unt.run_model(store, _FakeBackend({"김성우": {"type": "born_in", "direction": "A→B", "confidence": "certain"}}), rep2)
+    check("카디널리티를 넘는 판정은 적지 않고 센다", rep2.over_cardinality == [("wd:C", "wd:PL", "born_in")]
+          and e("wd:C", "wd:PL", "related_to"), str(rep2.over_cardinality))
+    rem = _unt.remaining(store.conn)
+    check("남는 것을 갈래별로 센다", rem.get("모델이 확신하지 못한 것") == 1, str(rem))
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

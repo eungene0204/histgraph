@@ -152,8 +152,9 @@ merge<TAB>남길 id<TAB>없앨 id<TAB>근거      keep<TAB>id<TAB>id<TAB>왜 다
 README "편집 계층" 절) — `relabel`·`redescribe`·`describe`·`nikh`·`precision`·
 `reigns`·`dedupe` 가 거기 적는다. 그래서 수집 뒤에 그 여섯을 **잊어도 고친
 값은 돌아온다.** 다시 돌리는 것은 새로 고칠 것이 생겼을 때다. 그 다음
-`scope korea` 로 파생본을 만든다. **SQL 로 라벨·설명·날짜를 직접 고치는 경로를
-새로 만들면** `overrides.record` 를 거기서 한 번 더 건다 — 안 걸면 옛 구조로
+`scope korea` 로 파생본을 만든다. `dedupe`·`untangle`(`related_to` 갈라 내기)은
+수집이 새 노드·새 `related_to` 를 내므로 수집 뒤마다 돌린다. **SQL 로
+라벨·설명·날짜를 직접 고치는 경로를 새로 만들면** `overrides.record` 를 거기서 한 번 더 건다 — 안 걸면 옛 구조로
 되돌아간다.
 인과 엣지(`causes`, MLX 필요)는 `scope` 뒤에 `--sync-to data/korea.sqlite` 로
 옮긴다 — 노드를 만들지 않으므로 파생본을 다시 만들 필요가 없다.
