@@ -247,6 +247,26 @@ export function chainRows(items, depth = 0, out = []) {
   return out;
 }
 
+// 줄마다 세울 안내선. 나무를 줄로 편 뒤라 '아래에 형제가 더 있나'를 다시
+// 세어야 선을 이을지 끊을지 안다 — `lines[L]` 은 L 단(0…depth) 의 세로선이
+// 이 줄을 지나 아래로 이어지는지, `last` 는 같은 단의 마지막 줄인지다.
+// 2026-09-06 지적: '←' 글자로는 무엇이 무엇을 불렀는지 눈에 안 들어와
+// 실선으로 잇는다.
+export function chainGuides(rows) {
+  const continues = (i, level) => {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      if (rows[j].depth < level) return false;
+      if (rows[j].depth === level) return true;
+    }
+    return false;
+  };
+  return rows.map((r, i) => {
+    const lines = [];
+    for (let level = 0; level <= r.depth; level += 1) lines.push(continues(i, level));
+    return { lines, last: !lines[r.depth] };
+  });
+}
+
 // 나무의 노드 이름. 서술구가 있으면 '후금 (후금의 파약 행위)' 가 아니라
 // 서술구를 앞세운다 — 이름은 단추가, 구는 글이 말한다.
 export function chainName(row, nodes) {

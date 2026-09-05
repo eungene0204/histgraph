@@ -582,15 +582,21 @@ button, input, select { font-family: inherit; }
 .rel-how, .chain-how { display: block; font-size: var(--font-ui-smaller); line-height: 1.5; color: var(--text-muted); margin-top: 3px; }
 .rel-how b, .chain-how b { font-weight: 600; color: var(--text-normal); }
 
-/* 인과 사슬 — 들여쓰기가 걸음 수다. */
+/* 인과 사슬 — 들여쓰기가 걸음 수고, 그 여백에 나무 안내선을 실선으로 긋는다.
+   세로선(.chain-line)은 한 단의 줄들을 위아래로 잇고, 꺾인 선(.chain-elbow)이
+   그 선에서 이 줄의 점으로 들어온다. 줄 사이 가로 구분선은 세로선과 엇갈려
+   지저분해지므로 두지 않는다 (2026-09-06: '←' 글자 대신 실선으로). */
 .chain { margin-bottom: 12px; }
-.chain-head { font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); margin: 6px 0 3px; padding-left: 6px; }
+.chain-head { font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); margin: 6px 0 2px; padding-left: 6px; }
 .chain-row {
+  position: relative;
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
-  padding: 3px 0; border-top: 1px solid var(--background-modifier-border);
+  padding: 3px 0;
 }
-.chain-row:first-of-type { border-top: 0; }
-.chain-arrow { color: var(--text-faint); font-size: 12px; width: 12px; flex: none; }
+.chain-guides { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; pointer-events: none; }
+.chain-line, .chain-elbow { position: absolute; top: 0; box-sizing: border-box; border: 0 solid var(--color-base-50); }
+.chain-line { bottom: 0; width: 0; border-left-width: 1.5px; }
+.chain-elbow { height: 15px; width: 11px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: 5px; }
 .chain-node {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   background: none; border: 0; padding: 2px 6px; margin: 0 -6px; border-radius: var(--radius-s);
@@ -599,7 +605,7 @@ button, input, select { font-family: inherit; }
 .chain-node:hover { background: var(--background-modifier-hover); color: var(--text-accent); }
 .chain-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chain-year { color: var(--text-faint); font-size: var(--font-ui-smaller); }
-.chain-row .chain-how { flex-basis: 100%; margin: 0 0 2px 18px; }
+.chain-row .chain-how { flex-basis: 100%; margin: 0 0 2px 14px; }
 
 /* 경로 찾기 — 접혀 있다가 열린다 */
 .d-more {

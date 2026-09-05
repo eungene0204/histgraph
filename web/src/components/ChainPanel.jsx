@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { nodeColor } from '../lib/graph-view.js';
-import { chainRows, chainName, pathSteps } from '../lib/relations.js';
+import { chainRows, chainName, chainGuides, pathSteps } from '../lib/relations.js';
 import { Glyph } from './Glyph.jsx';
 
 // 인과 사슬. "이 일은 무엇이 불렀고 무엇을 불렀나"를 원인 → 결과 엣지만
@@ -11,13 +11,22 @@ import { Glyph } from './Glyph.jsx';
 // 그리는 부분(ChainTree·PathView)은 자료를 받아 그리기만 한다. 서버에
 // 묻는 것은 ChainPanel 하나다 — 그래야 브라우저 없이 그려서 잴 수 있다.
 
-const KIND_ARROW = { in: '←', out: '→' };
+// 한 단의 들여쓰기(px). 안내선도 같은 간격으로 선다.
+const STEP = 14;
 
-function Row({ row, nodes, dir, onVisit }) {
+// 줄 하나. 왼쪽 여백에 나무 안내선을 실선으로 긋는다 — 위 단에서 내려온
+// 세로선이 이 줄의 점 앞에서 꺾여 들어오고(ㄴ), 아래에 형제가 더 있으면
+// 세로선이 그대로 지나간다(ㅏ). 화살표 글자는 쓰지 않는다.
+function Row({ row, guide, nodes, onVisit }) {
   const n = nodes?.[row.id] || {};
   return (
-    <div className="chain-row" style={{ marginLeft: row.depth * 14 }}>
-      <span className="chain-arrow" aria-hidden="true">{KIND_ARROW[dir]}</span>
+    <div className="chain-row" style={{ paddingLeft: (row.depth + 1) * STEP }}>
+      <span className="chain-guides" aria-hidden="true">
+        {guide.lines.map((on, level) => (on
+          ? <i key={level} className="chain-line" style={{ left: level * STEP }} />
+          : null))}
+        <i className="chain-elbow" style={{ left: row.depth * STEP }} />
+      </span>
       <button className="chain-node" onClick={() => onVisit(row.id, { nest: true })}>
         <span className="rel-dot" style={{ background: nodeColor(n.type, n.group) }} />
         <span className="chain-name">{chainName(row, nodes)}</span>
@@ -41,18 +50,20 @@ export function ChainTree({ data, onVisit }) {
   const causes = chainRows(data.causes);
   const effects = chainRows(data.effects);
   if (!causes.length && !effects.length) return null;
+  const causeGuides = chainGuides(causes);
+  const effectGuides = chainGuides(effects);
   return (
     <div className="chain">
       {causes.length > 0 && (
         <>
           <div className="chain-head">이 일을 부른 것 · {causes.length}</div>
-          {causes.map((r, i) => <Row key={`c-${r.id}-${i}`} row={r} nodes={data.nodes} dir="in" onVisit={onVisit} />)}
+          {causes.map((r, i) => <Row key={`c-${r.id}-${i}`} row={r} guide={causeGuides[i]} nodes={data.nodes} onVisit={onVisit} />)}
         </>
       )}
       {effects.length > 0 && (
         <>
           <div className="chain-head">이 일이 부른 것 · {effects.length}</div>
-          {effects.map((r, i) => <Row key={`e-${r.id}-${i}`} row={r} nodes={data.nodes} dir="out" onVisit={onVisit} />)}
+          {effects.map((r, i) => <Row key={`e-${r.id}-${i}`} row={r} guide={effectGuides[i]} nodes={data.nodes} onVisit={onVisit} />)}
         </>
       )}
     </div>

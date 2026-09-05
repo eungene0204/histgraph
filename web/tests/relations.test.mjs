@@ -6,7 +6,7 @@
 // 같이 따라왔는지를 잰다.
 import {
   pt, sentence, groupRelations, relHead, byYear, cardsFor,
-  whyEmpty, fmtDate, chainRows, pathSteps, pathSentence,
+  whyEmpty, fmtDate, chainRows, chainGuides, pathSteps, pathSentence,
 } from '../src/lib/relations.js';
 
 let pass = 0;
@@ -218,6 +218,16 @@ console.log('\n인과');
     nodes: { 'wd:BJ': { label: '병자호란' }, 'wd:JIN': { label: '후금' }, 'wd:IMJIN': { label: '임진왜란', start: '1592' } } };
   const rows = chainRows(tree.causes);
   ok('나무를 줄로 펴면 깊이가 들여쓰기다', rows.length === 2 && rows[0].depth === 0 && rows[1].depth === 1 && rows[1].id === 'wd:IMJIN', JSON.stringify(rows));
+  // 안내선: 형제가 아래에 더 있는 단만 세로선이 이어진다
+  const forest = chainRows([
+    { id: 'a', kind: '원인', children: [{ id: 'a1', kind: '배경', children: [] }, { id: 'a2', kind: '배경', children: [] }] },
+    { id: 'b', kind: '원인', children: [] },
+  ]);
+  const guides = chainGuides(forest);
+  ok('첫 줄은 아래에 형제(b)가 있어 세로선이 이어진다', guides[0].lines[0] === true && guides[0].last === false, JSON.stringify(guides));
+  ok('a1 은 0단 선이 지나가고 1단에도 형제(a2)가 남았다', guides[1].lines[0] === true && guides[1].lines[1] === true && guides[1].last === false, JSON.stringify(guides[1]));
+  ok('a2 는 그 단의 마지막이라 1단 선이 끊긴다', guides[2].lines[0] === true && guides[2].lines[1] === false && guides[2].last === true, JSON.stringify(guides[2]));
+  ok('b 는 뿌리 단의 마지막이다', guides[3].lines[0] === false && guides[3].last === true, JSON.stringify(guides[3]));
   const steps = pathSteps([{ id: 'wd:IMJIN', edge: null }, { id: 'wd:JIN', edge: { kind: '배경', how: '명의 쇠퇴' } }, { id: 'wd:BJ', edge: { kind: '원인', how: '' } }], tree.nodes);
   eq('경로를 글로 읽는다', pathSentence(steps), '임진왜란 → (배경) 후금 → (원인) 병자호란');
   eq('걸음에 연도가 붙는다', steps[0].year, '1592년');

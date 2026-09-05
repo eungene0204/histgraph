@@ -191,6 +191,9 @@ let detailHtml = '';
   const chainHtml = plain(renderToString(h(ChainTree, { data: tree, onVisit: () => {} })));
   ok('사슬에 원인의 원인까지 선다', chainHtml.includes('이 일을 부른 것') && chainHtml.includes('후금') && chainHtml.includes('임진왜란'), chainHtml.slice(0, 200));
   ok('사슬 줄에 서술구와 어떻게가 붙는다', chainHtml.includes('후금의 파약 행위') && chainHtml.includes('명의 쇠퇴로 여진이 성장했다'));
+  const chainRaw = renderToString(h(ChainTree, { data: tree, onVisit: () => {} }));
+  ok('사슬은 화살표 글자가 아니라 실선으로 잇는다', !chainRaw.includes('←') && !chainRaw.includes('chain-arrow') && (chainRaw.match(/chain-elbow/g) || []).length === 2, chainRaw.slice(0, 300));
+  ok('둘째 걸음은 한 단 더 들어가 있다', /padding-left:28px/.test(chainRaw) && /padding-left:14px/.test(chainRaw), chainRaw.match(/padding-left:[^;"]*/g)?.join(' '));
   ok('비어 있으면 사슬을 그리지 않는다', renderToString(h(ChainTree, { data: { causes: [], effects: [], nodes: {} }, onVisit: () => {} })) === '');
   const pathHtml = plain(renderToString(h(PathView, { data: {
     found: true, reversed: false, nodes: tree.nodes,
