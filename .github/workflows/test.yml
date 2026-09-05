@@ -30,6 +30,11 @@ jobs:
       - name: 파이프라인 테스트
         run: python tests/test_pipeline.py
 
+      # 화면에 영어가 뜨면 여기가 빨개진다. 로컬 훅(tools/hooks/pre-push)이
+      # 같은 것을 먼저 재지만, --no-verify 로 넘긴 push 는 여기서만 잡힌다.
+      - name: 화면 DB 한국어 검사
+        run: python tools/check_korean.py
+
   web:
     name: 화면
     runs-on: ubuntu-latest

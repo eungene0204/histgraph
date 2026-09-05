@@ -9,6 +9,11 @@ import { Search } from './components/Search.jsx';
 // 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
 // 더할 때마다 두 곳을 고쳐야 하고, 빠뜨린 하나가 화면에 영어로 뜬다.
 
+// 인과 도면 스위치. 2026-09-06 사용자: "인과관계 그래프를 지우진 말고 기능
+// 꺼두자." 켜면 노드를 눌렀을 때 캔버스가 그 노드의 인과 도면이 된다
+// (design.md §4 '인과 도면'). 꺼져 있으면 전처럼 그 노드의 주변 관계를 편다.
+export const CAUSAL_DIAGRAM = false;
+
 function hashId() {
   return location.hash ? decodeURIComponent(location.hash.slice(1)) : '';
 }
@@ -16,14 +21,21 @@ function hashId() {
 export default function App() {
   const [meta, setMeta] = useState(null);
   const [seeds, setSeeds] = useState([]);
+  // Obsidian 그래프 설정과 같은 네 절 — 필터·묶음(범례)·표시·힘 (design.md §5).
   const [settings, setSettings] = useState({
-    depth: 2, limit: 120, includePeriod: false, showLabels: true, showRail: true,
+    depth: 2, limit: 120, includePeriod: false, hiddenEdges: [],     // 필터
+    showLabels: true, showRail: true, arrows: true,                  // 표시
+    textFade: 0.3, nodeScale: 1, lineScale: 1,
+    centerForce: 1, repelForce: 1, linkDistance: 1,                  // 힘
   });
   const [detail, setDetail] = useState(null);       // 상세 패널에 그릴 노드 (서버 응답)
   const [timeline, setTimeline] = useState(null);   // 연표 자료
   const [note, setNote] = useState(null);
   const [sideOpen, setSideOpen] = useState(false);
   const [ready, setReady] = useState(false);        // 그래프를 한 번이라도 그렸나
+  // 자료 서버에 못 닿은 상태. 화면에는 '아직 아무것도 안 골랐다'와
+  // 똑같이 비어 보이므로, 둘을 갈라 적으려고 따로 든다.
+  const [offline, setOffline] = useState(false);
 
   // **상세 패널에서** 관계를 타고 들어간 자취. '←' 로 한 칸씩 되짚어
   // 올라간다. 그래프나 연표에서 고른 노드는 여기 쌓이지 않는다 — 그건
@@ -43,20 +55,29 @@ export default function App() {
   // --- 연표 ------------------------------------------------------------
   // 연표의 주인공은 **지금 보고 있는 노드**다. 검색으로 옮겨가든 캔버스에서
   // 누르든 상세를 타고 들어가든, 화면 한가운데가 바뀌면 연표도 따라간다.
+  // 도면에서 돌아올 때 되살릴 주변 관계 안내 칩
+  const worldNoteRef = useRef(null);
+
   const showTimeline = useCallback(async (id) => {
     if (!settingsRef.current.showRail || timelineIdRef.current === id) return;
     timelineIdRef.current = id;
-    const t = await api.timeline(id);
+    const t = await api.timeline(id).catch(() => null);
+    if (!t) return;
     // 그 사이에 다른 노드로 옮겼으면 늦게 온 답은 버린다
     if (timelineIdRef.current !== id) return;
     setTimeline(t.error ? null : t);
   }, []);
 
   // --- 그래프 적재 -----------------------------------------------------
+  //
   const load = useCallback(async (id, { merge = false } = {}) => {
     const view = viewRef.current;
     if (!view) return;
-    const data = await api.graph(id, settingsRef.current);
+    const data = await api.graph(id, settingsRef.current).catch(() => null);
+    // 서버가 죽어 있으면 fetch 가 통째로 터진다. 잡지 않으면 약속이 조용히
+    // 깨져 화면은 첫 빈 화면 그대로 서 있는다 — 그게 '그래프가 안 보인다'다.
+    if (!data) { setOffline(true); setNote(null); return; }
+    setOffline(false);
     if (data.missing || !data.nodes.length) {
       setNote(<>‘{id}’ 주변에 그릴 관계가 없습니다.</>);
       return;
@@ -70,13 +91,39 @@ export default function App() {
     view.focusOn(id);
 
     const label = data.nodes.find((n) => n.id === id)?.label || id;
-    setNote(
+    const text = (
       <>
         {label} 주변 · 노드 {data.nodes.length} · 관계 {data.edges.length}
         {data.truncated && <> · <b>차수 상위만 표시</b></>}
-      </>,
+      </>
     );
+    worldNoteRef.current = text;
+    setNote(text);
   }, [showTimeline]);
+
+  // --- 인과 도면 -------------------------------------------------------
+  //
+  // **노드를 누르면 캔버스가 그 노드의 인과 도면이 된다** (2026-09-06 사용자:
+  // "노드를 클릭하면 인과관계를 보여주는 그래프를", 그리고 이웃 위에 얹어
+  // 보였더니 "너무 복잡하게 그려지고 있어서 아무런 정보값이 없어"). 원인은
+  // 왼쪽 열, 결과는 오른쪽 열 (design.md §4 '인과 도면'). 인과가 없는
+  // 노드(대부분의 인물)는 전처럼 그 노드의 주변 관계를 편다. 빈 곳을
+  // 누르면 접어 둔 주변 관계 그래프로 돌아온다.
+  const openCausal = useCallback(async (id) => {
+    const view = viewRef.current;
+    if (!view) return;
+    if (!CAUSAL_DIAGRAM) { load(id, { merge: true }); return; }
+    // 두 걸음만 편다 — 네 걸음(사슬 패널)을 도면에 다 세우면 심하전투의
+    // 원인 31개가 한 화면에 겹친다. 더 앞은 도면 안의 노드를 눌러 이어 간다.
+    const chain = await api.chain(id, 2).catch(() => null);
+    if (chain && !chain.error && view.showCausal(chain)) {
+      const v = view.causalView;
+      const label = chain.nodes?.[id]?.label || id;
+      setNote(<>{label}의 인과 · 원인 {v.causes} · 결과 {v.effects} · 노드를 누르면 그 노드의 인과로, 빈 곳을 누르면 주변 관계로</>);
+      return;
+    }
+    load(id, { merge: true });
+  }, [load]);
 
   // --- 상세 패널 -------------------------------------------------------
   //
@@ -109,17 +156,21 @@ export default function App() {
     setDetail(null);
     setTrail([]);
     detailRef.current = null;
+    viewRef.current?.exitCausal();   // Esc 는 도면도 접는다
     // 연표는 남긴다 — 상세를 닫아도 화면 한가운데 그 노드는 그대로 있고,
     // '언제 사람인가'는 관계 목록과 달리 계속 붙어 있어야 할 정보다.
   }, []);
 
-  // 화면에 있는 노드면 그리로 옮기고, 없으면 그 주변을 새로 편다.
+  // 상세·연표에서 고른 노드 — 도면이 켜져 있으면 캔버스에서 누른 것과 같이
+  // 인과 도면을 열고(안 서면 주변 관계), 꺼져 있으면 화면에 있는 노드면
+  // 그리로 옮기고 없으면 그 주변을 새로 편다.
   const visit = useCallback((id, opts = {}) => {
     const view = viewRef.current;
-    if (view?.byId.has(id)) { view.select(id); view.focusOn(id); }
+    if (CAUSAL_DIAGRAM) openCausal(id);
+    else if (view?.byId.has(id)) { view.select(id); view.focusOn(id); }
     else load(id, { merge: true });
     showDetail(id, opts);
-  }, [load, showDetail]);
+  }, [load, openCausal, showDetail]);
 
   // 되짚어 올라가기 — 그래프에도 그 노드가 다시 보여야 '돌아왔다'가 된다.
   const backDetail = useCallback(() => {
@@ -133,11 +184,12 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const m = await api.meta();
+      const m = await api.meta().catch(() => null);
       if (!alive) return;
+      if (!m) { setOffline(true); return; }
       setMeta(m);
       document.title = `histgraph — ${m.era_label || '전체'}`;
-      const s = await api.seeds(12);
+      const s = await api.seeds(12).catch(() => []);
       if (!alive) return;
       setSeeds(s);
       // 주소가 비어 있으면 왕조에서 시작한다. 조선 그래프의 중심은 조선이다 —
@@ -200,17 +252,6 @@ export default function App() {
     <>
       <header className="top">
         <div className="brand">
-          <button
-            className="menu-toggle"
-            aria-label={sideOpen ? '패널 닫기' : '패널 열기'}
-            aria-expanded={sideOpen}
-            title="시작점·범례·표시 설정"
-            onClick={() => setSideOpen((v) => !v)}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
           <span className="mark" />
           <h1>histgraph</h1>
           {/* 어디까지 파고 들어가도 한 번에 중심으로 돌아올 수 있어야 한다.
@@ -221,37 +262,42 @@ export default function App() {
           </button>
         </div>
 
-        <Search nodeTypes={meta?.node_types} onPick={(id) => load(id)} />
-
-        <div className="counts">
-          {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
-        </div>
+        {/* 검색으로 찾은 노드는 그래프만이 아니라 오른쪽 상세도 바로 연다 */}
+        <Search nodeTypes={meta?.node_types} onPick={(id) => { load(id); showDetail(id); }} />
       </header>
 
-      <div className={`layout${sideOpen ? ' side-open' : ''}`}>
+      <div className="layout">
+        <TimelinePanel railRef={railRef} data={timeline} onPick={visit} />
+
+        {/* 그래프 설정은 캔버스 위 오른쪽 위에 뜬다 (Obsidian 의 graph-controls).
+            사이드바가 아니라 캔버스의 일부라서 같은 틀에 담는다. */}
+        <div className="stage-wrap">
+        <GraphCanvas
+          viewRef={viewRef}
+          settings={settings}
+          note={note}
+          empty={!ready}
+          offline={offline}
+          // **클릭하면 그 사람의 세계가 열려야 한다.** 고르기만 하면 화면에는
+          // 그 노드가 우연히 들고 온 엣지 한두 개만 남는다 — 조선 화면에서
+          // 정종을 누르면 '한씨'와의 선 하나뿐이고, 아버지 태조도 형제인 태종도
+          // 안 보인다. 실제로는 관계가 25건 있는데 화면이 못 보여준 것이다.
+          onSelect={(node) => { showDetail(node.id); openCausal(node.id); }}
+          // 더블클릭은 자리를 지킨 채 이웃만 얹는다 (지금 보던 배치를 잃지 않는다).
+          // 도면에서는 도면을 접고 그 노드의 이웃을 편다.
+          onExpand={(node) => { viewRef.current?.exitCausal(); load(node.id, { merge: true }); }}
+          onCausalExit={() => setNote(worldNoteRef.current)}
+        />
         <SidePanel
+          open={sideOpen}
+          onToggle={() => setSideOpen((v) => !v)}
           meta={meta}
           seeds={seeds}
           settings={settings}
           onSettings={changeSettings}
           onPick={(id) => load(id)}
         />
-
-        <TimelinePanel railRef={railRef} data={timeline} onPick={visit} />
-
-        <GraphCanvas
-          viewRef={viewRef}
-          showLabels={settings.showLabels}
-          note={note}
-          empty={!ready}
-          // **클릭하면 그 사람의 세계가 열려야 한다.** 고르기만 하면 화면에는
-          // 그 노드가 우연히 들고 온 엣지 한두 개만 남는다 — 조선 화면에서
-          // 정종을 누르면 '한씨'와의 선 하나뿐이고, 아버지 태조도 형제인 태종도
-          // 안 보인다. 실제로는 관계가 25건 있는데 화면이 못 보여준 것이다.
-          onSelect={(node) => { showDetail(node.id); load(node.id, { merge: true }); }}
-          // 더블클릭은 자리를 지킨 채 이웃만 얹는다 (지금 보던 배치를 잃지 않는다)
-          onExpand={(node) => load(node.id, { merge: true })}
-        />
+        </div>
 
         <DetailPanel
           node={detail}
@@ -269,6 +315,10 @@ export default function App() {
         <span className="foot-copy">© 2026 histgraph</span>
         <a href="/privacy.html">개인정보처리방침</a>
         <a href="/terms.html">이용약관</a>
+        {/* 노드·엣지 수는 글자 수처럼 상태 줄 오른쪽 끝에 선다 */}
+        <span className="counts">
+          {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
+        </span>
       </footer>
     </>
   );

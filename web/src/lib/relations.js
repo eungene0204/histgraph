@@ -6,7 +6,20 @@
 // 상대가 자녀다. 방향별 이름이 있는 타입만 바꿔 부른다.
 export const DIR_HEAD = {
   child_of: { out: '부모', in: '자녀' },
+  // 사제는 스승 → 제자다. 나가는 상대는 제자, 들어오는 상대가 스승이다.
+  taught: { out: '제자', in: '스승' },
   part_of: { out: '상위', in: '하위' },
+  // 인과는 언제나 원인 → 결과다. 나가는 상대는 이 노드가 부른 결과,
+  // 들어오는 상대는 이 노드를 부른 원인이다.
+  caused: { out: '결과', in: '원인' },
+};
+
+// 인과의 종류(`causes.KINDS`)별 문장. 엣지 라벨이 종류다.
+export const KIND_SENTENCE = {
+  '원인': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 원인이 되었다`,
+  '배경': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 배경이 되었다`,
+  '계기': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 계기가 되었다`,
+  '영향': (a, b) => `${a}${pt(a, '은', '는')} ${b}에 영향을 주었다`,
 };
 
 // 시대(from_period)와 시점(dated_to)은 둘 다 '언제'를 가리킨다. 따로 세우면
@@ -35,9 +48,30 @@ export function pt(word, withBatchim, without) {
   return code % 28 ? withBatchim : without;
 }
 
+// 사건에서 맡은 역할. `roles` 가 말뭉치의 근거로 적은 것(주도·가담·대항·
+// 피해·표적·수습·언급)과, 인포박스 칸 이름(지휘관·주요 인물·교전·가해)이다.
+// 역할이 있으면 '참여했다'로 뭉개지 않는다 — 12.3 내란의 '주요인물2' 는
+// 계엄을 막은 쪽이고, 체포 명단에 오른 사람을 참여자라 부르면 거짓이다.
+export const ROLE_SENTENCE = {
+  '주도': (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 주도했다`,
+  '가담': (a, b) => `${a}${pt(a, '은', '는')} ${b}에 가담했다`,
+  '대항': (a, b) => `${a}${pt(a, '은', '는')} ${b}에 맞섰다`,
+  '피해': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 피해자다`,
+  '표적': (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 표적이 되었다`,
+  '수습': (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 수사·재판했다`,
+  '언급': (a, b) => `${a}${pt(a, '은', '는')} ${b} 기록에 이름이 나온다`,
+  '근거 없음': (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다고 하나 근거를 찾지 못했다`,
+  '지휘관': (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지휘했다`,
+  '주요 인물': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 주요 인물이다`,
+  '교전': (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 싸웠다`,
+  '가해': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 가해자다`,
+};
+
 // 엣지 방향 그대로 주어와 목적어를 놓는다. src -> dst 순서다.
 export const SENTENCE = {
-  participated_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 참여했다`,
+  participated_in: (a, b, o = {}) => (ROLE_SENTENCE[o.label]
+    ? ROLE_SENTENCE[o.label](a, b)
+    : `${a}${pt(a, '은', '는')} ${b}에 참여했다`),
   occurred_at: (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 일어났다`,
   occurred_during: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 일어났다`,
   born_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 태어났다`,
@@ -46,9 +80,11 @@ export const SENTENCE = {
   located_in: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 있다`,
   depicts: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 다룬다`,
   spouse_of: (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 부부다`,
+  taught: (a, b) => `${a}${pt(a, '이', '가')} ${b}${pt(b, '을', '를')} 가르쳤다`,
   member_of: (a, b) => `${a}${pt(a, '은', '는')} ${b} 소속이다`,
   held_position: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지냈다`,
   part_of: (a, b) => `${a}${pt(a, '은', '는')} ${b}의 일부다`,
+  caused: (a, b, o = {}) => (KIND_SENTENCE[o.label] || KIND_SENTENCE['원인'])(a, b),
   // 전후(P155/P156)는 앞선 사건에서, 인과(P828/P1542)는 원인에서 담는다.
   // 방향이 하나로 모여 있어 '다음'·'원인'이 적힌 엣지는 어느 쪽에서 읽어도
   // 뒤집히지 않는다.
@@ -56,6 +92,8 @@ export const SENTENCE = {
     ? `${a} 다음에 ${b}${pt(b, '이', '가')} 일어났다`
     : o.label === '원인'
     ? `${a}${pt(a, '은', '는')} ${b}의 원인이 되었다`
+    : ROLE_SENTENCE[o.label]
+    ? ROLE_SENTENCE[o.label](a, b)
     : `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다`),
   // 엣지에 '아버지'·'어머니'가 적혀 있으면 그대로 부른다 (실측 479건)
   child_of: (a, b, o) => {
@@ -79,7 +117,10 @@ export const SENTENCE = {
 // 지금 보는 노드(self)와 상대 사이의 관계 하나를 문장으로 만든다.
 export function sentence(r, self) {
   const me = { label: self.label, type: self.type };
-  const [src, dst] = r.dir === 'out' ? [me, r.other] : [r.other, me];
+  // 인과의 상대가 서술구('후금의 파약 행위')로 적혀 있었으면 그 구로 부른다 —
+  // '후금은 병자호란의 원인이 되었다'보다 '후금의 파약 행위는…'이 참에 가깝다.
+  const other = r.type === 'caused' && r.as ? { ...r.other, label: r.as } : r.other;
+  const [src, dst] = r.dir === 'out' ? [me, other] : [other, me];
   const make = SENTENCE[r.type];
   return make
     ? make(src.label, dst.label, { label: r.edge_label, srcType: src.type })
@@ -180,10 +221,80 @@ export function whyEmpty(d) {
   return '아직 서사를 받아오지 않았습니다.';
 }
 
+// 접힌 높이(다섯 줄)를 넘길 만큼 길 때만 '전체 보기'를 낸다. 세 줄짜리
+// 글에 단추가 붙어 있으면 눌러도 아무 일이 없다. 한 줄에 스물여덟 자쯤
+// 들어가므로 다섯 줄이 140자다.
+export const LONG_DESC = 140;
+
 export function fmtDate(v) {
   if (!v) return '';
   const m = String(v).match(/^(-?)(\d{1,4})/);
   if (!m) return '';
   const y = +m[2];
   return m[1] ? `기원전 ${y}년` : `${y}년`;
+}
+
+
+// --- 인과 사슬 ---------------------------------------------------------------
+// 서버(`/api/chain`)가 준 나무를 화면에 세울 줄로 편다. 깊이가 들여쓰기다.
+// 원인 쪽은 이 노드를 부른 것들이라 '←', 결과 쪽은 '→' 로 읽는다.
+export function chainRows(items, depth = 0, out = []) {
+  for (const it of items || []) {
+    out.push({ id: it.id, depth, kind: it.kind, how: it.how || '', as: it.as || '',
+               evidence: it.evidence || [], sources: it.sources || [] });
+    chainRows(it.children, depth + 1, out);
+  }
+  return out;
+}
+
+// 줄마다 세울 안내선. 나무를 줄로 편 뒤라 '아래에 형제가 더 있나'를 다시
+// 세어야 선을 이을지 끊을지 안다 — `lines[L]` 은 L 단(0…depth) 의 세로선이
+// 이 줄을 지나 아래로 이어지는지, `last` 는 같은 단의 마지막 줄인지,
+// `stem` 은 바로 아래 줄이 이 줄의 자식이라 이 줄의 점에서 줄기를 내려야
+// 하는지다.
+// 2026-09-06 지적: '←' 글자로는 무엇이 무엇을 불렀는지 눈에 안 들어와
+// 실선으로 잇는다. 같은 날 다시 지적: 자식 단의 세로선이 자식 줄에서만
+// 시작해 부모의 점과 떨어져 있었다 — "심하전투에 후금이 영향을 줬으면
+// 저 트리선이 심하전투에 완전히 연결". 부모 줄이 점 아래로 줄기를 내려
+// 자식의 꺾인 선과 잇는다.
+export function chainGuides(rows) {
+  const continues = (i, level) => {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      if (rows[j].depth < level) return false;
+      if (rows[j].depth === level) return true;
+    }
+    return false;
+  };
+  return rows.map((r, i) => {
+    const lines = [];
+    for (let level = 0; level <= r.depth; level += 1) lines.push(continues(i, level));
+    const stem = i + 1 < rows.length && rows[i + 1].depth === r.depth + 1;
+    return { lines, last: !lines[r.depth], stem };
+  });
+}
+
+// 나무의 노드 이름. 서술구가 있으면 '후금 (후금의 파약 행위)' 가 아니라
+// 서술구를 앞세운다 — 이름은 단추가, 구는 글이 말한다.
+export function chainName(row, nodes) {
+  const n = nodes?.[row.id];
+  return n ? n.label : row.id;
+}
+
+// `/api/path` 의 경로 하나를 걸음으로. 첫 걸음에는 엣지가 없다.
+export function pathSteps(path, nodes) {
+  return (path || []).map((step) => ({
+    id: step.id,
+    label: nodes?.[step.id]?.label || step.id,
+    type: nodes?.[step.id]?.type,
+    group: nodes?.[step.id]?.group,
+    year: fmtDate(nodes?.[step.id]?.start),
+    kind: step.edge?.kind || '',
+    how: step.edge?.how || '',
+    evidence: step.edge?.evidence || [],
+  }));
+}
+
+// 경로를 한 줄 글로. "임진왜란 → (배경) 후금 → (계기) 정묘호란"
+export function pathSentence(steps) {
+  return steps.map((s, i) => (i === 0 ? s.label : `→ (${s.kind}) ${s.label}`)).join(' ');
 }

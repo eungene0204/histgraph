@@ -12,9 +12,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from urllib.request import pathname2url
 
+from . import overrides as overrides_mod
 from .ontology import Edge, Node
 
-SCHEMA = """
+SCHEMA = overrides_mod.SCHEMA + """
 CREATE TABLE IF NOT EXISTS nodes (
     id          TEXT PRIMARY KEY,
     type        TEXT NOT NULL,
@@ -65,6 +66,17 @@ CREATE TABLE IF NOT EXISTS same_as (
     method TEXT NOT NULL,
     score  REAL NOT NULL DEFAULT 1.0,
     PRIMARY KEY (a, b)
+);
+
+-- 정본이 아닌 설명을 우리 말로 새로 쓴 글 (summaries.py). nodes.description
+-- 은 손대지 않는다 — 수집이 설명을 통째로 다시 쓰므로, 우리가 쓴 글은 따로
+-- 두고 원문 해시로 아직 유효한지 잰다.
+CREATE TABLE IF NOT EXISTS summaries (
+    node_id  TEXT PRIMARY KEY,
+    text     TEXT NOT NULL,
+    model    TEXT NOT NULL,
+    src_hash TEXT NOT NULL,
+    made_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS ingest_log (
@@ -145,6 +157,10 @@ class GraphStore:
             self.conn.executemany(
                 "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?,?)", alias_rows
             )
+        # **편집 계층을 다시 씌운다** (`overrides` 모듈 머리글). 위의 덮어쓰기가
+        # 사람이 고친 이름·정본 설명·잘라 둔 날짜를 방금 지웠을 수 있다.
+        # 수집이 무엇을 가져왔든 고친 값이 마지막에 선다.
+        self.last_reapply = overrides_mod.reapply(self, node_ids=[r[0] for r in rows])
         self.conn.commit()
         return len(rows)
 
@@ -165,6 +181,10 @@ class GraphStore:
                  confidence = excluded.confidence,
                  props      = excluded.props""",
             rows,
+        )
+        # 재위 표식(`reigns`)처럼 엣지에 적어 둔 값도 같은 규칙이다.
+        overrides_mod.reapply(
+            self, edge_keys={overrides_mod.edge_key(r[0], r[1], r[2]) for r in rows}
         )
         self.conn.commit()
         return len(rows)

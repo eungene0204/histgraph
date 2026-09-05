@@ -40,6 +40,10 @@ class Backend(Protocol):
         """관계 목록을 돌려준다. 실패 시 빈 목록."""
         ...
 
+    def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict | None:
+        """스키마대로의 JSON 객체 하나. 관계 목록이 아닌 것(요약 한 편)을 받을 때."""
+        ...
+
 
 def _coerce_relations(payload: Any) -> list[dict] | None:
     """모델이 낸 JSON 을 관계 목록으로 정규화.
@@ -107,6 +111,24 @@ class AnthropicBackend:
 
             self._client = anthropic.Anthropic()
         return self._client
+
+    def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict | None:
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=2000,
+            system=system,
+            output_config={
+                "format": {"type": "json_schema", "schema": schema},
+                "effort": self.effort,
+            },
+            messages=[{"role": "user", "content": user}],
+        )
+        if response.stop_reason == "refusal":
+            log.warning("거절됨: %s", response.stop_details)
+            return None
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        payload = _extract_json(text)
+        return payload if isinstance(payload, dict) else None
 
     def complete(self, system: str, user: str, schema: dict[str, Any]) -> list[dict]:
         response = self.client.messages.create(
@@ -242,23 +264,30 @@ class MLXBackend:
         self.model = model
         self.max_tokens = max_tokens
         self._generator = None
+        self._schema_key = None
+        self._wrapped = None
         self._tokenizer = None
 
     def _build(self, schema: dict[str, Any]):
-        """모델과 스키마 제약 생성기를 준비 (최초 1회)."""
-        if self._generator is not None:
+        """모델과 스키마 제약 생성기를 준비. 모델은 한 번, 생성기는 스키마마다
+        한 번 — 한 프로세스가 관계 추출과 요약을 번갈아 물을 수 있게."""
+        key = json.dumps(schema, sort_keys=True)
+        if self._generator is not None and self._schema_key == key:
             return self._generator
 
         import outlines
-        from mlx_lm import load
         from outlines.types import JsonSchema
 
-        log.info("MLX 모델 로드 중: %s (최초 1회, 수십 초 소요)", self.model)
-        model, tokenizer = load(self.model)
-        self._tokenizer = tokenizer
-        wrapped = outlines.from_mlxlm(model, tokenizer)
-        self._generator = outlines.Generator(wrapped, JsonSchema(schema))
-        log.info("MLX 모델 준비 완료")
+        if self._wrapped is None:
+            from mlx_lm import load
+
+            log.info("MLX 모델 로드 중: %s (최초 1회, 수십 초 소요)", self.model)
+            model, tokenizer = load(self.model)
+            self._tokenizer = tokenizer
+            self._wrapped = outlines.from_mlxlm(model, tokenizer)
+            log.info("MLX 모델 준비 완료")
+        self._generator = outlines.Generator(self._wrapped, JsonSchema(schema))
+        self._schema_key = key
         return self._generator
 
     def _chat_prompt(self, system: str, user: str) -> str:
@@ -282,16 +311,28 @@ class MLXBackend:
         except TypeError:
             return apply(messages, tokenize=False, add_generation_prompt=True)
 
-    def complete(self, system: str, user: str, schema: dict[str, Any]) -> list[dict]:
+    def _generate(self, system: str, user: str, schema: dict[str, Any],
+                  max_tokens: int | None = None) -> Any | None:
         generator = self._build(schema)
         prompt = self._chat_prompt(system, user)
         try:
-            text = generator(prompt, max_tokens=self.max_tokens)
+            text = generator(prompt, max_tokens=max_tokens or self.max_tokens)
         except Exception as err:  # 생성 실패는 문서 하나만 건너뛴다
             log.warning("MLX 생성 실패: %s", err)
-            return []
+            return None
+        return _extract_json(text)
 
-        payload = _extract_json(text)
+    def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict | None:
+        # 요약 한 편은 짧다. 관계 추출의 12,000 토큰을 주면 잘못 샌 생성이
+        # 그만큼 오래 돈다.
+        payload = self._generate(system, user, schema, max_tokens=800)
+        return payload if isinstance(payload, dict) else None
+
+    def complete(self, system: str, user: str, schema: dict[str, Any]) -> list[dict]:
+        payload = self._generate(system, user, schema)
+        if payload is None:
+            return []
+        text = json.dumps(payload, ensure_ascii=False)
         relations = _coerce_relations(payload)
         if relations is None:
             # 스키마가 강제되므로 여기 오면 대개 max_tokens 로 잘린 것이다

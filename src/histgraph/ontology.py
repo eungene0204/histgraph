@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -72,6 +74,12 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     "about": ("주제", ("media", "artwork"), ("concept",)),
     "child_of": ("자녀", ("person",), ("person",)),
     "spouse_of": ("배우자", ("person",), ("person",)),
+    # 사제. 방향은 스승 → 제자. 한국사에서 학맥은 당파와 직결된다(성혼 문인
+    # → 서인)는 이유로 인포박스의 '스승'·'제자'를 버리지 않고 related_to 로
+    # 남겨 뒀는데, 그 뜻이 라벨에도 없어 화면은 '관련 있다'밖에 못 했다.
+    # 추출이 related_to 로 낸 인물끼리의 관계 761건 중 학맥이 가장 큰 갈래다
+    # (`untangle`, 2026-09-05).
+    "taught": ("사제", ("person",), ("person",)),
     "member_of": ("소속", ("person",), ("org",)),
     "held_position": ("직위", ("person",), ("role", "org")),
     # 한국사에서 시대 구분은 왕조와 같다 — '조선시대'는 '조선'이라는 정체가
@@ -98,13 +106,45 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     # 시간축. 인물·사건은 연도와 '같은 실체'가 아니므로 same_as 가 아니라
     # 엣지로 잇는다. 출생/사망/시작/종료는 엣지 label 로 구분한다.
     "dated_to": ("시점", tuple(NODE_TYPES), ("period",)),
+    # 인과. **이 그래프가 온톨로지인 이유다** — "임진왜란이 수십 년 뒤
+    # 병자호란에 어떻게 이어졌나"는 참여·장소·시대 엣지로는 답할 수 없고,
+    # 원인에서 결과로 가는 엣지를 따라가야 한다 (`causes`·`/api/chain`).
+    # 방향은 언제나 원인 → 결과. 라벨은 인과의 종류(원인·배경·계기·영향,
+    # `causes.KINDS`)고, '어떻게'는 `props.how` 한 구절과 `props.evidence`
+    # 인용이 말한다. 원인 쪽에 단체·인물·개념을 허용하는 이유: 한국사
+    # 서술의 인과는 사건끼리만 오가지 않는다 — '후금의 성장'이 정묘호란의
+    # 배경이고 '동학'이 동학농민운동의 뿌리다. 결과 쪽도 사건만이 아니다
+    # ('임진왜란 → 명의 쇠퇴'는 org 가 결과다).
+    "caused": ("원인", ("event", "org", "person", "concept"), ("event", "org", "concept")),
     "part_of": ("상위", tuple(NODE_TYPES), tuple(NODE_TYPES)),
     "related_to": ("관련", tuple(NODE_TYPES), tuple(NODE_TYPES)),
 }
 
 
+# --- 카디널리티 -----------------------------------------------------------
+# 한 출발 노드가 이 엣지로 가리킬 수 있는 **서로 다른 도착 노드**의 최대 수.
+# 팔란티어 파운드리는 링크마다 1:N 인지 N:M 인지를 반드시 적는데, 우리는
+# 출발·도착 타입만 있었다. 사람은 한 곳에서 태어나고 한 곳에서 죽고 부모가
+# 둘이다 — 그 이상이면 같은 곳을 다른 해상도로 말한 것(함경도·명천군)이거나
+# 동명이인의 문서가 섞인 것이다 (실측: 정의공주의 어머니가 원경왕후와
+# 소헌왕후, 김성우의 출생지가 부산과 광주). 여기 없는 타입은 제한이 없다.
+# 재는 것은 `cardinality` 모듈, 쓸 때 경고하는 것은 `cardinality_problems`.
+MAX_TARGETS: dict[str, int] = {
+    "born_in": 1,
+    "died_in": 1,
+    "occurred_during": 1,
+    "child_of": 2,   # 양부모는 여기 걸린다 — 인평대군의 양부 능창대군. 보고만 한다.
+}
+
+
 class OntologyError(ValueError):
     pass
+
+
+# 이름표에 남아서는 안 되는 자국. 위키 주석·틀·링크·각주가 조각난 채로
+# 별칭 칸에 들어오는 일이 있다. 꺾쇠는 국가유산 지정명(`金剛般若波羅蜜經
+# <卷二∼五>`)에도 쓰이므로 **주석 자국만** 잡는다.
+_MARKUP_LEFTOVER = re.compile(r"<!--|-->|\{\{|\}\}|\[\[|\]\]|<ref")
 
 
 @dataclass(slots=True)
@@ -143,6 +183,12 @@ class Node:
         # 안 되기 때문이다.
         if self.description and not has_hangul(self.description):
             self.description = to_korean(self.description)
+        # **별칭에 마크업이 섞여 들어오는 것도 여기서 막는다.** 별칭은
+        # 화면에 이름표로 그대로 서므로 지우다 만 위키 문법이 남으면
+        # 곧바로 보인다 — 을사사화의 '다른 이름' 칸에 있던 편집자 쪽지
+        # (`<!-- 잘 알려진 명칭으로 …`)가 이름표 두 개로 섰다 (2026-09-05).
+        # 소스마다 따로 검사하면 언젠가 하나가 빠진다.
+        self.aliases = [a for a in self.aliases if not _MARKUP_LEFTOVER.search(a)]
         # **작품은 무슨 매체인지 모른 채 들어올 수 없다.** 설명과 달리 이건
         # 나중에 채울 수 있는 값이 아니다 — 비어 있으면 화면에서 영화와
         # 드라마와 게임이 한 덩어리가 되고, 그 상태를 알아볼 방법도 없다.
@@ -185,3 +231,18 @@ def validate_edge_endpoints(edge: Edge, nodes: dict[str, Node]) -> str | None:
     if dst_node.type not in allowed_dst:
         return f"{edge.type}: 도착 타입 {dst_node.type} 허용 안 됨 ({allowed_dst})"
     return None
+
+
+def cardinality_problems(edges: Iterable[Edge]) -> list[str]:
+    """한 묶음 안에서 카디널리티를 넘는 출발 노드. 쓰기 전에 경고할 재료."""
+    targets: dict[tuple[str, str], set[str]] = {}
+    for e in edges:
+        limit = MAX_TARGETS.get(e.type)
+        if limit is None:
+            continue
+        targets.setdefault((e.src, e.type), set()).add(e.dst)
+    return [
+        f"{etype}: {src} 가 {len(dsts)}곳을 가리킴 (최대 {MAX_TARGETS[etype]})"
+        for (src, etype), dsts in sorted(targets.items())
+        if len(dsts) > MAX_TARGETS[etype]
+    ]

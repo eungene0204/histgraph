@@ -6,7 +6,7 @@
 // 같이 따라왔는지를 잰다.
 import {
   pt, sentence, groupRelations, relHead, byYear, cardsFor,
-  whyEmpty, fmtDate,
+  whyEmpty, fmtDate, chainRows, chainGuides, pathSteps, pathSentence,
 } from '../src/lib/relations.js';
 
 let pass = 0;
@@ -174,6 +174,65 @@ eq('연도', fmtDate('1592-01-01'), '1592년');
 eq('기원전', fmtDate('-0057-01-01'), '기원전 57년');
 eq('빈 값', fmtDate(null), '');
 eq('날짜가 아니면 빈 값', fmtDate('알 수 없음'), '');
+
+console.log('\n역할 — 참여로 뭉개지 않는다');
+{
+  const me = { id: 'p', label: '이재명', type: 'person' };
+  const ev = other('e', '12.3 내란', 'event', 'event');
+  const r = (label, type = 'participated_in') => rel({ type, dir: 'out', other: ev, edge_label: label });
+  eq('역할이 없으면 참여했다', sentence(r(null), me), '이재명은 12.3 내란에 참여했다');
+  eq('인포박스 주요 인물은 주요 인물이다', sentence(r('주요 인물'), me), '이재명은 12.3 내란의 주요 인물이다');
+  eq('대항은 맞섰다', sentence(r('대항'), me), '이재명은 12.3 내란에 맞섰다');
+  eq('표적은 관련 엣지로 온다', sentence(r('표적', 'related_to'), me), '이재명은 12.3 내란에서 표적이 되었다');
+  eq('피해자', sentence(r('피해', 'related_to'), me), '이재명은 12.3 내란의 피해자다');
+  eq('근거 없음은 그렇다고 말한다', sentence(r('근거 없음', 'related_to'), me),
+     '이재명과 12.3 내란은 관련이 있다고 하나 근거를 찾지 못했다');
+  eq('원인·다음은 그대로', sentence(rel({ type: 'related_to', dir: 'out', other: ev, edge_label: '원인' }), me),
+     '이재명은 12.3 내란의 원인이 되었다');
+}
+
+// --- 인과 -----------------------------------------------------------------
+// "온톨로지 그래프이므로 인과관계를 보여줘야 한다 — 임진왜란 → 명의 쇠퇴 →
+// 여진족의 성장 → 병자호란" (2026-09-04). 엣지는 원인 → 결과, 라벨이 종류다.
+console.log('\n인과');
+{
+  const imjin = { label: '임진왜란', type: 'event' };
+  const jin = other('wd:JIN', '후금', 'org', 'actor');
+  const bj = other('wd:BJ', '병자호란', 'event', 'event');
+  eq('나가는 인과는 이 노드가 원인', sentence(rel({ type: 'caused', dir: 'out', other: jin, edge_label: '배경' }), imjin),
+     '임진왜란은 후금의 배경이 되었다');
+  eq('들어오는 인과는 상대가 원인', sentence(rel({ type: 'caused', dir: 'in', other: jin, edge_label: '계기' }), { label: '정묘호란', type: 'event' }),
+     '후금은 정묘호란의 계기가 되었다');
+  eq('종류가 영향이면 영향을 주었다', sentence(rel({ type: 'caused', dir: 'out', other: jin, edge_label: '영향' }), imjin),
+     '임진왜란은 후금에 영향을 주었다');
+  eq('종류를 모르면 원인', sentence(rel({ type: 'caused', dir: 'out', other: bj }), imjin), '임진왜란은 병자호란의 원인이 되었다');
+  eq('서술구가 있으면 그 구로 부른다',
+     sentence(rel({ type: 'caused', dir: 'in', other: jin, edge_label: '원인', as: '후금의 파약 행위' }), { label: '병자호란', type: 'event' }),
+     '후금의 파약 행위는 병자호란의 원인이 되었다');
+  eq('원인 묶음 머리', relHead({ type: 'caused', dir: 'in', label: '원인' }), '원인');
+  eq('결과 묶음 머리', relHead({ type: 'caused', dir: 'out', label: '원인' }), '결과');
+  const tree = { center: 'wd:BJ',
+    causes: [{ id: 'wd:JIN', kind: '배경', how: '형제 관계를 요구했다', as: '', evidence: [],
+               children: [{ id: 'wd:IMJIN', kind: '배경', how: '명의 쇠퇴', as: '', evidence: [], children: [] }] }],
+    effects: [],
+    nodes: { 'wd:BJ': { label: '병자호란' }, 'wd:JIN': { label: '후금' }, 'wd:IMJIN': { label: '임진왜란', start: '1592' } } };
+  const rows = chainRows(tree.causes);
+  ok('나무를 줄로 펴면 깊이가 들여쓰기다', rows.length === 2 && rows[0].depth === 0 && rows[1].depth === 1 && rows[1].id === 'wd:IMJIN', JSON.stringify(rows));
+  // 안내선: 형제가 아래에 더 있는 단만 세로선이 이어진다
+  const forest = chainRows([
+    { id: 'a', kind: '원인', children: [{ id: 'a1', kind: '배경', children: [] }, { id: 'a2', kind: '배경', children: [] }] },
+    { id: 'b', kind: '원인', children: [] },
+  ]);
+  const guides = chainGuides(forest);
+  ok('첫 줄은 아래에 형제(b)가 있어 세로선이 이어진다', guides[0].lines[0] === true && guides[0].last === false, JSON.stringify(guides));
+  ok('a1 은 0단 선이 지나가고 1단에도 형제(a2)가 남았다', guides[1].lines[0] === true && guides[1].lines[1] === true && guides[1].last === false, JSON.stringify(guides[1]));
+  ok('a2 는 그 단의 마지막이라 1단 선이 끊긴다', guides[2].lines[0] === true && guides[2].lines[1] === false && guides[2].last === true, JSON.stringify(guides[2]));
+  ok('b 는 뿌리 단의 마지막이다', guides[3].lines[0] === false && guides[3].last === true, JSON.stringify(guides[3]));
+  ok('자식이 있는 줄(a)만 점 아래로 줄기를 내린다', guides[0].stem === true && guides[1].stem === false && guides[2].stem === false && guides[3].stem === false, JSON.stringify(guides.map((g) => g.stem)));
+  const steps = pathSteps([{ id: 'wd:IMJIN', edge: null }, { id: 'wd:JIN', edge: { kind: '배경', how: '명의 쇠퇴' } }, { id: 'wd:BJ', edge: { kind: '원인', how: '' } }], tree.nodes);
+  eq('경로를 글로 읽는다', pathSentence(steps), '임진왜란 → (배경) 후금 → (원인) 병자호란');
+  eq('걸음에 연도가 붙는다', steps[0].year, '1592년');
+}
 
 console.log('\n==============================================');
 console.log(`통과 ${pass} / 실패 ${fail}`);

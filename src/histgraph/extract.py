@@ -573,6 +573,7 @@ def to_graph(
                 CANDIDATES.format(type_clause="AND n.type = ?2"), (name, node_type)
             ).fetchall(),
             doc_span,
+            source_node,
         )
         if row:
             return row["id"], row["type"]
@@ -582,6 +583,7 @@ def to_graph(
                 CANDIDATES.format(type_clause=""), (name,)
             ).fetchall(),
             doc_span,
+            source_node,
         )
         if row:
             return row["id"], row["type"]
@@ -833,9 +835,19 @@ POSSESSIVE_SKIP: dict[str, str] = {
 # 여성을 이름 없이 `누구의 딸` 로만 적었는데 모델이 그 구절을 통째로
 # 이름으로 냈다. `possessive_mismatch` 는 **근거 안에서** 소유격을 찾으므로
 # 이름 자체가 설명구인 이 경우를 놓친다.
+#
+# **친족어를 낱개로 세면 반드시 샌다.** 실측(기축옥사 문서): `정여립의
+# 처자`·`정여립의 형제`·`정여립의 조상` 셋이 그대로 노드가 됐다. 목록에
+# `처`·`형`·`누이` 는 있는데 `처자`·`형제`·`조상` 이 없었던 것뿐이다.
+# 이름 없이 관계로만 가리키는 말은 끝이 없으므로 **집합(형제·자매·처자)과
+# 세대(조상·후손·일가)** 를 같이 넣는다.
+_GROUP_KIN = r"형제|자매|남매|처자|처첩|가족|일가|친족|일족|권속|식솔"
+_LINEAGE_KIN = r"조상|선조|선대|후손|후예|자손|후사"
 DESCRIPTIVE_NAME = re.compile(
-    rf"의\s*(?:{_PARENT_KIN}|{_DESCENDANT_KIN}"
-    r"|부인|처|아내|남편|어머니|아버지|부모|형|아우|동생|누이)\s*$"
+    rf"의\s*(?:{_PARENT_KIN}|{_DESCENDANT_KIN}|{_GROUP_KIN}|{_LINEAGE_KIN}"
+    r"|부인|처|아내|남편|어머니|아버지|부모|형|아우|동생|누이|누나|언니|오빠"
+    r"|장인|장모|사위|며느리|조카|숙부|백부|외숙|사촌|문인|제자|스승"
+    r")\s*$"
 )
 
 
@@ -994,7 +1006,8 @@ def lifespan_conflict(
     return gap > LIFESPAN_TOLERANCE
 
 
-def pick_candidate(rows: list, doc_span: tuple[int, int] | None):
+def pick_candidate(rows: list, doc_span: tuple[int, int] | None,
+                   doc_id: str | None = None):
     """이름이 여러 노드를 가리킬 때 하나를 고른다.
 
     기본 기준은 **연결 차수**다 — 산문이 '정종'이라 쓸 때 엣지 1개짜리
@@ -1007,9 +1020,19 @@ def pick_candidate(rows: list, doc_span: tuple[int, int] | None):
 
     그래서 **출처 문서의 연대와 겹치는 후보를 먼저 본다.** 겹치는 것이
     있으면 그 안에서 차수로 고르고, 없으면 원래대로 차수만 본다
-    (연대를 모르는 후보를 탈락시키면 멀쩡한 연결이 사라진다)."""
+    (연대를 모르는 후보를 탈락시키면 멀쩡한 연결이 사라진다).
+
+    **연대만으로는 이 경우를 못 막는다.** 예종(1450~1469)과 퇴계
+    (1501~1570)는 32년 차이라 여유(40년) 안에 든다. 그래서 이황 문서에서
+    나온 관계 22건이 그대로 예종에게 갔다 — 결혼·문인·남인·양명학 배척이
+    전부 예종의 것이 됐다. **문서의 주인공은 남에게 주지 않는다**: 후보
+    안에 출처 문서 자신이 있으면 그것이 답이다."""
     if not rows:
         return None
+    if doc_id is not None:
+        for r in rows:
+            if r["id"] == doc_id:
+                return r
     if doc_span is None:
         return rows[0]
     from .promote import life_span

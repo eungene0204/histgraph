@@ -23,12 +23,17 @@
 // 대신 연표는 화면보다 길어지므로, 훑기 막대와 '고른 자리로 돌아가기'가
 // 길을 잃지 않게 받쳐 준다.
 
-import { nodeColor, TYPE_COLOR } from './graph-view.js';
+import { nodeColor } from './graph-view.js';
 
 // **왼쪽에는 왕의 재위 띠가 선다.** 조선의 시간을 사람은 절대 연도가
 // 아니라 임금으로 읽는다 — '1456년'보다 '세조 때'가 먼저 온다. 재위는
 // 구간이므로 점이 아니라 막대로 긋고, 사망은 재위의 끝이 아니라서
 // (태조는 1398년에 물러나 1408년에 죽었다) 따로 찍어 점선으로 잇는다.
+//
+// **대통령도 같은 띠, 같은 모양이다.** 1948년 뒤의 시간은 '박정희 때'로
+// 읽힌다 — 왕이 하던 일을 대통령이 이어받았다. 서버가 자리의 종류(kind)를
+// 주고, 여기서는 말만 가른다: 재위/재임. 재임 중인 사람은 끝 해 대신
+// '~' 만 적는다 (ongoing).
 const LANE_W = 104;   // 재위 띠 칸의 너비 (끄면 0)
 const BAR_X = 11;     // 재위 막대가 서는 자리 (칸 안에서)
 const BAR_W = 6;
@@ -113,10 +118,51 @@ export function placeMarks(marks, { from, to, pos }) {
 // 부산진 전투(5월)가 한산도 대첩(7월)보다 아래에 섰다). 날짜를 모르는
 // 것은 앞에 둔다 — 위키데이터는 연도만 아는 날을 1월 1일로 적어 보내므로
 // 달을 따로 적어 주지는 않는다.
+//
+// **원인은 결과보다 위에 선다.** 결과의 날짜가 거칠어서(연도만) 원인의
+// 날짜(12월 9일)를 품으면, 날짜 문자열로는 결과가 먼저다 — 병자호란
+// (1636-12-09)이 그 결과인 공석신주사건(1636) 아래에 섰다 (2026-09-05
+// 지적). 거친 날짜는 '그 해 어딘가'이지 '1월 1일'이 아니므로, 원인을
+// 품는 거친 날짜는 원인 **바로 뒤**에 세운다. 고른 노드와 그 이웃 사이의
+// 인과만 안다 (서버가 `rel` 로 준다). 같은 날이어도 원인이 먼저다.
 export function sortMarks(marks) {
+  const self = marks.find((m) => m.kind === 'self');
+  const key = new Map(marks.map((m) => [m, sortKey(m, self, marks)]));
   return [...marks].sort((a, b) => a.year - b.year
-    || String(a.date || '').localeCompare(String(b.date || ''))
+    || key.get(a).localeCompare(key.get(b))
     || a.label.localeCompare(b.label, 'ko'));
+}
+
+// 거친 날짜가 고운 날짜를 품는가 — '1636' ⊇ '1636-12-09', '1920-10' ⊇
+// '1920-10-21'. 같은 날도 품는다. 날짜를 모르면('') 무엇이든 품는다.
+export function dateContains(coarse, fine) {
+  const c = String(coarse || '');
+  const f = String(fine || '');
+  return f.startsWith(c) && (f.length === c.length || f[c.length] === '-');
+}
+
+// 정렬용 날짜 열쇠. 원인을 품는 거친 날짜는 '원인 날짜 + ~' 가 되어
+// 원인 바로 뒤에 선다 ('~' 는 숫자와 '-' 보다 뒤다). 비교기는 그대로
+// 문자열 순이라 순환이 생기지 않는다.
+function sortKey(m, self, marks) {
+  const own = String(m.date || '');
+  if (!self) return own;
+  if (m === self) {
+    // 고른 노드가 결과: 그 날짜가 품는 원인들 중 가장 늦은 것 뒤.
+    let latest = null;
+    for (const n of marks) {
+      if (n.rel?.type !== 'caused' || n.rel.dir !== 'in' || n.year !== m.year) continue;
+      const d = String(n.date || '');
+      if (dateContains(own, d) && (latest === null || d > latest)) latest = d;
+    }
+    return latest === null ? own : `${latest}~`;
+  }
+  // 이웃이 결과(고른 노드가 원인): 이웃의 거친 날짜가 고른 노드를 품으면 그 뒤.
+  if (m.rel?.type === 'caused' && m.rel.dir === 'out' && m.year === self.year
+      && dateContains(own, self.date)) {
+    return `${String(self.date || '')}~`;
+  }
+  return own;
 }
 
 export class TimelineRail {
@@ -133,6 +179,8 @@ export class TimelineRail {
       this.showReigns = localStorage.getItem('tl-reigns') !== '0';
     } catch { /* 비공개 창 등 */ }
     this.focusPy = 0;
+    // 고른 자리로 가는 중인가. show() 가 켜고, 도착하거나 사람이 훑으면 꺼진다.
+    this.seeking = false;
     // 지금 배치의 축 — 연도 <-> 픽셀 환산에 쓴다 (pos: 해마다의 y)
     this.axis = { from: 0, to: 1, H: 1, pos: new Float64Array([0, 1]) };
 
@@ -149,6 +197,10 @@ export class TimelineRail {
     });
 
     this.body.addEventListener('scroll', () => this.syncMap(), { passive: true });
+    // 사람이 직접 훑기 시작하면 '고른 자리로 가는 중'은 끝난 것이다.
+    for (const ev of ['wheel', 'pointerdown', 'touchstart']) {
+      this.body.addEventListener(ev, () => { this.seeking = false; }, { passive: true });
+    }
 
     // 훑기 막대를 누르거나 끌면 그 해로 옮긴다.
     this.head.addEventListener('pointerdown', (ev) => {
@@ -198,6 +250,7 @@ export class TimelineRail {
   renderHead() {
     const d = this.data;
     const kings = (d.reigns || []).length;
+    const chipText = seatCount(d.reigns || []);
     const when = d.year === null ? '연도 미상'
       : d.end !== null && d.end !== d.year ? `${yr(d.year)} ~ ${yr(d.end)}`
       : yr(d.year);
@@ -221,7 +274,7 @@ export class TimelineRail {
       <button class="tl-when" title="고른 자리로 돌아가기">${esc(when)}${via}</button>
       <div class="tl-count"></div>
       ${kings ? `<button class="tl-kings" aria-pressed="${this.showReigns}"
-            title="왼쪽에 왕의 재위 기간을 막대로 세웁니다">왕 ${kings}</button>` : ''}
+            title="${esc(seatHint(d.reigns))}">${esc(chipText)}</button>` : ''}
       <div class="tl-map" hidden title="누르거나 끌어서 연표를 옮깁니다">
         <span>${d.axis.from}</span>
         <div class="tl-map-bar"><i class="tl-map-view"></i><b class="tl-map-here" hidden></b></div>
@@ -266,8 +319,18 @@ export class TimelineRail {
       this.body.innerHTML = '<p class="tl-empty">연도를 아는 이웃이 없어 자리를 잡을 수 없습니다.</p>';
       return;
     }
-    // 창 크기가 바뀌어 다시 그리는 경우엔 보던 해를 지킨다
-    const viewYear = keepView ? this.yearAt(this.body.scrollTop + this.body.clientHeight / 2) : null;
+    // 창 크기가 바뀌어 다시 그리는 경우엔 보던 해를 지킨다.
+    //
+    // **단, 고른 자리로 가는 중이면 그리로 마저 간다.** 새 노드의 머리글이
+    // 이전과 다르면 (연도 미상 힌트가 생기거나 '연결된 연도' 줄이 사라지면)
+    // 몸통 높이가 몇 px 바뀌고, 그 순간 ResizeObserver 가 이 길로 들어온다.
+    // 그때 '보던 해'는 아직 옛 노드의 자리라, 지키면 방금 시작한 스크롤을
+    // 도로 끊는 셈이 된다 (실측: 갑자사화에서 한양을 검색하면 연표가 1504년에
+    // 그대로 서 있었다. 그래프에서 누를 때는 비슷한 노드끼리 오가 머리글이
+    // 안 바뀌니 드러나지 않았을 뿐이다).
+    const seeking = this.seeking;
+    const viewYear = keepView && !seeking
+      ? this.yearAt(this.body.scrollTop + this.body.clientHeight / 2) : null;
 
     // 재위 띠가 왼쪽 칸을 먹고, 축과 라벨은 그만큼 오른쪽으로 밀린다.
     const reigns = (d.reigns || []);
@@ -311,31 +374,38 @@ export class TimelineRail {
         <circle cx="${AX}" cy="${ty}" r="${m.kind === 'self' ? 4 : 2.6}" fill="${c}"/>`;
     }).join('');
 
-    // 연도 칸은 **그 해의 첫 줄에만** 해를 적고, 나머지 줄에는 달을 적는다.
-    // 늘어난 해에서 같은 숫자를 서른여덟 번 되풀이해 봐야 읽을 것이 없고,
-    // 달은 그 안의 차례를 실제로 설명한다. 달을 모르는 줄은 **비운다** —
-    // 위키데이터가 연도만 아는 날을 1월 1일로 적어 보내는 것을 `precision`
-    // 이 걷어냈으므로, 빈 칸은 '1월'이 아니라 '모른다'는 뜻이다.
-    const items = place.map(({ m, ty }, i) => `
+    // 원인은 오른쪽 여백에서 꺾인 선으로 고른 노드와 잇는다 (2026-09-05
+    // 사용자 요청). 축 위에 그리면 점·막대와 겹치고, 라벨 사이를 지나면
+    // 글자를 가른다 — 오른쪽 가장자리는 늘 비어 있다.
+    const W = this.body.clientWidth || (PANEL_W + lane);
+    const self_ = place.find((p) => p.m.kind === 'self');
+    const causeWires = self_
+      ? place.filter((p) => isCause(p.m)).map((p) => causeWire(p.ty, self_.ty, W)).join('')
+      : '';
+
+    const items = place.map(({ m, ty }, i) => {
+      const cell = yearCell(m, i ? place[i - 1].m : null);
+      return `
       <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${ty.toFixed(1)}px"
               title="${esc(markName(m))} · ${esc(whenText(m))}">
-        <span class="tl-y">${i && place[i - 1].m.year === m.year
-          ? esc(monthOf(m.date)) : esc(shortYear(m.year))}</span>
+        <span class="tl-y${cell.repeat ? ' rep' : ''}">${esc(cell.text)}</span>
         <span class="tl-name">${esc(markName(m))}</span>
-        ${m.rel ? `<span class="tl-rel">${esc(relHead(m.rel))}</span>` : ''}
-      </button>`).join('');
+        ${m.rel ? `<span class="tl-rel${isCause(m) ? ' is-cause' : ''}">${esc(relHead(m.rel))}</span>` : ''}
+      </button>`;
+    }).join('');
 
     const band = lane
       ? this.reignBand(reigns, at, { id: d.id, year: d.year })
       : { svg: '', items: '', named: 0 };
 
     this.body.innerHTML = `
-      <div class="tl-canvas" style="height:${H}px; --lane:${lane}px">
+      <div class="tl-canvas${causeWires ? ' has-cause' : ''}" style="height:${H}px; --lane:${lane}px">
         <svg class="tl-wires" width="100%" height="${H}" aria-hidden="true">
           <line x1="${AX}" y1="${PAD_TOP - 8}" x2="${AX}" y2="${H - PAD_BOTTOM + 8}"
                 stroke="var(--line)" stroke-width="1"/>
           ${band.svg}
           ${wires}
+          ${causeWires}
         </svg>
         ${band.items}
         ${items}
@@ -349,22 +419,22 @@ export class TimelineRail {
     const chip = this.head.querySelector('.tl-kings');
     if (chip) {
       const all = reigns.length;
-      chip.textContent = !lane || band.named >= all ? `왕 ${all}` : `왕 ${band.named}/${all}`;
+      chip.textContent = !lane || band.named >= all
+        ? seatCount(reigns) : `${seatCount(reigns)} (이름 ${band.named}/${all})`;
       chip.title = !lane
-        ? '왼쪽에 왕의 재위 기간을 막대로 세웁니다'
+        ? seatHint(reigns)
         : band.named >= all
-        ? '막대가 재위, 동그라미가 몰년입니다'
-        : `이름을 세울 자리가 모자란 임금 ${all - band.named}명은 막대만 있습니다`
+        ? '막대가 재위·재임, 동그라미가 몰년입니다'
+        : `이름을 세울 자리가 모자란 ${all - band.named}명은 막대만 있습니다`
           + ' — 막대에 마우스를 올리면 이름이 나옵니다';
     }
-    const self_ = place.find((p) => p.m.kind === 'self');
     const focus = self_ || place.find((p) => p.m.kind === 'near')
       || place[Math.floor(place.length / 2)];
     this.focusPy = focus.ty;
     this.hereFrac = self_ ? self_.ty / H : null;
     this.hereEndFrac = self_ && self_.m.end != null && self_.m.end !== self_.m.year
       ? at(self_.m.end) / H : null;
-    if (recenter) this.recenter();
+    if (recenter || seeking) this.recenter();
     else if (viewYear !== null) this.body.scrollTop = this.yOf(viewYear) - this.body.clientHeight / 2;
     this.syncMap();
   }
@@ -375,7 +445,7 @@ export class TimelineRail {
   // 고종 1907 퇴위 · 1919 사망). 재위 중에 죽은 임금은 막대 끝과 동그라미가
   // 같은 자리에 겹치고, 그때 몰년은 막대 라벨의 뒷 숫자가 곧 몰년이다.
   reignBand(reigns, at, self = {}) {
-    const c = TYPE_COLOR.person;
+    const c = REIGN_COLOR;
     const svg = [];
     const labels = [];       // {y, prio, html}
     // **고른 노드가 누구 때의 일인지 띠에서 바로 보이게 한다.** 연표가
@@ -387,7 +457,8 @@ export class TimelineRail {
       const y1 = at(r.start);
       const y2 = Math.max(at(r.end), y1 + 2);
       const dy = r.death != null ? at(r.death) : null;
-      const tip = `${r.label} · ${r.position} 재위 ${yr(r.start)}~${yr(r.end)}`
+      const tip = `${r.label} · ${r.position} ${seatWord(r)} ${yr(r.start)}~`
+        + (r.ongoing ? '' : yr(r.end))
         + (r.death != null ? ` · ${yr(r.death)} 사망` : '');
       // 이웃한 재위는 끝과 시작이 맞닿는다. 한 칸씩 걸러 진하게 칠해야
       // 어디서 갈리는지 보인다.
@@ -408,7 +479,7 @@ export class TimelineRail {
       labels.push({
         y: y1, prio: 0,
         html: `<button class="tl-reign${on ? ' k-on' : ''}" data-id="${esc(r.id)}" style="top:${y1.toFixed(1)}px"
-                 title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${shortYear(r.start)}~${shortYear(r.end)}</i></button>`,
+                 title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${shortYear(r.start)}~${r.ongoing ? '' : shortYear(r.end)}</i></button>`,
       });
       // 퇴위 뒤에도 산 임금만 몰년을 따로 적는다. 재위 중에 죽었으면
       // 위 막대 라벨의 뒷 숫자가 이미 몰년이라 두 번 적는 셈이 된다.
@@ -447,7 +518,24 @@ export class TimelineRail {
   }
 
   recenter() {
-    this.body.scrollTo({ top: this.focusPy - this.body.clientHeight / 2, behavior: 'smooth' });
+    const top = Math.max(0, Math.min(
+      this.focusPy - this.body.clientHeight / 2,
+      this.body.scrollHeight - this.body.clientHeight));
+    this.seeking = true;
+    this.body.scrollTo({ top, behavior: 'smooth' });
+    // 도착하면 '가는 중'을 내린다. 그 뒤로는 창 크기가 바뀌어도 보던 해를 지킨다.
+    // 가는 도중 다시 부르면 이전 목적지의 감시는 걷는다 — 남겨 두면 지나가는
+    // 길에 옛 자리를 스치는 순간 '도착'으로 잘못 읽는다.
+    if (this._arrive) this.body.removeEventListener('scroll', this._arrive);
+    const arrived = () => {
+      if (Math.abs(this.body.scrollTop - top) > 1) return;
+      this.seeking = false;
+      this.body.removeEventListener('scroll', arrived);
+      if (this._arrive === arrived) this._arrive = null;
+    };
+    this._arrive = arrived;
+    this.body.addEventListener('scroll', arrived, { passive: true });
+    arrived();
   }
 
   // 지금 보이는 구간이 연표 어디쯤인지. 스크롤이 없으면 막대도 없다.
@@ -476,10 +564,42 @@ export class TimelineRail {
 const DIR_HEAD = {
   child_of: { out: '부모', in: '자녀' },
   part_of: { out: '상위', in: '하위' },
+  // 서버는 인과의 이름을 '원인'으로만 준다. 나가는 쪽 상대는 이 노드가
+  // 부른 **결과**다 — 위화도 회군 옆에 과전법이 '원인'으로 서 있었다.
+  caused: { out: '결과', in: '원인' },
 };
 
 function relHead(rel) {
   return DIR_HEAD[rel.type]?.[rel.dir] || rel.label;
+}
+
+// 이 표시가 고른 노드의 **원인**인가. caused 엣지는 원인 → 결과이므로
+// 들어오는(in) 쪽 상대가 원인이다. 결과(out)는 잇지 않는다 — 사용자가
+// 부른 것은 원인뿐이고, 양쪽을 다 그리면 선이 어느 쪽으로 읽히는지 흐려진다.
+export function isCause(m) {
+  return m.rel?.type === 'caused' && m.rel?.dir === 'in';
+}
+
+// 원인 줄에서 오른쪽으로 나가 꺾여 내려오고(올라가고), 고른 노드의 줄로
+// 되돌아오는 ㄷ 자 선. 끝에 작은 화살촉이 고른 노드를 가리킨다 —
+// 원인이 결과로 흐른다는 방향은 색만으로는 안 읽힌다.
+//   yFrom: 원인 줄의 y · yTo: 고른 노드 줄의 y · W: 연표 캔버스 너비
+export const CAUSE_WIRE = { arm: 12, inset: 12, color: '#4f93bf' };   // --color-blue
+// 왕·대통령의 재위 띠는 파랑이다 (2026-09-06 사용자 결정: 노드 팔레트가
+// 빨강 계열로 바뀐 뒤에도 "전처럼 blue 를 유지"). 노드 색과 잇지 않는다 —
+// 인물 노드가 빨강이 됐을 때 띠까지 따라가서 지적받았다.
+export const REIGN_COLOR = '#3d84f5';
+export function causeWire(yFrom, yTo, W) {
+  const { arm, inset, color } = CAUSE_WIRE;
+  const xR = W - inset;          // 세로 선 — 스크롤바와 그림자 안쪽
+  const xS = xR - arm;           // 가로 팔이 시작하는 자리 (라벨 오른쪽 끝 + 2px)
+  const f = (v) => Number(v).toFixed(1);
+  return `<path d="M${f(xS)} ${f(yFrom)} H${f(xR)} V${f(yTo)} H${f(xS)}"
+                fill="none" stroke="${color}" stroke-width="1.2"
+                stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>
+          <path d="M${f(xS + 4)} ${f(yTo - 3)} L${f(xS)} ${f(yTo)} L${f(xS + 4)} ${f(yTo + 3)}"
+                fill="none" stroke="${color}" stroke-width="1.2"
+                stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>`;
 }
 
 // 띠 칸은 좁다. 왕조 접두어는 띠 전체가 같은 왕조라 떼어도 헷갈리지
@@ -507,6 +627,44 @@ export function markName(m) {
   const own = /^(-?\d{1,4})/.exec(String(m.date || ''));
   if (!own || Number(own[1]) !== m.year) return label;
   return `${label} 탄생`;
+}
+
+// 연도 칸에 무엇을 적는가. **그 해의 첫 줄**에는 해를 적고, 뒤따르는
+// 줄에는 달을 적는다 — 늘어난 해에서 같은 숫자를 서른여덟 번 되풀이해
+// 봐야 읽을 것이 없고, 달은 그 안의 차례를 실제로 설명한다.
+//
+// **달을 모르면 해를 다시 적되 흐리게 둔다.** 예전에는 비웠는데, 그러면
+// 한 해에 둘만 서고 그 둘 다 날짜가 없을 때 뒤에 선 쪽만 연도 칸이 통째로
+// 비어 '연도를 모르는 사건'으로 읽힌다 (실측: 1380년에 진포 해전과
+// 황산대첩이 나란히 섰고, 가나다순으로 뒤인 황산대첩에 연도가 없었다).
+// 모르는 것은 달이지 해가 아니다 — 아는 것을 지워 모르는 척할 이유는 없다.
+export function yearCell(m, prev) {
+  if (!prev || prev.year !== m.year) return { text: shortYear(m.year), repeat: false };
+  const month = monthOf(m.date);
+  return month ? { text: month, repeat: false }
+    : { text: shortYear(m.year), repeat: true };
+}
+
+// 왕은 재위하고 대통령은 재임한다. 서버가 자리의 종류를 준다.
+function seatWord(r) {
+  return r.kind === 'president' ? '재임' : '재위';
+}
+
+// 칩의 글자 — '왕 27' 또는 '왕 29 · 대통령 14'. 없는 쪽은 적지 않는다.
+export function seatCount(reigns) {
+  const kings = reigns.filter((r) => r.kind !== 'president').length;
+  const presidents = reigns.length - kings;
+  const parts = [];
+  if (kings) parts.push(`왕 ${kings}`);
+  if (presidents) parts.push(`대통령 ${presidents}`);
+  return parts.join(' · ');
+}
+
+function seatHint(reigns) {
+  const hasP = (reigns || []).some((r) => r.kind === 'president');
+  const hasK = (reigns || []).some((r) => r.kind !== 'president');
+  const who = hasP && hasK ? '왕의 재위와 대통령의 재임' : hasP ? '대통령의 재임' : '왕의 재위';
+  return `왼쪽에 ${who} 기간을 막대로 세웁니다`;
 }
 
 function yr(y) {

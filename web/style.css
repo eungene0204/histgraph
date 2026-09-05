@@ -1,23 +1,98 @@
-/* 그래프가 주인공이라 화면 전체가 어둡고 조용하다. 색은 노드에만 쓴다. */
+/* Obsidian 의 기본 다크 테마를 옮겼다. 설계 근거와 값의 출처는 design.md.
+   그래프가 주인공이라 크롬은 무채색 회색 층으로만 짓고, 색은 노드와
+   강조(보라) 둘뿐이다. */
 :root {
   color-scheme: dark;
-  --surface:      #141413;
-  --surface-2:    #1a1a19;
-  --surface-3:    #232321;
-  --line:         #2f2f2c;
-  --text:         #f0efec;
-  --text-2:       #c3c2b7;
-  --text-3:       #8b8b84;
-  /* 크롬이 쓰는 단 하나의 색 — 초점·링크·누를 수 있는 것.
-     노드 색과는 다른 갈래라 이름도 따로 둔다. */
-  --accent:       #3987e5;
-  /* 로고 표식은 노드 팔레트의 축소판이다. 값은 graph-view.js 의
-     TYPE_COLOR person·event·place 를 그대로 옮긴 것 — 같은 것을 두
-     벌 두면 한쪽만 고쳐진다. (뼈대 색은 표식에 쓰지 않아 두지 않는다) */
-  --mark-actor:   #4a6ad8;
-  --mark-event:   #ec7e3e;
-  --mark-thing:   #3fb968;
-  --font: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+
+  /* --- Obsidian 의 회색 사다리 (dark) --- */
+  --color-base-00: #1e1e1e;
+  --color-base-10: #242424;
+  --color-base-20: #262626;
+  --color-base-25: #2a2a2a;
+  --color-base-30: #363636;
+  --color-base-35: #3f3f3f;
+  --color-base-40: #555555;
+  --color-base-50: #666666;
+  --color-base-60: #999999;
+  --color-base-70: #b3b3b3;
+  --color-base-100: #dadada;
+
+  /* 강조색 — Obsidian 의 보라 hsl(254 80% 68%). 초점·링크·누를 수 있는 것. */
+  --accent-h: 254; --accent-s: 80%; --accent-l: 68%;
+  --color-accent:   hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --color-accent-1: hsl(var(--accent-h) var(--accent-s) 73%);
+  --color-accent-2: hsl(var(--accent-h) var(--accent-s) 78%);
+  /* 파랑 — 연표의 '원인' (2026-09-05 사용자 요청: 원인은 blue). 노드 팔레트의
+     남색(003049)을 글자가 읽히도록 밝힌 것. 인물 노드가 빨강이 된 뒤로 노드
+     색과는 무관하다. */
+  --color-blue: #4f93bf;
+
+  /* --- 뜻을 가진 이름 --- */
+  --background-primary:       var(--color-base-00);   /* 본문·캔버스 */
+  --background-primary-alt:   var(--color-base-10);
+  --background-secondary:     var(--color-base-20);   /* 사이드바·머리·상태 줄 */
+  --background-secondary-alt: var(--color-base-30);
+  --background-modifier-border:       var(--color-base-30);
+  --background-modifier-border-hover: var(--color-base-35);
+  --background-modifier-border-focus: var(--color-base-40);
+  --background-modifier-hover:        rgba(255, 255, 255, .075);
+  --background-modifier-active-hover: hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .15);
+  --background-modifier-form-field:   var(--color-base-00);
+  --text-normal:  var(--color-base-100);
+  --text-muted:   var(--color-base-70);
+  --text-faint:   var(--color-base-50);
+  --text-accent:        var(--color-accent);
+  --text-accent-hover:  var(--color-accent-2);
+  --text-on-accent: #fff;
+  --text-selection: hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .25);
+  --interactive-normal: var(--color-base-30);
+  --interactive-hover:  var(--color-base-35);
+  --interactive-accent: var(--color-accent);
+  --tag-background: hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .1);
+  --tag-border:     hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .15);
+
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --input-radius: 5px;
+  --pill-radius: 2em;
+  --shadow-s: 0 1px 2px rgba(0,0,0,.121), 0 3.4px 6.7px rgba(0,0,0,.179), 0 15px 30px rgba(0,0,0,.3);
+  --shadow-l: 0 1.8px 7.3px rgba(0,0,0,.071), 0 6.3px 24.1px rgba(0,0,0,.112), 0 30px 90px rgba(0,0,0,.2);
+
+  /* Obsidian 은 Inter 를 싣지만 우리는 싣지 않는다 — 한글은 어차피 시스템
+     글꼴이 맡고, 라틴은 시스템 글꼴(SF·Segoe)이 Inter 와 같은 결이다. */
+  --font-interface: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter,
+                    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  --font-ui-smaller: 11px;
+  --font-ui-small:   13px;
+  --font-ui-medium:  15px;
+  --font-ui-larger:  20px;
+  --font-text-size:  14px;
+  --line-height-normal: 1.5;
+  --line-height-tight: 1.3;
+
+  /* 그래프 */
+  --graph-controls-width: 240px;
+  --graph-line: var(--color-base-35);
+  --graph-text: var(--text-normal);
+  --graph-node-focused: var(--text-accent);
+
+  /* 로고 표식 = 노드 팔레트의 축소판. graph-view.js 의 TYPE_COLOR
+     person·event·place 를 그대로 옮긴 것 — 두 벌 두면 한쪽만 고쳐진다. */
+  --mark-actor: #3d84f5;
+  --mark-event: #fb6c13;
+  --mark-thing: #2e9e5e;
+
+  /* 옛 이름 다리. timeline.js 가 var(--line)·var(--surface-2) 를 직접 쓴다. */
+  --surface:   var(--background-primary);
+  --surface-2: var(--background-secondary);
+  --surface-3: var(--color-base-25);
+  --line:      var(--background-modifier-border);
+  --text:      var(--text-normal);
+  --text-2:    var(--text-muted);
+  --text-3:    var(--text-faint);
+  --accent:    var(--color-accent);
+  --font:      var(--font-interface);
 }
 
 * { box-sizing: border-box; }
@@ -25,12 +100,14 @@
 html, body {
   height: 100%;
   margin: 0;
-  background: var(--surface);
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 14px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+  line-height: var(--line-height-normal);
   -webkit-font-smoothing: antialiased;
 }
+::selection { background: var(--text-selection); }
 
 body { display: flex; flex-direction: column; overflow: hidden; }
 
@@ -40,410 +117,559 @@ body { display: flex; flex-direction: column; overflow: hidden; }
    받는다. 실제로 노드 클릭과 연표 스크롤이 한꺼번에 죽었다. */
 #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
-/* --- 상단 --- */
+/* Obsidian 의 스크롤바 — 가늘고, 트랙은 없고, 잡이만 반투명. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.1); border-radius: var(--radius-l);
+  border: 3px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); background-clip: padding-box; }
+
+button, input, select { font-family: inherit; }
+
+/* 누를 수 있는 아이콘 — Obsidian 의 .clickable-icon */
+.clickable-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  background: none; border: none; border-radius: var(--radius-s);
+  color: var(--text-muted); cursor: pointer;
+}
+.clickable-icon:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.clickable-icon[aria-pressed="true"], .clickable-icon[aria-expanded="true"] {
+  background: var(--background-modifier-active-hover); color: var(--text-accent);
+}
+.clickable-icon svg { width: 16px; height: 16px; }
+
+/* --- 상단 (Obsidian 의 탭 머리 줄) --- */
 .top {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
+  gap: 16px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
   flex: none;
 }
 
-.brand { display: flex; align-items: center; gap: 9px; flex: none; }
-.menu-toggle {
-  display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; margin-right: 2px;
-  background: none; border: 1px solid var(--line); border-radius: 7px;
-  color: var(--text-2); cursor: pointer;
-}
-.menu-toggle:hover { color: var(--text); border-color: var(--text-3); }
-.menu-toggle[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
-.brand h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.brand { display: flex; align-items: center; gap: 8px; flex: none; }
+.brand h1 { font-size: var(--font-ui-small); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 .brand .mark {
   width: 13px; height: 13px; border-radius: 50%;
   background: var(--mark-actor);
   box-shadow: 9px 5px 0 -3px var(--mark-event), 16px -3px 0 -4px var(--mark-thing);
 }
+/* 시대 — 지금 열린 문서 이름처럼 탭으로 보인다. 누르면 중심으로 돌아간다. */
 .era {
-  font-size: 12px; color: var(--text-2);
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: 3px 10px; margin-left: 4px;
-  background: none; font-family: inherit; cursor: pointer;
+  font-size: var(--font-ui-small); color: var(--text-muted);
+  border: none; border-radius: var(--radius-s);
+  padding: 4px 8px; margin-left: 2px;
+  background: none; cursor: pointer;
 }
-.era:hover { color: var(--text); border-color: var(--text-3); }
+.era:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 
-.search { position: relative; flex: 1; max-width: 560px; }
+.search { position: relative; flex: 1; max-width: 520px; }
 .search input {
   width: 100%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--surface-3);
-  color: var(--text);
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--input-radius);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-ui-small);
 }
-.search input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.search input::placeholder { color: var(--text-faint); }
+.search input:hover { border-color: var(--background-modifier-border-hover); }
+.search input:focus {
+  outline: none;
+  border-color: var(--background-modifier-border-focus);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; }
 
+/* 검색 결과 — Obsidian 의 빠른 전환(quick switcher) 목록 */
 .results {
   position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; right: 0;
   max-height: 58vh; overflow-y: auto;
-  margin: 0; padding: 4px;
+  margin: 0; padding: 6px;
   list-style: none;
-  background: var(--surface-3);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: 0 18px 40px rgba(0,0,0,.55);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
 }
 .results li {
   display: flex; align-items: center; gap: 9px;
-  padding: 7px 9px; border-radius: 7px; cursor: pointer;
+  padding: 6px 10px; border-radius: var(--radius-s); cursor: pointer;
+  color: var(--text-normal);
 }
-.results li:hover, .results li[aria-selected="true"] { background: #2c2c29; }
-.results .meta { margin-left: auto; color: var(--text-3); font-size: 11.5px; }
-
-.counts { margin-left: auto; color: var(--text-3); font-size: 12px; text-align: right; }
+.results li:hover, .results li[aria-selected="true"] { background: var(--background-modifier-hover); }
+.results li[aria-selected="true"] { color: var(--text-accent); }
+.results .meta { margin-left: auto; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.results .empty-row { color: var(--text-faint); cursor: default; }
 
 /* --- 배치 --- */
 .layout { flex: 1; display: flex; min-height: 0; }
 
-/* 기본은 접힘 — 그래프가 주인공이니 메뉴(☰)를 눌러야 열린다. */
-.side {
-  width: 244px; flex: none;
-  border-right: 1px solid var(--line);
-  background: var(--surface-2);
+/* 캔버스와 그 위에 뜨는 설정 상자를 한 틀에 담는다. */
+.stage-wrap { flex: 1; position: relative; display: flex; min-width: 0; }
+
+/* --- 그래프 설정 상자 (Obsidian 의 graph-controls) ---
+   왼쪽 사이드바가 아니라 캔버스 위 **왼쪽 위**에 떠 있다 (Obsidian 과 같은
+   자리). 기본은 접힘 — 단추 하나만 남는다. 그래프가 주인공이다. */
+.graph-controls-toggle { position: absolute; top: 12px; left: 12px; z-index: 6; }
+.graph-controls-toggle[aria-expanded="true"] { display: none; }
+.graph-controls {
+  position: absolute; top: 12px; left: 12px; z-index: 5;
+  width: var(--graph-controls-width);
+  max-height: calc(100% - 24px);
   overflow-y: auto;
-  padding: 14px;
-  display: none;
+  padding: 6px 10px 10px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
 }
-.layout.side-open .side { display: block; }
-.side section { margin-bottom: 22px; }
-.side h2 {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--text-3); margin: 0 0 8px;
+.graph-controls[hidden] { display: none; }
+.graph-controls .gc-close { position: absolute; top: 6px; right: 6px; }
+.graph-controls section { padding: 4px 0 6px; border-bottom: 1px solid var(--background-modifier-border); }
+.graph-controls section:last-child { border-bottom: none; }
+/* 절 머리 — 접을 수 있다. 화살표가 접힘을 말한다. */
+.graph-controls summary {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 0; margin: 0 0 2px;
+  font-size: var(--font-ui-small); font-weight: 600; color: var(--text-normal);
+  cursor: pointer; list-style: none; user-select: none;
 }
-.hint { color: var(--text-3); font-size: 11.5px; line-height: 1.5; margin: 0 0 8px; }
+.graph-controls summary::-webkit-details-marker { display: none; }
+.graph-controls summary::before {
+  content: ''; width: 5px; height: 5px; margin: 0 6px 0 2px;
+  border-right: 1.5px solid var(--text-faint); border-bottom: 1.5px solid var(--text-faint);
+  transform: rotate(-45deg); transition: transform .12s;
+}
+.graph-controls details[open] > summary::before { transform: rotate(45deg); }
+.hint { color: var(--text-muted); font-size: var(--font-ui-smaller); line-height: 1.5; margin: 0 0 6px; }
 
 .seeds { list-style: none; margin: 0; padding: 0; }
 .seeds li {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 7px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  padding: 4px 6px; border-radius: var(--radius-s); cursor: pointer;
+  font-size: var(--font-ui-small); color: var(--text-normal);
 }
-.seeds li:hover { background: var(--surface-3); }
-.seeds .meta { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.seeds li:hover { background: var(--background-modifier-hover); }
+.seeds .meta { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 
-.legend { list-style: none; margin: 0 0 10px; padding: 0; }
+.legend { list-style: none; margin: 0 0 8px; padding: 0; }
 .legend li {
   display: flex; align-items: center; gap: 8px;
-  padding: 3px 0; font-size: 12.5px; color: var(--text-2);
+  padding: 2px 6px; font-size: var(--font-ui-small); color: var(--text-muted);
 }
-.legend .count { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.legend .count { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 /* 갈래 머리 — 색 견본을 두지 않는다. 색은 아래 타입들이 나눠 가졌다. */
-.legend-group {
-  margin-top: 8px; font-size: 11px; letter-spacing: 0.04em;
-  color: var(--text-3);
-}
+.legend-group { margin-top: 6px; font-size: var(--font-ui-smaller); color: var(--text-faint); }
 .legend li.legend-group:first-child { margin-top: 0; }
-.legend.lines svg { flex: none; }
+.legend.lines svg { flex: none; color: var(--text-faint); }
 
-.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 12.5px; color: var(--text-2); }
-.row select {
-  background: var(--surface-3); color: var(--text);
-  border: 1px solid var(--line); border-radius: 6px;
-  padding: 4px 7px; font: inherit; font-size: 12.5px;
+/* 설정 줄 — Obsidian 의 setting-item 을 작게 */
+.row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 3px 6px; font-size: var(--font-ui-small); color: var(--text-normal);
 }
-.check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); margin-bottom: 7px; cursor: pointer; }
-.check input { accent-color: var(--accent); }
+.row select {
+  background: var(--interactive-normal); color: var(--text-normal);
+  border: 1px solid transparent; border-radius: var(--input-radius);
+  padding: 3px 6px; font: inherit; font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+.row select:hover { background: var(--interactive-hover); }
+.check {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px; font-size: var(--font-ui-small); color: var(--text-normal); cursor: pointer;
+}
+.check input { accent-color: var(--interactive-accent); margin: 0; }
+.check .meta { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.gc-sub { margin: 8px 6px 2px; font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); }
+.edge-filter { list-style: none; margin: 0; padding: 0; }
+.edge-filter .check { padding: 2px 6px; }
+
+/* 슬라이더 — Obsidian 의 setting-item: 이름 왼쪽, 가는 트랙, 둥근 잡이 */
+.slider {
+  display: grid; grid-template-columns: 1fr 88px 30px; align-items: center; gap: 8px;
+  padding: 3px 6px; font-size: var(--font-ui-small); color: var(--text-normal);
+}
+.slider i { font-style: normal; font-size: var(--font-ui-smaller); color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
+.slider input {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 3px; margin: 0;
+  background: var(--background-modifier-border); border-radius: 2px; cursor: pointer;
+}
+.slider input::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--interactive-normal); border: 1px solid var(--background-modifier-border-hover);
+  box-shadow: 0 1px 2px rgba(0,0,0,.3);
+}
+.slider input:hover::-webkit-slider-thumb { background: var(--interactive-hover); }
+.slider input:active::-webkit-slider-thumb { background: var(--interactive-accent); border-color: var(--interactive-accent); }
+.slider input::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--interactive-normal); border: 1px solid var(--background-modifier-border-hover);
+}
 
 /* --- 캔버스 --- */
-.stage { flex: 1; position: relative; min-width: 0; background: var(--surface); }
+.stage { flex: 1; position: relative; min-width: 0; background: var(--background-primary); }
 #canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 
 .stage-note {
-  position: absolute; left: 14px; bottom: 12px;
-  background: rgba(26,26,25,.92);
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 6px 10px; font-size: 12px; color: var(--text-2);
+  position: absolute; left: 12px; bottom: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m);
+  padding: 4px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted);
 }
 .empty {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-3); font-size: 13.5px; pointer-events: none;
+  color: var(--text-faint); font-size: var(--font-ui-small); pointer-events: none;
+  text-align: center; padding: 0 40px;
 }
 /* [hidden] 은 display 기본값만 끈다 — .empty 의 flex 가 이기므로 명시한다.
    (실측: 그래프 위에 안내문이 겹쳐 그려졌다) */
 .empty[hidden], .stage-note[hidden], .results[hidden], .detail[hidden],
 .timeline[hidden] { display: none; }
 
-/* --- 연표 ---
+/* --- 연표 (왼쪽 사이드바) ---
    그래프는 관계만 말하고 시간은 말하지 않는다. 고른 노드가 몇 년쯤의
-   일이고 무엇 뒤 무엇 앞인지를 이 막대가 맡는다. 자리는 연도에 비례하고,
-   겹쳐서 밀린 라벨은 가는 회색 실선으로 제자리와 이어 둔다 — 노드 색으로
-   그었더니 관계선으로 읽혔다. 갈리는 것은 선의 모양이 아니라 색이다. */
+   일이고 무엇 뒤 무엇 앞인지를 이 막대가 맡는다. 자리는 연도에 비례한다. */
 .timeline {
   width: 252px; flex: none;
   position: relative;
   display: flex; flex-direction: column;
-  border-right: 1px solid var(--line);
-  background: var(--surface-2);
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
   min-height: 0;
 }
-.tl-head { flex: none; padding: 13px 14px 11px; border-bottom: 1px solid var(--line); }
-.tl-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
-.tl-kicker {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--text-3);
-}
+.tl-head { flex: none; padding: 10px 12px 10px; border-bottom: 1px solid var(--background-modifier-border); }
+.tl-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.tl-kicker { font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); }
 /* 몇 개가 물러나 있는지. 안 보이는 사건이 없는 셈이 되면 안 된다. */
-.tl-count { margin-top: 4px; font-size: 11px; color: var(--text-3); }
-.tl-count b { color: var(--text-2); font-weight: 600; }
+.tl-count { margin-top: 3px; font-size: var(--font-ui-smaller); color: var(--text-faint); }
+.tl-count b { color: var(--text-muted); font-weight: 600; }
 /* 연표는 화면보다 길어서 훑다 보면 고른 자리를 잃는다. 누르면 돌아온다. */
 .tl-when {
   display: block; width: 100%; padding: 0; text-align: left;
   background: none; border: none; cursor: pointer;
-  color: var(--text); font: inherit; font-size: 16px; font-weight: 650;
+  color: var(--text-normal); font: inherit; font-size: var(--font-ui-medium); font-weight: 600;
   letter-spacing: -0.01em;
 }
-.tl-when:hover { color: var(--accent); }
+.tl-when:hover { color: var(--text-accent); }
 /* 노드가 스스로 적고 있는 날짜가 아니라 이어진 연도 노드에서 가져온 값.
    같은 얼굴로 내놓으면 안 된다. */
 .tl-via {
   margin-left: 6px; vertical-align: 2px;
-  font-size: 10.5px; font-weight: 400; color: var(--text-3);
-  border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px;
+  font-size: 10.5px; font-weight: 400; color: var(--text-faint);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--pill-radius); padding: 1px 6px;
 }
 
 /* 훑기 막대 — 연표가 화면보다 길 때만 나온다.
-   밝은 칸이 지금 보이는 구간, 파란 표식이 고른 노드의 자리.
-   누르거나 끌면 그 해로 옮긴다. */
+   테두리 칸이 지금 보이는 구간, 보라 표식이 고른 노드의 자리. */
 .tl-map {
   display: flex; align-items: center; gap: 6px;
-  margin-top: 10px; font-size: 10.5px; color: var(--text-3);
+  margin-top: 8px; font-size: 10.5px; color: var(--text-faint);
   cursor: pointer; user-select: none;
 }
 .tl-map[hidden] { display: none; }
 .tl-map-bar {
-  position: relative; flex: 1; height: 12px; border-radius: 3px;
-  background: var(--surface-3); touch-action: none;
+  position: relative; flex: 1; height: 12px; border-radius: var(--radius-s);
+  background: var(--color-base-30); touch-action: none;
 }
-/* 지금 보이는 구간 — 창틀로 그린다. 칠해 버리면 고른 노드 표식과
-   둘 다 '막대'로 보여 무엇이 무엇인지 갈리지 않는다. */
 .tl-map-view {
   position: absolute; top: 0; bottom: 0; min-width: 8px;
-  border: 1.5px solid var(--text-3); border-radius: 3px;
+  border: 1.5px solid var(--text-faint); border-radius: var(--radius-s);
 }
-.tl-map:hover .tl-map-view { border-color: var(--text-2); }
-/* 고른 노드의 자리 (인물이면 생몰 구간) */
+.tl-map:hover .tl-map-view { border-color: var(--text-muted); }
 .tl-map-here {
   position: absolute; top: 3px; bottom: 3px; min-width: 2px;
-  border-radius: 2px; background: var(--accent);
+  border-radius: 2px; background: var(--interactive-accent);
 }
 
 .tl-body { flex: 1; overflow-y: auto; position: relative; min-height: 0; }
-/* 아래로 더 있다는 표시. 연표는 화면보다 길다. */
 .timeline::after {
-  content: ''; position: absolute; left: 0; right: 9px; bottom: 0; height: 28px;
-  background: linear-gradient(transparent, var(--surface-2));
+  content: ''; position: absolute; left: 0; right: 12px; bottom: 0; height: 28px;
+  background: linear-gradient(transparent, var(--background-secondary));
   pointer-events: none;
 }
 .tl-canvas { position: relative; }
 .tl-wires { position: absolute; inset: 0; pointer-events: none; }
-.tl-hint {
-  margin: 9px 0 0; font-size: 11px; line-height: 1.55; color: var(--text-3);
-}
+.tl-hint { margin: 8px 0 0; font-size: var(--font-ui-smaller); line-height: 1.5; color: var(--text-faint); }
 
+/* 연표의 줄 — Obsidian 의 파일 트리 항목(tree-item) */
 .tl-mark {
   position: absolute; left: var(--lane, 0px); right: 8px; transform: translateY(-50%);
   display: flex; align-items: baseline; gap: 6px;
   padding: 3px 4px 3px 0;
-  background: none; border: none; border-radius: 6px;
-  color: var(--text-2); font: inherit; font-size: 12px;
+  background: none; border: none; border-radius: var(--radius-s);
+  color: var(--text-muted); font: inherit; font-size: 12px;
   text-align: left; cursor: pointer;
 }
-.tl-mark:hover { background: var(--surface-3); color: var(--text); }
+.tl-mark:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 .tl-y {
   flex: none; width: 38px; text-align: right;
-  font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums;
 }
 .tl-name {
   margin-left: 14px;                 /* 38(연도) + 6(gap) + 14 = 58 = DOT_X */
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tl-rel { flex: none; font-size: 10.5px; color: var(--text-3); }
-/* 고른 노드 자신. 나머지는 그 자리를 재는 눈금이므로 물러나 있어야 한다. */
-.tl-mark.k-self { color: var(--text); font-weight: 650; }
-.tl-mark.k-self .tl-y { color: var(--text-2); }
-.tl-mark.k-anchor { color: var(--text-3); }
-.tl-mark.k-anchor:hover { color: var(--text-2); }
-/* 왕조 자신. 사건이 아니라 그것들이 놓인 틀이라 조금 물러나 있다. */
-.tl-mark.k-era { color: var(--text-2); font-weight: 600; }
-/* --- 왕의 재위 띠 ---
-   막대가 재위, 동그라미가 사망. 물러나서도 산 임금이 여럿이라(태조는
-   1398년에 물러나 1408년에 죽었다) 둘을 한 점으로 합칠 수 없다. 그 사이는
-   점선으로 잇는다 — 상왕으로 산 기간이다. */
+.tl-rel { flex: none; font-size: 10.5px; color: var(--text-faint); }
+/* 원인 — 파랗게, 그리고 오른쪽 여백의 꺾인 선(causeWire)이 고른 노드와 잇는다.
+   선이 지나는 자리만큼 줄을 짧게 접어 글자와 선이 겹치지 않게 한다
+   (24 = inset 12 + arm 12). 원인이 없는 연표는 줄이 그대로 넓다. */
+.tl-rel.is-cause { color: var(--color-blue); }
+.tl-canvas.has-cause .tl-mark { right: 24px; }
+/* 고른 노드 자신 — 열린 문서처럼 밝고 굵다. */
+.tl-mark.k-self { color: var(--text-normal); font-weight: 600; }
+.tl-mark.k-self .tl-y { color: var(--text-muted); }
+.tl-y.rep { opacity: .42; }
+.tl-mark.k-anchor { color: var(--text-faint); }
+.tl-mark.k-anchor:hover { color: var(--text-muted); }
+.tl-mark.k-era { color: var(--text-muted); font-weight: 600; }
+/* --- 왕의 재위 띠 --- */
 .tl-kings {
-  margin-top: 7px; padding: 2px 8px;
-  background: none; border: 1px solid var(--line); border-radius: 999px;
-  color: var(--text-3); font: inherit; font-size: 10.5px; cursor: pointer;
+  margin-top: 6px; padding: 2px 8px;
+  background: none; border: 1px solid var(--background-modifier-border); border-radius: var(--pill-radius);
+  color: var(--text-faint); font: inherit; font-size: 10.5px; cursor: pointer;
 }
-.tl-kings:hover { color: var(--text-2); border-color: var(--text-3); }
-.tl-kings[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.tl-kings:hover { color: var(--text-muted); background: var(--background-modifier-hover); }
+.tl-kings[aria-pressed="true"] {
+  color: var(--text-accent); border-color: var(--tag-border); background: var(--tag-background);
+}
 .tl-reign-bar { pointer-events: auto; cursor: pointer; }
 .tl-reign-bar:hover { opacity: 1 !important; }
-/* 고른 노드가 누구 때의 일인지 — 그 임금의 막대만 밝다. */
 .tl-reign-bar.k-on { filter: brightness(1.15); }
 .tl-reign {
   position: absolute; left: 27px; width: 70px;
   display: flex; flex-direction: column; gap: 1px;
   padding: 0; background: none; border: none;
-  color: var(--text-2); font: inherit; font-size: 11px; line-height: 1.25;
+  color: var(--text-muted); font: inherit; font-size: 11px; line-height: 1.25;
   text-align: left; cursor: pointer;
 }
 .tl-reign b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-reign i {
-  font-style: normal; font-size: 10px; color: var(--text-3);
+  font-style: normal; font-size: 10px; color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
-.tl-reign.k-on { color: var(--text); }
-.tl-reign.k-on b { color: var(--accent); }
-.tl-reign:hover { color: var(--text); }
-.tl-reign:hover i { color: var(--text-2); }
-/* 몰년만 따로 적은 줄. 재위 막대가 끝난 뒤의 표식이라 더 물러나 있다. */
-/* 몰년 줄은 한 줄이라 표식 높이에 맞춰 가운데로 올린다. */
+.tl-reign.k-on { color: var(--text-normal); }
+.tl-reign.k-on b { color: var(--text-accent); }
+.tl-reign:hover { color: var(--text-normal); }
+.tl-reign:hover i { color: var(--text-muted); }
 .tl-reign.k-death { transform: translateY(-50%); }
-.tl-reign.k-death i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tl-reign.k-death i { color: var(--text-3); opacity: .8; }
+.tl-reign.k-death i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); opacity: .8; }
 
-.tl-empty { padding: 16px 14px; color: var(--text-3); font-size: 12px; line-height: 1.6; }
+.tl-empty { padding: 14px 12px; color: var(--text-faint); font-size: 12px; line-height: 1.6; }
 
-.tl-body::-webkit-scrollbar { width: 9px; }
-.tl-body::-webkit-scrollbar-thumb { background: #35352f; border-radius: 5px; }
-
-/* --- 상세 --- */
+/* --- 상세 (오른쪽 사이드바 — 문서 한 장처럼 읽힌다) --- */
 .detail {
   width: 348px; flex: none;
-  border-left: 1px solid var(--line);
-  background: var(--surface-2);
+  border-left: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
   overflow-y: auto;
-  padding: 16px 16px 40px;
+  padding: 14px 16px 40px;
   position: relative;
 }
-.detail .close {
-  position: absolute; top: 12px; right: 12px; z-index: 3;   /* 뒤로 막대 위로 */
-  background: none; border: none; color: var(--text-3);
-  font-size: 14px; cursor: pointer; padding: 4px;
-}
-.detail .close:hover { color: var(--text); }
+.detail .close { position: absolute; top: 8px; right: 8px; z-index: 3; }
 
-/* 관계를 타고 깊이 들어가면 어디서 왔는지 잊는다 — 되돌아갈 자리를 이름째 들고 있는다.
-   관계 목록이 길어 스크롤을 내려도 사라지면 안 되므로 위에 붙여 둔다. */
+/* 관계를 타고 깊이 들어가면 어디서 왔는지 잊는다 — 되돌아갈 자리를 이름째
+   들고 있는다. 스크롤을 내려도 사라지면 안 되므로 위에 붙여 둔다. */
 .d-back {
-  position: sticky; top: -16px; z-index: 2;
+  position: sticky; top: -14px; z-index: 2;
   display: flex; align-items: center; gap: 6px;
-  width: calc(100% + 32px); margin: -16px -16px 6px; padding: 13px 40px 9px 16px;
-  background: var(--surface-2);
-  border: none; border-bottom: 1px solid var(--line);
-  color: var(--text-3); font: inherit; font-size: 12px; text-align: left;
+  width: calc(100% + 32px); margin: -14px -16px 8px; padding: 10px 40px 8px 14px;
+  background: var(--background-secondary);
+  border: none; border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-muted); font: inherit; font-size: 12px; text-align: left;
   cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.d-back:hover { color: var(--text); background: var(--surface-3); }
+.d-back:hover { color: var(--text-normal); background: var(--background-primary-alt); }
 .d-back span { flex: none; font-size: 13px; }
 
+/* 타입 딱지 — 색 견본과 타입 이름을 늘 함께 둔다 (색만으로 읽히지 않게). */
 .d-type {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11.5px; color: var(--text-2);
-  border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px;
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
+  background: var(--background-modifier-hover); border-radius: var(--pill-radius); padding: 2px 9px 2px 7px;
 }
-.d-title { font-size: 19px; font-weight: 650; margin: 9px 0 4px; line-height: 1.3; padding-right: 24px; }
-.d-dates { color: var(--text-3); font-size: 12.5px; margin-bottom: 12px; }
+/* 제목 — Obsidian 의 인라인 제목 */
+.d-title {
+  font-size: var(--font-ui-larger); font-weight: 700; margin: 10px 0 2px;
+  line-height: var(--line-height-tight); letter-spacing: -0.02em; padding-right: 24px;
+}
+.d-dates { color: var(--text-muted); font-size: 12.5px; margin-bottom: 12px; font-variant-numeric: tabular-nums; }
+/* 설명 — 문서 본문처럼 그냥 글이다. 상자에 넣지 않는다.
+   접힌 채로 다섯 줄만 보이고, 아래 '전체 보기'가 편다. 요약이라도 열세
+   줄이 되면 관계 목록이 화면 밖으로 밀린다 (2026-09-05 지적). 끝을
+   흐리게 지워 '여기서 잘렸다'를 글자 없이 말한다. */
 .d-desc {
-  font-size: 13px; line-height: 1.68; color: var(--text-2);
-  background: var(--surface-3); border-radius: 8px; padding: 11px 12px;
-  max-height: 168px; overflow: hidden; position: relative; white-space: pre-wrap;
+  font-size: var(--font-text-size); line-height: 1.65; color: var(--text-normal);
+  white-space: pre-wrap;
+  max-height: calc(1.65em * 5); overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
 }
-.d-desc.open { max-height: none; }
-/* 설명이 없을 때의 자리. 빈 칸을 그냥 두면 '없는 게 당연한 노드'로 읽힌다 */
+.d-desc.open { max-height: none; -webkit-mask-image: none; mask-image: none; }
+/* 설명이 없을 때의 자리 — 콜아웃. 빈 칸을 그냥 두면 '없는 게 당연한
+   노드'로 읽힌다. */
 .d-nodesc {
-  font-size: 12px; line-height: 1.6; color: var(--text-3);
-  background: var(--surface-3); border-radius: 8px; padding: 10px 12px;
-  margin: 0; border-left: 2px solid var(--line);
+  font-size: 12.5px; line-height: 1.6; color: var(--text-muted);
+  background: rgba(255,255,255,.04); border-radius: var(--radius-s); padding: 10px 12px;
+  margin: 0; border-left: 3px solid var(--color-base-40);
 }
-/* 넘겨받은 글이라는 단서 — 산문과 같은 무게로 읽히면 안 된다.
-   이건 '이 글이 다른 문서의 글'이라는 경고지 출처 표기가 아니다. */
-.d-desc-src { font-size: 11px; color: var(--text-3); margin: 5px 0 0; }
+.d-desc-src { font-size: var(--font-ui-smaller); color: var(--text-faint); margin: 6px 0 0; }
 /* 출처 한 줄. §1 의 유일한 예외 — 남의 글을 옮겼으면 그렇다고 적는 것이
    라이선스 의무다. 설명 바로 아래, 이 한 줄뿐이다. */
-.d-desc-origin { font-size: 11px; color: var(--text-3); margin: 5px 0 0; line-height: 1.5; }
-.d-desc-origin a { color: var(--text-3); text-decoration: underline; text-underline-offset: 2px; }
-.d-desc-origin a:hover { color: var(--accent); }
+.d-desc-origin { font-size: var(--font-ui-smaller); color: var(--text-faint); margin: 6px 0 0; line-height: 1.5; }
+.d-desc-origin a { color: var(--text-faint); text-decoration: underline; text-underline-offset: 2px; }
+.d-desc-origin a:hover { color: var(--text-accent); }
+/* 접고 펴는 단추 — 출처 한 줄 아래에 선다 (출처는 설명 바로 아래여야 한다) */
+.d-desc-more { margin-top: 8px; }
+/* 절 머리 — Obsidian 의 백링크 창 머리(굵은 글자 + 수를 적은 작은 칩) */
 .d-section-title {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--text-3); margin: 20px 0 8px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--font-ui-small); font-weight: 600; color: var(--text-normal);
+  margin: 22px 0 6px; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);
 }
+.flair {
+  font-size: var(--font-ui-smaller); font-weight: 500; color: var(--text-muted);
+  background: var(--background-modifier-hover); border-radius: var(--radius-s); padding: 0 6px;
+  line-height: 1.6;
+}
+/* 다른 이름 — 속성 창의 알약 */
 .d-aliases { display: flex; flex-wrap: wrap; gap: 5px; }
 .d-aliases span {
-  font-size: 11.5px; color: var(--text-2);
-  background: var(--surface-3); border-radius: 5px; padding: 2px 7px;
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
+  background: var(--background-modifier-hover); border-radius: var(--pill-radius); padding: 2px 9px;
 }
 
-.rel-group { margin-bottom: 12px; }
-.rel-head { font-size: 12px; color: var(--text-3); margin-bottom: 5px; }
+/* 관계 — 백링크 목록. 상자가 아니라 줄이고, 가리키면 밝아진다. */
+.rel-group { margin-bottom: 10px; }
+.rel-head { font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); margin: 6px 0 2px; padding-left: 6px; }
 .rel {
   display: block; width: 100%; text-align: left;
-  background: var(--surface-3); border: 1px solid transparent; border-radius: 8px;
-  padding: 8px 10px; margin-bottom: 5px; cursor: pointer;
-  color: var(--text); font: inherit;
+  background: none; border: none; border-radius: var(--radius-s);
+  padding: 5px 8px; margin: 0; cursor: pointer;
+  color: var(--text-normal); font: inherit;
 }
-.rel:hover { border-color: var(--line); background: #2c2c29; }
-.rel-line { display: flex; align-items: center; gap: 7px; font-size: 13px; min-width: 0; }
-.rel-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.rel:hover { background: var(--background-modifier-hover); }
+.rel:hover .rel-name { color: var(--text-accent); }
+.rel-line { display: flex; align-items: center; gap: 7px; font-size: var(--font-ui-small); min-width: 0; }
+.rel-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .rel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 근거 — 인용. 왼쪽 줄이 '남의 문장'임을 말한다. */
 .rel-ev {
-  margin-top: 6px; font-size: 11.5px; line-height: 1.6; color: var(--text-3);
-  border-left: 2px solid var(--line); padding-left: 8px;
+  margin-top: 5px; font-size: var(--font-ui-smaller); line-height: 1.55; color: var(--text-muted);
+  border-left: 2px solid var(--color-base-40); padding-left: 8px;
 }
-/* 타고 들어온 관계. 목록 어딘가에 또 있지만, 방금 누른 그 한 줄을
-   다시 찾게 하지 않으려고 맨 위에 세운다. */
+/* 타고 들어온 관계 — 방금 누른 그 한 줄. 강조색으로 살짝 물들인다. */
 .d-via {
-  background: var(--surface-3); border-radius: 8px;
-  padding: 9px 11px; margin: 0 0 14px;
+  background: var(--background-modifier-active-hover); border-radius: var(--radius-s);
+  padding: 8px 10px; margin: 0 0 14px;
 }
 .d-via-line {
   display: flex; align-items: baseline; gap: 7px;
-  font-size: 13px; line-height: 1.5; color: var(--text);
+  font-size: var(--font-ui-small); line-height: 1.5; color: var(--text-normal);
 }
 .d-via-line .rel-dot { position: relative; top: -1px; }
-.d-via .rel-ev { border-left-color: #3a3a35; }
+.d-via .rel-ev { border-left-color: var(--color-base-50); }
+.rel-ev.shared { margin: 0 0 6px 6px; }
 
-/* 여러 관계가 함께 딛고 선 근거. 카드 밖에 한 번만 둔다. */
-.rel-ev.shared { margin: 0 0 7px; }
-
-.side::-webkit-scrollbar, .detail::-webkit-scrollbar, .results::-webkit-scrollbar { width: 9px; }
-.side::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb, .results::-webkit-scrollbar-thumb {
-  background: #35352f; border-radius: 5px;
+/* 인과 — 종류 딱지와 '어떻게'. */
+.chain-kind {
+  flex: none; font-size: 10.5px; line-height: 1; padding: 3px 7px; border-radius: var(--pill-radius);
+  background: var(--tag-background); border: 1px solid var(--tag-border); color: var(--text-accent); margin-left: 4px;
 }
+.rel-how, .chain-how { display: block; font-size: var(--font-ui-smaller); line-height: 1.5; color: var(--text-muted); margin-top: 3px; }
+.rel-how b, .chain-how b { font-weight: 600; color: var(--text-normal); }
 
-/* --- 바닥 ---
+/* 인과 사슬 — 들여쓰기가 걸음 수고, 그 여백에 나무 안내선을 실선으로 긋는다.
+   세로선(.chain-line)은 한 단의 줄들을 위아래로 잇고, 꺾인 선(.chain-elbow)이
+   그 선에서 이 줄의 점으로 들어온다. 자식이 있는 줄은 점 바로 아래에서
+   줄기(.chain-stem)를 내려 다음 줄의 꺾인 선과 잇는다 — 선은 점의 한가운데
+   (STEP 배수 + 점 반지름 4px) 에 선다. 줄 사이 가로 구분선은 세로선과 엇갈려
+   지저분해지므로 두지 않는다 (2026-09-06: '←' 글자 대신 실선으로. 같은 날
+   다시: 부모의 점과 자식의 선이 떨어져 있었다 → 줄기). */
+.chain { margin-bottom: 12px; }
+.chain-head { font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); margin: 6px 0 2px; padding-left: 6px; }
+.chain-row {
+  position: relative;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+  padding: 3px 0;
+}
+.chain-guides { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; pointer-events: none; }
+.chain-line, .chain-elbow, .chain-stem { position: absolute; top: 0; box-sizing: border-box; border: 0 solid var(--color-base-50); }
+.chain-line { bottom: 0; width: 0; border-left-width: 1.5px; }
+/* 꺾인 선은 점의 한가운데(y 15px)에서 가로로 나가 점의 왼쪽 가장자리(다음
+   STEP)에 닿는다: 너비 = STEP 14 − 반지름 4. */
+.chain-elbow { height: 15px; width: 10px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: 5px; }
+/* 줄기는 점의 아래 가장자리(15 + 4)에서 줄 바닥까지 — 설명 글이 있어도
+   그 옆을 지나 다음 줄(자식)의 꺾인 선 꼭대기에 닿는다. */
+.chain-stem { top: 19px; bottom: 0; width: 0; border-left-width: 1.5px; }
+.chain-node {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  background: none; border: 0; padding: 2px 6px; margin: 0 -6px; border-radius: var(--radius-s);
+  color: var(--text-normal); font: inherit; font-size: var(--font-ui-small); cursor: pointer; text-align: left;
+}
+.chain-node:hover { background: var(--background-modifier-hover); color: var(--text-accent); }
+.chain-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chain-year { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.chain-row .chain-how { flex-basis: 100%; margin: 0 0 2px 14px; }
+
+/* 경로 찾기 — 접혀 있다가 열린다 */
+.d-more {
+  background: none; border: 1px solid var(--background-modifier-border); border-radius: var(--input-radius);
+  color: var(--text-muted); font: inherit; font-size: var(--font-ui-smaller);
+  padding: 4px 10px; cursor: pointer;
+}
+.d-more:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.pathfinder { margin-bottom: 14px; position: relative; }
+.pathfinder input {
+  width: 100%; box-sizing: border-box; height: 30px;
+  background: var(--background-modifier-form-field); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--input-radius);
+  padding: 0 10px; font: inherit; font-size: var(--font-ui-small);
+}
+.pathfinder input:focus {
+  outline: none; border-color: var(--background-modifier-border-focus);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+.pathfinder-results { position: static; margin-top: 4px; max-height: 220px; box-shadow: none; border-radius: var(--radius-m); }
+.path-title { font-size: 12.5px; color: var(--text-muted); margin: 10px 0 4px; }
+.path-steps { list-style: none; margin: 0; padding: 0 0 0 6px; border-left: 2px solid var(--color-base-40); }
+.path-steps li { position: relative; padding: 2px 0 2px 8px; }
+.path-edge { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 3px 0 3px 4px; }
+.path-edge .chain-how { display: inline; margin: 0; }
+
+/* --- 상태 줄 (Obsidian 의 status bar) ---
    그래프가 화면을 다 먹는 구조라 아래에 남길 자리가 한 줄뿐이다. 방침과
-   약관은 어느 화면에서든 한 번에 닿아야 하므로 여기 둔다. 글자를 작고
-   흐리게 눌러 그래프를 가리지 않게 한다. */
+   약관은 어느 화면에서든 한 번에 닿아야 하므로 여기 둔다. 노드·엣지 수는
+   글자 수처럼 오른쪽 끝에 선다. */
 .foot {
   flex: none;
-  display: flex; align-items: center; gap: 14px;
-  padding: 5px 16px;
-  border-top: 1px solid var(--line);
-  background: var(--surface-2);
-  font-size: 11.5px; color: var(--text-3);
+  display: flex; align-items: center; gap: 4px;
+  height: 24px; padding: 0 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-smaller); color: var(--text-muted);
 }
-.foot a { color: var(--text-3); text-decoration: none; }
-.foot a:hover { color: var(--accent); text-decoration: underline; }
+.foot a, .foot span {
+  padding: 0 6px; border-radius: var(--radius-s);
+  color: var(--text-muted); text-decoration: none;
+}
+.foot a:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .foot-copy { margin-right: auto; }
+.counts { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 1100px) {
-  .side { width: 200px; }
   .detail { width: 300px; }
   .timeline { width: 208px; }
 }

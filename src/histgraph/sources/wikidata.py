@@ -456,7 +456,11 @@ def _resolve_targets(
         allowed_dst = EDGE_TYPES[e.type][2]
         if actual_type.get(e.dst, "") not in allowed_dst:
             e.props["original_type"] = e.type
-            e.type = "related_to"
+            # 뜻이 살아 있는 완화가 있으면 그쪽으로 (`untangle.RELAX` — 같은 표).
+            # 출생지가 '조선'(단체)이면 조선 사람이라는 말이고, 3·1 운동의
+            # 구성원이면 참여자다. related_to 는 아무 질문에도 답하지 못한다.
+            relaxed = relax_type(e.type, actual_type.get(e.dst, ""))
+            e.type = relaxed or "related_to"
             downgraded += 1
     if downgraded:
         log.info("스키마 불일치 엣지 %d개를 related_to 로 완화", downgraded)
@@ -829,9 +833,9 @@ def links_from_rows(rows: list[dict]) -> set[tuple[str, str, str, str]]:
         elif prop == "P710":  # b 가 a 에 참여했다 (사건이 적어 둔 참가자)
             out.add((b, a, "participated_in", ""))
         elif prop == "P828":  # a 의 원인이 b — 원인에서 결과로
-            out.add((b, a, "related_to", "원인"))
+            out.add((b, a, "caused", "원인"))
         elif prop == "P1542":  # a 의 결과가 b
-            out.add((a, b, "related_to", "원인"))
+            out.add((a, b, "caused", "원인"))
         elif prop == "P276":  # a 가 b 에서 일어났다
             out.add((a, b, "occurred_at", ""))
     return out
@@ -846,6 +850,19 @@ MONARCH_ROOT = "Q116"            # 군주
 # 배우자로 있었던 기간은 재위가 아니므로 갈라낸다. 실측으로 이 두 줄이
 # 없으면 조선 왕비 35명이 왕과 같은 띠에 선다.
 CONSORT_ROOTS = ("Q719039", "Q7723211")   # 왕비 · 황후
+
+# 대통령도 같은 띠에 선다. 1948년 뒤의 한국 시간을 사람은 '이승만 때'·
+# '박정희 때'로 읽는다 — 왕이 하던 일을 대통령이 이어받은 것이다.
+# 군주처럼 계층(P279*)으로 찾되, 조건이 둘 더 있다:
+#   - 권한대행은 뺀다. 허정·고건은 '대통령 권한대행' 자리를 P279* 로
+#     대통령에 닿게 갖고 있어서, 계층만 보면 대통령의 띠에 선다.
+#   - 관할(P1001)이 대한민국인 자리만. 뿌리 '대통령'(Q30461) 자체는 세계의
+#     대통령 6,285명이 걸려 있고, 그래프의 P39 엣지에는 '조선민주주의
+#     인민공화국 주석'도 P279* 로 대통령에 닿는다. 이 그래프가 세우는
+#     줄은 대한민국의 대통령이다.
+PRESIDENT_ROOT = "Q30461"        # 대통령
+ACTING_ROOT = "Q4676846"         # 권한대행
+PRESIDENT_JURISDICTION = "Q884"  # 대한민국
 
 
 def fetch_monarch_positions(
@@ -881,6 +898,75 @@ def fetch_monarch_positions(
             if uri and is_real_qid(uri):
                 out[_qid(uri)] = _val(r, "posLabel") or _qid(uri)
     return out
+
+
+def fetch_president_positions(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 150,
+    failures: list[str] | None = None,
+) -> dict[str, str]:
+    """직위 QID 중 '대한민국 대통령 자리'만 골라 라벨과 함께 돌려준다.
+
+    `fetch_monarch_positions` 와 같은 모양이다. 뿌리와 조건은 위 상수의
+    주석 참고 — 권한대행을 빼고, 관할이 대한민국인 자리만 남긴다."""
+    out: dict[str, str] = {}
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?pos ?posLabel WHERE {{
+                  VALUES ?pos {{ {values} }}
+                  ?pos wdt:P279* wd:{PRESIDENT_ROOT} .
+                  ?pos wdt:P1001 wd:{PRESIDENT_JURISDICTION} .
+                  FILTER NOT EXISTS {{ ?pos wdt:P279* wd:{ACTING_ROOT} }}
+                  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
+                }}""",
+            f"대통령 직위/{i}",
+            failures if failures is not None else [],
+        )
+        for r in rows:
+            uri = _val(r, "pos")
+            if uri and is_real_qid(uri):
+                out[_qid(uri)] = _val(r, "posLabel") or _qid(uri)
+    return out
+
+
+def drop_nested_terms(
+    reigns: dict[tuple[str, str], tuple[str | None, str | None]],
+) -> tuple[dict[tuple[str, str], tuple[str | None, str | None]], list[tuple[str, str]]]:
+    """다른 사람의 임기 **한가운데서 시작하는** 임기를 뺀다.
+
+    실측: 황교안은 Wikidata 에 '대한민국 대통령' 2016-12-09~2017-05-10 으로
+    적혀 있다. 권한대행 표식이 없어서 계층으로는 걸러지지 않는데, 그 시작이
+    박근혜의 임기(~2017-03-10) 안이다. 한 자리에 두 사람이 동시에 앉을 수는
+    없으므로, 남의 임기 안에서 시작하는 쪽이 대행이다.
+
+    같은 날에 넘겨받는 것은 겹침이 아니다 (박정희 1979-10-26 사망 →
+    최규하 1979-10-26 시작). 이름을 박아 두지 않고 규칙으로 가르는 이유는
+    이 저장소의 규약이다 — 다음 대행이 와도 표를 고칠 일이 없다.
+
+    돌려주는 둘째 값은 뺀 짝의 목록이다. 조용히 빼지 않는다."""
+    keep: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    dropped: list[tuple[str, str]] = []
+    for key, (start, end) in reigns.items():
+        if start is None:
+            keep[key] = (start, end)
+            continue
+        s_key = (_year_num(start), start)
+        inside = False
+        for other, (o_start, o_end) in reigns.items():
+            if other == key or other[1] != key[1] or not (o_start and o_end):
+                continue
+            if (_year_num(o_start), o_start) < s_key < (_year_num(o_end), o_end):
+                inside = True
+                break
+        if inside:
+            dropped.append(key)
+        else:
+            keep[key] = (start, end)
+    return keep, dropped
 
 
 def fetch_reigns(
@@ -1063,4 +1149,55 @@ def fetch_aliases(
 
     if failures:
         log.warning("별칭 조회 실패 %d구간", len(failures))
+    return out
+
+
+def relax_type(edge_type: str, dst_type: str) -> str | None:
+    """스키마에 안 맞는 엣지를 뜻이 남는 타입으로. 없으면 None (related_to)."""
+    from ..untangle import RELAX
+
+    new = RELAX.get((edge_type, dst_type))
+    if new and dst_type in EDGE_TYPES[new][2]:
+        return new
+    return None
+
+
+def fetch_place_ancestors(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 150,
+    failures: list[str] | None = None,
+) -> dict[str, set[str]]:
+    """QID -> 그 장소가 속한 상위 행정구역 QID 전부 (P131 사슬).
+
+    카디널리티 검사(`cardinality`)가 '함경도와 명천군은 같은 곳을 다른
+    굵기로 말한 것'을 알려면 장소끼리의 `located_in` 이 있어야 하는데,
+    우리 그래프에는 84건뿐이었다 (2026-09-05). 한 번에 사슬 전체를
+    받는다 (`wdt:P131+`) — 깊이를 몰라도 되고 쿼리도 하나다."""
+    out: dict[str, set[str]] = {}
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?item ?up WHERE {{
+                  VALUES ?item {{ {values} }}
+                  ?item wdt:P131+ ?up .
+                }}""",
+            f"장소상위/{i}",
+            failures if failures is not None else [],
+        )
+        for qid, ups in ancestors_from_rows(rows).items():
+            out.setdefault(qid, set()).update(ups)
+    return out
+
+
+def ancestors_from_rows(rows: list[dict]) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for r in rows:
+        item, up = _val(r, "item"), _val(r, "up")
+        if not (item and up and is_real_qid(item) and is_real_qid(up)):
+            continue
+        if _qid(item) != _qid(up):
+            out.setdefault(_qid(item), set()).add(_qid(up))
     return out

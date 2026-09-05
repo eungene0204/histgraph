@@ -29,6 +29,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import overrides
+
 HANGUL = re.compile(r"[가-힣]")
 QID_RE = re.compile(r"^Q\d+$")
 
@@ -110,6 +112,10 @@ def apply_overrides(
         old = row[0]
         if old == ov.label:
             report.already += 1
+            if not dry_run:
+                # 이미 맞는 이름이라도 표에는 적는다 — 다음 수집이 영어로
+                # 되돌리는 순간 `upsert_nodes` 가 이 줄로 되살린다.
+                overrides.record(conn, "node", ov.node_id, "label", ov.label, "relabel", ov.note)
             continue
 
         twin = conn.execute(
@@ -126,6 +132,7 @@ def apply_overrides(
             "UPDATE nodes SET label = ?, updated_at = datetime('now') WHERE id = ?",
             (ov.label, ov.node_id),
         )
+        overrides.record(conn, "node", ov.node_id, "label", ov.label, "relabel", ov.note)
         # 옛 이름을 별칭으로 남긴다. QID 가 라벨이던 노드는 남길 게 없다.
         if old and old != ov.qid:
             conn.execute(
@@ -139,3 +146,49 @@ def apply_overrides(
     # 다른 수를 찍으면 그 수를 믿을 수 없다.
     report.remaining = [n for n in english_nodes(conn) if n[0] not in fixed]
     return report
+
+
+# 별칭은 화면에 이름표(`다른 이름`)로 그대로 선다. 여기 걸러 낼 것이 둘이다:
+#
+#   로마자 표기 — 'Im Ho'·'FIBA referee' 가 §1 을 어긴다. **지우지는 않는다.**
+#               검색은 별칭으로도 찾으므로(`/api/search`) 로마자로 친 것을
+#               찾아 주는 값이다. 화면에만 안 세운다.
+#   마크업 조각 — `<!-- 잘 알려진 명칭으로` (을사사화, 2026-09-05 지적).
+#               수집 쪽은 고쳤지만 별칭을 SQL 로 직접 쓰는 길이 여럿이라
+#               (`promote`·`labels`·`scope`) 화면 앞에도 관문을 둔다.
+#
+# 한자는 남긴다 — '訓民正音'·'金剛般若波羅蜜經<卷二∼五>' 는 이름이지
+# 외국어가 아니고, 국가유산 지정명은 꺾쇠를 이름의 일부로 쓴다.
+LATIN = re.compile(r"[A-Za-z]")
+MARKUP_LEFTOVER = re.compile(r"<!--|-->|\{\{|\}\}|\[\[|\]\]|<ref")
+
+
+def screen_alias(alias: str) -> bool:
+    """이 별칭을 화면에 세워도 되는가."""
+    if not alias or MARKUP_LEFTOVER.search(alias):
+        return False
+    return bool(HANGUL.search(alias)) or not LATIN.search(alias)
+
+
+def foreign_text(conn: sqlite3.Connection) -> list[tuple[str, str, str, str]]:
+    """화면에 한글 아닌 글로 뜰 노드 전부 — (id, 타입, 칸, 글).
+
+    **이 함수가 배포 관문이다.** `tools/check_korean.py` 가 push 전에,
+    CI 가 push 뒤에 이걸 세고, `scope` 는 파생본을 만들자마자 센다. 화면에
+    영어가 뜨는 일이 세 번 반복됐는데 세 번 다 '표는 있는데 안 돌렸다'
+    였다 — 사람이 기억해서 돌리는 방식은 이미 실패했으므로, 돌렸는지를
+    기계가 묻는다.
+
+    라벨과 설명 두 칸을 본다. 빈 설명은 세지 않는다 — 화면이 '설명 없음'을
+    한국어로 그린다. 기준은 `has_hangul` 과 같이 '한글이 한 자도 없는가'
+    하나뿐이다. 더 정교하게 물으면 로마자 표기가 섞인 멀쩡한 글까지 걸린다.
+    """
+    found: list[tuple[str, str, str, str]] = []
+    for nid, ntype, label, desc in conn.execute(
+        "SELECT id, type, label, description FROM nodes ORDER BY type, id"
+    ):
+        if not HANGUL.search(label or ""):
+            found.append((nid, ntype, "label", label or ""))
+        if desc and desc.strip() and not HANGUL.search(desc):
+            found.append((nid, ntype, "description", desc))
+    return found

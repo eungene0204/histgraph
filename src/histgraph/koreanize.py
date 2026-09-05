@@ -598,6 +598,11 @@ def redescribe(conn: sqlite3.Connection, *, dry_run: bool = False) -> Redescribe
                 WHERE id = ?""",
             (korean, english, "사전" if korean else None, node_id),
         )
+        # 편집 계층에도 적는다 — 수집이 영어를 되돌려 놓으면 저장소가 이
+        # 줄로 다시 옮긴다 (`overrides` 모듈 머리글). 지금 값에 한글이 없을
+        # 때만 씌우므로, 진짜 한국어 설명이 오면 번역은 물러난다.
+        from . import overrides
+        overrides.record_many(conn, overrides.redescribe_rows(node_id, english, korean))
     if not dry_run:
         conn.commit()
     return report

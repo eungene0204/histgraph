@@ -11,6 +11,7 @@ export function Search({ nodeTypes, onPick }) {
   const [cursor, setCursor] = useState(-1);
   const inputRef = useRef(null);
   const boxRef = useRef(null);
+  const seqRef = useRef(0);                 // 고른 뒤 늦게 온 답이 목록을 다시 펴지 않게 한다
 
   // '/' 로 검색창에 바로 간다. 입력 중일 때는 그냥 글자로 들어가야 한다.
   useEffect(() => {
@@ -38,9 +39,10 @@ export function Search({ nodeTypes, onPick }) {
     if (!term) { setRows(null); return; }
     // 늦게 온 답이 최신 답을 덮지 않게 한다
     let alive = true;
+    const seq = seqRef.current;
     const timer = setTimeout(async () => {
       const found = await api.search(term);
-      if (!alive) return;
+      if (!alive || seq !== seqRef.current) return;
       setRows(found);
       setCursor(-1);
     }, DEBOUNCE_MS);
@@ -49,16 +51,28 @@ export function Search({ nodeTypes, onPick }) {
 
   const close = () => { setRows(null); setCursor(-1); };
 
-  const pick = (id) => { onPick(id); close(); };
+  const pick = (id) => { seqRef.current += 1; onPick(id); close(); };
+
+  // 엔터: 목록이 있으면 고른 줄(없으면 첫 줄)로, 목록이 아직 안 왔으면
+  // 기다리지 않고 바로 물어서 첫 줄로 간다. 치자마자 엔터를 쳐도 돼야 한다.
+  const submit = async () => {
+    if (rows?.length) { pick(rows[Math.max(cursor, 0)].id); return; }
+    const term = q.trim();
+    if (!term) return;
+    const seq = ++seqRef.current;
+    const found = await api.search(term);
+    if (seq !== seqRef.current) return;
+    if (found.length) pick(found[0].id);
+    else { setRows(found); setCursor(-1); }
+  };
 
   const onKeyDown = (ev) => {
     if (ev.key === 'Escape') { close(); inputRef.current?.blur(); return; }
+    if (ev.key === 'Enter') { ev.preventDefault(); submit(); return; }
     if (!rows?.length) return;
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
       ev.preventDefault();
       setCursor((c) => (c + (ev.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length);
-    } else if (ev.key === 'Enter') {
-      pick(rows[Math.max(cursor, 0)].id);
     }
   };
 

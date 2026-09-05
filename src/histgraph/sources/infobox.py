@@ -81,6 +81,24 @@ EVENT_FIELDS: dict[str, tuple[str, tuple[str, ...], str]] = {
 # 없어서 날짜가 빈 사건이 238건인데, 그 답이 인포박스에 적혀 있었다.
 EVENT_VALUE_FIELDS = ("날짜", "별칭", "다른 이름")
 
+# **인포박스는 '참여'라고 말한 적이 없다.** `주요인물1`·`주요인물2` 는
+# 사건의 **양편**이다 — 12.3 내란의 주요인물1 은 계엄을 편 쪽(윤석열·
+# 김용현), 주요인물2 는 그것을 막은 쪽(우원식·이재명·한동훈)이다. 편을
+# 버리고 둘 다 `participated_in` 으로 만들면 화면이 "이재명은 12.3 내란에
+# 참여했다"고 말한다 — 그는 체포 명단에 오른 사람이다.
+#
+# 그래서 칸의 이름을 엣지 라벨로 남기고(주요 인물·지휘관·교전), 편 번호를
+# `props.side` 에 적는다. 화면은 라벨대로 읽는다 ("…의 주요 인물이다").
+# 어느 편이 무엇을 했는지는 인포박스가 말해 주지 않는다 — 그것은 산문에
+# 있고, `roles` 가 말뭉치에서 근거를 찾아 적는다.
+FIELD_LABEL: dict[str, str] = {
+    "지휘관1": "지휘관", "지휘관2": "지휘관",
+    "주요인물1": "주요 인물", "주요인물2": "주요 인물",
+    "교전국1": "교전", "교전국2": "교전",
+    "가해자": "가해",
+}
+FIELD_SIDE = re.compile(r"([12])$")
+
 # 인물 문서의 인포박스. 산문의 족보 목록과 달리 **필드의 주인이 명확** 해서
 # LLM 없이 정확하게 가져올 수 있다 (족보 목록 문제는 extract 쪽 참조).
 PERSON_FIELDS: dict[str, tuple[str, tuple[str, ...], str]] = {
@@ -91,10 +109,10 @@ PERSON_FIELDS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "자녀": ("child_of", ("person",), IN),
     "출생지": ("born_in", ("place",), OUT),
     "사망지": ("died_in", ("place",), OUT),
-    # 사제 관계는 온톨로지에 전용 타입이 없다. 한국사에서 학맥은 당파와
-    # 직결되므로(성혼 문인 -> 서인) 버리지 않고 related_to 로 남긴다.
-    "스승": ("related_to", ("person",), OUT),
-    "제자": ("related_to", ("person",), IN),
+    # 사제 (`taught`, 스승 → 제자). '스승' 칸의 값이 스승이므로 값 → 문서
+    # 주인공(IN), '제자' 칸은 주인공 → 값(OUT).
+    "스승": ("taught", ("person",), IN),
+    "제자": ("taught", ("person",), OUT),
 }
 
 FIELDS_BY_TYPE: dict[str, dict[str, tuple[str, tuple[str, ...], str]]] = {
@@ -147,6 +165,19 @@ def _template_spans(wikitext: str) -> list[str]:
     return spans
 
 
+# 위키 주석(`<!-- … -->`)은 **값이 아니라 편집자에게 남긴 쪽지**다. 을사사화·
+# 헤이그 특사 사건의 `| 다른 이름 = <!-- 잘 알려진 명칭으로, 사건 이름과
+# 중복되면 쓰지 않음 -->` 이 별칭 두 개로 화면에 섰다 (2026-09-05 지적) —
+# 쉼표에서 갈리는 바람에 `<…>` 를 지우는 규칙이 짝을 잃었다. 조각난 뒤에
+# 지우려 하면 늦으니 **틀을 읽기 전에** 통째로 지운다.
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def strip_comments(wikitext: str) -> str:
+    """위키 주석을 지운다. 닫히지 않은 주석은 그 뒤가 통째로 쪽지다."""
+    return re.sub(r"<!--(?!.*?-->).*", "", _COMMENT.sub("", wikitext), flags=re.S)
+
+
 def infobox_span(wikitext: str, fields: dict | None = None) -> str:
     """대상 필드를 담고 있는 틀의 안쪽만 돌려준다.
 
@@ -166,7 +197,7 @@ def infobox_span(wikitext: str, fields: dict | None = None) -> str:
     `{{font color|…}}` 같은 중첩 틀이 있으므로 단순히 첫 `}}` 를 찾으면
     안 된다."""
     names = fields if fields is not None else EVENT_FIELDS
-    spans = _template_spans(wikitext)
+    spans = _template_spans(strip_comments(wikitext))
     if not spans:
         return ""
     for span in spans:
@@ -236,8 +267,12 @@ def infobox_aliases(value: str, label: str = "") -> list[str]:
         return []
     value = _PIPED_LINK.sub(r"\1", value)
     out: list[str] = []
-    for part in _ALIAS_SPLIT.split(value):
+    for part in _ALIAS_SPLIT.split(strip_comments(value)):
         name = _MARKUP.sub("", part).strip().strip("·,")
+        # 꺾쇠가 남아 있으면 이름이 아니라 지우다 만 마크업이다. 별칭은
+        # 화면에 그대로 서는 글자라 반쪽짜리를 들여보내면 안 된다.
+        if "<" in name or ">" in name:
+            continue
         # 한 글자는 본문 아무 데나 걸리고, 너무 길면 이름이 아니라 설명이다
         if 2 <= len(name) <= 40 and name != label and name not in out:
             out.append(name)
@@ -608,15 +643,19 @@ def ingest(
                 ):
                     skipped_anachronism += 1
                     continue
+                props: dict = {"infobox_field": field}
+                if side := FIELD_SIDE.search(field):
+                    props["side"] = int(side.group(1))
                 edges.append(
                     Edge(
                         src=src,
                         dst=dst,
                         type=edge_type,
                         source=SOURCE,
+                        label=FIELD_LABEL.get(field),
                         # 구조에서 직접 왔지만 파싱이 끼어 있다. 1.0 은 아니다.
                         confidence=0.95,
-                        props={"infobox_field": field},
+                        props=props,
                     )
                 )
 

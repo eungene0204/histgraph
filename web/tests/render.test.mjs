@@ -34,7 +34,8 @@ import App from './src/App.jsx';
 import { SidePanel } from './src/components/SidePanel.jsx';
 import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph };
+import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView };
 `;
 
 await build({
@@ -51,7 +52,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -112,6 +113,11 @@ let appHtml = '';
   ok('범례 묶음 머리가 항목과 같은 층에 있다',
      /<ul class="legend">\s*<li class="legend-group">/.test(html),
      html.slice(html.indexOf('legend') - 20, html.indexOf('legend') + 160));
+  // 인과 도면이 꺼져 있는 동안 범례의 선은 전부 글자색이다 (인과는 굵기로만 갈린다)
+  ok('범례의 인과 선은 굵은 글자색이다',
+     !html.includes('#4f93bf') && /stroke="currentColor" stroke-width="2.8"/.test(html)
+       && /stroke="currentColor" stroke-width="1.4" stroke-dasharray="5 4"/.test(html),
+     html.match(/stroke="[^"]*"/g)?.join(' '));
   // `<ul class="legend">` **다음부터** 그것이 닫히는 데까지 또 <ul> 이 없어야
   // 한다. 여는 태그 자신을 세면 늘 걸린다.
   const OPEN = '<ul class="legend">';
@@ -139,6 +145,8 @@ let detailHtml = '';
       { type: 'created', dir: 'out', label: '만듦',
         other: { id: 'a1', label: '훈민정음', type: 'heritage', group: 'thing' },
         evidence: ['세종이 훈민정음을 만들었다'] },
+      { type: 'caused', dir: 'in', label: '원인', edge_label: '배경', how: '집현전을 세워 학자를 길렀다',
+        as: '집현전 설치', other: { id: 'e1', label: '집현전', type: 'org', group: 'actor' }, evidence: [] },
     ],
   };
   detailHtml = renderToString(h(DetailPanel, {
@@ -171,16 +179,58 @@ let detailHtml = '';
        node, prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
      })).match(/d-title[^>]*>([^<]*)/)?.[1] ?? '') === '조선 세종');
   ok('부모와 자녀가 갈려 있다', detailHtml.includes('부모') && detailHtml.includes('자녀'));
-  ok('관계 수가 적힌다', /관계 3/.test(plain(detailHtml)));
+  ok('관계 수가 적힌다', /관계\s*(<[^>]*>)*4/.test(plain(detailHtml)));   // 수는 칩(.flair)에 든다
+  ok('인과 카드에 종류와 어떻게가 적힌다',
+     detailHtml.includes('rel-how') && plain(detailHtml).includes('집현전 설치') && plain(detailHtml).includes('집현전을 세워 학자를 길렀다'),
+     detailHtml.match(/rel-how[\s\S]{0,160}/)?.[0]);
+  ok('인과가 원인 묶음으로 선다', plain(detailHtml).includes('원인 · 1'));
+
+  // 인과 사슬 나무와 경로 — 서버 없이 자료를 넣어 그린다
+  const tree = { center: 'wd:BJ',
+    causes: [{ id: 'wd:JIN', kind: '배경', how: '형제 관계를 요구했다', as: '후금의 파약 행위', evidence: [],
+               children: [{ id: 'wd:IMJIN', kind: '배경', how: '명의 쇠퇴로 여진이 성장했다', as: '', evidence: [], children: [] }] }],
+    effects: [],
+    nodes: { 'wd:BJ': { id: 'wd:BJ', label: '병자호란', type: 'event', group: 'event' },
+             'wd:JIN': { id: 'wd:JIN', label: '후금', type: 'org', group: 'actor' },
+             'wd:IMJIN': { id: 'wd:IMJIN', label: '임진왜란', type: 'event', group: 'event', start: '1592' } } };
+  const chainHtml = plain(renderToString(h(ChainTree, { data: tree, onVisit: () => {} })));
+  ok('사슬에 원인의 원인까지 선다', chainHtml.includes('이 일을 부른 것') && chainHtml.includes('후금') && chainHtml.includes('임진왜란'), chainHtml.slice(0, 200));
+  ok('사슬 줄에 서술구와 어떻게가 붙는다', chainHtml.includes('후금의 파약 행위') && chainHtml.includes('명의 쇠퇴로 여진이 성장했다'));
+  const chainRaw = renderToString(h(ChainTree, { data: tree, onVisit: () => {} }));
+  ok('사슬은 화살표 글자가 아니라 실선으로 잇는다', !chainRaw.includes('←') && !chainRaw.includes('chain-arrow') && (chainRaw.match(/chain-elbow/g) || []).length === 2, chainRaw.slice(0, 300));
+  ok('둘째 걸음은 한 단 더 들어가 있다', /padding-left:28px/.test(chainRaw) && /padding-left:14px/.test(chainRaw), chainRaw.match(/padding-left:[^;"]*/g)?.join(' '));
+  // 부모(후금)의 점에서 자식(임진왜란)의 꺾인 선까지 줄기가 잇는다. 선은 점의
+  // 한가운데(STEP 배수 + 4) 에 선다 — 후금 줄의 줄기 x = 14 + 4, 임진왜란 줄의 꺾인 선 x = 14 + 4.
+  ok('자식이 있는 줄은 점 아래로 줄기를 내려 자식의 선과 잇는다',
+     (chainRaw.match(/chain-stem/g) || []).length === 1 && /chain-stem" style="left:18px"/.test(chainRaw) && /chain-elbow" style="left:18px"/.test(chainRaw),
+     chainRaw.match(/chain-(stem|elbow)" style="[^"]*"/g)?.join(' '));
+  ok('비어 있으면 사슬을 그리지 않는다', renderToString(h(ChainTree, { data: { causes: [], effects: [], nodes: {} }, onVisit: () => {} })) === '');
+  const pathHtml = plain(renderToString(h(PathView, { data: {
+    found: true, reversed: false, nodes: tree.nodes,
+    paths: [[{ id: 'wd:IMJIN', edge: null }, { id: 'wd:JIN', edge: { kind: '배경', how: '명의 쇠퇴' } }, { id: 'wd:BJ', edge: { kind: '원인', how: '' } }]],
+  }, onVisit: () => {} })));
+  ok('경로에 걸음과 종류가 선다', pathHtml.includes('임진왜란') && pathHtml.includes('1592년') && pathHtml.includes('배경') && pathHtml.includes('병자호란'), pathHtml.slice(0, 300));
+  ok('경로가 없으면 한국어로 말한다', plain(renderToString(h(PathView, { data: { found: false, paths: [], nodes: {} }, onVisit: () => {} }))).includes('이어지지 않습니다'));
   ok('타고 들어온 관계가 문장으로 머리에 붙는다',
      detailHtml.includes('조선 세종의 아버지는 조선 태종이다'),
      detailHtml.match(/d-via-line[\s\S]{0,200}/)?.[0]);
   ok('근거 구절이 따옴표 안에 들어간다', plain(detailHtml).includes('“세종이 훈민정음을 만들었다”'));
   ok('돌아가기 단추가 있다', detailHtml.includes('d-back'));
 
-  // 서버가 요약을 주므로 화면은 접지 않고 '전문 보기'도 없다 — 전문을
-  // 화면에 내지 않는다 (2026-09-05 애드센스 '주의 필요').
-  ok('전문 보기가 없다', !detailHtml.includes('전문 보기') && !detailHtml.includes('d-more'));
+  // 긴 설명은 접어 둔다 (다섯 줄). 여는 것은 **서버가 이미 보낸 요약**의
+  // 나머지지 전문이 아니다 — 전문은 화면에 내지 않는다 (2026-09-05
+  // 애드센스 '주의 필요').
+  ok('짧은 설명에는 전체 보기가 없다',
+     !detailHtml.includes('전체 보기') && !detailHtml.includes('d-desc-more'));
+  ok('짧은 설명은 접히지 않는다', detailHtml.includes('d-desc open'));
+  const longHtml = renderToString(h(DetailPanel, {
+    node: { ...node, description: '가'.repeat(400) },
+    prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
+  }));
+  ok('긴 설명에는 전체 보기가 붙는다', longHtml.includes('전체 보기'));
+  ok('긴 설명은 접힌 채로 그려진다',
+     longHtml.includes('class="d-desc"') && !longHtml.includes('d-desc open'),
+     longHtml.match(/d-desc[^>]*/)?.[0]);
   // 출처는 설명 아래 한 줄 — 이름은 문서로, 라이선스는 그 조문으로 이어진다.
   const originHtml = renderToString(h(DetailPanel, {
     node: { ...node, desc_origin: {
@@ -196,6 +246,11 @@ let detailHtml = '';
      originHtml.includes('href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"')
      && originHtml.includes('href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"'));
   ok('출처를 모르면 아무것도 안 적는다', !detailHtml.includes('d-desc-origin'));
+  const rewrittenHtml = renderToString(h(DetailPanel, {
+    node: { ...node, desc_origin: { name: '한국어 위키백과', url: '', license: '', license_url: '', rewritten: true } },
+    prev: null, onClose: () => {}, onBack: () => {}, onVisit: () => {},
+  }));
+  ok('새로 쓴 글은 그렇다고 말한다', plain(rewrittenHtml).includes('한국어 위키백과 문서를 바탕으로 새로 쓴 글입니다'));
 
   // 설명이 없으면 왜 없는지를 적는다
   const emptyHtml = renderToString(h(DetailPanel, {
@@ -214,9 +269,9 @@ let detailHtml = '';
 // --- 색 견본 ------------------------------------------------------------
 {
   const html = renderToString(h(Glyph, { type: 'person', group: 'actor' }));
-  ok('타입 색이 그대로 나온다', html.includes('#4a6ad8'), html);
+  ok('타입 색이 그대로 나온다', html.includes('#3d84f5'), html);
   ok('모르는 타입은 갈래 색으로 물러난다',
-     renderToString(h(Glyph, { type: 'nope', group: 'event' })).includes('#ec7e3e'));
+     renderToString(h(Glyph, { type: 'nope', group: 'event' })).includes('#fb6c13'));
 }
 
 // --- CSS 가 기대하는 것을 React 가 실제로 내는가 -------------------------

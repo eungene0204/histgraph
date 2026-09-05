@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import mimetypes
@@ -23,7 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import pages
+from . import pages, summaries
+from .labels import screen_alias
 from .ontology import EDGE_TYPES, NODE_TYPES
 from .provenance import desc_origin
 from .store import GraphStore
@@ -121,8 +123,8 @@ MAX_SPAN = {"person": 110, "event": 60}
 
 # 관계를 볼 때 사람이 먼저 궁금해하는 순서. 상세 패널의 정렬 기준이다.
 RELATION_ORDER = [
-    "participated_in", "held_position", "member_of", "created",
-    "child_of", "spouse_of", "born_in", "died_in",
+    "caused", "participated_in", "held_position", "member_of", "created",
+    "child_of", "spouse_of", "taught", "born_in", "died_in",
     "occurred_at", "located_in", "depicts", "part_of",
     "from_period", "occurred_during", "dated_to", "related_to",
 ]
@@ -343,6 +345,12 @@ class GraphAPI:
         # 세종특별자치시와 '세종 비암사 극락보전'이 먼저 나오고 정작 조선
         # 세종(차수 21)은 네 번째로 밀린다 — 실측으로 확인한 순서다.
         # 연도 노드는 검색 대상이 되는 일이 드물어 뒤로 보낸다.
+        #
+        # **연표 눈금(`source='timeline'`)은 아예 뺀다.** '1974'를 치면
+        # `time:1974`('1974년')가 첫 줄이었고, 엔터가 그걸 열어 연표 1974년
+        # 자리에 '1974년'이라는 노드가 앉았다. 눈금은 날짜 없는 사건을
+        # 해에 걸어 두는 뼈대지 사람이 찾을 개체가 아니다 — 그 해를
+        # 찾는 사람에게는 그 해의 사건이 나와야 한다.
         rows = self.store.conn.execute(
             """SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                       COUNT(e.src) AS d,
@@ -351,8 +359,9 @@ class GraphAPI:
                                ELSE 2 END) AS rank
                  FROM nodes n
                  LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
-                WHERE n.label LIKE ?2
-                   OR n.id IN (SELECT node_id FROM aliases WHERE alias LIKE ?2)
+                WHERE (n.label LIKE ?2
+                       OR n.id IN (SELECT node_id FROM aliases WHERE alias LIKE ?2))
+                  AND n.source != 'timeline'
              GROUP BY n.id
              ORDER BY (n.type = 'period'), d DESC, rank, n.label
                 LIMIT ?3""",
@@ -388,9 +397,14 @@ class GraphAPI:
             key = (e["src"], e["dst"], e["type"])
             row = merged.get(key)
             if row is None:
+                # 인과는 종류(배경·계기·영향)가 곧 뜻이라 엣지의 라벨 열을
+                # 그대로 보낸다. 다른 관계는 타입 이름 하나로 족하다.
+                label = EDGE_TYPES[e["type"]][0]
+                if e["type"] == "caused" and e["label"]:
+                    label = e["label"]
                 merged[key] = {
                     "s": e["src"], "t": e["dst"], "type": e["type"],
-                    "label": EDGE_TYPES[e["type"]][0],
+                    "label": label,
                     "conf": e["confidence"], "sources": [e["source"]],
                 }
             else:
@@ -416,15 +430,24 @@ class GraphAPI:
             return None
 
         props = json.loads(row["props"] or "{}")
+        # 정본이 아닌 글은 우리 말로 새로 쓴 것(summaries)이 있으면 그것을
+        # 낸다. 출처 줄은 그때 '바탕으로 새로 쓴 글'이라 말한다.
+        rewritten = summaries.lookup(self.store.conn, row["id"], row["description"])
+        origin = desc_origin(row["source"], props, row["url"])
+        if origin and rewritten:
+            origin = {**origin, "rewritten": True}
         # 또 하나의 이름은 제목 줄에 세운다. '다른 이름' 더미에 같이 두면
         # 표기 변형과 구별되지 않아 별명처럼 읽힌다 (`co_names` 참고).
         names = _names(row)
+        # 별칭 칸에는 로마자 표기와 마크업 조각이 섞여 들어온다 — 화면에
+        # 세울 수 있는 것만 고른다 (`labels.screen_alias`). 지우지 않는
+        # 이유는 검색이 별칭으로도 찾기 때문이다.
         aliases = [
             r["alias"]
             for r in self.store.conn.execute(
                 "SELECT alias FROM aliases WHERE node_id = ? ORDER BY alias", (node_id,)
             )
-            if r["alias"] not in names
+            if r["alias"] not in names and screen_alias(r["alias"])
         ]
         rows = self.store.conn.execute(
             """SELECT e.src, e.dst, e.type, e.source, e.confidence, e.props,
@@ -466,14 +489,25 @@ class GraphAPI:
                     # 사용자는 0.9 짜리 엣지를 믿을지 판단할 방법이 없다.
                     "evidence": [],
                     "original_type": edge_props.get("original_type"),
+                    # 인과 엣지의 '어떻게'. 종류(edge_label)만으로는 "A 가
+                    # B 의 배경"이라는 말뿐이라 무엇이 이어졌는지 모른다.
+                    "how": edge_props.get("how") or None,
+                    # 상대가 서술구('후금의 파약 행위')로 적혀 있었으면 그 구.
+                    "as": edge_props.get("cause_as" if direction == "in" else "effect_as") or None,
                 }
             fact["confidence"] = max(fact["confidence"], r["confidence"])
+            if not fact["how"] and edge_props.get("how"):
+                fact["how"] = edge_props["how"]
             if not fact["edge_label"] and r["edge_label"]:
                 fact["edge_label"] = r["edge_label"]
             if r["source"] not in fact["sources"]:
                 fact["sources"].append(r["source"])
             if edge_props.get("evidence"):
                 fact["evidence"].append(edge_props["evidence"])
+            # `roles` 가 말뭉치에서 찾은 근거. 역할('대항'·'표적')을 말할 때는
+            # 그 문장을 함께 보여야 한다 — 역할은 판정이고 문장은 사실이다.
+            if edge_props.get("role_evidence"):
+                fact["evidence"].append(edge_props["role_evidence"])
         relations = list(by_fact.values())
         # 같은 종류 안에서는 확인할 수 있는 것을 먼저 보여준다 — 여러
         # 소스가 확인해 준 사실, 그다음 근거 구절이 달린 관계 순이다.
@@ -503,7 +537,7 @@ class GraphAPI:
             # 말뭉치가 쓴다. 2026-09-05 화면에 전문을 뿌린 것이 애드센스
             # '주의 필요'(스크랩)로 돌아왔다 — 이 자리에서 전문을 다시
             # 내보내지 않는다.
-            "description": pages.summarize(row["description"]),
+            "description": rewritten or pages.summarize(row["description"]),
             # 설명이 어디서 왔는지. 'kowiki' 는 위키백과 산문, 'wd:ko' 는
             # Wikidata 한국어 한 줄, '사전' 은 영어 한 줄을 koreanize 로
             # 옮긴 것이다. 도구가 쓰라고 남겨 둔다. 화면이 그리는 것은 아래
@@ -512,7 +546,7 @@ class GraphAPI:
             # 설명 아래 한 줄로 적는 출처 — 이름·문서 주소·라이선스(한국어).
             # 남의 글을 옮겼으면 그렇다고 적는 것이 라이선스 의무다
             # (provenance.py). 모르면 None 이고, 화면은 그때 아무것도 안 적는다.
-            "desc_origin": desc_origin(row["source"], props, row["url"]),
+            "desc_origin": origin,
             # 영어 한 줄이 왔지만 사전으로 옮기지 못해 비운 노드.
             # 빈 칸의 이유를 화면이 정확히 말할 수 있게 한다.
             "desc_dropped": bool(props.get("desc_en") and not row["description"]),
@@ -698,14 +732,23 @@ class GraphAPI:
         **사망은 재위의 끝이 아니다.** 태조는 1398년에 물러나 1408년에
         죽었고, 고종은 1907년에 물러나 1919년에 죽었다. 둘을 한 점으로
         합치면 상왕으로 산 10년이 사라진다. 그래서 재위 구간과 몰년을
-        따로 넘긴다."""
+        따로 넘긴다.
+
+        **대통령도 같은 띠다.** 1948년 뒤의 시간은 '박정희 때'로 읽힌다.
+        표식의 값이 자리의 종류(`monarch`·`president`)라 화면이 '재위'와
+        '재임'을 갈라 부른다. 예전 표식 `true` 는 군주다.
+
+        **재임 중인 사람은 끝이 없다.** 끝을 모르는 것과 아직 안 끝난 것은
+        다르다 — 살아 있고 끝 날짜가 없으면 오늘까지 긋고 `ongoing` 으로
+        밝힌다. 죽은 사람의 빈 끝은 전처럼 몰년으로 닫는다."""
         cached = getattr(self._local, "reigns", None)
         if cached is not None:
             return cached
         rows = self.store.conn.execute(
             """SELECT e.src AS id, e.start_date AS r_start, e.end_date AS r_end,
                       n.label, n.type, n.start_date, n.end_date,
-                      p.label AS position
+                      p.label AS position,
+                      json_extract(e.props, '$.reign') AS seat
                  FROM edges e
                  JOIN nodes n ON n.id = e.src
                  JOIN nodes p ON p.id = e.dst
@@ -715,21 +758,32 @@ class GraphAPI:
              ORDER BY e.start_date"""
         ).fetchall()
 
+        this_year = datetime.date.today().year
         out: list[dict] = []
         for r in rows:
             start = _year(r["r_start"])
             if start is None:
                 continue
             # 재위 끝이 비어 있으면(재위 중 죽은 임금 일부) 몰년으로 닫는다.
-            # 그것도 없으면 한 점으로 둔다 — 없는 끝을 오늘로 늘리지 않는다.
+            # 그것도 없고 살아 있으면 재임 중이다. 죽었는데 몰년도 없으면
+            # 한 점으로 둔다 — 모르는 끝을 오늘로 늘리지 않는다.
             death = _year(r["end_date"])
             end = _year(r["r_end"])
+            ongoing = False
             if end is None:
-                end = death if death is not None and death >= start else start
+                if death is not None:
+                    end = death if death >= start else start
+                elif r["end_date"]:
+                    end = start
+                else:
+                    end = max(this_year, start)
+                    ongoing = True
             out.append({
                 "id": r["id"], "label": r["label"],
                 "position": r["position"],
+                "kind": "president" if r["seat"] == "president" else "monarch",
                 "start": start, "end": end,
+                "ongoing": ongoing,
                 # 몰년이 재위 끝보다 앞서면 둘 중 하나가 틀린 것이다.
                 # 화면이 거꾸로 된 꼬리를 그리지 않게 여기서 뗀다.
                 "death": death if death is not None and death >= end else None,
@@ -953,6 +1007,27 @@ def dispatch(
             limit=int(one("limit", str(DEFAULT_LIMIT))),
             exclude=exclude,
         )
+    # 인과 사슬. 한 노드의 원인·결과 나무, 또는 두 노드 사이의 최단 경로.
+    if path == "/api/chain":
+        from .causes import chain
+        node_id = (q.get("id") or [""])[0]
+        depth = max(1, min(int((q.get("depth") or ["4"])[0]), 6))
+        got = chain(api.store, node_id, depth=depth)
+        if got is None:
+            return 404, {"error": "not found", "id": node_id}
+        for n in got["nodes"].values():
+            n["group"] = TYPE_GROUP.get(n["type"], "thing")
+        return 200, got
+    if path == "/api/path":
+        from .causes import paths
+        src = (q.get("from") or [""])[0]
+        dst = (q.get("to") or [""])[0]
+        if not src or not dst:
+            return 400, {"error": "from 과 to 가 필요합니다"}
+        got = paths(api.store, src, dst)
+        for n in got["nodes"].values():
+            n["group"] = TYPE_GROUP.get(n["type"], "thing")
+        return 200, got
     if path == "/api/timeline":
         tl = api.timeline(one("id"))
         return (200, tl) if tl else (404, {"error": "not found"})

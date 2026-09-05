@@ -18,14 +18,21 @@ from pathlib import Path
 
 from .backends import build_backend
 from .http import Fetcher
-from .ontology import EDGE_TYPES, FORMS, NODE_TYPES, Edge, Node, validate_edge_endpoints
+from .ontology import (
+    EDGE_TYPES, FORMS, MAX_TARGETS, NODE_TYPES, Edge, Node, cardinality_problems,
+    validate_edge_endpoints,
+)
 from .sources import culture, datagokr, heritage, wikidata
+from . import overrides as overrides_mod
 from .store import GraphStore
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "data" / "histgraph.sqlite"
 DEFAULT_CACHE = ROOT / "data" / "cache"
 DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
+DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
+DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
+DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -49,6 +56,9 @@ def _persist(
 ) -> None:
     node_map = {n.id: n for n in nodes}
     problems = [msg for e in edges if (msg := validate_edge_endpoints(e, node_map))]
+    # 카디널리티도 쓰기 전에 본다 — 한 묶음이 한 사람의 출생지를 둘 주면
+    # 그 묶음 안에서 이미 무엇인가 섞인 것이다 (`ontology.MAX_TARGETS`).
+    problems += cardinality_problems(edges)
     if problems:
         for msg in sorted(set(problems))[:5]:
             print(f"  ⚠ 스키마 경고: {msg}", file=sys.stderr)
@@ -810,11 +820,48 @@ def cmd_scope(args: argparse.Namespace) -> int:
 
     with GraphStore(args.db) as store:
         result = scope_mod.extract(store, args.era, out, hops=args.hops,
-                                   drop_isolated=not args.keep_isolated)
+                                   drop_isolated=not args.keep_isolated,
+                                   drop_undescribed=not args.keep_undescribed)
+
+    # **파생본에 한국어 관문을 바로 건다.** scope 는 원본을 그대로 베끼므로
+    # 원본에서 relabel·redescribe 를 잊었으면 영어가 그대로 화면에 간다.
+    # "relabel 은 파생본에도 한 번 더"를 README 에 적어 두는 방식은 세 번
+    # 실패했다 (2026-09-03 ×2 · 09-04). 그래서 사람이 기억하지 않아도 되게
+    # 여기서 돌리고, 그러고도 남으면 **실패로 끝낸다** — 파일은 남되 종료
+    # 코드가 1 이라 파이프라인이 알아챈다. 남은 것은 표에 적고 다시 돌린다.
+    #
+    # **동명이인 관문도 여기 건다.** 파생본이 화면이 읽는 것이므로, 이름이
+    # 겹쳐 엉뚱한 사람에게 붙은 연결은 여기서 걷어내야 화면에서 사라진다
+    # (`homonyms` 모듈 머리글 — 퇴계 이황의 관계 22건이 조선 예종에게
+    # 가 있었다). 원본도 같이 고칠 것: `uv run histgraph homonyms`.
+    from . import homonyms as hom
+    from . import koreanize
+    from . import labels as labels_mod
+
+    table = labels_mod.load_table(args.table)
+    with GraphStore(Path(out)) as derived:
+        relabeled = labels_mod.apply_overrides(derived.conn, table)
+        redescribed = koreanize.redescribe(derived.conn)
+        homs = hom.sweep(derived.conn)
+        # **지우기 전에 한 번 더 채운다.** redescribe 가 방금 비운 칸이
+        # 있고, 사전에는 그 노드의 정의가 있을 수 있다. 항목 CSV 는
+        # 저장소에 없으니(`data/raw/` 는 .gitignore) 있을 때만 돌린다.
+        from .sources import aks
+        filled = {"filled": 0}
+        if (aks.RAW_DIR / aks.INDEX_CSV).exists():
+            filled = aks.fill_descriptions(derived)
+        # 그러고도 빈 내용 노드는 화면에 세우지 않는다 (CLAUDE.md §1-3).
+        swept = ({"nodes": 0, "edges": 0} if args.keep_undescribed
+                 else scope_mod.sweep_undescribed(derived.conn))
+        foreign = labels_mod.foreign_text(derived.conn)
+
     print(f"\n=== {result['era']} 서브그래프 ===")
     print(f"  출력: {result['out']}")
     print(f"  씨앗 {result['seeds']:,} → 노드 {result['kept_nodes']:,} · 엣지 {result['kept_edges']:,}"
           f" · 별칭 {result['kept_aliases']:,}")
+    if result["undescribed_dropped"]:
+        print(f"  설명 없는 노드 {result['undescribed_dropped']:,}개 제외"
+              " (이름 말고 할 말이 없어 화면에 세우지 않는다)")
     if result["isolated_dropped"]:
         print(f"  고립 노드 {result['isolated_dropped']:,}개 제외 (엣지가 없어 그래프에 기여하지 않음)")
     print(f"  댕글링 엣지: {result['dangling']}")
@@ -824,6 +871,32 @@ def cmd_scope(args: argparse.Namespace) -> int:
     print("\n  관계 구성:")
     for k, v in result["by_edge_type"].items():
         print(f"    {k:16} {v:>6,}")
+
+    print(f"\n  한국어 관문: 이름 {len(relabeled.applied):,}개 · 설명"
+          f" {len(redescribed.applied):,}개 옮김 · 설명 {len(redescribed.cleared):,}개 비움")
+    if filled["filled"]:
+        print(f"  사전의 정의로 채운 설명 {filled['filled']:,}개")
+    if swept["nodes"]:
+        print(f"  설명을 비운 뒤 다시 지운 노드 {swept['nodes']:,}개"
+              f" · 엣지 {swept['edges']:,}건 — 원본에서 redescribe 를 먼저 돌리세요")
+    print(f"  동명이인 관문: 문서에 돌려놓은 엣지 {homs.repointed:,}건 ·"
+          f" 버린 엣지 {homs.dropped:,}건")
+    print(f"    연대가 100년 넘게 어긋난 참여 {len(homs.conflicts):,}건 ·"
+          f" 겹치는 별칭 {len(homs.alias_clashes):,}건 — `histgraph homonyms` 로 본다")
+    for _, pl, _, el, span, year, gap in homs.conflicts[:6]:
+        print(f"      {gap:>5}년  {pl[:12]:14} ({span[0]}~{span[1]}) --참여--> "
+              f"{el[:20]:22} ({year}년)")
+    if foreign:
+        print(f"\n  ✗ 화면에 한글 아닌 글이 뜨는 노드 {len(foreign):,}건 —"
+              f" {args.table.relative_to(ROOT) if args.table.is_relative_to(ROOT) else args.table}"
+              " 에 이름을 적고 다시 돌리세요"
+              f" (표만 고쳤다면 `histgraph --db {out} relabel` 로 충분합니다):")
+        for nid, ntype, column, text in foreign[:40]:
+            print(f"    {ntype:<7} {nid:>16}  {column}: {text[:60]}")
+        if len(foreign) > 40:
+            print(f"    … 그 밖 {len(foreign) - 40:,}건")
+        return 1
+    print("  한글 아닌 글이 뜨는 노드가 없습니다.")
     return 0
 
 
@@ -905,7 +978,7 @@ def cmd_spans(args: argparse.Namespace) -> int:
 _LINK_PROP = {
     ("part_of", ""): "P361/P527",
     ("related_to", "다음"): "P155/P156",
-    ("related_to", "원인"): "P828/P1542",
+    ("caused", "원인"): "P828/P1542",
     ("participated_in", ""): "P710",
     ("occurred_at", ""): "P276",
 }
@@ -1085,6 +1158,12 @@ def cmd_precision(args: argparse.Namespace) -> int:
                 "updated_at = datetime('now') WHERE id = ?",
                 updates,
             )
+            # 잘라 둔 날짜는 편집 계층에 남는다 — 수집이 1월 1일을 되돌려
+            # 놓아도 저장소가 다시 자른다 (`overrides`).
+            for start, end, nid in updates:
+                for col, val in (("start_date", start), ("end_date", end)):
+                    if val:
+                        overrides_mod.record(store.conn, "node", nid, col, val, "precision")
             store.conn.commit()
 
         trimmed = len(updates)
@@ -1099,8 +1178,201 @@ def cmd_precision(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_corpus(args: argparse.Namespace) -> int:
+    """근현대 문서를 통째로 내려받아 말뭉치(`data/corpus.sqlite`)에 넣는다.
+
+    그래프가 아니라 글이다. "이재명은 12.3 내란에 참여했다"가 틀렸다는
+    것은 구조화 소스 어디에도 없고 산문에만 있다 — 그 산문을 문단으로
+    쪼개 검색할 수 있게 둔다 (`ask`), 그리고 `roles` 가 거기서 근거를
+    찾는다. 설명(`nodes.description`)과 다른 점: 설명은 화면용으로 잘려
+    있고(인물은 도입부만) 검색 색인이 없다.
+
+    소스는 셋이고 `--source` 로 고른다 (기본은 셋 다):
+    - `aks`  민족문화대백과 — 정본. `data/raw/` 의 항목 CSV 로 노드에 잇고
+      문서 페이지를 받는다. 이어진 항목 전부 + 근현대 `--kinds`(기본 사건).
+    - `nikh` 한국사연대기 — 정본. `data/raw/nikh/yeondaegi.xlsx` 에 본문이
+      이미 있어 네트워크가 없다.
+    - `kowiki` 위키백과 — 정본에 없는 것을 메운다."""
+    from . import corpus as corpus_mod
+
+    sources = ["aks", "nikh", "kowiki"] if args.source == "all" else [args.source]
+    fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
+    with GraphStore(args.db) as store:
+        conn = corpus_mod.open_corpus(args.corpus)
+        picked = corpus_mod.pick_nodes(store, since=args.since)
+        by_reason: dict[str, int] = {}
+        for why in picked.values():
+            by_reason[why] = by_reason.get(why, 0) + 1
+        print(f"  대상 노드 {len(picked):,}개: "
+              + " · ".join(f"{k} {v:,}" for k, v in sorted(by_reason.items())))
+        if "aks" in sources:
+            from .sources import aks
+            kinds = tuple(k.strip() for k in args.kinds.split(",") if k.strip())
+            if args.dry_run:
+                entries = aks.load_index()
+                matched = aks.match_nodes(entries, aks.node_names(store))
+                todo = aks.select_entries(entries, matched, kinds=kinds)
+                print(f"  민족문화대백과: 항목 {len(entries):,}건 · 노드에 이은 것 {len(matched):,}건"
+                      f" · 받을 것 {len(todo):,}건")
+            else:
+                got = aks.ingest(fetcher, store, conn, kinds=kinds, limit=args.limit,
+                                 refresh=args.refresh)
+                print(f"  민족문화대백과: 노드에 이은 것 {got['matched']:,}건 · 받음 {got['fetched']:,}건"
+                      f" / 대상 {got['todo']:,}건 · 빈 문서 {got['empty']:,}건"
+                      f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개")
+        if "nikh" in sources and not args.dry_run:
+            got = corpus_mod.build_nikh(store, conn, refresh=args.refresh)
+            print(f"  한국사연대기: 항목 {got['entries']:,}건 · 노드에 이은 것 {got['linked']:,}건"
+                  f" · 넣음 {got['put']:,}건 · 이미 있음 {got['skipped']:,}건"
+                  f" · 새 문단 {got['passages']:,}개")
+        if "kowiki" in sources and not args.dry_run:
+            got = corpus_mod.build(fetcher, store, conn, sorted(picked), refresh=args.refresh,
+                                   limit=args.limit)
+            print(f"  위키백과: 내려받음 {got['fetched']:,}건 / 요청 {got['asked']:,}건"
+                  f" · 없는 문서 {got['missing']:,}건 · 새 문단 {got['passages']:,}개")
+        st = corpus_mod.stats(conn)
+        conn.close()
+    if args.dry_run:
+        return 0
+    print(f"  말뭉치: 문서 {st['docs']:,}건 · 문단 {st['passages']:,}개 · {st['chars'] / 10000:,.0f}만 자"
+          + " · " + " · ".join(f"{k} {v:,}" for k, v in st["by_source"].items()))
+    return 0
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    """말뭉치에서 물음에 가까운 문단을 찾는다 (검색만, 모델 없음)."""
+    from . import corpus as corpus_mod
+
+    conn = corpus_mod.open_corpus(args.corpus)
+    hits = corpus_mod.search(conn, args.query, k=args.k)
+    if not hits:
+        print("  맞는 문단이 없습니다.")
+        return 1
+    for h in hits:
+        head = h["title"] + (f" · {h['section']}" if h["section"] else "")
+        print(f"\n  [{head}]\n  {h['text'][:600]}")
+    return 0
+
+
+def cmd_roles(args: argparse.Namespace) -> int:
+    """사건에 '참여'한 인물이 실제로 무엇을 했는지 말뭉치의 근거로 적는다.
+
+    `--dry-run` 은 모델 없이 근거 문단이 있는 엣지만 센다. 모델은 MLX 가
+    기본이고 메모리를 35GB 잡는다 — 다른 `extract` 가 돌고 있으면 함께
+    띄우지 말 것 (커널이 둘 중 하나를 죽인다)."""
+    from . import corpus as corpus_mod
+    from . import roles as roles_mod
+
+    backend = None if args.dry_run else build_backend(args.backend, args.model)
+    conn = corpus_mod.open_corpus(args.corpus)
+    with GraphStore(args.db) as store:
+        only = frozenset(r.strip() for r in args.redo_roles.split(",") if r.strip()) if args.redo_roles else None
+        got = roles_mod.run(store, conn, backend, since=args.since, limit=args.limit,
+                            dry_run=args.dry_run, redo=args.redo, only_roles=only)
+    c = got["counts"]
+    print(f"  후보 {c['후보']:,}건 · 근거 문단 있음 {c['문단 있음']:,} · 없음 {c['문단 없음']:,}")
+    if got["by_role"]:
+        print("  판정: " + " · ".join(f"{k} {v}" for k, v in sorted(got["by_role"].items(), key=lambda x: -x[1])))
+    for line in got["samples"]:
+        print(f"    {line}")
+    if not args.dry_run:
+        print("  화면 DB 는 `scope korea` 를 다시 돌려야 바뀝니다.")
+    return 0
+
+
+def cmd_causes(args: argparse.Namespace) -> int:
+    """사건 문서에 서술된 인과(원인 → 결과)를 말뭉치의 근거로 적는다.
+
+    `--dry-run` 은 모델 없이 물을 문서와 분량만 센다. 모델은 MLX 가 기본이고
+    메모리를 35GB 잡는다 — 다른 `extract`·`roles` 와 함께 띄우지 말 것.
+    끝나면 `--sync-to data/korea.sqlite` 로 화면 DB 에 옮긴다 (양끝이 거기
+    있는 엣지만). 노드를 새로 만들지 않으므로 `scope` 를 다시 돌릴 필요가 없다."""
+    from . import causes as causes_mod
+    from . import corpus as corpus_mod
+
+    scope: set[str] | None = None
+    if args.scope is not None:
+        with GraphStore(args.scope) as scoped:
+            scope = {r["id"] for r in scoped.conn.execute("SELECT id FROM nodes")}
+    with GraphStore(args.db) as store:
+        moved = causes_mod.migrate(store)
+        if moved:
+            print(f"  Wikidata 원인·결과 {moved}건을 인과 엣지로 옮겼습니다.")
+        if args.reresolve:
+            conn = corpus_mod.open_corpus(args.corpus)
+            got = causes_mod.reresolve(store, conn, scope=scope)
+            c = got["counts"]
+            print(f"  저장된 답을 다시 판정: 문서 {c['문서']:,}건 · 인과 엣지 {c['엣지']:,}건 (모델 없이)")
+        elif not args.sync_only:
+            backend = None if args.dry_run else build_backend(args.backend, args.model)
+            conn = corpus_mod.open_corpus(args.corpus)
+            types = tuple(t.strip() for t in args.types.split(",") if t.strip())
+            target = GraphStore(args.sync_to) if args.sync_to is not None and not args.dry_run else None
+            try:
+                got = causes_mod.run(store, conn, backend, types=types, limit=args.limit,
+                                     dry_run=args.dry_run, redo=args.redo, scope=scope,
+                                     sync_target=target)
+            finally:
+                if target is not None:
+                    target.close()
+            c = got["counts"]
+            print(f"  문서 {c['문서']:,}건" + ("" if args.dry_run else f" · 인과 엣지 {c['엣지']:,}건"))
+            if got["dropped"]:
+                print("  버림: " + " · ".join(f"{k} {v}" for k, v in sorted(got["dropped"].items(), key=lambda x: -x[1])))
+            if got["unresolved"]:
+                top = sorted(got["unresolved"].items(), key=lambda x: -x[1])[:20]
+                print("  못 푼 이름 (노드 후보): " + " · ".join(f"{k}×{v}" if v > 1 else k for k, v in top))
+            for line in got["samples"]:
+                print(f"    {line}")
+        if args.reresolve and got["dropped"]:
+            print("  버림: " + " · ".join(f"{k} {v}" for k, v in sorted(got["dropped"].items(), key=lambda x: -x[1])))
+        if args.sync_to is not None:
+            with GraphStore(args.sync_to) as target:
+                n = causes_mod.sync(store, target)
+            print(f"  화면 DB 로 인과 엣지 {n:,}건을 옮겼습니다: {args.sync_to}")
+        total = store.conn.execute("SELECT COUNT(*) FROM edges WHERE type = 'caused'").fetchone()[0]
+        print(f"  인과 엣지 합계 {total:,}건")
+    return 0
+
+
+def _find_node(store: GraphStore, text: str) -> str | None:
+    """id 그대로, 아니면 라벨·별칭으로. 여럿이면 연결이 많은 쪽."""
+    if store.conn.execute("SELECT 1 FROM nodes WHERE id = ?", (text,)).fetchone():
+        return text
+    row = store.conn.execute(
+        """SELECT n.id, (SELECT COUNT(*) FROM edges e WHERE e.src = n.id OR e.dst = n.id) AS deg
+             FROM nodes n
+            WHERE n.label = ?1 OR EXISTS (SELECT 1 FROM aliases a WHERE a.node_id = n.id AND a.alias = ?1)
+         ORDER BY deg DESC LIMIT 1""",
+        (text,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def cmd_chain(args: argparse.Namespace) -> int:
+    """인과 사슬을 글로 읽는다. `--to` 를 주면 두 노드 사이의 최단 경로."""
+    from . import causes as causes_mod
+
+    with GraphStore(args.db) as store:
+        src = _find_node(store, args.node)
+        if src is None:
+            print(f"  노드를 찾지 못했습니다: {args.node}", file=sys.stderr)
+            return 1
+        if args.to:
+            dst = _find_node(store, args.to)
+            if dst is None:
+                print(f"  노드를 찾지 못했습니다: {args.to}", file=sys.stderr)
+                return 1
+            got = causes_mod.paths(store, src, dst, max_depth=args.depth * 2)
+            print(causes_mod.render_paths(got))
+            return 0 if got["found"] else 1
+        got = causes_mod.chain(store, src, depth=args.depth)
+        print(causes_mod.render_chain(got))
+    return 0
+
+
 def cmd_reigns(args: argparse.Namespace) -> int:
-    """왕의 재위 기간을 held_position 엣지에 채운다.
+    """왕의 재위·대통령의 재임 기간을 held_position 엣지에 채운다.
 
     **재위는 노드가 아니라 엣지의 값이다.** 인물 노드의 P569/P570 은
     생몰이고, 직위 노드(조선 임금)에 적을 수도 없다 — '언제부터 언제까지
@@ -1130,18 +1402,38 @@ def cmd_reigns(args: argparse.Namespace) -> int:
         monarch = wikidata.fetch_monarch_positions(
             fetcher, positions, failures=failures
         )
-        if not monarch:
-            print("  군주 자리에 해당하는 직위가 없습니다.")
-            return 0
-        print(f"  군주 자리 {len(monarch)}종: "
-              + " · ".join(sorted(monarch.values()))[:150])
-
-        wanted = [r for r in pairs if r["dst"][len("wd:"):] in monarch]
-        persons = sorted({r["src"][len("wd:"):] for r in wanted})
-        print(f"  그 자리에 앉은 인물 {len(persons):,}명 — 재위 조회 중...")
-        reigns = wikidata.fetch_reigns(
-            fetcher, persons, list(monarch), failures=failures
+        # **대통령도 같은 띠에 선다.** 1948년 뒤의 시간은 '박정희 때'로
+        # 읽힌다. 자리를 고르는 규칙은 wikidata.fetch_president_positions.
+        president = wikidata.fetch_president_positions(
+            fetcher, positions, failures=failures
         )
+        seats = {**monarch, **president}
+        if not seats:
+            print("  군주·대통령 자리에 해당하는 직위가 없습니다.")
+            return 0
+        if monarch:
+            print(f"  군주 자리 {len(monarch)}종: "
+                  + " · ".join(sorted(monarch.values()))[:150])
+        if president:
+            print(f"  대통령 자리 {len(president)}종: "
+                  + " · ".join(sorted(president.values()))[:150])
+
+        wanted = [r for r in pairs if r["dst"][len("wd:"):] in seats]
+        persons = sorted({r["src"][len("wd:"):] for r in wanted})
+        print(f"  그 자리에 앉은 인물 {len(persons):,}명 — 재위·재임 조회 중...")
+        reigns = wikidata.fetch_reigns(
+            fetcher, persons, list(seats), failures=failures
+        )
+        # 남의 임기 한가운데서 시작하는 임기는 대행이다 (황교안). **대통령
+        # 자리에만 건다** — 군주 자리는 '왕'·'여왕' 같은 일반 항목이라
+        # 여러 나라의 임금이 한 자리를 나눠 쓰고, 겹침이 곧 정상이다
+        # (실측: 고려 우왕·진덕여왕이 걸렸다).
+        pres_terms = {k: v for k, v in reigns.items() if k[1] in president}
+        pres_terms, nested = wikidata.drop_nested_terms(pres_terms)
+        reigns = {k: v for k, v in reigns.items() if k[1] not in president} | pres_terms
+        for p_qid, pos_qid in nested:
+            print(f"  겹치는 임기라 뺌 (권한대행으로 봄): "
+                  f"{labels.get(f'wd:{p_qid}', p_qid)} — {seats[pos_qid]}")
 
         filled = 0
         seated: set[str] = set()      # 재위를 하나라도 채운 인물
@@ -1152,28 +1444,38 @@ def cmd_reigns(args: argparse.Namespace) -> int:
                 continue
             filled += 1
             seated.add(r["src"])
+            kind = "president" if key[1] in president else "monarch"
             if filled <= 12:
                 print(f"    {labels.get(r['src'], r['src'])[:16]:18}"
                       f" {start or '?'} ~ {end or '?'}"
-                      f"  ({monarch[key[1]]})")
+                      f"  ({seats[key[1]]})")
             if args.dry_run:
                 continue
             # 날짜만 넣지 않고 '이건 재위다'를 함께 적는다. 나중에 다른
             # 직위(영의정 재임)에도 날짜가 붙으면 화면이 둘을 갈라야 한다.
+            # 값은 자리의 종류다 — 화면이 '재위'와 '재임'을 갈라 부른다.
+            # (예전 표식 `true` 도 군주로 읽는다: server._reigns.)
             store.conn.execute(
                 """UPDATE edges
                       SET start_date = ?, end_date = ?,
                           props = json_set(COALESCE(NULLIF(props, ''), '{}'),
-                                           '$.reign', json('true'))
+                                           '$.reign', ?)
                     WHERE src = ? AND dst = ? AND type = 'held_position'""",
-                (start, end, r["src"], r["dst"]),
+                (start, end, kind, r["src"], r["dst"]),
             )
+            # 재위는 편집 계층에도 남는다 — 수집이 props 를 덮어써도
+            # 저장소가 되돌린다 (`overrides`). 예전엔 이걸 잊으면 띠가 사라졌다.
+            ekey = overrides_mod.edge_key(r["src"], r["dst"], "held_position")
+            overrides_mod.record(store.conn, "edge", ekey, "props.reign", kind, "reigns")
+            for col, val in (("start_date", start), ("end_date", end)):
+                if val:
+                    overrides_mod.record(store.conn, "edge", ekey, col, val, "reigns")
         if not args.dry_run:
             store.conn.commit()
 
-        head = "채울 재위" if args.dry_run else "채운 재위"
+        head = "채울 재위·재임" if args.dry_run else "채운 재위·재임"
         print(f"\n  {head} {filled:,}건 / 자리 {len(wanted):,}건"
-              f" · 재위를 아는 인물 {len(seated):,}명 / {len(persons):,}명")
+              f" · 기간을 아는 인물 {len(seated):,}명 / {len(persons):,}명")
         # **한 인물이 같은 자리를 두 항목으로 갖기도 한다.** 정종은
         # '조선 임금'과 일반 '왕' 둘에 걸려 있고 날짜는 앞의 것에만 있다.
         # 빠진 자리를 세면 정종이 '재위를 모르는 왕'이 되므로, 못 채운
@@ -1187,6 +1489,145 @@ def cmd_reigns(args: argparse.Namespace) -> int:
         if failures:
             print(f"  ⚠ 실패한 쿼리 {len(failures)}건 — 재실행하면 그 구간만 다시 시도합니다.",
                   file=sys.stderr)
+    return 0
+
+
+def cmd_untangle(args: argparse.Namespace) -> int:
+    """`related_to` 를 뜻 있는 타입으로 갈라 낸다 (`untangle` 모듈 머리글).
+
+    규칙(완화·인포박스 사제) → 겹침 접기 → 모델 판정(근거 있는 추출 엣지)
+    순서다. 모델은 MLX 가 기본이고 35GB 를 잡는다 — `extract`·`paraphrase`
+    와 함께 띄우지 말 것. `--rules-only` 면 모델 없이 앞 둘만 한다.
+
+        uv run histgraph untangle --dry-run
+        uv run histgraph untangle --rules-only
+        uv run histgraph --db data/korea.sqlite untangle --limit 50
+    """
+    from . import untangle as unt
+
+    with GraphStore(args.db) as store:
+        before = store.conn.execute("SELECT COUNT(*) FROM edges WHERE type = 'related_to'").fetchone()[0]
+        rep = unt.Report()
+        unt.apply_rules(store, rep, dry_run=args.dry_run)
+        unt.fold_redundant(store, rep, dry_run=args.dry_run)
+        head = "바꿀" if args.dry_run else "바꿈"
+        by_new: dict[str, int] = {}
+        for *_, new in rep.relaxed:
+            by_new[new] = by_new.get(new, 0) + 1
+        print(f"  related_to {before:,}건")
+        print(f"  규칙으로 {head} {len(rep.relaxed):,}건: "
+              + (" · ".join(f"{t} {n}" for t, n in sorted(by_new.items(), key=lambda kv: -kv[1])) or "없음"))
+        print(f"  뜻 있는 엣지가 이미 있어 접{'을' if args.dry_run else '은'} 것 {rep.folded:,}건")
+
+        if args.export:
+            n = unt.export_candidates(store.conn, args.export, redo=args.redo)
+            print(f"  후보 {n:,}건을 {args.export} 에 뽑았습니다 — 판정을 {DEFAULT_UNTANGLE.name} 에 적고 --table 로 적용")
+            return 0
+        table_path = args.table if args.table else (DEFAULT_UNTANGLE if DEFAULT_UNTANGLE.exists() else None)
+        backend = None
+        if table_path is not None and not args.dry_run:
+            table = unt.load_verdicts(table_path)
+            unt.run_table(store, table, rep, redo=args.redo)
+            print(f"  표 {len(table):,}줄")
+        elif not args.rules_only and not args.dry_run:
+            from .backends import build_backend
+            backend = build_backend(args.backend, args.model)
+        if table_path is None:
+            unt.run_model(store, backend, rep, limit=args.limit, redo=args.redo,
+                          dry_run=args.dry_run or args.rules_only)
+        if args.dry_run or (args.rules_only and table_path is None):
+            print(f"  모델에 물을 것 {rep.asked:,}건" + (" (묻지 않았다)" if rep.asked else ""))
+        else:
+            print(f"  모델 판정 {rep.asked:,}건 → 타입 {len(rep.typed):,} · none {rep.none:,}"
+                  f" · 확신 부족 {rep.weak:,}")
+            by_t: dict[str, int] = {}
+            for *_, t in rep.typed:
+                by_t[t] = by_t.get(t, 0) + 1
+            if by_t:
+                print("    " + " · ".join(f"{t} {n}" for t, n in sorted(by_t.items(), key=lambda kv: -kv[1])))
+        if rep.over_cardinality:
+            print(f"  카디널리티를 넘어 적지 않은 것 {len(rep.over_cardinality):,}건 (예: "
+                  + ", ".join(f"{s}→{d} {t}" for s, d, t in rep.over_cardinality[:3]) + ")")
+        if not args.dry_run:
+            after = store.conn.execute("SELECT COUNT(*) FROM edges WHERE type = 'related_to'").fetchone()[0]
+            print(f"\n  남은 related_to {after:,}건 (전 {before:,}):")
+            for key, n in unt.remaining(store.conn).items():
+                print(f"    {n:>6,}  {key}")
+    return 0
+
+
+def cmd_cardinality(args: argparse.Namespace) -> int:
+    """카디널리티를 넘는 노드 — 출생지가 둘인 사람, 부모가 셋인 사람
+    (`cardinality` 모듈 머리글). 지우지 않고 보여 준다: 충돌은 동명이인
+    문서가 섞였거나 소스가 틀린 곳이고, 해상도 차이는 틀린 것이 없다.
+
+        uv run histgraph cardinality
+        uv run histgraph --db data/korea.sqlite cardinality --type born_in --list
+    """
+    from . import cardinality as card
+
+    types = tuple(t.strip() for t in args.type.split(",")) if args.type else None
+    with GraphStore(args.db) as store:
+        if args.fetch_places:
+            # 해상도 차이를 알아보려면 장소끼리의 상위 관계가 있어야 한다.
+            fetcher = Fetcher(DEFAULT_CACHE, min_interval=1.5)
+            failures: list[str] = []
+            got = card.fill_place_hierarchy(store, fetcher, failures=failures)
+            print(f"  장소 {got['asked']:,}곳의 상위 행정구역 조회 · located_in {got['edges']:,}건")
+            if failures:
+                print(f"  ⚠ 실패한 쿼리 {len(failures)}건", file=sys.stderr)
+        vs = card.violations(store.conn, types)
+    if not vs:
+        print("  카디널리티를 넘는 노드가 없습니다.")
+        return 0
+    shape = card.summarize(vs)
+    total_conf = sum(b["conflict"] for b in shape.values())
+    print(f"  넘는 노드 {len(vs):,}개 — 충돌 {total_conf:,} · 해상도 차이 {len(vs) - total_conf:,}")
+    for etype, b in shape.items():
+        print(f"    {etype:<16} 최대 {MAX_TARGETS[etype]}"
+              f"  충돌 {b['conflict']:>4,} · 해상도 차이 {b['resolution']:>4,}")
+    conflicts = [v for v in vs if v.kind == "conflict"]
+    shown = conflicts if args.list else conflicts[:15]
+    print("\n  충돌 — 동명이인 문서가 섞였거나 소스 하나가 틀린 곳 (지우지 않는다):")
+    for v in shown:
+        tg = " | ".join(f"{lbl}({src})" for _, lbl, src in v.targets)
+        print(f"    {v.edge_type:<12} {v.src_label[:16]:18} {tg[:110]}")
+    if len(conflicts) > len(shown):
+        print(f"    … 그 밖 {len(conflicts) - len(shown):,}개 (--list 로 전부)")
+    return 0
+
+
+def cmd_overrides(args: argparse.Namespace) -> int:
+    """편집 계층 — 사람과 후처리가 고친 값의 표 (`overrides` 모듈 머리글).
+
+    기본은 무엇이 얼마나 고쳐져 있는지 센다. `--reapply` 는 표 전부를
+    그래프에 다시 씌운다 (저장소가 쓸 때마다 하는 일을 손으로 한 번).
+    `--seed` 는 표가 없던 때 고쳐 둔 값(재위·잘라 둔 날짜·정본 설명)을
+    지금 DB 에서 되짚어 표에 적는다 — DB 마다 한 번:
+
+        uv run histgraph overrides --seed
+        uv run histgraph --db data/korea.sqlite overrides --seed
+    """
+    with GraphStore(args.db) as store:
+        if args.seed:
+            counts = overrides_mod.seed_from_db(store.conn)
+            print("  되짚어 적음: " + " · ".join(
+                f"{k} {v:,}" for k, v in counts.items()))
+        if args.reapply:
+            rep = overrides_mod.reapply(store, everything=True)
+            store.conn.commit()
+            print(f"  다시 씌움: 노드 칸 {rep.nodes:,} · 엣지 칸 {rep.edges:,}"
+                  f" · 다시 합침 {len(rep.remerged):,} · 조건이 안 맞아 물러남 {rep.skipped:,}")
+            for drop, keep in rep.remerged[:10]:
+                print(f"    {drop} → {keep}")
+        rows = overrides_mod.summary(store.conn)
+        if not rows:
+            print("  편집 계층이 비어 있습니다.")
+            return 0
+        total = sum(n for *_, n in rows)
+        print(f"  고친 칸 {total:,}개")
+        for target, origin, fld, n in rows:
+            print(f"    {target:<5} {origin:<12} {fld:<22} {n:>7,}")
     return 0
 
 
@@ -1297,6 +1738,126 @@ def cmd_relabel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_nikh(args: argparse.Namespace) -> int:
+    """국사편찬위원회 정본(한국사연대기·실록)을 그래프에 씌운다."""
+    from .sources import nikh
+
+    raw = Path(args.raw) if args.raw else nikh.RAW_DIR
+    index_path = raw / nikh.SILLOK_INDEX
+    if args.build_index or not index_path.exists():
+        print(f"  실록 색인을 만든다: {index_path} (몇 분 걸린다)")
+        n = nikh.build_sillok_index(raw, index_path)
+        print(f"  ✓ 실록 기사 {n:,}건 색인")
+        if args.index_only:
+            return 0
+
+    index = nikh.SillokIndex(index_path)
+    with GraphStore(args.db) as store:
+        kinds = tuple(args.kinds) if args.kinds else None
+        nodes, edges, rep = nikh.ingest(store, raw, index, kinds=kinds)
+        print(f"  연대기 항목 {len(nodes):,} → 기존 노드에 씌움 {rep.matched:,} · 새 노드 {rep.created:,}")
+        print(f"  연대: 실록 기사로 {rep.dated_sillok:,} · 설명 문장으로 {rep.dated_text:,} · "
+              f"인물 생몰년 {rep.person_dates:,} · 연도 못 잡은 사건 {len(rep.undated_events):,}")
+        print(f"  엣지: 참여 {rep.edges_participated:,} · 시대 {rep.edges_period:,} · "
+              f"흡수할 추출 고아 {len(rep.merges):,}")
+        if rep.absent_mentions:
+            print(f"    항목 본문에는 있으나 실록 기사에는 없는 사람 {rep.absent_mentions:,}건 — 잇지 않았다")
+        if rep.undated_events:
+            print(f"    연도 없음: {', '.join(rep.undated_events[:args.show])}")
+        if rep.ambiguous:
+            print(f"  이름이 여럿에 걸린 항목 {len(rep.ambiguous)}건 (새 노드로 세우거나 차수로 골랐다):")
+            for label, ids in rep.ambiguous[:args.show]:
+                print(f"    {label}: {', '.join(ids)}")
+        if rep.unresolved_mentions:
+            top = rep.unresolved_mentions.most_common(args.show)
+            print(f"  노드를 못 찾은 인물 언급 {sum(rep.unresolved_mentions.values()):,}건: "
+                  + ", ".join(f"{n}({c})" for n, c in top))
+        if args.dry_run:
+            print("  (dry-run: 저장하지 않음)")
+            return 0
+        stale = nikh.drop_sillok_participation(store)
+        if stale:
+            print(f"  이전에 실록 기사에 붙인 참여 엣지 {stale:,}건을 지우고 다시 만든다")
+        _persist(store, nikh.SOURCE, nodes, edges)
+        # 정본은 편집 계층에 남는다 — 다음 `ingest` 가 Wikidata 설명으로
+        # 덮어쓰고 `canon` 표식을 지워도 저장소가 되돌린다 (`overrides`).
+        canon_rows = 0
+        for node in nodes:
+            if node.props.get("canon") == nikh.SOURCE:
+                canon_rows += overrides_mod.record_many(
+                    store.conn, overrides_mod.canon_rows(
+                        node.id, node.description, node.start_date, node.end_date, node.props
+                    )
+                )
+        store.conn.commit()
+        print(f"  편집 계층에 정본 {canon_rows:,}칸 기록")
+        merged = nikh.apply_merges(store, rep.merges)
+        if merged:
+            print(f"  ✓ 추출 고아 {merged}개를 정본 노드로 합침")
+    return 0
+
+
+def cmd_homonyms(args: argparse.Namespace) -> int:
+    """이름이 같을 뿐 다른 사람인 것을 가른다 (`homonyms` 모듈 머리글)."""
+    from . import homonyms as hom
+
+    with GraphStore(args.db) as store:
+        label = {r["id"]: r["label"]
+                 for r in store.conn.execute("SELECT id, label FROM nodes")}
+        rep = hom.sweep(store.conn, apply=not args.dry_run)
+
+    def name(nid: str) -> str:
+        return f"{label.get(nid, '?')[:20]}({nid})"
+
+    print(f"  문서의 주인공이 남에게 간 엣지 {len(rep.misrouted):,}건")
+    for src, dst, etype, wrong, doc in rep.misrouted[:args.show]:
+        other = dst if src == wrong else src
+        print(f"    {name(wrong)} --{etype}--> {name(other)}"
+              f"   →  주인공은 {name(doc)}")
+    print(f"\n  연대가 100년 넘게 어긋난 참여 {len(rep.conflicts):,}건 — 보고만 한다"
+          f" (다른 사람이거나 **연도가 틀린 것**이다)")
+    for _, pl, _, el, span, year, gap in rep.conflicts[:args.show]:
+        print(f"    {gap:>5}년  {pl[:14]:16} ({span[0]}~{span[1]}) --참여--> "
+              f"{el[:24]:26} ({year}년)")
+    print(f"  그 안쪽 {len(rep.near):,}건 — 부관참시이거나 지저분한 날짜다")
+    print(f"  다른 노드의 라벨이기도 한 별칭 {len(rep.alias_clashes):,}건 — 보고만 한다")
+    for alias, nid, owner, clash in rep.alias_clashes[:args.show]:
+        print(f"    '{alias}' : {owner} ({nid})  ↔  {clash}")
+    if args.dry_run:
+        print("\n  (dry-run: 고치지 않음)")
+    else:
+        print(f"\n  ✓ 문서에 돌려놓은 엣지 {rep.repointed:,}건 ·"
+              f" 갈 자리가 이미 차 있어 버린 엣지 {rep.dropped:,}건")
+    return 0
+
+
+def cmd_namu(args: argparse.Namespace) -> int:
+    """토막글 작품에 나무위키 개요를 보충한다.
+
+    `enrich` 뒤에 돌린다. 위키백과 본문이 100자 넘게 있는 작품은 손대지
+    않고, 한 줄짜리('《태조 왕건》은 영화이다.')만 채운다."""
+    from .sources import namu
+
+    fetcher = Fetcher(Path(args.db).parent / "cache", min_interval=max(args.interval, 1.0))
+    with GraphStore(args.db) as store:
+        print(f"→ 나무위키 개요 보충 중 (설명 {args.min_chars}자 미만인 {', '.join(args.types)})...")
+        report = namu.fill(
+            store, fetcher, tuple(args.types),
+            min_chars=args.min_chars, limit=args.limit,
+            dry_run=args.dry_run, refresh=args.refresh,
+        )
+        filled = report["filled"]
+        missed = report["missed"]
+        print(f"  대상 {report['candidates']:,}편 · 채움 {len(filled):,} · 못 찾음 {len(missed):,}")
+        for _, label, title in filled[: args.show]:
+            print(f"    ✓ {label} ← {title}")
+        for _, label in missed[: args.show]:
+            print(f"    · {label}", file=sys.stderr)
+        if args.dry_run:
+            print("\n  --dry-run 입니다. 저장하지 않았습니다.")
+    return 0
+
+
 def cmd_redescribe(args: argparse.Namespace) -> int:
     """영어로 들어온 노드 설명을 한국어로 바꾼다.
 
@@ -1339,6 +1900,209 @@ def cmd_redescribe(args: argparse.Namespace) -> int:
             print(f"\n  ⚠ 아직 영어인 설명 {len(left):,}개가 남아 있습니다")
         else:
             print("\n  영어로 뜨는 설명이 없습니다.")
+    return 0
+
+
+def cmd_describe(args: argparse.Namespace) -> int:
+    """빈 설명칸을 민족문화대백과의 '정의 한 문장'으로 채운다.
+
+    `enrich` 는 Wikidata QID 가 있는 노드만 채운다 — 산문에서 이름만 뽑혀
+    나온 `ex:` 노드에는 물어볼 QID 가 없다. 그쪽은 사전 항목 CSV 로
+    채운다. 네트워크가 필요 없고 `data/raw/` 만 있으면 된다.
+
+    수집 뒤마다 `redescribe` 와 같이 돌린다. 원본과 파생본 둘 다:
+
+        uv run histgraph describe
+        uv run histgraph --db data/korea.sqlite describe
+    """
+    from .sources import aks
+
+    with GraphStore(args.db) as store:
+        before = store.conn.execute(
+            "SELECT COUNT(*) FROM nodes"
+            " WHERE description IS NULL OR trim(description) = ''"
+        ).fetchone()[0]
+        report = aks.fill_descriptions(store, dry_run=args.dry_run)
+        head = "채울 설명" if args.dry_run else "채운 설명"
+        print(f"  빈 설명 {before:,}개 · 사전 항목 {report['entries']:,}건"
+              f" · {head} {report['filled']:,}개")
+        # 동명이인은 채우지 않는다. 몇 개를 그래서 남겼는지 적지 않으면
+        # '사전에 없어서'와 구별이 안 된다.
+        if report["ambiguous"]:
+            print(f"  · 이름이 겹쳐 잇지 않은 노드 {report['ambiguous']:,}개")
+        for nid, text in report["samples"]:
+            print(f"    {nid:>28}  {text[:52]}")
+        if args.dry_run:
+            print("\n  (미리보기라 아직 아무것도 바꾸지 않았습니다)")
+    return 0
+
+
+def cmd_paraphrase(args: argparse.Namespace) -> int:
+    """정본이 아닌 설명(위키백과·나무위키·출처 모름)을 우리 말로 새로 쓴다
+    (`summaries` 모듈 머리글). 정본(국편·민백·국가유산청)은 손대지 않는다.
+
+    모델은 MLX 가 기본이고 35GB 를 잡는다 — `extract`·`roles`·`causes` 와
+    함께 띄우지 말 것. 끝나면 `--sync-to data/korea.sqlite` 로 화면 DB 에
+    옮긴다. 설명이 바뀐 노드는 옛 글이 저절로 무효가 되므로 수집 뒤마다
+    다시 돌리면 그것만 새로 쓴다:
+
+        uv run histgraph paraphrase --scope data/korea.sqlite --sync-to data/korea.sqlite
+    """
+    from . import summaries as summaries_mod
+
+    with GraphStore(args.db) as store:
+        if not args.sync_only:
+            backend = None if args.dry_run else build_backend(args.backend, args.model)
+            only = None
+            if args.scope is not None:
+                with GraphStore(args.scope, readonly=True) as scoped:
+                    only = {r["id"] for r in scoped.conn.execute("SELECT id FROM nodes")}
+            got = summaries_mod.run(store, backend, limit=args.limit,
+                                    dry_run=args.dry_run, redo=args.redo, only=only)
+            c = got["counts"]
+            print(f"  후보 {c['후보']:,}건" + ("" if args.dry_run else
+                  f" · 새로 씀 {c['새로 씀']:,} · 떨어짐 {c['떨어짐']:,}"))
+            if got["reasons"]:
+                print("  떨어진 이유: " + " · ".join(
+                    f"{k} {v}" for k, v in sorted(got["reasons"].items(), key=lambda x: -x[1])))
+            for line in got["samples"]:
+                print(f"    {line}")
+        if args.sync_to is not None:
+            with GraphStore(args.sync_to) as target:
+                n = summaries_mod.sync(store, target)
+            print(f"  화면 DB 로 새로 쓴 글 {n:,}건을 옮겼습니다: {args.sync_to}")
+        total = store.conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
+        print(f"  새로 쓴 글 합계 {total:,}건")
+    return 0
+
+
+def cmd_dedupe(args: argparse.Namespace) -> int:
+    """한 사건이 두 노드로 들어와 있는 것을 찾는다 (`duplicates` 모듈 머리글).
+
+    규칙은 후보를 찾을 뿐이고, 합치는 것은 표에 적힌 짝뿐이다. 수집이
+    노드를 다시 세우므로 `ingest` 뒤마다, 파생본에도 한 번 더 돌린다:
+
+        uv run histgraph dedupe --apply
+        uv run histgraph --db data/korea.sqlite dedupe --apply
+    """
+    from . import duplicates as dup
+
+    try:
+        table = dup.load_table(args.table)
+    except (OSError, dup.DuplicateTableError) as err:
+        print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
+        return 1
+
+    with GraphStore(args.db) as store:
+        label = {r["id"]: r["label"]
+                 for r in store.conn.execute("SELECT id, label FROM nodes")}
+        rep = (dup.apply(store, table, args.type) if args.apply
+               else dup.sweep(store.conn, table, args.type))
+        label.update({r["id"]: r["label"]
+                      for r in store.conn.execute("SELECT id, label FROM nodes")})
+
+    def name(nid: str) -> str:
+        return f"{label.get(nid, '?')}({nid})"
+
+    merges = sum(1 for v in table if v.action == "merge")
+    print(f"  {args.type} 후보 {len(rep.candidates):,}쌍 · 표에 적힌 판정"
+          f" {len(table):,}줄 (합친다 {merges:,} · 다르다 {len(table) - merges:,})")
+    print(f"  증거로 판정한 것 — 같다 {len(rep.auto_same):,}쌍 ·"
+          f" 다르다 {len(rep.auto_diff):,}쌍 · 모름 {len(rep.unjudged):,}쌍")
+
+    if rep.auto_diff and args.show:
+        by_why: dict[str, int] = {}
+        for _, why in rep.auto_diff:
+            by_why[why.split(" (")[0]] = by_why.get(why.split(" (")[0], 0) + 1
+        shape = " · ".join(f"{w} {n:,}" for w, n in sorted(
+            by_why.items(), key=lambda kv: -kv[1])[:4])
+        print(f"    다르다고 본 근거: {shape}")
+
+    if rep.merged:
+        print(f"\n  ✓ 합친 짝 {len(rep.merged):,}개")
+        for keep, drop, moved in rep.merged[:args.show or len(rep.merged)]:
+            print(f"    {name(drop)}  →  {name(keep)}   엣지 {moved:,}건 옮김")
+        if args.show and len(rep.merged) > args.show:
+            print(f"    … 그 밖 {len(rep.merged) - args.show:,}개")
+    if rep.date_clashes:
+        # 어느 쪽이 맞는지 기계는 모른다. 남는 노드의 날짜를 그대로 두고 알린다.
+        print(f"\n  합친 짝의 연대가 어긋난 것 {len(rep.date_clashes):,}건"
+              f" — 남은 쪽 날짜를 그대로 두었습니다:")
+        for line in rep.date_clashes[:args.show or len(rep.date_clashes)]:
+            print(f"    {line}")
+    if rep.stale:
+        print(f"  이미 합쳐져 있던 짝 {len(rep.stale):,}개")
+    if rep.absent:
+        # 파생본에는 원본의 노드가 다 있지 않다. 시대 그래프에서는 정상이다.
+        print(f"  이 그래프에 없는 짝 {len(rep.absent):,}개"
+              f" (예: {', '.join(v.drop for v in rep.absent[:3])})")
+
+    if rep.unjudged:
+        what = "사건" if args.type == "event" else args.type
+        print(f"\n  ⚠ 증거가 모자란 후보 {len(rep.unjudged):,}쌍 — 같은 {what}인지"
+              f" 사람이 한 줄 적어야 합니다 ({args.table}):")
+        for c in rep.unjudged[:args.show]:
+            print(f"    [{c.rule}] {name(c.a)}  ↔  {name(c.b)}")
+            print(f"           근거: {c.evidence}")
+        if len(rep.unjudged) > args.show:
+            print(f"    … 그 밖 {len(rep.unjudged) - args.show:,}쌍")
+        print("\n    merge<TAB>남길 id<TAB>없앨 id<TAB>근거"
+              "   /   keep<TAB>id<TAB>id<TAB>왜 다른지")
+        return 1
+
+    print("\n  판정이 안 적힌 후보가 없습니다.")
+    return 0
+
+
+def cmd_chronology(args: argparse.Namespace) -> int:
+    """원인이 결과보다 뒤인 인과를 찾고, 표의 판정을 씌운다 (`chronology` 모듈 머리글).
+
+    연대가 어긋난 것은 엣지가 틀렸거나 날짜가 틀린 것이다. 어느 쪽인지는
+    정본을 읽고 표에 적는다. 수집이 날짜를 되돌려도 편집 계층이 다시
+    씌우지만, 새 인과가 들어오면 다시 돌린다:
+
+        uv run histgraph chronology --apply
+        uv run histgraph --db data/korea.sqlite chronology --apply
+    """
+    from . import chronology as chrono
+
+    try:
+        table = chrono.load_table(args.table)
+    except (OSError, chrono.ChronologyTableError) as err:
+        print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
+        return 1
+
+    with GraphStore(args.db) as store:
+        applied = chrono.apply(store, table) if args.apply else None
+        rep = chrono.find(store.conn)
+
+    dates = sum(1 for r in table if r.action == "date")
+    drops = sum(1 for r in table if r.action == "drop")
+    flips = len(table) - dates - drops
+    print(f"  표 {len(table):,}줄 (날짜 {dates:,} · 지움 {drops:,} · 뒤집음 {flips:,})")
+    if applied is not None:
+        print(f"  씌움: 날짜 {applied.dated:,} · 지움 {applied.dropped:,} · 뒤집음 {applied.flipped:,}")
+        if applied.absent:
+            # 파생본에는 원본의 노드가 다 있지 않다. 시대 그래프에서는 정상이다.
+            print(f"  이 그래프에 없는 대상 {len(applied.absent):,}줄"
+                  f" (예: {', '.join(r.a for r in applied.absent[:3])})")
+    print(f"  결과의 거친 날짜가 원인을 품는 것 {len(rep.within):,}건"
+          f" (연표가 원인 뒤에 세운다) · 연대를 모르는 것 {rep.unknown:,}건")
+    if args.show and rep.within:
+        for s in rep.within[:args.show]:
+            print(f"    {s.cause}({s.cause_date}) → {s.effect}({s.effect_date})")
+
+    if rep.backwards:
+        print(f"\n  ⚠ 원인이 결과보다 뒤인 인과 {len(rep.backwards):,}건 — 날짜가 틀렸는지"
+              f" 엣지가 틀렸는지 정본을 읽고 표에 적어야 합니다 ({args.table}):")
+        for s in rep.backwards[:args.show or len(rep.backwards)]:
+            print(f"    {s.cause}({s.cause_date}) → {s.effect}({s.effect_date})"
+                  f"   {s.src} → {s.dst}")
+        print("\n    date<TAB>id<TAB>시작<TAB>끝<TAB>근거   /   drop<TAB>원인<TAB>결과<TAB>근거"
+              "   /   flip<TAB>원인<TAB>결과<TAB>종류<TAB>근거")
+        return 1
+
+    print("\n  원인이 결과보다 뒤인 인과가 없습니다.")
     return 0
 
 
@@ -1500,11 +2264,81 @@ def main(argv: list[str] | None = None) -> int:
     p_pm.add_argument("--interval", type=float, default=1.0)
     p_pm.set_defaults(func=cmd_promote)
 
+    p_nm = sub.add_parser("namu", help="토막글 작품에 나무위키 개요 보충 (enrich 뒤)")
+    p_nm.add_argument("--types", nargs="*", default=["media"])
+    p_nm.add_argument("--min-chars", type=int, default=100,
+                      help="이 길이 미만인 설명만 보충 (기본 100)")
+    p_nm.add_argument("--limit", type=int, default=None, help="보충할 노드 수 (시험용)")
+    p_nm.add_argument("--show", type=int, default=20, help="출력할 예시 수")
+    p_nm.add_argument("--interval", type=float, default=1.5)
+    p_nm.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
+    p_nm.add_argument("--refresh", action="store_true", help="못 찾았다고 표시한 노드도 다시 본다")
+    p_nm.set_defaults(func=cmd_namu)
+
+    p_nk = sub.add_parser(
+        "nikh", help="국사편찬위원회 정본(한국사연대기·실록)을 씌운다 — data/raw/nikh"
+    )
+    p_nk.add_argument("--raw", default=None, help="자료 폴더 (기본 data/raw/nikh)")
+    p_nk.add_argument("--build-index", action="store_true", help="실록 색인을 다시 만든다")
+    p_nk.add_argument("--index-only", action="store_true", help="색인만 만들고 끝낸다")
+    p_nk.add_argument("--kinds", nargs="*", default=None,
+                      help="연대기 유형만 (사건 인물 조직·단체 유물·유적 지리 기타)")
+    p_nk.add_argument("--show", type=int, default=20, help="출력할 예시 수")
+    p_nk.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
+    p_nk.set_defaults(func=cmd_nikh)
+
+    p_hm = sub.add_parser(
+        "homonyms", help="이름이 같을 뿐 다른 사람인 연결을 가른다 (동명이인 관문)"
+    )
+    p_hm.add_argument("--show", type=int, default=15, help="출력할 예시 수")
+    p_hm.add_argument("--dry-run", action="store_true", help="고치지 않고 세기만")
+    p_hm.set_defaults(func=cmd_homonyms)
+
+    p_dp = sub.add_parser(
+        "dedupe", help="한 사건이 두 노드로 들어와 있는 것을 찾는다 (중복 관문)"
+    )
+    p_dp.add_argument("--table", type=Path, default=DEFAULT_DUPLICATES,
+                      help="판정 표 (기본: data/duplicates.tsv)")
+    p_dp.add_argument("--type", default="event", help="볼 노드 타입 (기본: event)")
+    p_dp.add_argument("--apply", action="store_true",
+                      help="표의 merge 줄을 실제로 합친다 (기본은 세기만)")
+    p_dp.add_argument("--show", type=int, default=20, help="출력할 후보 수")
+    p_dp.set_defaults(func=cmd_dedupe)
+
+    p_ch = sub.add_parser(
+        "chronology", help="원인이 결과보다 뒤인 인과를 찾는다 (연대 관문)"
+    )
+    p_ch.add_argument("--table", type=Path, default=DEFAULT_CHRONOLOGY,
+                      help="판정 표 (기본: data/chronology.tsv)")
+    p_ch.add_argument("--apply", action="store_true",
+                      help="표의 판정을 편집 계층에 적고 씌운다 (기본은 세기만)")
+    p_ch.add_argument("--show", type=int, default=20, help="출력할 건수")
+    p_ch.set_defaults(func=cmd_chronology)
+
     p_rd = sub.add_parser("redescribe", help="영어로 들어온 설명을 한국어로")
     p_rd.add_argument("--dry-run", action="store_true", help="바꾸지 않고 미리보기")
     p_rd.add_argument("--list-cleared", action="store_true",
                       help="비운 설명을 전부 나열")
     p_rd.set_defaults(func=cmd_redescribe)
+
+    p_ds = sub.add_parser("describe",
+                          help="빈 설명을 민족문화대백과의 정의 한 문장으로 (수집 뒤마다)")
+    p_ds.add_argument("--dry-run", action="store_true", help="채우지 않고 미리보기")
+    p_ds.set_defaults(func=cmd_describe)
+
+    p_pp = sub.add_parser("paraphrase",
+                          help="정본이 아닌 설명(위키백과·나무위키)을 우리 말로 새로 쓴다 (MLX)")
+    p_pp.add_argument("--limit", type=int, default=None)
+    p_pp.add_argument("--backend", choices=["anthropic", "mlx"], default="mlx")
+    p_pp.add_argument("--model", default=None)
+    p_pp.add_argument("--dry-run", action="store_true", help="모델 없이 후보만 센다")
+    p_pp.add_argument("--redo", action="store_true", help="이미 쓴 것도 다시")
+    p_pp.add_argument("--sync-to", type=Path, default=None,
+                      help="끝나고 새로 쓴 글을 이 파생본(화면 DB)으로 옮긴다")
+    p_pp.add_argument("--sync-only", action="store_true", help="쓰지 않고 옮기기만")
+    p_pp.add_argument("--scope", type=Path, default=None,
+                      help="이 파생본에 있는 노드만 쓴다 (원본 전체는 며칠 걸린다)")
+    p_pp.set_defaults(func=cmd_paraphrase)
 
     p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")
     p_sc.add_argument("era", nargs="+",
@@ -1516,6 +2350,13 @@ def main(argv: list[str] | None = None) -> int:
                       help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
     p_sc.add_argument("--keep-isolated", action="store_true", help="엣지 없는 노드도 유지")
+    # **`enrich --scope` 를 위한 문이다.** 설명이 빈 노드를 빼 버린 파생본을
+    # 범위로 주면, 정작 채워야 할 노드가 범위 밖이라 영영 안 채워진다.
+    # 채울 때는 이 스위치로 전부 담은 파생본을 한 번 만들어 그걸 범위로 준다.
+    p_sc.add_argument("--keep-undescribed", action="store_true",
+                      help="설명이 빈 내용 노드도 유지 (enrich --scope 대상 만들 때)")
+    p_sc.add_argument("--table", type=Path, default=DEFAULT_LABELS,
+                      help=f"파생본에 바로 적용할 한국어 라벨 표 (기본 {DEFAULT_LABELS.name})")
     p_sc.set_defaults(func=cmd_scope)
 
     p_tl = sub.add_parser("timeline", help="연도를 일급 개체로 정규화")
@@ -1541,7 +2382,61 @@ def main(argv: list[str] | None = None) -> int:
     p_lk.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_lk.set_defaults(func=cmd_links)
 
-    p_rg = sub.add_parser("reigns", help="왕의 재위 기간을 직위 엣지에 채운다 (P39 한정어)")
+    p_cp = sub.add_parser("corpus", help="근현대 문서 전문을 말뭉치로 내려받는다 (RAG 저장층)")
+    p_cp.add_argument("--corpus", type=Path, default=None, help="말뭉치 파일 (기본 data/corpus.sqlite)")
+    p_cp.add_argument("--since", type=int, default=1945, help="이 해 뒤의 사건과 그 이웃 (기본 1945)")
+    p_cp.add_argument("--limit", type=int, default=None)
+    p_cp.add_argument("--refresh", action="store_true", help="이미 있는 문서도 다시 받는다")
+    p_cp.add_argument("--interval", type=float, default=0.5)
+    p_cp.add_argument("--dry-run", action="store_true", help="대상만 세고 받지 않는다")
+    p_cp.add_argument("--source", choices=["all", "aks", "nikh", "kowiki"], default="all",
+                      help="aks 민족문화대백과(정본) · nikh 한국사연대기(정본) · kowiki 위키백과")
+    p_cp.add_argument("--kinds", default="사건",
+                      help="민족문화대백과에서 노드와 무관하게도 받을 근현대 항목 유형 (쉼표)")
+    p_cp.set_defaults(func=cmd_corpus)
+
+    p_ask = sub.add_parser("ask", help="말뭉치에서 물음에 가까운 문단을 찾는다")
+    p_ask.add_argument("query")
+    p_ask.add_argument("--corpus", type=Path, default=None)
+    p_ask.add_argument("-k", type=int, default=5)
+    p_ask.set_defaults(func=cmd_ask)
+
+    p_ro = sub.add_parser("roles", help="사건 참여자의 역할(주도·대항·피해…)을 말뭉치 근거로 판정")
+    p_ro.add_argument("--corpus", type=Path, default=None)
+    p_ro.add_argument("--since", type=int, default=1945)
+    p_ro.add_argument("--limit", type=int, default=None)
+    p_ro.add_argument("--backend", choices=["anthropic", "mlx", "ollama"], default="mlx")
+    p_ro.add_argument("--model", default=None)
+    p_ro.add_argument("--dry-run", action="store_true", help="모델 없이 근거 문단 유무만 센다")
+    p_ro.add_argument("--redo", action="store_true", help="이미 판정한 엣지도 다시")
+    p_ro.add_argument("--redo-roles", default=None,
+                      help="이 역할로 판정됐던 엣지만 다시 묻는다 (쉼표, 예: 주도)")
+    p_ro.set_defaults(func=cmd_roles)
+
+    p_ca = sub.add_parser("causes", help="사건 문서에 서술된 인과(원인 → 결과)를 말뭉치 근거로 적는다")
+    p_ca.add_argument("--corpus", type=Path, default=None)
+    p_ca.add_argument("--types", default="event", help="물을 노드 타입 (쉼표, 기본 event)")
+    p_ca.add_argument("--limit", type=int, default=None)
+    p_ca.add_argument("--backend", choices=["anthropic", "mlx", "ollama"], default="mlx")
+    p_ca.add_argument("--model", default=None)
+    p_ca.add_argument("--dry-run", action="store_true", help="모델 없이 물을 문서와 분량만 센다")
+    p_ca.add_argument("--redo", action="store_true", help="이미 물은 문서도 다시")
+    p_ca.add_argument("--sync-to", type=Path, default=None,
+                      help="끝나고 인과 엣지를 이 파생본(화면 DB)으로 옮긴다")
+    p_ca.add_argument("--sync-only", action="store_true", help="묻지 않고 옮기기만")
+    p_ca.add_argument("--scope", type=Path, default=None,
+                      help="이 파생본(화면 DB)에 있는 노드만 묻는다 — 화면에 선 것부터")
+    p_ca.add_argument("--reresolve", action="store_true",
+                      help="저장된 모델 답을 모델 없이 다시 판정한다 (해소기가 좋아졌을 때)")
+    p_ca.set_defaults(func=cmd_causes)
+
+    p_ch = sub.add_parser("chain", help="인과 사슬을 글로 읽는다 (--to 를 주면 두 노드 사이의 경로)")
+    p_ch.add_argument("node", help="노드 id 또는 이름")
+    p_ch.add_argument("--to", default=None, help="이 노드까지의 최단 인과 경로")
+    p_ch.add_argument("--depth", type=int, default=4)
+    p_ch.set_defaults(func=cmd_chain)
+
+    p_rg = sub.add_parser("reigns", help="왕의 재위·대통령의 재임 기간을 직위 엣지에 채운다 (P39 한정어)")
     p_rg.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_rg.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_rg.set_defaults(func=cmd_reigns)
@@ -1552,6 +2447,31 @@ def main(argv: list[str] | None = None) -> int:
     p_pr.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_pr.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_pr.set_defaults(func=cmd_precision)
+
+    p_un = sub.add_parser("untangle", help="related_to 를 뜻 있는 타입으로 갈라 낸다 (규칙 → 겹침 → 모델)")
+    p_un.add_argument("--backend", choices=["anthropic", "mlx", "ollama"], default="mlx")
+    p_un.add_argument("--model", default=None)
+    p_un.add_argument("--limit", type=int, default=None, help="모델에 물을 최대 건수")
+    p_un.add_argument("--redo", action="store_true", help="이미 판정한 것도 다시 묻는다")
+    p_un.add_argument("--rules-only", action="store_true", help="모델 없이 규칙과 겹침만")
+    p_un.add_argument("--dry-run", action="store_true", help="바꾸지 않고 센다")
+    p_un.add_argument("--export", type=Path, default=None, help="모델에 물을 후보를 이 표로 뽑기만 한다")
+    p_un.add_argument("--table", type=Path, default=None,
+                      help=f"직접 판정한 표 (기본: {DEFAULT_UNTANGLE} 이 있으면 모델 대신 그것)")
+    p_un.set_defaults(func=cmd_untangle)
+
+    p_cd = sub.add_parser("cardinality", help="출생지가 둘인 사람처럼 카디널리티를 넘는 노드를 센다 (보고만)")
+    p_cd.add_argument("--type", default=None, help="엣지 타입 (쉼표). 기본은 MAX_TARGETS 전부")
+    p_cd.add_argument("--list", action="store_true", help="충돌을 전부 나열")
+    p_cd.add_argument("--fetch-places", action="store_true",
+                      help="걸린 장소들의 상위 행정구역(P131)을 받아 located_in 으로 잇는다")
+    p_cd.set_defaults(func=cmd_cardinality)
+
+    p_ov = sub.add_parser("overrides", help="편집 계층 — 고친 값의 표를 세고(--seed 되짚기, --reapply 다시 씌우기)")
+    p_ov.add_argument("--seed", action="store_true",
+                      help="표가 없던 때 고쳐 둔 값을 지금 DB 에서 되짚어 적는다 (DB 마다 한 번)")
+    p_ov.add_argument("--reapply", action="store_true", help="표 전부를 그래프에 다시 씌운다")
+    p_ov.set_defaults(func=cmd_overrides)
 
     p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
     p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,

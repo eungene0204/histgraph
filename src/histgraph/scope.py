@@ -75,8 +75,22 @@ class Era:
     # 걸리고 유관순·김좌진·이완용·홍범도·신채호·이육사·여운형이 전부
     # 들어온다.
     person_window: tuple[int, int] | None = None
+    # 국적으로 인물 씨앗을 고를 것인가. **대한민국은 아니다** — 전체 인물의
+    # 65%(18,471명)가 이 국적이고 그 대부분은 역사가 아니라 명단이다
+    # (운동선수·연예인). 끄면 인물은 사건의 이웃과 `seed_positions` 로만
+    # 들어온다: 사건에 참여한 사람, 그리고 그 자리에 앉았던 사람.
+    seed_by_polity: bool = True
+    # 이 자리에 앉았던 인물은 씨앗이다 (`held_position` 의 도착 QID).
+    # 대한민국의 씨앗 인물은 대통령이다 — 연표의 띠가 그들로 선다.
+    seed_positions: list[str] = field(default_factory=list)
+    # 이 해보다 앞선 사건은 정체 태그가 있어도 씨앗이 아니다. Wikidata 의
+    # P17 은 '지금 그 땅의 나라'를 적는 일이 잦다 — 실측: 원종·애노의
+    # 난(889년)이 대한민국의 사건으로 태그돼 있다.
+    since: int | None = None
 
     def seed_polities(self) -> list[str]:
+        if not self.seed_by_polity:
+            return []
         return self.person_polities or [self.polity_label]
 
 
@@ -95,6 +109,16 @@ ERAS: dict[str, Era] = {
         person_window=(1910, 1945),
         state=False,
     ),
+    # 대한민국은 왕조가 아니라 지금의 나라다. 정체 노드(Q884)는 그래프에
+    # **장소**로 앉아 있고(출생지 엣지 983건이 가리킨다) 시대 엣지의 도착이
+    # 될 수 없으므로, 씨앗은 사건과 대통령에서 온다. 인물을 국적으로 고르면
+    # 명단이 된다 (`seed_by_polity` 주석).
+    "daehan": Era(
+        "대한민국", "Q884", "대한민국", ["대한민국"],
+        seed_by_polity=False,
+        seed_positions=["Q6296418"],   # 대한민국 대통령
+        since=1945,
+    ),
 }
 
 # 한 화면에 담을 시대 묶음. **시대를 고르는 기준(ERAS)과 다른 것이다** —
@@ -102,12 +126,12 @@ ERAS: dict[str, Era] = {
 # 어디에도 없다. 사람도 이어진다: 대한제국에서 벼슬한 사람이 일제강점기에
 # 의병이 되고, 조선의 마지막 왕이 일제강점기의 이왕(李王)이다.
 BUNDLES: dict[str, tuple[str, ...]] = {
-    "korea": ("joseon", "ilje"),
+    "korea": ("joseon", "ilje", "daehan"),
 }
 
 # 묶음의 이름. 화면 머리에 뜨는 글자라 한국어여야 한다.
 BUNDLE_LABEL: dict[str, str] = {
-    "korea": "조선~일제강점기",
+    "korea": "조선~대한민국",
 }
 
 
@@ -144,7 +168,17 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
                  AND json_extract(props,'$.polity') IN ({marks})""",
             polities,
         )
-    ]
+    ] if polities else []
+    # 그 자리에 앉았던 사람 (Era.seed_positions 주석 참고).
+    by_seat: list[str] = []
+    for pos in era.seed_positions:
+        by_seat += [
+            r["src"]
+            for r in c.execute(
+                """SELECT src FROM edges WHERE type='held_position' AND dst=?""",
+                (f"wd:{pos}",),
+            )
+        ]
     # **국적 태그가 없는 인물이 3,390명이고 거기에 왕들이 들어 있다.**
     # '조선 정종'은 라벨에 시대가 적혀 있는데도 씨앗이 아니어서, 다른
     # 인물의 이웃으로만 딸려 들어왔다. 그 바람에 그의 어머니(한씨)처럼
@@ -179,7 +213,7 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
                 continue
             by_year.append(r["id"])
 
-    persons = list({*persons, *by_label, *by_year})
+    persons = list({*persons, *by_label, *by_year, *by_seat})
     seeds.update(persons)
 
     events = [
@@ -196,14 +230,18 @@ def select_seeds(store: GraphStore, era: Era) -> set[str]:
     # 신임사화·경신 대기근과 임진왜란 전투 30여 건이 통째로 빠져 있었다.
     event_polities = [era.polity_label, *era.successor_events]
     marks = ",".join("?" * len(event_polities))
-    events += [
-        r["id"]
-        for r in c.execute(
-            f"""SELECT id FROM nodes WHERE type='event'
-                 AND json_extract(props,'$.polity') IN ({marks})""",
-            event_polities,
-        )
-    ]
+    for r in c.execute(
+        f"""SELECT id, start_date FROM nodes WHERE type='event'
+             AND json_extract(props,'$.polity') IN ({marks})""",
+        event_polities,
+    ):
+        if era.since is not None:
+            from .timeline import _year_of
+
+            year = _year_of(r["start_date"])
+            if year is not None and year < era.since:
+                continue
+        events.append(r["id"])
     # 왕조 노드에 from_period 로 직접 걸린 사건도 포함
     events += [
         r["src"]
@@ -317,12 +355,61 @@ def _dated_events(store: GraphStore, ids: set[str]) -> set[str]:
     return out
 
 
+# 설명이 없으면 지우는 타입. **화면에서 제 이름 말고 할 말이 있어야 하는**
+# 노드들이다. 사용자 지적(2026-09-04): 연표에 '백성들이 종이를 바치는 일의
+# 폐단에 대해 선혜청에서 아뢰다'(실록 기사 제목)가 설명 없이 서 있었다 —
+# "안 보여주는 게 더 좋을 것 같은데".
+#
+# **여기 없는 타입은 뼈대다.**
+#   period  연표의 눈금(`time:1592`)과 유물 제작연대 문자열('1436년(조선
+#           세종 18)'). 설명이 있을 수 없고, 없어도 연표가 그 자리를 그린다.
+#           지우면 축이 무너진다.
+#   role    직위는 인물 상세의 '직위' 줄로만 서고 연표에 안 선다. 이름
+#           자체가 뜻이다 — '영의정'에 더 적을 말이 없어도 빈 칸이 아니다.
+#   place   행정 지명도 이름이 곧 뜻이다. '서울 종로구'에 해설을 붙일
+#           일이 없는데, 빼면 그 구에 있는 유물 86건이 '어디 있는지'를
+#           잃는다 (실측: 빈 설명 장소 284개 중 상위 20개가 엣지 10건
+#           이상인 행정 지명이다).
+#
+# **지우기 전에 채운다.** 이 관문에 걸리는 것은 '자료가 없는 노드'가
+# 아니라 '아직 안 받아온 노드'인 적이 많았다 (실측: 빈 설명 wd 노드 573개
+# 중 415개가 한국어 위키백과나 Wikidata 한 줄 설명을 갖고 있었다).
+# `enrich` 와 `describe` 를 먼저 돌리지 않으면 이 규칙이 멀쩡한 노드를
+# 지운다 — 그래서 `cmd_scope` 가 남은 수를 세어 알린다.
+UNDESCRIBED_DROP_TYPES = (
+    "event", "person", "org", "heritage", "artwork", "media", "concept",
+)
+
+
+def _undescribed(store: GraphStore, ids: set[str]) -> set[str]:
+    """그 가운데 설명이 비어 있어 화면에 할 말이 없는 노드."""
+    if not ids:
+        return set()
+    out: set[str] = set()
+    ordered = sorted(ids)
+    kinds = ",".join(f"'{t}'" for t in UNDESCRIBED_DROP_TYPES)  # 코드 안의 고정 목록
+    for i in range(0, len(ordered), 500):
+        batch = ordered[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        out.update(
+            r["id"]
+            for r in store.conn.execute(
+                f"""SELECT id FROM nodes
+                     WHERE id IN ({marks}) AND type IN ({kinds})
+                       AND (description IS NULL OR trim(description) = '')""",
+                batch,
+            )
+        )
+    return out
+
+
 def extract(
     store: GraphStore,
     era_keys: str | Sequence[str],
     out_path: str,
     hops: int = 1,
     drop_isolated: bool = True,
+    drop_undescribed: bool = True,
 ) -> dict[str, object]:
     """시대 서브그래프를 별도 DB 로 뽑는다. 시대를 여럿 주면 한 DB 에 담는다.
 
@@ -378,6 +465,15 @@ def extract(
         log.info("노드 행이 없는 끝점 %d개 제외", len(keep) - len(real))
     keep = real
 
+    # **설명이 없는 내용 노드를 뺀다 — 고립 정리보다 먼저.** 나중에 빼면
+    # 그것만 사라진 자리에 이웃이 점으로 남는다. 순서를 지키면 고립 검사가
+    # 최종 노드 집합을 본다.
+    undescribed: set[str] = set()
+    if drop_undescribed:
+        undescribed = _undescribed(store, keep)
+        keep -= undescribed
+        log.info("설명 없는 노드 %d개 제외 (남은 노드 %d)", len(undescribed), len(keep))
+
     isolated: set[str] = set()
     if drop_isolated:
         # 엣지가 하나도 없는 노드는 그래프에서 할 일이 없다. 실측: 조선
@@ -421,7 +517,8 @@ def extract(
     dest = GraphStore(out)
 
     ordered = sorted(keep)
-    node_rows, edge_rows, alias_rows, name_rows = [], [], [], []
+    node_rows, edge_rows, alias_rows, name_rows, summary_rows = [], [], [], [], []
+    override_rows: list = []
     for i in range(0, len(ordered), 500):
         batch = ordered[i : i + 500]
         marks = ",".join("?" * len(batch))
@@ -444,6 +541,19 @@ def extract(
         ).fetchall()
         alias_rows += store.conn.execute(
             f"SELECT * FROM same_as WHERE a IN ({marks})", batch
+        ).fetchall()
+        # 우리 말로 새로 쓴 설명(summaries.py)도 함께 — 안 옮기면 화면이
+        # 위키 원문 도입부로 물러난다.
+        summary_rows += store.conn.execute(
+            f"SELECT * FROM summaries WHERE node_id IN ({marks})", batch
+        ).fetchall()
+        # 편집 계층도 따라간다 — 파생본에 `relabel` 을 또 돌리지 않아도
+        # 고친 이름·정본·재위가 그대로 서고, 파생본 위의 수집도 되돌린다.
+        override_rows += store.conn.execute(
+            f"""SELECT * FROM overrides
+                 WHERE (target = 'node' AND key IN ({marks}))
+                    OR (target = 'edge' AND substr(key, 1, instr(key, char(9)) - 1) IN ({marks}))""",
+            batch + batch,
         ).fetchall()
 
     edge_rows = [r for r in edge_rows if r["dst"] in keep]
@@ -471,6 +581,17 @@ def extract(
             (r["a"], r["b"]): r for r in alias_rows
         }.values()],
     )
+    dest.conn.executemany(
+        "INSERT OR REPLACE INTO summaries (node_id,text,model,src_hash,made_at) VALUES (?,?,?,?,?)",
+        [(r["node_id"], r["text"], r["model"], r["src_hash"], r["made_at"]) for r in summary_rows],
+    )
+    ocols = "target,key,field,value,origin,reason,apply_when,made_at"
+    dest.conn.executemany(
+        f"INSERT OR REPLACE INTO overrides ({ocols}) VALUES ({','.join('?' * 8)})",
+        [tuple(r[c] for c in ocols.split(",")) for r in {
+            (r["target"], r["key"], r["field"]): r for r in override_rows
+        }.values()],
+    )
     dest.conn.commit()
 
     stats = dest.stats()
@@ -479,6 +600,7 @@ def extract(
         "era": " · ".join(e.name for e in eras),
         "out": str(out),
         "seeds": len(seeds),
+        "undescribed_dropped": len(undescribed),
         "isolated_dropped": len(isolated),
         "kept_aliases": len(name_rows),
         "kept_nodes": stats["nodes_total"],
@@ -487,3 +609,40 @@ def extract(
         "by_edge_type": stats["by_edge_type"],
         "dangling": stats["dangling_edges"],
     }
+
+
+def sweep_undescribed(conn) -> dict[str, int]:
+    """파생본에서 설명 없는 내용 노드를 지운다 — `redescribe` 뒤의 두 번째 빗질.
+
+    `extract` 가 이미 한 번 걸렀는데도 이게 필요한 이유: `cmd_scope` 는
+    파생본을 만든 **뒤에** `redescribe` 를 돌리고, 그것은 한국어로 옮기지
+    못한 설명을 **비운다**. 그래서 복사할 때는 차 있던 칸이 그 다음에
+    빈다. 한 번만 거르면 그 노드들이 그대로 화면에 선다.
+
+    엣지·별칭·same_as 도 같이 지운다. 남기면 없는 곳을 가리키는 엣지가
+    된다."""
+    kinds = ",".join(f"'{t}'" for t in UNDESCRIBED_DROP_TYPES)  # 코드 안의 고정 목록
+    ids = [
+        r[0] for r in conn.execute(
+            f"""SELECT id FROM nodes WHERE type IN ({kinds})
+                 AND (description IS NULL OR trim(description) = '')"""
+        )
+    ]
+    if not ids:
+        return {"nodes": 0, "edges": 0}
+    edges = 0
+    for i in range(0, len(ids), 500):
+        batch = ids[i : i + 500]
+        marks = ",".join("?" * len(batch))
+        edges += conn.execute(
+            f"DELETE FROM edges WHERE src IN ({marks}) OR dst IN ({marks})",
+            (*batch, *batch),
+        ).rowcount
+        conn.execute(
+            f"DELETE FROM same_as WHERE a IN ({marks}) OR b IN ({marks})",
+            (*batch, *batch),
+        )
+        conn.execute(f"DELETE FROM aliases WHERE node_id IN ({marks})", batch)
+        conn.execute(f"DELETE FROM nodes WHERE id IN ({marks})", batch)
+    conn.commit()
+    return {"nodes": len(ids), "edges": max(edges, 0)}

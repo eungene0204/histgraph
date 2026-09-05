@@ -475,6 +475,14 @@ check("`X의 따님` 은 이름이 아니다", is_descriptive_name("양윤순(�
 check("`X의 딸` 도 이름이 아니다", is_descriptive_name("정승복의 딸"))
 check("보통 이름은 통과", not is_descriptive_name("안중관"))
 check("한자 병기 이름도 통과", not is_descriptive_name("송시열(宋時烈)"))
+# **친족어를 낱개로 세면 반드시 샌다.** 실측(기축옥사 문서): 목록에 `처`·
+# `형`·`누이` 는 있는데 `처자`·`형제`·`조상` 이 없어서 셋이 그대로 노드가
+# 됐다. 집합(형제·처자·일가)과 세대(조상·후손)를 같이 본다.
+for _bad in ("정여립의 처자", "정여립의 형제", "정여립의 조상", "정여립의 일가",
+             "이순신의 후손", "세종의 사위", "김종직의 문인", "현종의 스승"):
+    check(f"`{_bad}` 는 이름이 아니다", is_descriptive_name(_bad))
+for _ok in ("정옥남", "조선 세조", "기축옥사", "의금부", "이덕형", "형조판서"):
+    check(f"`{_ok}` 는 통과", not is_descriptive_name(_ok))
 
 # 한자 병기가 붙으면 같은 사람이 두 노드가 된다
 check("한자 병기 제거", normalize_name("송시열(宋時烈)") == "송시열")
@@ -870,6 +878,17 @@ check("값이 본문으로 새지 않는다", "사도세자가" not in vals.get(
 check("날짜를 ISO 로", infobox_date(vals["날짜"]) == "1762-07-05")
 check("별칭을 가른다", infobox_aliases(vals["별칭"], "임오화변") == ["임오옥", "사도세자사건"])
 
+# 위키 주석은 편집자에게 남긴 쪽지지 별칭이 아니다. 을사사화·헤이그 특사
+# 사건의 `<!-- 잘 알려진 명칭으로, 사건 이름과 중복되면 쓰지 않음 -->` 이
+# 쉼표에서 갈려 이름표 두 개로 화면에 섰다 (2026-09-05 지적).
+memo = "<!-- 잘 알려진 명칭으로, 사건 이름과 중복되면 쓰지 않음 -->"
+check("주석은 별칭이 아니다", infobox_aliases(memo, "을사사화") == [])
+check("주석 뒤의 이름은 살린다", infobox_aliases(f"을사년의 옥사 {memo}", "을사사화") == ["을사년의 옥사"])
+eul = "{{사건 정보\n| 사건명 = 을사사화\n| 별칭 = " + memo + "\n| 날짜 = [[1545년]]\n}}"
+check("주석은 값을 읽기 전에 지운다",
+      parse_infobox_values(eul, EVENT_VALUE_FIELDS, EVENT_FIELDS).get("별칭") == "",
+      str(parse_infobox_values(eul, EVENT_VALUE_FIELDS, EVENT_FIELDS)))
+
 # 괄호 안 재위 연차를 연도로 집으면 안 된다 — 거의 모든 사건에 붙어 있다.
 check("재위 연차는 연도가 아니다", infobox_date("(영조 38)") is None)
 check("연차가 붙어도 서기를 집는다", infobox_date("[[1504년]](연산군 10년)") == "1504-01-01")
@@ -1054,6 +1073,40 @@ check("사건은 넘겨주기를 따라가지 않음", "redirects" not in stub.p
 fetch_qids(stub, ["리델"])
 check("인물은 넘겨주기를 따라감", stub.params.get("redirects") == "1")
 
+# 사건의 넘겨주기 중 **띄어쓰기만 다른 것**은 흡수가 아니라 표기 차이다.
+# 실측(2026-09-04): '조미수호통상조약'이 '조미 수호 통상 조약'을 가리키는데
+# 사건이라 넘겨주기를 안 따라가 문서가 없는 것으로 떨어졌다. 반대로
+# '단종 복위 운동' → '세조찬위' 는 상위 사건이라 따라가면 안 된다.
+spacing_stub = _StubFetcher({
+    "query": {
+        "redirects": [
+            {"from": "조미수호통상조약", "to": "조미 수호 통상 조약"},
+            {"from": "단종 복위 운동", "to": "세조찬위"},
+        ],
+        "pages": [
+            {"title": "조미 수호 통상 조약", "pageprops": {"wikibase_item": "Q697104"}},
+            {"title": "세조찬위", "pageprops": {"wikibase_item": "Q16175444"}},
+        ],
+    }
+})
+found2, _ = fetch_qids(spacing_stub, ["조미수호통상조약", "단종 복위 운동"],
+                       follow_redirects=False, spacing_only=True)
+check("띄어쓰기만 다른 넘겨주기는 따라간다",
+      found2 == {"조미수호통상조약": "Q697104"}, str(found2))
+check("이름이 다른 넘겨주기는 상위 항목으로의 흡수라 버린다",
+      "단종 복위 운동" not in found2)
+check("띄어쓰기만 볼 때도 넘겨주기 자체는 켠다",
+      spacing_stub.params.get("redirects") == "1")
+
+# Wikidata 의 사건은 Q1656682 와 Q1190554 두 뿌리로 갈라져 있다. 앞의
+# 것만 보면 전쟁·조약·학살이 통째로 '클래스 확인 실패'가 된다 (실측:
+# 국공 내전 P31=내전, 조미 수호 통상 조약 P31=조약, 자유시 참변 P31=학살).
+from histgraph.promote import CATEGORY_TO_TYPE  # noqa: E402
+
+check("사건의 두 뿌리를 다 본다",
+      CATEGORY_TO_TYPE.get("Q1656682") == "event"
+      and CATEGORY_TO_TYPE.get("Q1190554") == "event")
+
 # 회귀: 문서명만 보고 승격하면 동명이인에 붙는다. 무오사화 문서의 '한유'는
 # 조선 인물인데 위키백과 '한유'는 당나라 문인 韓愈(768~824)다.
 from histgraph.promote import life_span, plausible_period  # noqa: E402
@@ -1082,6 +1135,15 @@ with tempfile.TemporaryDirectory() as tmp:
         Node(id="ex:person:세조", type="person", label="세조", source="extract"),
         Node(id="ex:person:숙종", type="person", label="숙종", source="extract"),
         Node(id="ex:person:고종", type="person", label="고종", source="extract"),
+        # 띄어쓰기만 다른 고아. 산문이 적은 대로 노드가 만들어진다.
+        Node(id="wd:Q5", type="event", label="단종 복위 운동", source="wd"),
+        Node(id="ex:event:단종 복위운동", type="event", label="단종 복위운동",
+             source="extract"),
+        # 띄어쓰기를 떼도 후보가 둘이면 고르지 않는다
+        Node(id="wd:Q6", type="event", label="여진 정벌 (조선)", source="wd"),
+        Node(id="wd:Q7", type="event", label="여진정벌 (조선)", source="wd"),
+        Node(id="ex:event:여진 정벌(조선)", type="event", label="여진 정벌(조선)",
+             source="extract"),
     ])
     store.upsert_edges([
         Edge(src="ex:person:세조", dst="wd:Q2", type="participated_in",
@@ -1096,6 +1158,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("왕조 접두로 매칭", plan["ex:person:세조"]["target"] == "wd:Q1")
     check("왕조가 둘이면 매칭하지 않음", "ex:person:숙종" not in plan)
     check("타입이 다르면 매칭하지 않음", "ex:person:고종" not in plan)
+    # 실측 회귀(2026-09-04): '단종 복위운동'(고아)과 '단종 복위 운동'(진짜)이
+    # 남남으로 남아, 사전에 정의가 있는데도 '같은 이름의 노드가 둘'이라
+    # 설명을 못 채우고 지워졌다. 띄어쓰기는 뜻이 아니다.
+    check("띄어쓰기만 다르면 같은 노드로 본다",
+          plan.get("ex:event:단종 복위운동", {}).get("target") == "wd:Q5"
+          and plan["ex:event:단종 복위운동"]["method"] == "label_nospace", str(plan.get("ex:event:단종 복위운동")))
+    check("띄어쓰기를 떼도 후보가 둘이면 고르지 않는다",
+          "ex:event:여진 정벌(조선)" not in plan)
 
     stats = merge_node(store, "ex:person:세조", "wd:Q1", method="dynasty_prefix")
     check("자기순환 엣지 제거", stats["self_loops"] == 1)
@@ -1379,6 +1449,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("검색은 차수 높은 쪽을 먼저", hits[0]["id"] == "wd:Q1", str(hits[:2]))
     check("부분 일치도 찾음", any(h["id"] == "wd:Q3" for h in hits))
     check("빈 검색어는 빈 결과", api.search("  ") == [])
+    # 실측 회귀: '1974'를 치면 연표 눈금 time:1974 가 첫 줄로 나와 엔터가 열었다
+    check("연표 눈금 노드는 검색에 안 나온다",
+          all(h["id"] != "wd:Q4" for h in api.search("1443")), str(api.search("1443")))
 
     g = api.graph("wd:Q1", depth=1)
     check("연도 노드는 기본적으로 빼고 그린다",
@@ -1428,6 +1501,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("왕조 노드가 그래프의 중심", api.root() == "wd:Q28179")
     check("시작점 맨 위가 왕조", api.seeds(5)[0]["id"] == "wd:Q28179")
     check("모르는 시대는 중심 없음", GraphAPI(store, era="").root() is None)
+    # 인과의 종류(배경·계기·영향)는 그래프 화면이 선 위에 적는다 — 타입 이름
+    # '원인'으로 뭉개 보내면 사슬 패널과 그래프가 다른 말을 한다.
+    store.upsert_edges([Edge(src="wd:Q2", dst="wd:Q1", type="caused", source="causes", label="배경", confidence=0.8)])
+    g3 = api.graph("wd:Q1", depth=1)
+    caused = [e for e in g3["edges"] if e["type"] == "caused"]
+    check("그래프의 인과 엣지는 종류를 라벨로 준다", len(caused) == 1 and caused[0]["label"] == "배경", str(caused))
     store.close()
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -1694,7 +1773,7 @@ side = links_from_rows([
 ])
 check("사건이 적어 둔 참가자는 참여 엣지가 된다 (방향은 사람 → 사건)",
       ("Q2", "Q1", "participated_in", "") in side, str(side))
-check("원인·결과는 원인에서 결과로 한 방향", ("Q3", "Q1", "related_to", "원인") in side, str(side))
+check("원인·결과는 원인에서 결과로 한 방향 (인과 엣지)", ("Q3", "Q1", "caused", "원인") in side, str(side))
 check("원인과 결과가 같은 엣지로 접힌다",
       len([x for x in side if x[3] == "원인"]) == 1, str(side))
 check("장소는 발생 장소 엣지가 된다", ("Q1", "Q4", "occurred_at", "") in side, str(side))
@@ -1902,9 +1981,13 @@ with tempfile.TemporaryDirectory() as tmp:
         Node(id="wd:Q28179", type="org", label="조선", source="wd"),
         Node(id="wd:EV1", type="event", label="갑오개혁", source="wd",
              start_date="1894-01-01", props={"polity": "조선"},
+             description="1894년 조선에서 시작된 제도 개혁.",
              aliases=["갑오경장"]),
         Node(id="wd:EV2", type="event", label="무신정변", source="wd",
              props={"polity": "고려"}),
+        # 설명이 없는 사건. 연대는 알지만 화면에서 이름 말고 할 말이 없다.
+        Node(id="wd:EV3", type="event", label="이름뿐인 사건", source="wd",
+             start_date="1895-01-01", props={"polity": "조선"}),
     ])
     era_seeds = select_seeds(store, ERAS["joseon"])
     check("Wikidata 가 그 정체의 사건이라 한 것은 씨앗이 된다",
@@ -1935,7 +2018,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("연대를 아는 사건은 엣지가 없어도 남는다",
           dest.conn.execute(
               "SELECT 1 FROM nodes WHERE id='wd:EV1'").fetchone() is not None)
+    # 사용자 지적(2026-09-04): 실록 기사 제목이 설명 없이 연표에 서 있었다.
+    # "안 보여주는 게 더 좋을 것 같은데" — 연대를 알아도 할 말이 없으면
+    # 세우지 않는다. 연대 있는 사건을 살리는 규칙보다 이쪽이 앞선다.
+    check("설명이 없으면 연대를 알아도 빠진다",
+          dest.conn.execute(
+              "SELECT 1 FROM nodes WHERE id='wd:EV3'").fetchone() is None)
     dest.close()
+
+    # 뼈대는 설명이 없어도 남는다 — 연표의 눈금과 직위가 사라지면 축과
+    # 인물 상세가 무너진다.
+    from histgraph.scope import UNDESCRIBED_DROP_TYPES  # noqa: E402
+
+    check("연표 눈금은 설명 없이도 남는다", "period" not in UNDESCRIBED_DROP_TYPES)
+    check("직위는 설명 없이도 남는다", "role" not in UNDESCRIBED_DROP_TYPES)
+    # '서울 종로구'에 해설을 붙일 일이 없는데, 빼면 그 구에 있는 유물
+    # 86건이 '어디 있는지'를 잃는다.
+    check("장소는 설명 없이도 남는다", "place" not in UNDESCRIBED_DROP_TYPES)
     store.close()
 
 # --- 사실 정합성 보수 ----------------------------------------------------
@@ -2006,6 +2105,33 @@ with tempfile.TemporaryDirectory() as tmp:
     check("보수 뒤 남는 건 참인 관계뿐",
           left == {("wd:W", "wd:H", "spouse_of"), ("wd:S", "wd:F", "child_of")}, str(left))
     check("두 번 돌려도 더 지울 게 없다", not audit_facts(store)["drops"])
+    store.close()
+
+# 옮겨 갈 자리에 같은 엣지가 이미 있으면 UNIQUE 제약에 부딪힌다. 실측
+# (2026-09-04): `promote` 를 두 번째 돌릴 때 IntegrityError 로 죽었다 —
+# 첫 번째가 옮겨 놓은 엣지와 부딪힌 것이라 한 번만 돌리는 동안은 안 보였다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "clash.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:OLD", type="person", label="김철", source="wd",
+             start_date="1400", end_date="1450"),
+        Node(id="wd:NEW", type="person", label="김철", source="wd",
+             start_date="1480", end_date="1550"),
+        Node(id="wd:EV2", type="event", label="어떤 사화", source="wd",
+             start_date="1500", end_date="1500"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:OLD", dst="wd:EV2", type="participated_in", source="extract",
+             props={"evidence": "김철이 이 사화에 얽혔다"}),
+        Edge(src="wd:NEW", dst="wd:EV2", type="participated_in", source="extract",
+             props={"evidence": "김철이 이 사화에 얽혔다"}),
+    ])
+    rep = repair_facts(store)
+    left = {(r["src"], r["dst"]) for r in
+            store.conn.execute("SELECT src, dst FROM edges")}
+    check("옮길 자리가 이미 차 있으면 지운다 (죽지 않는다)",
+          left == {("wd:NEW", "wd:EV2")}, str(left))
+    check("부딪힌 수를 센다", rep.get("collided") == 1, str(rep.get("collided")))
     store.close()
 
 # --- 한국어 라벨 덮어쓰기 ------------------------------------------------
@@ -2638,10 +2764,10 @@ with tempfile.TemporaryDirectory() as tmp:
     from histgraph import resolve as rs  # noqa: E402
     from histgraph import scope as sc  # noqa: E402
 
-    check("묶음은 시대 여럿으로 풀린다", sc.eras_of("korea") == ("joseon", "ilje"))
+    check("묶음은 시대 여럿으로 풀린다", sc.eras_of("korea") == ("joseon", "ilje", "daehan"))
     check("시대 이름은 자기 자신으로 풀린다", sc.eras_of("joseon") == ("joseon",))
     # 화면 머리말은 서버가 준다. 모르는 키에 영어를 내보내면 안 된다.
-    check("묶음 이름은 한국어다", sc.label_of("korea") == "조선~일제강점기")
+    check("묶음 이름은 한국어다", sc.label_of("korea") == "조선~대한민국")
     check("모르는 시대는 빈 이름", sc.label_of("없는시대") == "")
 
     store = GraphStore(Path(tmp) / "era.sqlite")
@@ -2804,12 +2930,1334 @@ check("`가해자` 는 참여가 맞다",
 check("`위치` 로 `사건 정보` 틀을 연다",
       EVENT_FIELDS["위치"][0] == "occurred_at")
 
+print("\n[한국어 관문 — 화면에 한글 아닌 글이 뜨는 노드를 센다]")
+# 세 번 반복된 일이다: 표와 사전은 있는데 파생본에 안 돌려서 영어가 화면에
+# 떴다. tools/check_korean.py 와 `scope` 가 이 함수로 그걸 잰다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "kr.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q1", type="event", label="1923 Jogono Police Station bombing",
+             source="wd"),
+        Node(id="wd:Q2", type="person", label="Q2", source="wd"),
+        Node(id="wd:Q3", type="person", label="김상옥", source="wd",
+             description="독립운동가 (1889~1923)"),
+        Node(id="wd:Q4", type="place", label="단양 (Danyang)", source="wd",
+             description="   "),   # 빈 설명은 세지 않는다
+    ])
+    # Node 관문이 영어 설명을 걸러 버리므로, SQL 로 직접 쓰는 경로가
+    # 남긴 영어 설명은 SQL 로 흉내 낸다 (wikipedia._fill_from_wikidata 류).
+    store.conn.execute(
+        "UPDATE nodes SET description='human settlement in South Korea' WHERE id='wd:Q4'")
+    store.conn.commit()
+    found = labels_mod.foreign_text(store.conn)
+    check("한글 없는 라벨을 센다",
+          ("wd:Q1", "event", "label", "1923 Jogono Police Station bombing") in found)
+    check("QID 가 라벨인 노드도 센다", ("wd:Q2", "person", "label", "Q2") in found)
+    check("한글이 섞인 라벨은 통과", not any(f[0] == "wd:Q3" for f in found))
+    check("한글 없는 설명을 센다",
+          ("wd:Q4", "place", "description", "human settlement in South Korea") in found,
+          str(found))
+    check("라벨에 한글이 섞이면 라벨은 통과 (설명만 걸린다)",
+          [f for f in found if f[0] == "wd:Q4"] ==
+          [("wd:Q4", "place", "description", "human settlement in South Korea")])
+    check("정확히 셋", len(found) == 3, str(found))
+    store.close()
+
+    # 배포 관문 스크립트는 같은 함수를 돌리고, 걸리면 1 로 끝난다
+    import subprocess
+    tool = Path(__file__).resolve().parents[1] / "tools" / "check_korean.py"
+    bad = subprocess.run([sys.executable, str(tool), str(Path(tmp) / "kr.sqlite")],
+                         capture_output=True, text=True)
+    check("check_korean.py 는 영어가 있으면 실패한다", bad.returncode == 1, bad.stdout)
+    check("무엇이 걸렸는지 찍는다", "Jogono" in bad.stdout, bad.stdout)
+    clean = GraphStore(Path(tmp) / "ok.sqlite")
+    clean.upsert_nodes([Node(id="wd:Q3", type="person", label="김상옥", source="wd")])
+    clean.close()
+    good = subprocess.run([sys.executable, str(tool), str(Path(tmp) / "ok.sqlite")],
+                          capture_output=True, text=True)
+    check("check_korean.py 는 한글뿐이면 통과한다", good.returncode == 0, good.stdout)
+
+# 별칭은 화면에 이름표로 그대로 선다 — 로마자 표기와 마크업 조각은 세우지
+# 않는다 (2026-09-05 지적: '<!-- 잘 알려진 명칭으로' 가 이름표로 섰다).
+# 지우지는 않는다: 검색은 로마자로 친 것도 별칭으로 찾아 준다.
+check("로마자 별칭은 화면에 안 세운다",
+      not labels_mod.screen_alias("Im Ho") and not labels_mod.screen_alias("KAPF"))
+check("마크업 조각은 화면에 안 세운다",
+      not labels_mod.screen_alias("<!-- 잘 알려진 명칭으로")
+      and not labels_mod.screen_alias("사건 이름과 중복되면 쓰지 않음 -->"))
+check("한자 이름은 세운다",
+      labels_mod.screen_alias("訓民正音")
+      and labels_mod.screen_alias("金剛般若波羅蜜經<卷二∼五>"))
+check("로마자가 섞여도 한글이 있으면 세운다", labels_mod.screen_alias("제1차 KAL기 폭파"))
+# 수집 쪽 관문 — Node 를 지나는 별칭은 마크업이 붙은 채로 들어올 수 없다
+check("Node 가 마크업 별칭을 버린다",
+      Node(id="wd:Q706103", type="event", label="을사사화", source="wd",
+           aliases=["<!-- 잘 알려진 명칭으로", "을사년의 옥사"]).aliases == ["을사년의 옥사"])
+
+# --- 나무위키 개요 ------------------------------------------------------------
+# 제목만 같은 다른 작품이 흔하다. '태조 왕건' 을 그냥 열면 2000년 드라마가
+# 나오는데 우리 노드는 1970년 영화다 — 분류의 갈래·연도로 걸러야 한다.
+print("\n[나무위키 개요]")
+from histgraph.sources import namu  # noqa: E402
+
+_NAMU = (
+    '<a href="/w/%EB%B6%84%EB%A5%98:2015%EB%85%84%20%EB%93%9C%EB%9D%BC%EB%A7%88">2015년 드라마</a>'
+    '<a href="/w/%EB%B6%84%EB%A5%98:MBC%20%EB%8B%A8%EB%A7%89%EA%B7%B9">MBC 단막극</a>'
+    "<table><tr><td>포스터</td></tr></table>"
+    "<h2 class='x'><a id='s-1' href='#toc'>1.</a> <span id='개요'>개요"
+    "<span><a href='/edit/x'>&#91;편집&#93;</a></span></span></h2>"
+    "<div>2015년에 방영한 <a href='/w/MBC'>MBC</a> 드라마이다.<br data-v>"
+    "많은 인기를 얻었다.&#91;1&#93;</div>"
+    "<h2><a id='s-2'>2.</a> 줄거리</h2><div>수포자가 조선에 떨어진다.</div>"
+)
+cats = namu.page_categories(_NAMU)
+check("분류를 읽는다", cats == ["2015년 드라마", "MBC 단막극"], str(cats))
+ov = namu.overview(_NAMU)
+check("첫 절만 받고 표·각주·다음 절은 버린다",
+      ov == "2015년에 방영한 MBC 드라마이다.\n많은 인기를 얻었다.", repr(ov))
+check("갈래·연도가 맞으면 받는다", namu.matches(cats, "series", "2015"))
+check("연도가 다르면 거른다", not namu.matches(cats, "series", "2000"))
+check("갈래가 다르면 거른다 (영화 노드에 드라마 문서)", not namu.matches(cats, "film", "2015"))
+check("연도를 모르면 갈래만 본다", namu.matches(cats, "series", None))
+check("작품 분류가 없으면 거른다", not namu.matches(["동음이의어", "성씨"], None, None))
+check("라벨 괄호의 해가 날짜 칸보다 앞선다", namu.year_for("궁녀 (1972년 영화)", "2007-01-01") == "1972")
+check("괄호에 해가 없으면 날짜 칸을 쓴다", namu.year_for("궁녀", "2007-01-01") == "2007")
+check("등장인물 문서는 작품이 아니다", not namu.matches(["옥중화/등장인물", "한국 드라마 캐릭터"], "series", None))
+check("틀 문구를 걷어낸다", "스포일러" not in namu._clean("<div>이 문서에 스포일러가 포함되어 있습니다.<br>줄거리다.</div>"))
+check("제목 괄호의 갈래가 다르면 거른다 (영화 노드에 '창(만화)')", not namu.paren_fits("창(만화)", "film"))
+check("괄호에 갈래가 없으면 통과", namu.paren_fits("창", "film") and namu.paren_fits("창(1997)", "film"))
+check("'자세한 내용은 … 참고하십시오' 는 본문이 아니다",
+      namu._clean("<div>자세한 내용은 대원군(1966) 문서를 참고하십시오.</div>") == "")
+_LIST = ("<h2><a id='s-1'>1.</a> 1966년 TBC 드라마</h2><div>첫 작품.</div>"
+         "<h2><a id='s-2'>2.</a> 1972년 MBC 드라마</h2><div>1972년 2월부터 방영.</div>")
+check("같은 제목 목록 문서에서는 우리 해의 절만 받는다", namu.year_section(_LIST, "1972") == "1972년 2월부터 방영.")
+check("괄호 앞 띄어쓰기를 없앤 제목이 후보에 든다",
+      "간신(영화)" in namu.candidates("간신 (영화)", "film", "2015"))
+picked = namu.pick_from_search(
+    [("태조 왕건", "분류:KBS 대하드라마 분류:2002년 종영"),
+     ("태조 왕건(영화)", "분류:1970년 영화"),
+     ("태조 왕건/평가", "분류:한국 드라마/평가")],
+    "태조 왕건 (영화)", "1970", "film")
+check("검색 결과에서 연도·갈래가 맞는 제목을 앞세운다", picked == ["태조 왕건(영화)"], str(picked))
+
+
+# --- 대통령의 재임 띠 ------------------------------------------------------
+# 1948년 뒤의 시간은 '박정희 때'로 읽힌다 — 왕이 하던 일을 대통령이
+# 이어받았다. 같은 띠, 같은 모양이고 말만 재위/재임으로 갈린다.
+from histgraph.sources.wikidata import drop_nested_terms  # noqa: E402
+
+terms = {
+    ("Q138048", "Q6296418"): ("2013-02-25", "2017-03-10"),   # 박근혜
+    # 황교안 — Wikidata 에 대통령으로 적혀 있고 권한대행 표식이 없다.
+    # 박근혜의 임기 한가운데서 시작한다.
+    ("Q12625765", "Q6296418"): ("2016-12-09", "2017-05-10"),
+    ("Q21001", "Q6296418"): ("2017-05-10", "2022-05-09"),    # 문재인
+    # 같은 날 넘겨받는 것은 겹침이 아니다 (박정희 사망일에 최규하 시작)
+    ("Q14356", "Q6296418"): ("1962-03-24", "1979-10-26"),
+    ("Q313350", "Q6296418"): ("1979-10-26", "1980-08-16"),
+    # 재임 중 — 끝이 없다. 남의 임기 판정에 쓰이지 않고, 자기도 남는다.
+    ("Q12612463", "Q6296418"): ("2025-06-04", None),
+    # 다른 자리의 겹침은 상관없다 (고종: 조선 임금 → 대한제국 황제)
+    ("Q9", "Q1"): ("1863-01-01", "1897-10-12"),
+    ("Q9", "Q2"): ("1897-10-12", "1907-07-19"),
+}
+kept, dropped = drop_nested_terms(terms)
+check("남의 임기 한가운데서 시작하는 임기는 대행이라 뺀다",
+      dropped == [("Q12625765", "Q6296418")], str(dropped))
+check("같은 날 넘겨받는 것은 겹침이 아니다",
+      ("Q313350", "Q6296418") in kept and ("Q14356", "Q6296418") in kept)
+check("재임 중인 임기도 남는다", ("Q12612463", "Q6296418") in kept)
+check("뺀 것 말고는 그대로다", len(kept) == len(terms) - 1, str(kept))
+
+with tempfile.TemporaryDirectory() as tmp:
+    import datetime as _dt
+
+    store = GraphStore(Path(tmp) / "pres.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:K1", type="person", label="조선 고종", source="wd",
+             start_date="1852", end_date="1919"),
+        Node(id="wd:P1", type="person", label="이승만", source="wd",
+             start_date="1875-03-26", end_date="1965-07-19"),
+        Node(id="wd:P2", type="person", label="이재명", source="wd",
+             start_date="1963-12-08"),
+        Node(id="wd:POS", type="role", label="조선 임금", source="wd"),
+        Node(id="wd:Q6296418", type="role", label="대한민국 대통령", source="wd"),
+        Node(id="wd:E1", type="event", label="4·19 혁명", source="wd",
+             start_date="1960-04-19"),
+    ])
+    store.upsert_edges([
+        # 예전 표식 `true` — 군주로 읽어야 한다
+        Edge(src="wd:K1", dst="wd:POS", type="held_position", source="wd",
+             start_date="1863-12-13", end_date="1897-10-12", props={"reign": True}),
+        Edge(src="wd:P1", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="1948-07-24", end_date="1960-04-27", props={"reign": "president"}),
+        # 재임 중 — 끝이 없고 살아 있다
+        Edge(src="wd:P2", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="2025-06-04", props={"reign": "president"}),
+    ])
+    api = GraphAPI(store, era="korea")
+    band = {r["id"]: r for r in api.timeline("wd:E1")["reigns"]}
+    check("대통령이 왕과 같은 띠에 선다", set(band) == {"wd:K1", "wd:P1", "wd:P2"}, str(band))
+    check("자리의 종류를 갈라 넘긴다",
+          band["wd:K1"]["kind"] == "monarch" and band["wd:P1"]["kind"] == "president")
+    check("물러난 대통령의 몰년은 재임 끝과 따로 간다",
+          (band["wd:P1"]["end"], band["wd:P1"]["death"]) == (1960, 1965), str(band["wd:P1"]))
+    check("재임 중이면 오늘까지 긋고 그렇다고 밝힌다",
+          band["wd:P2"]["ongoing"] and band["wd:P2"]["end"] == _dt.date.today().year,
+          str(band["wd:P2"]))
+    check("물러난 사람은 재임 중이 아니다", not band["wd:P1"]["ongoing"] and not band["wd:K1"]["ongoing"])
+    check("축이 재임 중인 대통령의 오늘까지 담는다",
+          api.timeline("wd:E1")["axis"]["to"] >= _dt.date.today().year)
+    store.close()
+
+# --- 대한민국 시대의 씨앗 ---------------------------------------------------
+# 인물 18,471명이 대한민국 국적이다 — 국적으로 고르면 명단이 된다. 씨앗은
+# 사건과 대통령 자리에서 오고, 사람은 그 이웃으로만 들어온다.
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import scope as sc2  # noqa: E402
+
+    store = GraphStore(Path(tmp) / "daehan.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q884", type="place", label="대한민국", source="wd"),
+        Node(id="wd:Q6296418", type="role", label="대한민국 대통령", source="wd"),
+        Node(id="wd:P1", type="person", label="박정희", source="wd",
+             start_date="1917-11-14", end_date="1979-10-26", props={"polity": "대한민국"}),
+        # 국적만 대한민국인 사람 — 씨앗이 아니다
+        Node(id="wd:P2", type="person", label="어느 운동선수", source="wd",
+             start_date="1990-01-01", props={"polity": "대한민국"}),
+        Node(id="wd:E1", type="event", label="5·16 군사정변", source="wd",
+             start_date="1961-05-16", props={"polity": "대한민국"}),
+        # P17 이 '지금 그 땅의 나라'를 적은 옛 사건 — 씨앗이 아니다
+        Node(id="wd:E2", type="event", label="원종·애노의 난", source="wd",
+             start_date="0889", props={"polity": "대한민국"}),
+        Node(id="wd:E3", type="event", label="6·29 선언", source="wd",
+             props={"seed_era": "대한민국"}),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:P1", dst="wd:Q6296418", type="held_position", source="wd"),
+    ])
+    seeds = sc2.select_seeds(store, sc2.ERAS["daehan"])
+    check("대통령 자리에 앉았던 사람은 씨앗이다", "wd:P1" in seeds, str(seeds))
+    check("국적만 대한민국인 사람은 씨앗이 아니다", "wd:P2" not in seeds, str(seeds))
+    check("정체 태그가 대한민국인 사건은 씨앗이다", "wd:E1" in seeds)
+    check("시대보다 앞선 사건은 태그가 있어도 씨앗이 아니다", "wd:E2" not in seeds)
+    check("시드 표에서 온 사건은 날짜가 없어도 씨앗이다", "wd:E3" in seeds)
+    check("조선~대한민국이 한 묶음이다",
+          sc2.eras_of("korea") == ("joseon", "ilje", "daehan") and sc2.label_of("korea") == "조선~대한민국")
+    store.close()
+
+# --- 국사편찬위원회 정본 (한국사연대기 · 실록) --------------------------------
+# 세종 재위 32년에 사건이 삼포 개항 하나였다. 정본 표에서 사건을 세우고
+# 실록 기사 제목으로 날짜를 잡는 경로가 이 절이다.
+
+print("\n[국편 정본 — 연대기·실록]")
+from histgraph.sources import nikh  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    rows = [
+        ["레벨아이디", "링크정보", "정보ID", "링크명", "유형", "한글명칭", "한자명칭", "설명", "제목", "내용"],
+        ["kc_i300100_0010", "kc_i300100", "n_1", "한국사 연대기", "사건", "훈민정음 창제", "訓民正音創製",
+         "", "개요", "세종의 명으로 1443년(세종 25) 훈민정음이 만들어졌다. 신숙주(申叔舟)·성삼문(成三問)이 도왔다."],
+        ["kc_i300100_0020", "kc_i300100", "n_1", "한국사 연대기", "사건", "훈민정음 창제", "訓民正音創製",
+         "", "반포", "1446년에 반포되었다. 세종대왕기념사업회가 뒤에 생겼다."],
+        ["kc_n300200_0010", "kc_n300200", "n_2", "한국사 연대기", "인물", "세종", "世宗", "조선 4대 왕", "개요", "…"],
+        ["kc_n300300_0010", "kc_n300300", "n_3", "한국사 연대기", "인물", "신숙주", "申叔舟", "", "개요", "…"],
+        ["kc_i200400_0010", "kc_i200400", "n_4", "한국사 연대기", "사건", "무신정변", "武臣政變",
+         "", "개요", "100년 무신정권의 시작. 의종 24년(1170)에 일어났다."],
+    ]
+    ents = nikh.group_entities(rows)
+    check("절 단위 행이 항목으로 묶인다", len(ents) == 4 and len(ents[0].sections) == 2)
+    ev = ents[0]
+    check("연도는 재위년 괄호가 붙은 것을 먼저 믿는다", nikh.entity_year(ev) == 1443)
+    check("'100년 무신정권' 은 연도가 아니다 — 괄호 안 1170 을 쓴다",
+          nikh.entity_year(ents[3]) == 1170, str(nikh.entity_year(ents[3])))
+    check("연대기 ID 의 자릿수가 시대다", nikh.era_of(ev, 1443) == "조선" and nikh.era_of(ents[3], 1170) == "고려")
+
+    ms = nikh.mentions(ev.full_text(), ["세종", "신숙주"], plain_text=ev.overview)
+    names = {(n, h) for n, h, _ in ms}
+    check("이름(漢字) 언급을 잡는다", ("신숙주", "申叔舟") in names and ("성삼문", "成三問") in names, str(names))
+    check("연대기 인물은 맨 이름으로도 잡는다", ("세종", "") in names, str(names))
+    check("'세종대왕기념사업회' 안의 세종은 언급이 아니다",
+          sum(1 for n, _, _ in ms if n == "세종") == 1, str(ms))
+    check("검색어는 이름 전체, 꼬리말을 뗀 몸통, 그리고 낱말 전부를 요구하는 검색",
+          nikh._search_terms("4군 6진 개척") == [("4군 6진 개척", ()), ("4군 6진", ()), ("4군", ("4군", "6진")), ("4군", ()), ("6진", ())],
+          str(nikh._search_terms("4군 6진 개척")))
+    check("두 글자 몸통('기묘')은 검색하지 않는다 — 간지에 걸린다",
+          nikh._search_terms("기묘사화") == [("기묘사화", ())], str(nikh._search_terms("기묘사화")))
+
+    # 실록 색인: 작은 XML 로 만든다
+    raw = Path(tmp)
+    (raw / "sillok").mkdir()
+    (raw / "sillok" / "2nd_wda_125.xml").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<level2 id="wda_125"><level4 id="wda_12512030">
+ <level5 id="wda_12512030_001"><front><biblioData type="T"><title><mainTitle>삭제에 쓸 향과 축문을 전하다</mainTitle></title>
+  <date><dateOccured date="1443-12-30L0" type="서기"/></date></biblioData></front>
+  <text><content><paragraph>○傳香祝。</paragraph></content></text></level5>
+ <level5 id="wda_12512030_002"><front><biblioData type="T"><title><mainTitle>훈민정음을 창제하다</mainTitle></title>
+  <date><dateOccured date="1443-12-30L0" type="서기"/></date><subjectClass>어문학-문학(文學)</subjectClass></biblioData></front>
+  <text><content><paragraph>○是月, 上親制諺文二十八字, 是謂<index num="1" type="서명">訓民正音</index>。</paragraph></content></text></level5>
+ <level5 id="wda_12812001_001"><front><biblioData type="T"><title><mainTitle>훈민정음을 반포하다</mainTitle></title>
+  <date><dateOccured date="1446-09-29L0" type="서기"/></date></biblioData></front>
+  <text><content><paragraph>○<index num="2" ref="M_0000001" type="이름">鄭麟趾</index></paragraph></content></text></level5>
+</level4></level2>""", encoding="utf-8")
+    (raw / "sillok_gojong").mkdir()
+    n = nikh.build_sillok_index(raw, raw / "sillok.sqlite")
+    check("실록 기사가 색인된다", n == 3, str(n))
+    idx = nikh.SillokIndex(raw / "sillok.sqlite")
+    hit = nikh.date_from_sillok(idx, "훈민정음 창제", [1446, 1443])
+    check("후보 연도 순서대로 같은 해 기사를 찾는다 (1446 반포가 먼저 걸린다)", hit and hit["date"] == "1446-09-29L0", str(hit))
+    hit = nikh.date_from_sillok(idx, "훈민정음 창제", [1443])
+    check("같은 해의 가장 이른 기사가 날짜다", hit and hit["date"] == "1443-12-30L0", str(hit))
+    check("후보 연도에 기사가 없으면 고르지 않는다", nikh.date_from_sillok(idx, "훈민정음 창제", [1450]) is None)
+    check("음력 날짜의 윤달 꼬리를 뗀다", nikh.lunar_iso("1443-12-30L0") == "1443-12-30")
+    check("연도를 모르고 기사가 많으면 고르지 않는다",
+          nikh.date_from_sillok(idx, "훈민정음", None) is not None  # 2건뿐이라 고른다
+          and nikh.date_from_sillok(idx, "향과 축문", None)["date"].startswith("1443"))
+    refs = idx.conn.execute("SELECT refs FROM articles WHERE id='wda_12812001_001'").fetchone()[0]
+    check("인명 색인의 인물 ID 가 기사에 붙는다", refs == "M_0000001", refs)
+    # 「규장각」 항목 본문의 김조순이 1781년 절목 기사의 참여자로 섰던 일.
+    # 실록 기사에는 그 기사에 이름이 있는 사람만 잇는다.
+    names, text = idx.article_people("wda_12812001_001")
+    check("기사의 인명 색인과 원문을 준다", names == {"鄭麟趾"} and "鄭麟趾" in text, str((names, text)))
+    check("한자 이름이 기사에 있어야 그 기사의 참여자다",
+          nikh.named_in_article("鄭麟趾", names, text)
+          and not nikh.named_in_article("金祖淳", names, text))
+    check("한글만 아는 사람은 한문 기사에서 못 찾으므로 잇지 않는다",
+          not nikh.named_in_article("", names, text))
+    check("없는 기사는 빈 것이다", idx.article_people("없음") == (frozenset(), ""))
+    check("관청·건물 한자는 사람 이름이 아니다 (이문원(摛文院) ≠ 이문원(李文源))",
+          nikh.NOT_A_PERSON.search("摛文院") and not nikh.NOT_A_PERSON.search("李文源"))
+
+    # 이름이 같은 노드 가르기
+    store = GraphStore(raw / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:A", type="person", label="김구", source="wd", start_date="1876"),
+        Node(id="wd:B", type="person", label="김구", source="wd", start_date="1488"),
+        Node(id="wd:E1", type="event", label="임진왜란", source="wd", start_date="1592"),
+        Node(id="wd:E2", type="event", label="임진왜란", source="wd", start_date="1592"),
+        Node(id="wd:P", type="person", label="이순신", source="wd"),
+        Node(id="ex:event:훈민정음 창제", type="event", label="훈민정음 창제", source="extract"),
+    ])
+    store.upsert_edges([Edge(src="wd:P", dst="wd:E1", type="participated_in", source="wd")])
+    nidx = nikh.NodeIndex(store)
+    p_modern = nikh.Entity("kc_n400100", "인물", "김구", "金九", "")
+    p_joseon = nikh.Entity("kc_n300100", "인물", "김구", "金絿", "")
+    check("같은 이름은 시대로 가른다",
+          nikh.pick_target(nidx, p_modern)[0] == "wd:A"
+          and nikh.pick_target(nidx, p_joseon)[0] == "wd:B")
+    check("실록 인물 CSV 의 생년이 있으면 그것으로 가른다",
+          nikh.pick_target(nidx, p_joseon, birth=1876)[0] == "wd:A")
+    e_imjin = nikh.Entity("kc_i300500", "사건", "임진왜란", "壬辰倭亂", "1592년(선조 25) 일본이 침입한 전쟁")
+    check("연대까지 같으면 차수가 압도적인 쪽만 받는다",
+          nikh.pick_target(nidx, e_imjin, [1592])[0] == "wd:E1")
+    nid, orphans, _ = nikh.pick_target(nidx, ev, [1443])
+    check("이름이 같은 추출 고아는 흡수 대상이다", nid is None and orphans == ["ex:event:훈민정음 창제"], str((nid, orphans)))
+    # 라벨의 정체 낱말이 항목의 시대와 다르면 후보가 아니다 — 고려 원종 항목이
+    # '조선 원종'(정원군)에 씌워졌던 사고 (2026-09-05)
+    store.upsert_nodes([
+        Node(id="wd:W1", type="person", label="조선 원종", source="wd", start_date="1580", aliases=["원종"]),
+        Node(id="wd:W2", type="person", label="고려 원종", source="wd", aliases=["원종"]),
+    ])
+    store.upsert_edges([Edge(src="wd:W1", dst="wd:E1", type="participated_in", source="wd"),
+                        Edge(src="wd:W1", dst="wd:E2", type="participated_in", source="wd"),
+                        Edge(src="wd:W1", dst="wd:P", type="child_of", source="wd")])
+    nidx = nikh.NodeIndex(store)
+    p_goryeo = nikh.Entity("kc_n203300", "인물", "원종", "元宗", "")
+    check("고려 항목의 '원종'은 차수가 커도 조선 원종에게 가지 않는다",
+          nikh.pick_target(nidx, p_goryeo)[0] == "wd:W2", str(nikh.pick_target(nidx, p_goryeo)))
+    check("정체 낱말이 없는 라벨은 관문에 걸리지 않는다",
+          not nikh.polity_mismatch("원종", "고려") and nikh.polity_mismatch("조선 원종", "고려")
+          and not nikh.polity_mismatch("고려 원종", "고려"))
+    store.close()
+
+
+# --- 말뭉치 (RAG 저장·검색층) ---------------------------------------------
+# "이재명은 12.3 내란에 참여했다"가 틀렸다는 것은 구조화 소스 어디에도
+# 없고 산문에만 있다. 글을 문단으로 쪼개 두고 찾을 수 있어야 한다.
+from histgraph import corpus as corpus_mod  # noqa: E402
+from histgraph import roles as roles_mod  # noqa: E402
+from histgraph.sources.infobox import FIELD_LABEL, FIELD_SIDE  # noqa: E402
+
+_DOC = """12.3 내란은 2024년 12월 3일 윤석열이 비상계엄을 선포한 사건이다.
+
+== 배경 ==
+정부 지지율이 최저 17%까지 하락하는 등 부정적 평가를 받았다.
+
+=== 국회 개회 및 계엄 해제 ===
+계엄 선포 직후 국회의장 우원식은 국회를 긴급소집했다. 경찰 바리케이드를 피해 11시경 이재명, 우원식은 담을 넘어 국회 건물에 들어갔다.
+
+=== 체포 지시 ===
+여 사령관은 다음과 같은 체포 명단을 불러주며 위치 추적을 요청했다: 이재명 더불어민주당 대표 우원식 국회의장 한동훈 국민의힘 대표
+
+== 각주 ==
+1. 오마이뉴스 2024년 12월 4일
+"""
+parts = corpus_mod.split_passages(_DOC)
+sections = [sec for sec, _ in parts]
+check("절 제목이 문단에 붙는다", "체포 지시" in sections, str(sections))
+check("각주 절은 글이 아니다", not any("오마이뉴스" in t for _, t in parts))
+check("절이 바뀌면 묶음도 끊긴다",
+      not any("담을 넘어" in t and "체포 명단" in t for _, t in parts))
+long = "가나다라마바사. " * 300
+check("긴 문단은 문장에서 자른다",
+      all(len(t) <= corpus_mod.PASSAGE_MAX + 20 for _, t in corpus_mod.split_passages(long)))
+
+with tempfile.TemporaryDirectory() as tmp:
+    conn = corpus_mod.open_corpus(Path(tmp) / "c.sqlite")
+    n = corpus_mod.put_doc(conn, "wd:EV", "12.3 내란", _DOC)
+    corpus_mod.put_doc(conn, "wd:P", "이재명", "이재명은 2025년 6월 4일 대통령에 취임했다.\n\n계엄 당시 국회 담을 넘었다.")
+    check("문서를 문단으로 넣는다", n >= 3 and corpus_mod.stats(conn)["docs"] == 2)
+    hits = corpus_mod.search(conn, "체포 명단")
+    check("두 글자 낱말을 FTS 로 찾는다", hits and "체포 명단" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "우원식은")
+    check("조사가 붙어도 찾는다 (앞머리 일치)", hits and "우원식" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "긴급소집")
+    check("어절 안의 낱말은 앞머리 일치라 찾는다", hits and "긴급소집" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "담")
+    check("한 글자는 LIKE 로 물러난다", any("담을 넘어" in h["text"] for h in hits))
+    check("fts 질의는 토큰을 따옴표로 감싸고 기본은 AND 다",
+          corpus_mod.fts_query("12.3 내란 체포") == '"12.3"* AND "내란"* AND "체포"*', corpus_mod.fts_query("12.3 내란 체포"))
+    corpus_mod.put_doc(conn, "wd:P2", "형수 욕설", "이재명 이재명 이재명 이재명 이재명 이재명이 욕설을 했다.")
+    hits = corpus_mod.search(conn, "체포 명단 이재명")
+    check("다 있는 문단이 이름 반복에 밀리지 않는다", hits and "체포 명단" in hits[0]["text"], str(hits[:1]))
+    hits = corpus_mod.search(conn, "체포 명단 없는말이다")
+    check("다 있는 문단이 없으면 OR 로 물러난다", any("체포 명단" in h["text"] for h in hits))
+    ment = corpus_mod.mentions(conn, "wd:EV", ["이재명"])
+    check("이름이 나오는 문단을 문서 순서로 준다",
+          [m["section"] for m in ment] == ["국회 개회 및 계엄 해제", "체포 지시"], str([m["section"] for m in ment]))
+    corpus_mod.put_doc(conn, "wd:EV", "12.3 내란", "다시 넣은 글. 아무 이름도 없다.")
+    check("같은 노드를 다시 넣으면 옛 문단이 지워진다",
+          not corpus_mod.mentions(conn, "wd:EV", ["이재명"]) and corpus_mod.stats(conn)["docs"] == 3)
+    corpus_mod.reindex(conn)
+    check("색인을 다시 지어도 같은 것을 찾는다", any("욕설" in h["text"] for h in corpus_mod.search(conn, "욕설")))
+    conn.close()
+
+# --- 말뭉치의 정본: 한 노드에 소스가 여럿 -----------------------------------
+# 사용자가 민족문화대백과·한국사연대기를 정본이라 했다 (2026-09-04). 같은
+# 노드의 문단을 줄 때 정본이 앞서고, 위키백과는 지워지지 않는다.
+import sqlite3  # noqa: E402
+from histgraph.sources import aks as aks_mod  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "multi.sqlite"
+    # 옛 파일(node_id 하나가 유일 열쇠)을 흉내 내 두고 연다 — 옮겨져야 한다
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE docs (id INTEGER PRIMARY KEY, node_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+            source TEXT NOT NULL, url TEXT, fetched_at TEXT NOT NULL, chars INTEGER NOT NULL);
+        CREATE TABLE passages (id INTEGER PRIMARY KEY, doc_id INTEGER NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+            node_id TEXT NOT NULL, n INTEGER NOT NULL, section TEXT NOT NULL DEFAULT '', text TEXT NOT NULL);
+        INSERT INTO docs VALUES (1, 'wd:EV', '12.3 내란', 'kowiki', NULL, '2026', 10);
+        INSERT INTO passages VALUES (1, 1, 'wd:EV', 0, '', '위키백과: 이재명은 담을 넘었다.');
+    """)
+    old.commit(); old.close()
+    conn = corpus_mod.open_corpus(path)
+    check("옛 말뭉치 파일의 열쇠가 (노드, 소스)로 바뀐다",
+          "UNIQUE (node_id, source)" in conn.execute(
+              "SELECT sql FROM sqlite_master WHERE name='docs'").fetchone()[0]
+          and corpus_mod.stats(conn)["docs"] == 1)
+    corpus_mod.put_doc(conn, "wd:EV", "12·3 비상계엄", "== 정의 ==\n정본: 이재명은 체포 대상이었다.", "aks")
+    st = corpus_mod.stats(conn)
+    check("같은 노드에 소스별로 글이 나란히 든다",
+          st["docs"] == 2 and st["by_source"] == {"aks": 1, "kowiki": 1}, str(st))
+    check("has_doc 은 소스를 가려 묻는다",
+          corpus_mod.has_doc(conn, "wd:EV") and corpus_mod.has_doc(conn, "wd:EV", "aks")
+          and not corpus_mod.has_doc(conn, "wd:EV", "nikh"))
+    ment = corpus_mod.mentions(conn, "wd:EV", ["이재명"])
+    check("같은 노드의 문단은 정본이 앞선다",
+          [m["source"] for m in ment] == ["aks", "kowiki"], str([m["source"] for m in ment]))
+    corpus_mod.put_doc(conn, "wd:EV", "12·3 비상계엄", "== 정의 ==\n정본을 다시 넣었다. 이름 없음.", "aks")
+    check("다시 넣으면 그 소스의 글만 바뀐다",
+          corpus_mod.stats(conn)["docs"] == 2
+          and [m["source"] for m in corpus_mod.mentions(conn, "wd:EV", ["이재명"])] == ["kowiki"])
+    conn.close()
+
+# --- 민족문화대백과 커넥터 -------------------------------------------------
+print("\n[민족문화대백과 — 잇기·본문]")
+check("이름 정규화: 괄호와 띄어쓰기를 뗀다",
+      aks_mod.norm_name("김용현 (군인)") == "김용현" and aks_mod.norm_name("1·4 후퇴") == "1·4후퇴")
+_E = lambda i, label, kind, era="현대/대한민국": aks_mod.Entry(  # noqa: E731
+    id=i, url=f"https://encykorea.aks.ac.kr/Article/{i}", label=label, hanja="",
+    field="", kind=kind, era=era, definition="정의.")
+entries = [
+    _E("E1", "이재명", "인물/근현대 인물"),
+    _E("E2", "김규식", "인물/근현대 인물"), _E("E3", "김규식", "인물/근현대 인물"),
+    _E("E4", "1·4후퇴", "사건"), _E("E5", "황진이", "인물/전통 인물", "조선"),
+    _E("E6", "네덜란드", "지명/국가"), _E("E7", "갑자사화", "사건", "조선"),
+]
+nodes = [("wd:1", "이재명", "person"), ("wd:2", "김규식", "person"),
+         ("wd:4", "1·4 후퇴", "event"), ("wd:5", "황진이", "media"),
+         ("wd:6", "네덜란드", "place"), ("wd:6b", "네덜란드", "place")]
+m = aks_mod.match_nodes(entries, nodes)
+check("이름·타입이 맞고 양쪽 다 하나뿐일 때만 잇는다", m == {"E1": "wd:1", "E4": "wd:4"}, str(m))
+m2 = aks_mod.match_nodes(entries + [_E("E8", "10월유신", "사건")],
+                         nodes + [("wd:8", "10월 유신", "event"), ("wd:8", "유신 체제", "event"),
+                                  ("wd:8", "10월유신", "event")])
+check("별칭으로도 잇되 노드 쪽 '하나뿐'은 노드 수로 센다", m2.get("E8") == "wd:8", str(m2))
+todo = aks_mod.select_entries(entries, m, kinds=("사건",))
+check("이은 항목 + 근현대 사건, 근현대 사건이 앞", [e.id for e in todo] == ["E4", "E1"], str([e.id for e in todo]))
+page = """<html><section class="content_section"><h3 class="tit">내용 요약</h3>
+<div class="detail">사전이 만든 요약</div></section>
+<section class="content_section"><h3 class="tit">정의</h3><div class="detail">재미 한인들이 전개한 운동.</div></section>
+<section class="content_section"><h3 class="tit">경과</h3><div class="detail"><p>첫 문단 <a href="/x">링크</a>&nbsp;끝.</p><p>둘째 문단.</p></div></section>
+<section class="content_section"><h3 class="tit">참고문헌</h3><div class="detail">『책』</div></section></html>"""
+secs = aks_mod.parse_article(page)
+check("절 단위로 읽고 요약·참고문헌은 뺀다", [t for t, _ in secs] == ["정의", "경과"], str(secs))
+check("태그를 벗기고 문단 줄을 지킨다", secs[1][1] == "첫 문단 링크 끝.\n둘째 문단.", repr(secs[1][1]))
+text = aks_mod.article_text(secs)
+check("말뭉치가 쪼개는 모양이다", [s for s, _ in corpus_mod.split_passages(text)] == ["정의", "경과"])
+
+# 빈 설명을 사전의 '정의 한 문장'으로 채운다. 사용자 지적(2026-09-04)에
+# 따라 설명 없는 노드를 지우기로 했으므로, 지우기 전에 채울 수 있는 것을
+# 다 채우는 이 길이 먼저 있어야 한다 — 실측: 빈 설명 3,297개 중 wd 노드
+# 415개는 위키백과·Wikidata 에, 304개는 이 사전에 글이 있었다.
+print("\n[민족문화대백과 — 빈 설명 채우기]")
+with tempfile.TemporaryDirectory() as tmp:
+    raw = Path(tmp) / "raw"
+    raw.mkdir()
+    rows = [
+        ("E1", "목민심서", "문헌/고서", "정약용이 지은 책."),
+        ("E2", "영의정", "제도/관직", "조선시대 의정부의 으뜸 벼슬."),
+        ("E3", "김규식", "인물/근현대 인물", "독립운동가 하나."),
+        ("E4", "김규식", "인물/근현대 인물", "독립운동가 둘."),
+        ("E5", "설명이있는사건", "사건", "덮어쓰면 안 되는 정의."),
+        ("E6", "한자만", "사건", "漢字"),
+    ]
+    head = "항목 아이디,항목 고유 웹주소,대표 미디어 아이디,항목명,원어,항목 분야,항목 유형,시대,항목 정의,집필자 정보"
+    body = "\n".join(
+        f"{i},https://encykorea.aks.ac.kr/Article/{i},x,{label},,,{kind},조선,{d},글쓴이"
+        for i, label, kind, d in rows)
+    (raw / aks_mod.INDEX_CSV).write_text("\ufeff" + head + "\n" + body + "\n", encoding="utf-8")
+
+    store = GraphStore(Path(tmp) / "desc.sqlite")
+    store.upsert_nodes([
+        Node(id="ex:artwork:목민심서", type="artwork", label="목민심서", source="extract"),
+        Node(id="ex:role:영의정", type="role", label="영의정", source="extract"),
+        Node(id="ex:person:김규식", type="person", label="김규식", source="extract"),
+        Node(id="wd:HAVE", type="event", label="설명이있는사건", source="wd",
+             description="이미 적혀 있는 설명."),
+        Node(id="wd:HANJA", type="event", label="한자만", source="wd"),
+    ])
+    rep = aks_mod.fill_descriptions(store, raw_dir=raw)
+    got = dict(store.conn.execute("SELECT id, description FROM nodes"))
+    check("유형 표를 넓혀 문헌·관직도 받는다",
+          got["ex:artwork:목민심서"] == "정약용이 지은 책."
+          and got["ex:role:영의정"] == "조선시대 의정부의 으뜸 벼슬.", str(got))
+    check("동명이인에는 남의 정의를 붙이지 않는다",
+          not (got["ex:person:김규식"] or "") and rep["ambiguous"] == 1, str(rep))
+    check("이미 적힌 설명은 덮어쓰지 않는다", got["wd:HAVE"] == "이미 적혀 있는 설명.")
+    check("한글이 한 자도 없는 정의는 넣지 않는다", not (got["wd:HANJA"] or ""))
+    check("채운 수를 센다", rep["filled"] == 2, str(rep))
+
+    # 파생본 두 번째 빗질 — redescribe 가 설명을 비운 뒤에도 걸러야 한다
+    from histgraph.scope import sweep_undescribed  # noqa: E402
+
+    store.upsert_edges([
+        Edge(src="wd:HAVE", dst="wd:HANJA", type="related_to", source="wd"),
+    ])
+    swept = sweep_undescribed(store.conn)
+    left = {r[0] for r in store.conn.execute("SELECT id FROM nodes")}
+    check("설명이 빈 내용 노드는 파생본에서 지운다", "wd:HANJA" not in left, str(sorted(left)))
+    check("직위는 설명이 없어도 남긴다", "ex:role:영의정" in left, str(sorted(left)))
+    check("지운 노드의 엣지도 같이 지운다",
+          store.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0] == 0
+          and swept["edges"] == 1, str(swept))
+    store.close()
+
+# --- 역할 판정 -------------------------------------------------------------
+passages = [{"title": "12.3 내란", "section": "체포 지시",
+             "text": "여 사령관은 다음과 같은 체포 명단을 불러주며 위치 추적을 요청했다: 이재명 더불어민주당 대표"}]
+v = roles_mod.accept([{"role": "표적", "evidence": "체포 명단을 불러주며 위치 추적을 요청했다", "confidence": "certain"}], passages)
+check("근거가 문단에 있으면 판정을 받는다", v == {"role": "표적", "evidence": "체포 명단을 불러주며 위치 추적을 요청했다", "confidence": 0.9}, str(v))
+check("근거가 문단에 없으면 버린다",
+      roles_mod.accept([{"role": "주도", "evidence": "그가 계엄을 계획했다", "confidence": "certain"}], passages) is None)
+check("목록 밖의 역할은 버린다",
+      roles_mod.accept([{"role": "영웅", "evidence": "체포 명단", "confidence": "certain"}], passages) is None)
+check("빈 답은 None", roles_mod.accept([], passages) is None)
+check("인포박스 칸 이름이 라벨이 되고 편 번호를 읽는다",
+      FIELD_LABEL["주요인물2"] == "주요 인물" and FIELD_SIDE.search("주요인물2").group(1) == "2"
+      and FIELD_SIDE.search("참가자") is None)
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "roles.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:EV", type="event", label="12.3 내란", source="wd", start_date="2024-12-03"),
+        Node(id="wd:OLD", type="event", label="갑자사화", source="wd", start_date="1504"),
+        Node(id="wd:P1", type="person", label="이재명", source="wd"),
+        Node(id="wd:P2", type="person", label="김용현 (군인)", source="wd"),
+        Node(id="wd:P3", type="person", label="연산군", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:P1", dst="wd:EV", type="participated_in", source="kowiki:infobox",
+             label="주요 인물", confidence=0.95, props={"infobox_field": "주요인물2", "side": 2}),
+        Edge(src="wd:P2", dst="wd:EV", type="participated_in", source="kowiki:infobox",
+             label="주요 인물", confidence=0.95, props={"infobox_field": "주요인물1", "side": 1}),
+        Edge(src="wd:P3", dst="wd:OLD", type="participated_in", source="wd"),
+    ])
+    conn = corpus_mod.open_corpus(Path(tmp) / "c.sqlite")
+    corpus_mod.put_doc(conn, "wd:EV", "12.3 내란", _DOC)
+    cands = roles_mod.candidates(store, conn, since=1945)
+    check("말뭉치에 문서가 있는 근현대 사건의 참여 엣지만 후보다",
+          {c["src"] for c in cands} == {"wd:P1", "wd:P2"}, str([c["src"] for c in cands]))
+    check("문서명 괄호를 뗀 이름으로도 찾는다", "김용현" in roles_mod.names_of(store, "wd:P2"))
+    got = roles_mod.gather(store, conn, "wd:P1", "wd:EV")
+    check("그 사람이 나오는 문단만 모은다", got and all("이재명" in g["text"] for g in got))
+    check("문단이 없으면 빈 목록", roles_mod.gather(store, conn, "wd:P2", "wd:EV") == [])
+
+    class _Fake:
+        model = "fake"
+        def complete(self, system, user, schema):
+            assert "이재명" in user and "체포 명단" in user
+            return [{"role": "표적", "evidence": "체포 명단을 불러주며", "confidence": "certain"}]
+
+    got = roles_mod.run(store, conn, _Fake(), since=1945)
+    check("문단이 있는 것만 모델에 묻고 없는 것은 근거 없음",
+          got["by_role"] == {"표적": 1, "근거 없음": 1}, str(got))
+    moved = store.conn.execute(
+        "SELECT type, label, json_extract(props,'$.role') AS role, json_extract(props,'$.was') AS was,"
+        " json_extract(props,'$.role_evidence') AS ev FROM edges WHERE src='wd:P1' AND dst='wd:EV'").fetchall()
+    check("피해·표적은 참여가 아니라 관련으로 옮긴다",
+          len(moved) == 1 and moved[0]["type"] == "related_to" and moved[0]["label"] == "표적"
+          and moved[0]["was"] == "participated_in" and "체포 명단" in moved[0]["ev"], str([dict(m) for m in moved]))
+    none = store.conn.execute(
+        "SELECT type, label FROM edges WHERE src='wd:P2' AND dst='wd:EV'").fetchone()
+    check("근거 없는 참여는 화면에 두지 않는다", none["type"] == "related_to" and none["label"] == "근거 없음")
+    check("한 번 판정한 엣지는 다시 묻지 않는다", roles_mod.candidates(store, conn, since=1945) == [])
+    store.upsert_edges([Edge(src="wd:P3", dst="wd:EV", type="participated_in", source="roles",
+                             label="주도", props={"role": "주도"})])
+    check("역할을 지정하면 그 역할로 판정됐던 엣지만 다시 묻는다",
+          [c["src"] for c in roles_mod.candidates(store, conn, since=1945, redo=True, only_roles={"주도"})] == ["wd:P3"])
+    api = GraphAPI(store, era="korea")
+    rel = [r for r in api.node("wd:P1")["relations"] if r["other"]["id"] == "wd:EV"]
+    check("화면에 역할과 근거가 함께 간다",
+          rel and rel[0]["edge_label"] == "표적" and any("체포 명단" in e for e in rel[0]["evidence"]), str(rel))
+    conn.close()
+    store.close()
+
+
+# --- 동명이인 관문 ------------------------------------------------------------
+# "여진 정벌은 고려때 일이야 왜 조선과 연결된지 모르겠어. 아마 왕이름이
+# 겹쳐서 그럴거야" (2026-09-04). 연표의 날짜와 이름 해소 두 자리를 고정한다.
+from histgraph import homonyms as hom_mod  # noqa: E402
+from histgraph.extract import pick_candidate  # noqa: E402
+
+print("\n[동명이인]")
+
+# 1) 연대기의 '설명' 칸이 딴 사건을 말할 때. kc_i304300(조선 여진 정벌)의
+#    설명은 고려 예종의 1107년 정벌이고 본문은 태종~선조대다. 첫 후보를
+#    그대로 쓰면 조선 사건이 1107년 자리에 선다.
+_yeojin = nikh.Entity(
+    "kc_i304300", "사건", "여진 정벌", "女眞征伐",
+    "예종이 숙종의 유지를 이어받아 1107년부터 시작한 여진에 대한 정벌.",
+    [("개요", "조선 전기~중기에 걸쳐 이루어진 여진족에 대한 대규모 군사활동."),
+     ("태종대의 여진 정벌", "최초의 여진 정벌은 1406년(태종 6) 태종에 의해 이루어졌다.")],
+)
+check("시대 창은 연대기 ID 의 자릿수에서 나온다",
+      nikh.era_window(_yeojin) == (1360, 1900), str(nikh.era_window(_yeojin)))
+_date, _basis, _ = nikh.resolve_date(_yeojin, None, None)
+check("짐작한 해는 그 항목의 시대 안에 든다 (1107 이 아니라 1406)",
+      (_date, _basis) == ("1406", "연대기 설명"), str((_date, _basis)))
+_goryeo = nikh.Entity("kc_i204300", "사건", "여진 정벌", "女眞征伐",
+                      "예종이 1107년부터 시작한 여진에 대한 정벌.")
+check("고려 항목이면 1107 을 그대로 받는다",
+      nikh.resolve_date(_goryeo, None, None)[0] == "1107")
+_only_out = nikh.Entity("kc_i300001", "사건", "가짜 사건", "", "1107년에 있었다.")
+check("시대 밖의 해뿐이면 지어내지 않고 비운다",
+      nikh.resolve_date(_only_out, None, None) == (None, None, {}))
+check("실록·기존 노드와 맞은 해는 창을 보지 않는다",
+      nikh.resolve_date(_yeojin, None, 1107)[1] == "연대기·기존 일치")
+check("시대 밖의 해만 말하는 '설명' 칸은 딴 항목의 것이다",
+      nikh.summary_is_alien(_yeojin) and not nikh.summary_is_alien(_goryeo))
+check("인물의 설명 칸은 시대보다 앞서도 된다",
+      not nikh.summary_is_alien(
+          nikh.Entity("kc_n403710", "인물", "이승훈", "", "1783년에 세례를 받았다.")))
+
+# --- 연대기가 적어 둔 달 --------------------------------------------------
+# "황산대첩은 1380년 9월 …이라고 한다. 9월이라고 표시해줘" (2026-09-04).
+# 연표는 몰린 해 안의 차례를 달로 읽는데, 해만 알면 같은 해의 이웃 뒤에서
+# 연도 칸이 빈다. 연대기 문장은 달을 적고 있다 — 다만 **그 항목 자신의**
+# 달일 때만 받는다.
+print("\n[연대기의 달]")
+
+_hwangsan = nikh.Entity(
+    "kc_i201700", "사건", "황산대첩", "荒山大捷",
+    "1380년 9월, 이성계 등이 전라도 지리산 부근의 황산에서 왜구를 크게 격퇴시킨 전투이다.",
+    [("개요", "황산대첩은 1380년(우왕 6) 9월에 이성계(李成桂)를 중심으로 한 고려군이 "
+              "황산(荒山)에서 왜구를 크게 격퇴한 전투이다."),
+     ("왜구들이 모여들다", "1380년(우왕 6) 8월, 대규모의 왜선이 진포(鎭浦)에 정박하였다.")],
+)
+check("설명·개요가 같은 달을 말하면 그 달을 받는다",
+      nikh.month_of(_hwangsan, 1380) == 9, str(nikh.month_of(_hwangsan, 1380)))
+check("본문의 달은 보지 않는다 — 진포대첩의 8월이 섞인다",
+      nikh.dated(_hwangsan, 1380) == ("1380-09", {"calendar": "lunar"}),
+      str(nikh.dated(_hwangsan, 1380)))
+check("해가 다르면 그 달이 아니다", nikh.month_of(_hwangsan, 1376) is None)
+
+# 설명 칸은 한 줄로 줄이다 엉뚱한 달을 적기도 한다. 명량해전의 설명은
+# 이순신이 재임용된 8월을, 개요는 해전 자신의 9월 16일을 적는다.
+_myeongnyang = nikh.Entity(
+    "kc_i300000", "사건", "명량해전", "鳴梁海戰",
+    "삼도수군통제사로 재임용된 이순신이 1597년 8월 명량 해협에서 일본군을 격파한 전투.",
+    [("개요", "명량해전은 1597년(선조 30) 9월 16일 명량 해협에서 조선 수군이 "
+              "일본 수군을 대파한 해전이다.")],
+)
+check("설명과 개요가 갈리면 달은 없는 것으로 둔다",
+      nikh.month_of(_myeongnyang, 1597) is None, str(nikh.month_of(_myeongnyang, 1597)))
+
+# 개요가 배경부터 시작하면 그 달은 이 항목의 달이 아니다.
+_june = nikh.Entity(
+    "kc_i400000", "사건", "6월민주화운동", "",
+    "", [("개요", "1987년 1월 박종철이 고문으로 인해 사망한 사건이 알려지면서 "
+                  "반대시위는 격화되기 시작했다.")],
+)
+check("항목을 부르지 않는 첫 문장의 달은 받지 않는다",
+      nikh.month_of(_june, 1987) is None, str(nikh.month_of(_june, 1987)))
+
+# 구간의 시작은 그 달의 일이 아니다.
+_ugeum = nikh.Entity(
+    "kc_i400100", "사건", "우금치 전투", "",
+    "", [("개요", "우금치 전투는 1894년(고종 31) 10월 23일부터 11월 11일 사이에 "
+                  "이루어진 두 차례의 전투를 말한다.")],
+)
+check("'10월 23일부터 11월 11일 사이' 는 10월의 일이 아니다",
+      nikh.month_of(_ugeum, 1894) is None, str(nikh.month_of(_ugeum, 1894)))
+
+check("양력을 쓴 뒤의 달에는 음력 딱지를 달지 않는다",
+      nikh.dated(nikh.Entity("kc_i400200", "사건", "정전협정", "", "",
+                             [("개요", "정전협정은 1953년 7월 27일에 조인되었다.")]),
+                 1953) == ("1953-07", {}))
+
+# 달은 **해가 이미 맞은 날짜를 자세하게만** 만든다. 일 단위로 아는 날짜를
+# 밀어내면 자세해지는 것이 아니라 딴 날이 된다.
+check("해가 같고 달만 붙는 것이면 받는다", nikh._refines("1380-09", "1380"))
+check("이미 일까지 아는 날짜는 밀어내지 않는다", not nikh._refines("1380-09", "1380-06-15"))
+check("같은 값은 고칠 것이 없다", not nikh._refines("1380", "1380"))
+
+
+# 2) 문서의 주인공을 남에게 주지 않는다. 조선 예종의 휘가 이황(李晄)이라
+#    별칭이 겹치는데, 32년 차이라 생몰 검사(여유 40년)에 안 걸린다.
+_rows = [{"id": "wd:Q488694", "start_date": "1450", "end_date": "1469"},
+         {"id": "wd:Q486291", "start_date": "1501", "end_date": "1570"}]
+check("연대만으로는 예종과 퇴계를 못 가른다",
+      pick_candidate(_rows, (1501, 1570))["id"] == "wd:Q488694")
+check("후보 안에 출처 문서 자신이 있으면 그것이 답이다",
+      pick_candidate(_rows, (1501, 1570), "wd:Q486291")["id"] == "wd:Q486291")
+check("문서가 후보에 없으면 하던 대로 고른다",
+      pick_candidate(_rows, (1501, 1570), "wd:Q999")["id"] == "wd:Q488694")
+
+with tempfile.TemporaryDirectory() as _tmp:
+    store = GraphStore(Path(_tmp) / "h.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:YEJONG", type="person", label="조선 예종", source="wd",
+             start_date="1450", end_date="1469", aliases=["이황"]),
+        Node(id="wd:TOEGYE", type="person", label="이황", source="wd",
+             start_date="1501", end_date="1570"),
+        Node(id="ex:person:김해 허씨", type="person", label="김해 허씨", source="extract"),
+        Node(id="wd:EV", type="event", label="안시성 전투", source="wd", start_date="0645"),
+        Node(id="wd:YANG", type="person", label="양만춘", source="wd", start_date="0700"),
+        Node(id="wd:LATE", type="person", label="정성근", source="wd", start_date="1955"),
+        Node(id="wd:SAHWA", type="event", label="갑자사화", source="wd", start_date="1504"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:YEJONG", dst="ex:person:김해 허씨", type="spouse_of",
+             source="extract", props={"extracted_from": "wd:TOEGYE"}),
+        Edge(src="wd:YANG", dst="wd:EV", type="participated_in", source="wd"),
+        Edge(src="wd:LATE", dst="wd:SAHWA", type="participated_in", source="extract"),
+    ])
+    found = hom_mod.misrouted_edges(store.conn)
+    check("문서의 주인공이 남에게 간 엣지를 찾는다",
+          found == [("wd:YEJONG", "ex:person:김해 허씨", "spouse_of",
+                     "wd:YEJONG", "wd:TOEGYE")], str(found))
+    rep = hom_mod.sweep(store.conn)
+    moved = store.conn.execute(
+        "SELECT src, json_extract(props,'$.repointed_from') AS was FROM edges"
+        " WHERE type = 'spouse_of'").fetchone()
+    check("퇴계의 혼인을 퇴계에게 돌려놓는다",
+          rep.repointed == 1 and moved["src"] == "wd:TOEGYE"
+          and moved["was"] == "wd:YEJONG", str(dict(moved)))
+    check("100년 넘게 어긋난 참여만 충돌로 센다",
+          [c[1] for c in rep.conflicts] == ["정성근"], str(rep.conflicts))
+    check("양만춘의 틀린 생년은 지우지 않고 가까운 쪽에 둔다",
+          [c[1] for c in rep.near] == ["양만춘"] and store.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE type='participated_in'"
+          ).fetchone()[0] == 2)
+    check("다른 노드의 라벨이기도 한 별칭을 센다",
+          rep.alias_clashes == [("이황", "wd:YEJONG", "조선 예종", "wd:TOEGYE")],
+          str(rep.alias_clashes))
+    store.close()
+
+
+# --- 중복 관문: 한 사건이 두 노드로 -------------------------------------------
+#
+# 2026-09-04 지적: "사도세자 사건과, 임오화변은 같은거야." 소스마다 표제를
+# 다르게 달아 같은 일이 두 노드가 된다. 규칙은 후보를 찾을 뿐이고, 합치는
+# 것은 표에 적힌 짝뿐이다 — 라벨이 비슷하다고 합치면 절반이 틀린다.
+
+print("\n[중복 관문]")
+from histgraph import duplicates as dup_mod  # noqa: E402
+
+check("갈래 접미사와 차수를 뗀 핵심어",
+      (dup_mod.core_name("제2차 진주성 전투"), dup_mod.core_name("홍산대첩"))
+      == ("진주성", "홍산"))
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "dup.sqlite")
+    store.upsert_nodes([
+        Node(id="nikh:SADO", type="event", label="사도세자 사건", source="nikh",
+             start_date="1762-05",
+             description="1762년(영조 38) 5월 영조가 아들인 사도세자를 뒤주에 가두어"
+                         " 죽인 사건으로, ‘임오화변’이라고도 한다."),
+        Node(id="wd:IMO", type="event", label="임오화변", source="wd",
+             start_date="1762-07-05", url="https://ko.wikipedia.org/wiki/임오화변",
+             description="임오화변(壬午禍變), 임오옥(壬午獄) 또는 사도세자"
+                         " 사건(思悼世子事件)은 1762년 7월 4일 사도세자가 뒤주에"
+                         " 갇혔다가 죽은 사건이다."),
+        Node(id="nikh:SAMIL", type="event", label="3·1운동", source="nikh"),
+        Node(id="wd:SAMIL", type="event", label="3·1 운동", source="wd"),
+        Node(id="ex:event:반탁 운동", type="event", label="반탁 운동", source="extract"),
+        Node(id="wd:BANTAK", type="event", label="신탁 통치 반대 운동", source="wd",
+             description="신탁 통치 반대 운동(信託統治反對運動) 또는 반탁"
+                         " 운동(反託運動)은 1945년 12월에 일어난 국민 운동이다."),
+        Node(id="wd:WANGJA1", type="event", label="제1차 왕자의 난", source="wd",
+             start_date="1398-10-14"),
+        Node(id="wd:WANGJA2", type="event", label="제2차 왕자의 난", source="wd",
+             start_date="1400"),
+        Node(id="wd:HONGSAN", type="event", label="홍산대첩", source="wd",
+             start_date="1376-07"),
+        Node(id="ex:event:홍산 전투", type="event", label="홍산 전투", source="extract"),
+        # 같은 위키백과 문서가 두 노드에 붙었다 — 이름은 하나도 안 겹친다.
+        Node(id="wd:IMSUL", type="event", label="임술민란", source="wd",
+             start_date="1862",
+             description="임술농민봉기(壬戌農民蜂起) 혹은 임술민란(壬戌民亂)은"
+                         " 1862년, 조선 각지에서 동시다발적으로 일어난 농민"
+                         " 봉기이다. 세금 제도의 문란이 원인이었다."),
+        Node(id="wd:JINJU", type="event", label="진주민란", source="wd",
+             start_date="1862",
+             description="임술농민봉기(壬戌農民蜂起) 혹은 임술민란(壬戌民亂)은"
+                         " 1862년, 조선 각지에서 동시다발적으로 일어난 농민"
+                         " 봉기이다. 진주에서 시작되었다."),
+        # 한 항목(《고려사》)을 말하는 두 실록 기사. 설명이 같은 게 당연하다.
+        Node(id="sillok:A", type="event", label="《고려사》를 올리다", source="nikh",
+             description="고려사(高麗史)는 조선 초에 편찬된 고려 왕조의 정사로,"
+                         " 기전체로 쓰였으며 139권에 이른다.",
+             props={"about": "nikh:KORYOSA"}),
+        Node(id="sillok:B", type="event", label="《고려사》를 교정하여 올리다",
+             source="nikh",
+             description="고려사(高麗史)는 조선 초에 편찬된 고려 왕조의 정사로,"
+                         " 기전체로 쓰였으며 139권에 이른다.",
+             props={"about": "nikh:KORYOSA"}),
+        # 이름이 통째로 같은 두 싸움. 1592년 청주성과 1950년 정주 전투다.
+        Node(id="wd:CHEONGJU1592", type="event", label="청주 전투", source="wd",
+             start_date="1592-09-06", description="임진왜란 당시 조헌의 의병과"
+             " 영규의 승병이 청주성을 되찾은 싸움이다."),
+        Node(id="wd:CHEONGJU1950", type="event", label="청주 전투", source="wd",
+             start_date="1950-10-29", description="6·25 전쟁 중 유엔군 공세"
+             " 기간에 벌어진 싸움이다."),
+        Node(id="wd:CHOI", type="person", label="최영", source="wd"),
+        Node(id="wd:YEONGJO", type="person", label="영조", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:CHOI", dst="ex:event:홍산 전투", type="participated_in", source="extract"),
+        Edge(src="wd:YEONGJO", dst="wd:IMO", type="participated_in", source="wd"),
+    ])
+
+    cands = {(c.rule, c.a, c.b) for c in dup_mod.find(store.conn)}
+    check("띄어쓰기만 다른 표제를 찾는다",
+          ("라벨", "nikh:SAMIL", "wd:SAMIL") in cands
+          or ("라벨", "wd:SAMIL", "nikh:SAMIL") in cands, str(cands))
+    check("설명이 서로를 이칭으로 부르는 짝을 찾는다",
+          any(r == "이칭" and {a, b} == {"nikh:SADO", "wd:IMO"} for r, a, b in cands),
+          str(cands))
+    check("갈래만 다른 이름을 찾는다 (홍산대첩 ↔ 홍산 전투)",
+          any(r == "핵심어" and {a, b} == {"wd:HONGSAN", "ex:event:홍산 전투"}
+              for r, a, b in cands), str(cands))
+    check("이름이 하나도 안 겹쳐도 같은 설명이면 찾는다 (진주민란 ↔ 임술민란)",
+          any(r == "설명" and {a, b} == {"wd:IMSUL", "wd:JINJU"} for r, a, b in cands),
+          str(cands))
+    check("한 항목을 말하는 실록 기사끼리는 후보가 아니다",
+          not any({a, b} == {"sillok:A", "sillok:B"} for _, a, b in cands), str(cands))
+    check("차수가 어긋나면 후보로 올리지 않는다",
+          not any({a, b} == {"wd:WANGJA1", "wd:WANGJA2"} for _, a, b in cands),
+          str(cands))
+
+    table = [
+        dup_mod.Verdict("merge", "nikh:SADO", "wd:IMO", "같은 사건"),
+        dup_mod.Verdict("merge", "wd:HONGSAN", "ex:event:홍산 전투", "같은 싸움"),
+        dup_mod.Verdict("merge", "wd:BANTAK", "ex:event:반탁 운동", "다른 이름"),
+    ]
+    rep = dup_mod.sweep(store.conn, table)
+    check("증거가 없는 후보만 표로 넘긴다",
+          {c.rule for c in rep.unjudged} == {"설명"}, str(rep.unjudged))
+    check("띄어쓰기만 다른 표제는 증거가 판정한다 (3·1운동)",
+          any({c.a, c.b} == {"nikh:SAMIL", "wd:SAMIL"} for c, _ in rep.auto_same),
+          str(rep.auto_same))
+    check("성과 이름 사이 공백은 표기 차이로 보지 않는다",
+          not dup_mod._spacing_variant("이 명희", "이명희")
+          and dup_mod._spacing_variant("경주 김씨", "경주김씨"))
+    check("이름이 같아도 연대가 어긋나면 다르다고 본다",
+          any({c.a, c.b} == {"wd:CHEONGJU1592", "wd:CHEONGJU1950"}
+              for c, _ in rep.auto_diff), str(rep.auto_diff))
+
+    rep = dup_mod.apply(store, table)
+    row = store.conn.execute(
+        "SELECT label, start_date, url, description FROM nodes WHERE id='nikh:SADO'"
+    ).fetchone()
+    check("없앤 노드가 사라진다",
+          store.conn.execute("SELECT COUNT(*) FROM nodes WHERE id='wd:IMO'").fetchone()[0] == 0)
+    check("엣지가 남은 노드로 옮겨진다", store.conn.execute(
+        "SELECT COUNT(*) FROM edges WHERE dst='nikh:SADO' AND src='wd:YEONGJO'"
+    ).fetchone()[0] == 1)
+    check("없어진 이름은 별칭으로 남는다", store.conn.execute(
+        "SELECT COUNT(*) FROM aliases WHERE node_id='nikh:SADO' AND alias='임오화변'"
+    ).fetchone()[0] == 1)
+    check("빈 칸만 없앤 쪽에서 채운다 (url 은 오고 날짜는 그대로)",
+          row["url"].endswith("임오화변") and row["start_date"] == "1762-05",
+          str(dict(row)))
+    check("지워질 설명은 props 에 남긴다", "임오옥" in (store.conn.execute(
+        "SELECT json_extract(props,'$.merged_desc') FROM nodes WHERE id='nikh:SADO'"
+    ).fetchone()[0] or ""))
+    check("연대가 어긋나면 알린다",
+          any("1762-05" in c for c in rep.date_clashes), str(rep.date_clashes))
+
+    # 셋이 한 사건: 표가 `가↔나`·`가↔다` 를 적었으면 `나↔다` 도 판정된 것이다.
+    check("합친 뒤 후보가 사라진다 (멱등)",
+          all({c.a, c.b} != {"wd:HONGSAN", "ex:event:홍산 전투"} for c in rep.candidates),
+          str(rep.candidates))
+    check("증거로 합친 짝도 사라진다 (3·1운동)", store.conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE id IN ('nikh:SAMIL','wd:SAMIL')"
+    ).fetchone()[0] == 1)
+    again = dup_mod.apply(store, table)
+    check("두 번 돌려도 결과가 같다", again.merged == [] and len(again.stale) == 3,
+          f"{again.merged} {again.stale}")
+    store.close()
+
+with tempfile.TemporaryDirectory() as tmp:
+    bad = Path(tmp) / "t.tsv"
+    bad.write_text("merge\tonly-one-column\n", encoding="utf-8")
+    try:
+        dup_mod.load_table(bad)
+        check("칸이 모자란 표를 거부한다", False)
+    except dup_mod.DuplicateTableError:
+        check("칸이 모자란 표를 거부한다", True)
+    bad.write_text("maybe\ta:1\ta:2\t?\n", encoding="utf-8")
+    try:
+        dup_mod.load_table(bad)
+        check("merge/keep 이 아닌 판정을 거부한다", False)
+    except dup_mod.DuplicateTableError:
+        check("merge/keep 이 아닌 판정을 거부한다", True)
+
+
+# --- 국가유산은 지정 건마다 관리번호와 소재지를 갖는다 ------------------------
+#
+# 이름도 한자도 같은 '동의보감'이 셋인데 국립중앙도서관본·규장각본·
+# 한국학중앙연구원본이라 서로 다른 보물이다. 반대로 '여수 진남관'은 보물
+# 324호이던 것이 국보 304호가 되며 두 줄이 됐다 — 소재지가 같다.
+
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "khs.sqlite")
+    def _h(nid, label, addr, desc=""):
+        return Node(id=nid, type="heritage", label=label, source="khs",
+                    description=desc or None, props={"address": addr})
+    store.upsert_nodes([
+        _h("khs:12-11-0010850000100", "동의보감",
+           "서울 서초구 반포대로 201, 국립중앙도서관 (반포동)", "허준이 지은 의서다."),
+        _h("khs:12-11-0010850000300", "동의보감",
+           "서울 관악구 관악로 1, 서울대학교 규장각한국학연구원 (신림동)",
+           "허준이 지은 의서다."),
+        _h("khs:11-24-0003040000000", "여수 진남관", ""),
+        _h("khs:11-36-0003040000000", "여수 진남관",
+           "전남광주통합특별시 여수시 동문로 11 (군자동) / (지번)전남 여수시 군자동 472",
+           "전라좌수영 객사로 세운 건물이다."),
+        _h("khs:12-36-0003240000000", "여수진남관", "전남 여수시 동문로 11 (군자동)",
+           "조선 수군의 본거지였다."),
+    ])
+    rep = dup_mod.sweep(store.conn, [], "heritage")
+    same = {frozenset((c.a, c.b)): why for c, why in rep.auto_same}
+    diff = {frozenset((c.a, c.b)) for c, _ in rep.auto_diff}
+    check("소장처가 다른 같은 이름은 다른 지정 건이다 (동의보감)",
+          frozenset(("khs:12-11-0010850000100", "khs:12-11-0010850000300")) in diff,
+          str(rep.auto_diff))
+    check("관리번호가 같으면 같은 유산이다 (시도코드만 다른 줄)",
+          "관리번호" in same.get(
+              frozenset(("khs:11-24-0003040000000", "khs:11-36-0003040000000")), ""),
+          str(same))
+    check("소재지가 같고 종목이 다르면 지정이 바뀐 것이다 (보물 → 국보)",
+          "소재지" in same.get(
+              frozenset(("khs:11-36-0003040000000", "khs:12-36-0003240000000")), ""),
+          str(same))
+
+    dup_mod.apply(store, [], "heritage")
+    rows = store.conn.execute(
+        "SELECT id, label, json_extract(props,'$.address') AS addr FROM nodes"
+        " WHERE label LIKE '%진남관%'").fetchall()
+    check("셋이 사슬로 얽혀도 한 노드로 모인다", len(rows) == 1, str([dict(r) for r in rows]))
+    check("남은 것은 알맹이가 있는 줄이다 (빈 줄이 이기지 않는다)",
+          rows and rows[0]["id"] == "khs:11-36-0003040000000", str([dict(r) for r in rows]))
+    check("없앤 줄의 props 도 이어받는다",
+          store.conn.execute("SELECT COUNT(*) FROM nodes WHERE label='동의보감'"
+                             ).fetchone()[0] == 2)
+    check("소재지 앞 세 마디로 견준다 (시도는 뗀다)",
+          dup_mod.address_key("전남 여수시 동문로 11 (군자동)")
+          == dup_mod.address_key(
+              "전남광주통합특별시 여수시 동문로 11 (군자동) / (지번)전남 여수시 군자동 472"))
+    store.close()
+
+
+# --- 표가 그래프와 맞는가 -----------------------------------------------------
+
+_dup_table = Path(__file__).resolve().parents[1] / "data" / "duplicates.tsv"
+if _dup_table.exists():
+    rows = dup_mod.load_table(_dup_table)
+    check("판정 표가 읽힌다", len(rows) > 0)
+    check("한 짝을 두 번 적지 않았다",
+          len({r.key for r in rows}) == len(rows))
+
+
+# --- 인과 관문: 원인 → 결과 사슬 ---------------------------------------------
+# "온톨로지 그래프이므로 모든 노드의 인과관계를 보여줘야 한다 — 임진왜란 →
+# 명의 쇠퇴 → 여진족의 성장 → 병자호란" (사용자, 2026-09-04). 인과 엣지는
+# 산문에서 근거와 함께 뽑되, 양끝은 있는 노드로 풀리고 연대는 순방향이어야 한다.
+from histgraph import causes as causes_mod  # noqa: E402
+
+print("\n[인과 관문]")
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "c.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:JOSEON", type="org", label="조선", source="wd", start_date="1392", end_date="1897"),
+        Node(id="wd:IMJIN", type="event", label="임진왜란", source="wd", start_date="1592", end_date="1598"),
+        Node(id="wd:MING", type="org", label="명나라", source="wd", start_date="1368", end_date="1644"),
+        Node(id="wd:JIN", type="org", label="후금", source="wd", start_date="1616", end_date="1636"),
+        Node(id="wd:JM", type="event", label="정묘호란", source="wd", start_date="1627"),
+        Node(id="wd:BJ", type="event", label="병자호란", source="wd", start_date="1636", end_date="1637"),
+        Node(id="wd:GABO", type="event", label="갑오개혁", source="wd", start_date="1894"),
+        Node(id="wd:BI", type="event", label="병인박해", source="wd", start_date="1866"),
+        Node(id="wd:BY", type="event", label="병인양요", source="wd", start_date="1866"),
+        Node(id="wd:P", type="person", label="인조", source="wd", start_date="1595", end_date="1649"),
+    ])
+    store.conn.execute("INSERT INTO aliases (node_id, alias) VALUES ('wd:IMJIN', '임진전쟁')")
+    # 옛 방식으로 들어온 Wikidata 원인·결과
+    store.upsert_edges([Edge(src="wd:BI", dst="wd:BY", type="related_to", source="wd", label="원인")])
+    check("옛 '관련(원인)' 엣지를 인과 엣지로 옮긴다", causes_mod.migrate(store) == 1)
+    check("옮긴 뒤 관련 엣지는 남지 않는다",
+          store.conn.execute("SELECT type FROM edges WHERE src='wd:BI'").fetchone()["type"] == "caused")
+    check("두 번 돌려도 더 옮길 것이 없다", causes_mod.migrate(store) == 0)
+
+    conn = corpus_mod.open_corpus(Path(tmp) / "corpus.sqlite")
+    doc_text = """병자호란은 1636년 청나라가 조선을 침입한 전쟁이다.
+
+== 배경 ==
+임진왜란으로 명나라의 국력이 크게 소진되었고, 그 틈을 타 여진의 후금이 성장하였다. 정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.
+
+== 경과 ==
+인조는 남한산성으로 피신하였다.
+
+== 결과 ==
+병자호란의 결과 조선은 청과 군신 관계를 맺었다."""
+    corpus_mod.put_doc(conn, "wd:BJ", "병자호란", doc_text, source="aks")
+    corpus_mod.put_doc(conn, "wd:GABO", "갑오개혁", "갑오개혁은 1894년의 개혁이다.", source="kowiki")
+    docs = causes_mod.documents(store, conn)
+    check("말뭉치에 글이 있는 사건만 묻는다", [d["id"] for d in docs] == ["wd:BJ", "wd:GABO"], str([d["id"] for d in docs]))
+    doc = docs[0]
+    passages = causes_mod.doc_passages(conn, "wd:BJ", budget=60)
+    check("예산이 빠듯하면 인과를 말하는 절이 먼저 든다",
+          [p["section"] for p in passages] == ["배경"], str([p["section"] for p in passages]))
+    passages = causes_mod.doc_passages(conn, "wd:BJ")
+    check("예산 안이면 문서 순서 그대로", [p["section"] for p in passages] == ["", "배경", "경과", "결과"],
+          str([p["section"] for p in passages]))
+    gaz = causes_mod.gazetteer(store, doc)
+    check("알려진 개체에 그 무렵의 사건과 단체가 든다",
+          "임진왜란" in gaz["event"] and "후금" in gaz["org"] and "갑오개혁" not in gaz["event"], str(gaz))
+    prompt = causes_mod.build_prompt(doc, passages, gaz)
+    check("프롬프트에 종류·개체·원문이 다 든다", "배경:" in prompt and "후금" in prompt and "남한산성" in prompt)
+
+    answers = [
+        # 정상 — 별칭으로 풀리고 근거가 원문에 있다
+        {"cause": "임진전쟁", "cause_type": "event", "effect": "명나라", "effect_type": "org", "kind": "영향",
+         "how": "명의 국력이 소진되었다", "evidence": "임진왜란으로 명나라의 국력이 크게 소진되었고", "confidence": "certain"},
+        {"cause": "후금", "cause_type": "org", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "형제 관계를 요구하며 압박했다", "evidence": "정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.", "confidence": "probable"},
+        # 연대 역행 — 갑오개혁(1894)이 병자호란(1636)의 원인일 수 없다
+        {"cause": "갑오개혁", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "병자호란은 1636년 청나라가 조선을 침입한 전쟁이다.", "confidence": "certain"},
+        # 이름을 못 푼다 — 노드를 만들지 않는다
+        {"cause": "여진족의 성장", "cause_type": "concept", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "", "evidence": "그 틈을 타 여진의 후금이 성장하였다.", "confidence": "certain"},
+        # 서술구는 주어로 푼다 — 정묘호란(의 굴욕)이 원인, 구는 남긴다
+        {"cause": "정묘호란 뒤의 형제 관계 요구", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "형제 관계 요구가 압박이 되었다", "evidence": "정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.", "confidence": "possible"},
+        # 자국 왕조는 원인이 되지 않는다
+        {"cause": "조선의 저항", "cause_type": "org", "effect": "병자호란", "effect_type": "event", "kind": "배경",
+         "how": "", "evidence": "인조는 남한산성으로 피신하였다.", "confidence": "possible"},
+        # 근거가 원문에 없다
+        {"cause": "정묘호란", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "정묘호란의 굴욕이 병자호란을 불렀다.", "confidence": "certain"},
+        # 자기 자신
+        {"cause": "병자호란", "cause_type": "event", "effect": "병자호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "병자호란의 결과 조선은 청과 군신 관계를 맺었다.", "confidence": "certain"},
+        # 결과가 인물 — 타입이 안 맞는다
+        {"cause": "병자호란", "cause_type": "event", "effect": "인조", "effect_type": "event", "kind": "영향",
+         "how": "", "evidence": "인조는 남한산성으로 피신하였다.", "confidence": "certain"},
+    ]
+    edges, why, missing = causes_mod.accept(store, doc, answers, passages, "test-model")
+    got = {(e.src, e.dst, e.label) for e in edges}
+    check("별칭으로 푼 원인과 단체 결과가 엣지가 된다", ("wd:IMJIN", "wd:MING", "영향") in got, str(got))
+    check("단체가 원인인 인과도 적는다", ("wd:JIN", "wd:BJ", "배경") in got, str(got))
+    check("연대가 역행하면 버린다", why.get("연대 역행") == 1 and ("wd:GABO", "wd:BJ", "원인") not in got, str(why))
+    store.upsert_nodes([Node(id="wd:ONGOING", type="org", label="재향군인회", source="wd", start_date="1952")])
+    check("끝을 모르는 단체가 결과면 연대로 막지 않는다 (시작 연도로 재면 참인 인과가 사라진다)",
+          not causes_mod.backwards(store, "wd:GABO", "wd:ONGOING", "org"))
+    check("끝난 단체가 결과면 그 끝보다 늦은 원인은 역행이다", causes_mod.backwards(store, "wd:GABO", "wd:JIN", "org"))
+    store.conn.execute("DELETE FROM nodes WHERE id = 'wd:ONGOING'")
+    check("못 푼 이름은 노드를 만들지 않고 모아 둔다", missing == ["여진족의 성장", "조선의 저항"] and why.get("이름 못 풂") == 2, str(missing))
+    jm = next(e for e in edges if e.src == "wd:JM")
+    check("서술구는 주어로 풀고 원래 구를 남긴다", jm.props["cause_as"] == "정묘호란 뒤의 형제 관계 요구" and "effect_as" not in jm.props, str(jm.props))
+    check("서술구의 주어 후보는 긴 것부터", causes_mod.heads("도요토미 히데요시의 사망") == ["도요토미 히데요시", "도요토미"], str(causes_mod.heads("도요토미 히데요시의 사망")))
+    check("한 글자 나라 이름은 긴 이름으로", causes_mod.heads("청의 연호 사용 강요")[-1] == "청나라", str(causes_mod.heads("청의 연호 사용 강요")))
+    hs = causes_mod.heads("후금(청)의 재차 침입 결심")
+    check("괄호는 떼고 보며 구 자체는 후보가 아니다", hs[-1] == "후금" and "후금(청)의 재차 침입 결심" not in hs, str(hs))
+    check("근거가 원문에 없으면 버린다", why.get("근거 없음") == 1, str(why))
+    check("자기 자신은 잇지 않는다", why.get("자기 자신") == 1, str(why))
+    check("인물은 결과가 될 수 없다", why.get("타입 안 맞음") == 1, str(why))
+    check("근거는 문장 단위로 되살린다",
+          next(e for e in edges if e.src == "wd:IMJIN").props["evidence"].endswith("성장하였다."),
+          next(e for e in edges if e.src == "wd:IMJIN").props["evidence"])
+    check("엣지에 '어떻게'와 출처 문서·모델이 남는다",
+          all(e.props["doc"] == "wd:BJ" and e.props["model"] == "test-model" for e in edges)
+          and next(e for e in edges if e.src == "wd:JIN").props["how"] == "형제 관계를 요구하며 압박했다")
+    check("스키마 밖 종류는 버린다",
+          causes_mod.accept(store, doc, [dict(answers[0], kind="이유")], passages, "m")[1] == {"종류 밖": 1})
+
+    n = causes_mod.write(store, edges)
+    check("엣지를 적는다", n == 3)
+    weaker = [Edge(src="wd:JIN", dst="wd:BJ", type="caused", source="causes", label="원인", confidence=0.5,
+                   props={"how": "다른 문서의 약한 말"})]
+    causes_mod.write(store, weaker)
+    row = store.conn.execute("SELECT label, confidence FROM edges WHERE src='wd:JIN' AND dst='wd:BJ'").fetchone()
+    check("같은 짝을 더 약하게 말한 문서는 앞의 것을 덮지 않는다", row["label"] == "배경" and row["confidence"] == 0.7, str(tuple(row)))
+    causes_mod.mark(store, doc, "test-model")
+    check("물은 문서는 다시 묻지 않는다", [d["id"] for d in causes_mod.documents(store, conn)] == ["wd:GABO"])
+    check("--redo 면 다시 묻는다", len(causes_mod.documents(store, conn, redo=True)) == 2)
+    causes_mod.keep_answers(store, {"id": "wd:BJ"}, [], "m")
+    check("--redo 도 답이 저장된 문서는 다시 묻지 않는다 (reresolve 몫)",
+          [d["id"] for d in causes_mod.documents(store, conn, redo=True)] == ["wd:GABO"])
+    store.conn.execute("DELETE FROM causes_answers")
+    check("--scope 를 주면 화면에 있는 노드만 묻는다",
+          [d["id"] for d in causes_mod.documents(store, conn, redo=True, scope={"wd:GABO"})] == ["wd:GABO"])
+
+    # 표기 차이 — 실측: 모델 답 5,000여 건 중 3,237건이 '이름 못 풂'이었고, 그중
+    # '대한민국임시정부'·'새마을운동'·'6.29 선언'처럼 **있는 노드를 다른 표기로**
+    # 부른 것이 적잖았다. 느슨한 열쇠로 한 번 더 풀되 정확한 표기가 먼저다.
+    store.upsert_nodes([
+        Node(id="wd:SM", type="concept", label="새마을 운동", source="wd", start_date="1970"),
+        Node(id="wd:629", type="event", label="6.29 선언", source="wd", start_date="1987"),
+        Node(id="wd:KCIA", type="org", label="대한민국 중앙정보부", source="wd", start_date="1961", end_date="1981"),
+        Node(id="wd:KPG", type="org", label="대한민국 임시정부", source="wd", start_date="1919", end_date="1948"),
+        Node(id="wd:TOEGYE", type="person", label="퇴계 이황", source="wd", start_date="1501", end_date="1570"),
+        Node(id="wd:YEJONG", type="person", label="예종", source="wd", start_date="1450", end_date="1469"),
+    ])
+    store.conn.execute("INSERT INTO aliases (node_id, alias) VALUES ('wd:YEJONG', '이황')")
+    doc_1987 = {"id": "wd:X", "start_date": "1987", "end_date": None}
+    r = causes_mod.resolve(store, "새마을운동", "concept", doc_1987)
+    check("띄어쓰기가 다른 이름을 푼다", r is not None and r[0] == "wd:SM", str(r))
+    r = causes_mod.resolve(store, "6·29 선언", "event", doc_1987)
+    check("가운뎃점·마침표가 다른 이름을 푼다", r is not None and r[0] == "wd:629", str(r))
+    r = causes_mod.resolve(store, "중앙정보부", "org", doc_1987)
+    check("한정어가 앞에 붙은 라벨을 접미로 푼다 (단체)", r is not None and r[0] == "wd:KCIA", str(r))
+    r = causes_mod.resolve(store, "중앙정보부의 공작", "org", doc_1987)
+    check("서술구의 주어도 느슨하게 푼다", r is not None and r[0] == "wd:KCIA" and r[2] == "중앙정보부", str(r))
+    check("자국 왕조는 띄어쓰기를 바꿔도 풀지 않는다", causes_mod.resolve(store, "대한민국임시정부", "org", doc_1987) is None)
+    r = causes_mod.resolve(store, "이황", "person", doc_1987)
+    check("정확한 표기가 있으면 느슨한 길은 밟지 않는다 (별칭 이황 = 예종)", r is not None and r[0] == "wd:YEJONG", str(r))
+    check("인물은 접미로 풀지 않는다 ('이황'이 '퇴계 이황'에 붙지 않는다)",
+          causes_mod.loose_index(store).lookup("황", "person") == [] and causes_mod.loose_index(store).lookup("퇴계이황", "person") == ["wd:TOEGYE"])
+    check("접미 후보가 넷 넘으면 풀지 않는다", causes_mod.LooseIndex(store).lookup("운동", "concept") == [])
+    store.upsert_nodes([Node(id="wd:4G6J", type="event", label="4군 6진 개척", source="wd", start_date="1433")])
+    r = causes_mod.resolve(store, "4군 6진", "event", {"id": "wd:X", "start_date": "1440", "end_date": None})
+    check("이름이 라벨의 앞머리면 접두로 푼다 ('4군 6진' → '4군 6진 개척')", r is not None and r[0] == "wd:4G6J", str(r))
+
+    # 모델 답은 저장해 두고, 해소기가 좋아지면 모델 없이 다시 판정한다
+    causes_mod.keep_answers(store, doc, answers, "test-model")
+    row = store.conn.execute("SELECT model, answers FROM causes_answers WHERE node_id = 'wd:BJ'").fetchone()
+    check("모델 답을 문서별로 저장한다", row is not None and row["model"] == "test-model" and "임진전쟁" in row["answers"])
+    store.upsert_nodes([Node(id="wd:JURCHEN", type="org", label="여진족", source="wd", start_date="1000", end_date="1636")])
+    got = causes_mod.reresolve(store, conn)
+    check("다시 판정하면 새로 생긴 노드로 풀린 인과가 더해진다",
+          got["counts"]["문서"] == 1 and store.conn.execute(
+              "SELECT 1 FROM edges WHERE src='wd:JURCHEN' AND dst='wd:BJ' AND type='caused'").fetchone() is not None,
+          str(got))
+    check("다시 판정해도 자국 왕조는 여전히 못 푼다", got["unresolved"] == {"조선의 저항": 1}, str(got["unresolved"]))
+    store.conn.execute("DELETE FROM edges WHERE src = 'wd:JURCHEN'")
+    store.conn.execute("DELETE FROM nodes WHERE id = 'wd:JURCHEN'")
+    store.conn.commit()
+
+    # 구조화 소스가 반대 방향을 알면 추출본을 버린다
+    store.upsert_edges([Edge(src="wd:JM", dst="wd:BJ", type="caused", source="wd", label="원인")])
+    _, why2, _ = causes_mod.accept(store, doc, [
+        {"cause": "병자호란", "cause_type": "event", "effect": "정묘호란", "effect_type": "event", "kind": "원인",
+         "how": "", "evidence": "정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.", "confidence": "certain"}], passages, "m")
+    check("구조화 소스와 반대 방향이면 버린다 (연대보다 먼저 잡히지 않아도)",
+          why2.get("연대 역행") == 1 or why2.get("구조화 소스와 반대") == 1, str(why2))
+
+    # 전투는 자기가 속한 전쟁의 원인이 아니다 — 상하위가 있는 짝은 적지 않는다
+    store.upsert_nodes([Node(id="wd:HS", type="event", label="한산도 전투", source="wd", start_date="1592")])
+    store.upsert_edges([Edge(src="wd:HS", dst="wd:IMJIN", type="part_of", source="wd")])
+    _, why3, _ = causes_mod.accept(store, doc, [
+        {"cause": "한산도 전투", "cause_type": "event", "effect": "임진왜란", "effect_type": "event", "kind": "영향",
+         "how": "", "evidence": "임진왜란으로 명나라의 국력이 크게 소진되었고", "confidence": "certain"}], passages, "m")
+    check("상하위 관계가 있는 짝은 인과로 적지 않는다", why3 == {"상하위 관계": 1}, str(why3))
+    store.upsert_edges([Edge(src="wd:IMJIN", dst="wd:HS", type="caused", source="causes", label="배경")])
+    check("이미 적힌 것은 되돌아가 지운다", causes_mod.prune_part_of(store) == 1
+          and store.conn.execute("SELECT COUNT(*) FROM edges WHERE type='caused' AND dst='wd:HS'").fetchone()[0] == 0)
+
+    # 사슬 — 임진왜란 → 명나라 (영향) · 후금 → 병자호란 (배경) · 정묘호란 → 병자호란 (wd)
+    store.upsert_edges([Edge(src="wd:MING", dst="wd:JIN", type="caused", source="causes", label="배경",
+                             confidence=0.7, props={"how": "명의 쇠퇴로 여진이 성장할 틈이 생겼다"})])
+    tree = causes_mod.chain(store, "wd:BJ", depth=4)
+    cause_ids = [c["id"] for c in tree["causes"]]
+    check("원인 나무의 첫 층은 직접 원인들", set(cause_ids) == {"wd:JIN", "wd:JM"}, str(cause_ids))
+    check("나무의 원인에 서술구가 붙는다", next(c for c in tree["causes"] if c["id"] == "wd:JM")["as"] == "정묘호란 뒤의 형제 관계 요구")
+    jin = next(c for c in tree["causes"] if c["id"] == "wd:JIN")
+    check("원인의 원인으로 내려간다 (후금 ← 명 ← 임진왜란)",
+          jin["children"][0]["id"] == "wd:MING" and jin["children"][0]["children"][0]["id"] == "wd:IMJIN", str(jin))
+    check("나무의 노드 요약이 한 번씩 실린다", set(tree["nodes"]) == {"wd:BJ", "wd:JIN", "wd:JM", "wd:MING", "wd:IMJIN"}, str(set(tree["nodes"])))
+    # 예산은 두 쪽이 나눠 쓴다 — 원인이 많은 사건의 결과가 빈손이 되지 않게
+    # (실측: 심하전투 원인 31건에 결과 0, 연표에는 정묘호란·인조반정이 결과)
+    store.upsert_nodes([Node(id="wd:MANY", type="event", label="원인 많은 일", source="wd")]
+                       + [Node(id=f"wd:C{i}", type="event", label=f"원인 {i}", source="wd") for i in range(5)]
+                       + [Node(id="wd:E1", type="event", label="결과 하나", source="wd")])
+    store.upsert_edges([Edge(src=f"wd:C{i}", dst="wd:MANY", type="caused", source="wd", label="원인") for i in range(5)]
+                       + [Edge(src="wd:MANY", dst="wd:E1", type="caused", source="wd", label="원인")])
+    saved_budget = causes_mod.TREE_BUDGET
+    causes_mod.TREE_BUDGET = 4
+    many = causes_mod.chain(store, "wd:MANY", depth=2)
+    causes_mod.TREE_BUDGET = saved_budget
+    check("원인이 예산을 다 써도 결과는 선다", len(many["effects"]) == 1 and len(many["causes"]) == 3,
+          f"원인 {len(many['causes'])} 결과 {len(many['effects'])}")
+    got = causes_mod.paths(store, "wd:IMJIN", "wd:BJ")
+    check("임진왜란에서 병자호란까지 최단 인과 경로를 찾는다",
+          got["found"] and [s["id"] for s in got["paths"][0]] == ["wd:IMJIN", "wd:MING", "wd:JIN", "wd:BJ"], str(got["paths"]))
+    check("경로의 걸음마다 '어떻게'가 붙는다",
+          got["paths"][0][2]["edge"]["how"] == "명의 쇠퇴로 여진이 성장할 틈이 생겼다", str(got["paths"][0][2]))
+    back = causes_mod.paths(store, "wd:BJ", "wd:IMJIN")
+    check("거꾸로 물으면 반대 방향임을 밝히고 같은 경로를 준다",
+          back["found"] and back["reversed"] and back["paths"][0][0]["id"] == "wd:IMJIN", str(back))
+    none = causes_mod.paths(store, "wd:GABO", "wd:BJ")
+    check("이어지지 않으면 없다고 한다", not none["found"] and none["paths"] == [])
+    text = causes_mod.render_chain(tree)
+    check("글로 읽을 때 원인·결과와 '어떻게'가 한글로 찍힌다",
+          "원인:" in text and "임진왜란 (1592)" in text and "명의 쇠퇴로" in text, text)
+    check("경로 글도 마찬가지", "임진왜란 (1592)" in causes_mod.render_paths(got) and "→[배경" in causes_mod.render_paths(got))
+
+    # 화면 DB 로 옮기기 — 양끝이 거기 있는 것만
+    target = GraphStore(Path(tmp) / "korea.sqlite")
+    target.upsert_nodes([Node(id="wd:JIN", type="org", label="후금", source="wd"),
+                         Node(id="wd:BJ", type="event", label="병자호란", source="wd"),
+                         Node(id="wd:JM", type="event", label="정묘호란", source="wd")])
+    moved = causes_mod.sync(store, target)
+    check("파생본에 양끝이 있는 인과 엣지만 옮긴다", moved == 3,
+          str(target.conn.execute("SELECT src, dst FROM edges").fetchall()))
+    api = GraphAPI(target, era="korea")
+    rel = next(r for r in api.node("wd:BJ")["relations"] if r["other"]["id"] == "wd:JIN")
+    check("상세에 인과 엣지가 종류·어떻게와 함께 간다",
+          rel["type"] == "caused" and rel["dir"] == "in" and rel["edge_label"] == "배경"
+          and rel["how"] == "형제 관계를 요구하며 압박했다", str(rel))
+    check("상세 관계 목록에서 인과가 맨 앞이다", api.node("wd:BJ")["relations"][0]["type"] == "caused")
+    from histgraph.server import dispatch as _dispatch
+    st, body = _dispatch(api, "/api/chain", {"id": ["wd:BJ"]})
+    check("/api/chain 이 나무를 준다", st == 200 and {c["id"] for c in body["causes"]} == {"wd:JIN", "wd:JM"}, str(body))
+    st, body = _dispatch(api, "/api/path", {"from": ["wd:JIN"], "to": ["wd:BJ"]})
+    check("/api/path 가 경로를 준다", st == 200 and body["found"] and body["nodes"]["wd:JIN"]["group"] == "actor", str(body))
+    st, _ = _dispatch(api, "/api/chain", {"id": ["없음"]})
+    check("없는 노드는 404", st == 404)
+    conn.close(); store.close(); target.close()
+
+
 # --- 글로 읽는 장 (`/n/<id>`) --------------------------------------------
 #
 # 관계망은 자바스크립트가 그려서, 검색 로봇과 광고 심사의 눈에는 화면이
 # 빈 <div> 하나다. 이 장들이 같은 자료를 글로 낸다. 재는 것은 셋이다 —
 # 글이 실제로 들어 있는가, 이웃으로 이어지는 링크가 있는가, 그리고 §1
 # 대로 **사람이 읽는 자리에 영어가 없는가**.
+# --- 다시 쓴 설명 (`paraphrase` — summaries.py) --------------------------
+#
+# 정본이 아닌 글(위키백과·나무위키·출처 모름)은 모델이 우리 말로 새로 쓰고,
+# 정본(국편·민백·국가유산청)은 손대지 않는다. 새 글은 nodes.description 이
+# 아니라 summaries 표에 두고, 원문 해시로 아직 유효한지 잰다.
+print("\n[다시 쓴 설명]")
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import summaries as sm
+    from histgraph import pages as _pages
+    from histgraph.server import GraphAPI as _GraphAPI
+
+    WIKI = ("이순신(李舜臣, 1545년 4월 28일 ~ 1598년 12월 16일)은 조선 중기의 무신이다. "
+            "본관은 덕수, 자는 여해, 시호는 충무이다. 임진왜란 때 삼도수군통제사로서 "
+            "한산도 대첩과 명량 해전에서 일본 수군을 크게 무찔렀다.")
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:LSS", type="person", label="이순신", source="wd", description=WIKI,
+             props={"desc_source": "kowiki", "kowiki_url": "https://ko.wikipedia.org/wiki/x"}),
+        Node(id="wd:KIM", type="person", label="김종서", source="wd",
+             description="김종서(金宗瑞)는 조선 전기의 문신이다. 세종 때 6진을 개척하였다.",
+             props={"canon": "nikh", "nikh_url": "https://contents.history.go.kr/x"}),
+        Node(id="wd:UNK", type="person", label="강항", source="wd",
+             description="강항(姜沆)은 조선 중기의 문신이다. 정유재란 때 일본에 잡혀갔다가 돌아왔다."),
+        Node(id="ex:X", type="person", label="이름뿐", source="extract"),
+    ])
+    cands = sm.candidates(store)
+    check("정본은 새로 쓰지 않고, 위키와 출처 모름만 후보다",
+          {c["id"] for c in cands} == {"wd:LSS", "wd:UNK"}, str([c["id"] for c in cands]))
+
+    class _Fake:
+        model = "fake"
+        def complete_json(self, system, user, schema):
+            if "이순신" in user:
+                return {"summary": "이순신은 1545년에 태어나 1598년에 죽은 조선 중기의 장수다. "
+                                   "임진왜란이 일어나자 삼도수군통제사가 되어 한산도와 명량에서 "
+                                   "일본 수군을 잇달아 물리쳤다."}
+            # 원문을 그대로 돌려주는 모델 — 요약이 아니라 베낌이다
+            return {"summary": "강항(姜沆)은 조선 중기의 문신이다. 정유재란 때 일본에 잡혀갔다가 돌아왔다. "
+                               "그는 학자였고 제자를 길렀으며 글을 남겼다."}
+
+    got = sm.run(store, _Fake())
+    check("새로 쓴 글은 받고 베낀 글은 떨어뜨린다",
+          got["counts"]["새로 씀"] == 1 and got["reasons"] == {"원문을 그대로 베낌": 1}, str(got))
+    check("nodes.description 은 그대로다",
+          store.conn.execute("SELECT description FROM nodes WHERE id='wd:LSS'").fetchone()[0] == WIKI)
+
+    api = _GraphAPI(store, era="korea")
+    d = api.node("wd:LSS")
+    check("화면은 새로 쓴 글을 받는다", d["description"].startswith("이순신은 1545년에"), d["description"][:60])
+    check("출처 줄은 '바탕으로 새로 쓴 글'이라 말한다",
+          d["desc_origin"]["rewritten"] is True
+          and "문서를 바탕으로 새로 쓴 글입니다" in _pages.node_page(api, "wd:LSS")[1])
+    check("떨어진 노드는 도입부로 물러난다",
+          api.node("wd:UNK")["description"].startswith("강항(姜沆)은") and api.node("wd:UNK")["desc_origin"] is None)
+    check("정본은 줄인 글 그대로",
+          api.node("wd:KIM")["description"].startswith("김종서(金宗瑞)는")
+          and "rewritten" not in api.node("wd:KIM")["desc_origin"])
+    check("한 번 쓴 것은 다시 묻지 않는다", [c["id"] for c in sm.candidates(store)] == ["wd:UNK"])
+
+    # 수집이 설명을 바꾸면 옛 요약은 옛 글의 요약이다 — 화면은 도입부로 돌아간다.
+    store.conn.execute("UPDATE nodes SET description = ? WHERE id = 'wd:LSS'", (WIKI + " 노량 해전에서 전사했다.",))
+    store.conn.commit()
+    check("원문이 바뀌면 옛 글은 무효다",
+          api.node("wd:LSS")["description"].startswith("이순신(李舜臣")
+          and "wd:LSS" in [c["id"] for c in sm.candidates(store)])
+
+    target = GraphStore(Path(tmp) / "t.sqlite")
+    target.upsert_nodes([Node(id="wd:LSS", type="person", label="이순신", source="wd", description=WIKI)])
+    check("파생본으로는 거기 있는 노드 것만 옮긴다", sm.sync(store, target) == 1
+          and target.conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0] == 1)
+    check("표가 없는 옛 DB 에서는 조용히 None",
+          sm.lookup(sqlite3.connect(":memory:"), "wd:LSS", WIKI) is None)
+    check("요약 규칙: 영어·짧음·위키 언급·베낌을 가른다",
+          sm.accept("King Sejong 은 왕이다. 훈민정음을 만들었다 정말로 그렇다 그렇다 그렇다.", WIKI) == "영어가 섞임"
+          and sm.accept("짧다.", WIKI).startswith("너무 짧음")
+          and sm.accept("위키백과에 따르면 이순신은 조선 중기의 장수로, 임진왜란에서 큰 공을 세워 뒷날 충무공이라 불리게 된 사람이다.", WIKI) == "'위키' 언급")
+    store.close(); target.close()
+
+
 print("\n[글로 읽는 장]")
 with tempfile.TemporaryDirectory() as tmp:
     import re as _re
@@ -2963,6 +4411,377 @@ with tempfile.TemporaryDirectory() as tmp:
           and pages.route(api, "/") is None)
     store.close()
 
+
+
+print("\n[편집 계층 — 수집이 덮어써도 고친 값이 되살아난다]")
+with tempfile.TemporaryDirectory() as _d:
+    from histgraph import overrides as _ov
+    from histgraph import labels as _labels_mod
+    from histgraph import koreanize as _kz
+    from histgraph.promote import merge_node as _merge_node
+
+    store = GraphStore(Path(_d) / "ov.sqlite")
+
+    # 1. relabel — 표의 이름은 수집이 영어로 되돌려도 남는다
+    _wd = lambda **kw: Node(id="wd:Q1", type="event", label="Sayuksin plot", source="wd",
+                            description="사육신 사건", **kw)
+    store.upsert_nodes([_wd()])
+    _labels_mod.apply_overrides(store.conn, [_labels_mod.Override("Q1", "사육신 사건", "표")])
+    store.upsert_nodes([_wd()])          # 다시 수집
+    row = store.conn.execute("SELECT label FROM nodes WHERE id='wd:Q1'").fetchone()
+    check("relabel 한 이름은 재수집 뒤에도 한국어다", row[0] == "사육신 사건", row[0])
+    check("영어 옛 이름은 별칭으로 남는다", store.conn.execute(
+        "SELECT 1 FROM aliases WHERE node_id='wd:Q1' AND alias='Sayuksin plot'").fetchone() is not None)
+    # 이미 맞는 이름도 표에 적혀야 다음 수집을 막는다
+    store.upsert_nodes([Node(id="wd:Q2", type="person", label="세종", source="wd")])
+    _labels_mod.apply_overrides(store.conn, [_labels_mod.Override("Q2", "세종", "표")])
+    check("이미 한국어인 이름도 편집 계층에 적힌다", store.conn.execute(
+        "SELECT value FROM overrides WHERE key='wd:Q2' AND field='label'").fetchone() is not None)
+
+    # 2. redescribe — 사전이 비운 설명은 영어가 돌아오면 다시 비우고, 진짜 한국어가 오면 물러난다
+    store.conn.execute("UPDATE nodes SET description='Something in English only' WHERE id='wd:Q2'")
+    _kz.redescribe(store.conn)
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q2'").fetchone()
+    check("사전에 없는 영어 설명은 비운다", not row[0], repr(row[0]))
+    # Node.__post_init__ 을 거치지 않는 SQL 경로가 영어를 다시 앉힌 상황
+    store.conn.execute("UPDATE nodes SET description='Something in English only' WHERE id='wd:Q2'")
+    _ov.reapply(store, node_ids=["wd:Q2"])
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q2'").fetchone()
+    check("영어가 되돌아오면 편집 계층이 다시 비운다", not row[0], repr(row[0]))
+    store.upsert_nodes([Node(id="wd:Q2", type="person", label="세종", source="wd",
+                             description="조선의 제4대 국왕")])
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q2'").fetchone()
+    check("진짜 한국어 설명이 오면 번역은 물러난다 (foreign 조건)", row[0] == "조선의 제4대 국왕", row[0])
+
+    # 3. precision — 잘라 둔 날짜는 1월 1일이 돌아와도 남는다
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             start_date="1592-01-01", description="전쟁")])
+    store.conn.execute("UPDATE nodes SET start_date='1592' WHERE id='wd:Q3'")
+    _ov.record(store.conn, "node", "wd:Q3", "start_date", "1592", "precision")
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             start_date="1592-01-01", description="전쟁")])
+    row = store.conn.execute("SELECT start_date FROM nodes WHERE id='wd:Q3'").fetchone()
+    check("precision 이 자른 날짜는 재수집 뒤에도 '1592'", row[0] == "1592", row[0])
+
+    # 4. reigns — 엣지의 재위 표식과 날짜가 props 덮어쓰기를 견딘다
+    store.upsert_nodes([Node(id="wd:Q4", type="role", label="조선 임금", source="wd")])
+    _e = lambda: Edge(src="wd:Q2", dst="wd:Q4", type="held_position", source="wd", props={"p": 1})
+    store.upsert_edges([_e()])
+    store.conn.execute("""UPDATE edges SET start_date='1418', end_date='1450',
+                          props=json_set(props,'$.reign','monarch') WHERE src='wd:Q2'""")
+    ek = _ov.edge_key("wd:Q2", "wd:Q4", "held_position")
+    _ov.record(store.conn, "edge", ek, "props.reign", "monarch", "reigns")
+    _ov.record(store.conn, "edge", ek, "start_date", "1418", "reigns")
+    _ov.record(store.conn, "edge", ek, "end_date", "1450", "reigns")
+    store.upsert_edges([_e()])
+    row = store.conn.execute("SELECT start_date, end_date, props FROM edges WHERE src='wd:Q2'").fetchone()
+    check("재위 표식이 재수집 뒤에도 남는다", '"reign": "monarch"' in row[2] and '"p": 1' in row[2], row[2])
+    check("재위 날짜가 재수집 뒤에도 남는다", (row[0], row[1]) == ("1418", "1450"), (row[0], row[1]))
+
+    # 5. describe — 정본 정의(always)는 수집이 위키 도입부를 가져와도 이긴다
+    _ov.record(store.conn, "node", "wd:Q3", "description", "1592년 일본이 조선을 침략한 전쟁", "describe", "민백 정의")
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             description="위키백과 도입부")])
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q3'").fetchone()
+    check("정본 설명은 수집이 덮어써도 남는다 (always)", row[0].startswith("1592년"), row[0])
+
+    # 6. dedupe — 없앤 노드는 되살아나면 다시 합쳐진다
+    store.upsert_nodes([Node(id="ex:event:임오화변", type="event", label="임오화변", source="extract",
+                             description="사도세자가 뒤주에서 죽은 일"),
+                        Node(id="wd:Q5", type="event", label="사도세자 사건", source="wd",
+                             description="사도세자가 뒤주에서 죽은 일")])
+    store.upsert_edges([Edge(src="wd:Q2", dst="ex:event:임오화변", type="participated_in", source="extract")])
+    _merge_node(store, "ex:event:임오화변", "wd:Q5", method="duplicate_table")
+    check("합친 노드는 사라진다", store.conn.execute(
+        "SELECT 1 FROM nodes WHERE id='ex:event:임오화변'").fetchone() is None)
+    store.upsert_nodes([Node(id="ex:event:임오화변", type="event", label="임오화변", source="extract")])
+    store.upsert_edges([Edge(src="wd:Q2", dst="ex:event:임오화변", type="participated_in", source="extract")])
+    check("되살아난 노드는 저장소가 다시 합친다", store.conn.execute(
+        "SELECT 1 FROM nodes WHERE id='ex:event:임오화변'").fetchone() is None)
+    check("되살아난 노드의 엣지는 남긴 쪽으로 간다", store.conn.execute(
+        "SELECT COUNT(*) FROM edges WHERE dst='wd:Q5' AND type='participated_in'").fetchone()[0] == 1
+        and store.conn.execute("SELECT COUNT(*) FROM edges WHERE dst='ex:event:임오화변'").fetchone()[0] == 0)
+
+    # 7. 되짚기 — 표가 없던 DB 에서 재위·부분 날짜·정본을 표로 옮긴다
+    store.conn.execute("DELETE FROM overrides")
+    store.conn.execute("""UPDATE nodes SET props=json_set(props,'$.canon','nikh','$.desc_source','nikh'),
+                          description='국편 글' WHERE id='wd:Q3'""")
+    counts = _ov.seed_from_db(store.conn)
+    check("되짚기가 재위·날짜·정본을 센다",
+          counts["reigns"] == 1 and counts["precision"] == 1 and counts["nikh"] == 1, str(counts))
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             start_date="1592-01-01", description="위키백과 도입부", props={})])
+    row = store.conn.execute("SELECT description, start_date, props FROM nodes WHERE id='wd:Q3'").fetchone()
+    check("되짚은 정본이 다음 수집을 이긴다",
+          row[0] == "국편 글" and row[1] == "1592" and '"canon": "nikh"' in row[2], tuple(row))
+    try:
+        _ov.record(store.conn, "node", "x:1", "type", "event", "t")
+        check("노드 타입은 편집 계층으로 못 바꾼다", False)
+    except _ov.OverrideError:
+        check("노드 타입은 편집 계층으로 못 바꾼다", True)
+    store.close()
+
+
+print("\n[카디널리티 — 출생지가 둘이면 무엇이 틀린 것인가]")
+from histgraph.ontology import MAX_TARGETS as _MAXT, cardinality_problems as _cardp
+from histgraph import cardinality as _card
+check("카디널리티를 선언한 엣지 타입은 전부 스키마에 있다", set(_MAXT) <= set(EDGE_TYPES))
+_pb = _cardp([
+    Edge(src="p:1", dst="pl:a", type="born_in", source="t"),
+    Edge(src="p:1", dst="pl:b", type="born_in", source="t"),
+    Edge(src="p:1", dst="pl:a", type="born_in", source="u"),   # 같은 곳을 두 소스가 — 문제 아님
+    Edge(src="p:2", dst="pl:a", type="born_in", source="t"),
+])
+check("한 묶음 안에서 출생지가 둘인 인물을 경고한다", len(_pb) == 1 and "p:1" in _pb[0], str(_pb))
+check("소스만 다른 같은 사실은 세지 않는다", "p:2" not in " ".join(_pb))
+
+with tempfile.TemporaryDirectory() as _d:
+    store = GraphStore(Path(_d) / "card.sqlite")
+    pl = lambda i, name: Node(id=f"wd:{i}", type="place", label=name, source="wd")
+    store.upsert_nodes([
+        pl("H", "함경도"), pl("M", "명천군"), pl("B", "부산광역시"), pl("G", "광주시"),
+        pl("S", "서울특별시"), pl("J", "종로구"), pl("HS", "한성부"), pl("GY", "광양시"),
+        pl("JN", "전라남도"), pl("JD", "전라도"),
+        Node(id="wd:P1", type="person", label="이용익", source="wd"),
+        Node(id="wd:P2", type="person", label="김성우", source="wd"),
+        Node(id="wd:P3", type="person", label="김두한", source="wd"),
+        Node(id="wd:P4", type="person", label="김안로", source="wd"),
+        Node(id="wd:P5", type="person", label="강희열", source="wd"),
+        Node(id="wd:P6", type="person", label="정의공주", source="wd"),
+        Node(id="wd:F", type="person", label="조선 세종", source="wd"),
+        Node(id="wd:M1", type="person", label="소헌왕후", source="wd"),
+        Node(id="wd:M2", type="person", label="원경왕후", source="wd"),
+    ])
+    E = lambda s_, d, t, src="wd": Edge(src=s_, dst=d, type=t, source=src)
+    store.upsert_edges([
+        E("wd:M", "wd:H", "located_in"), E("wd:J", "wd:S", "located_in"),
+        E("wd:GY", "wd:JN", "located_in"),
+        E("wd:P1", "wd:H", "born_in"), E("wd:P1", "wd:M", "born_in", "kowiki:infobox"),   # 해상도
+        E("wd:P2", "wd:B", "born_in"), E("wd:P2", "wd:G", "born_in", "kowiki:infobox"),   # 충돌
+        E("wd:P3", "wd:S", "born_in"), E("wd:P3", "wd:J", "born_in", "kowiki:infobox"),   # 해상도
+        E("wd:P4", "wd:S", "born_in"), E("wd:P4", "wd:HS", "born_in", "kowiki:infobox"),  # 옛 이름
+        E("wd:P5", "wd:GY", "born_in"), E("wd:P5", "wd:JD", "born_in", "kowiki:infobox"), # 8도
+        E("wd:P6", "wd:F", "child_of"), E("wd:P6", "wd:M1", "child_of", "kowiki:infobox"),
+        E("wd:P6", "wd:M2", "child_of"),                                                   # 부모 셋
+    ])
+    vs = {v.src: v for v in _card.violations(store.conn)}
+    check("출생지가 둘인 인물을 전부 잡는다", set(vs) == {"wd:P1", "wd:P2", "wd:P3", "wd:P4", "wd:P5", "wd:P6"}, str(set(vs)))
+    check("함경도·명천군은 해상도 차이다", vs["wd:P1"].kind == "resolution")
+    check("부산·광주는 충돌이다", vs["wd:P2"].kind == "conflict")
+    check("서울·종로구는 해상도 차이다 (located_in 사슬)", vs["wd:P3"].kind == "resolution")
+    check("한성부는 서울의 옛 이름이다", vs["wd:P4"].kind == "resolution")
+    check("전라남도의 광양시는 전라도 안이다 (8도 표)", vs["wd:P5"].kind == "resolution")
+    check("부모가 셋이면 충돌이다", vs["wd:P6"].kind == "conflict" and len(vs["wd:P6"].targets) == 3)
+    shape = _card.summarize(list(vs.values()))
+    check("요약은 타입별로 충돌·해상도를 센다",
+          shape["born_in"] == {"conflict": 1, "resolution": 4} and shape["child_of"]["conflict"] == 1, str(shape))
+    store.close()
+
+from histgraph.sources.wikidata import ancestors_from_rows as _afr
+_rows = [{"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q2"}},
+         {"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q3"}},
+         {"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q1"}}]
+check("상위 행정구역 응답을 QID 집합으로 읽고 자기 자신은 뺀다", _afr(_rows) == {"Q1": {"Q2", "Q3"}}, str(_afr(_rows)))
+
+
+print("\n[related_to 갈라 내기 — 뜻 없는 선을 뜻 있는 타입으로]")
+from histgraph import untangle as _unt
+from histgraph.sources.wikidata import relax_type as _relax
+check("출생지가 단체(조선)면 from_period 로 완화한다", _relax("born_in", "org") == "from_period")
+check("단체의 구성원이 사건이면 참여로 완화한다", _relax("member_of", "event") == "participated_in")
+check("갈 데 없는 불일치는 None (related_to)", _relax("held_position", "person") is None)
+_ch = _unt.choices_for("person", "person")
+check("인물끼리는 자녀·배우자·사제만 고를 수 있다",
+      {t for t, _, _ in _ch} == {"child_of", "spouse_of", "taught"}, str(_ch))
+check("비대칭 관계는 양방향, 부부는 한 방향", sum(1 for t, _, _ in _ch if t == "taught") == 2
+      and sum(1 for t, _, _ in _ch if t == "spouse_of") == 1)
+check("인물→장소는 출생지·사망지", {t for t, _, _ in _unt.choices_for("person", "place")} == {"born_in", "died_in"})
+check("인과는 선택지에 없다 (별도 계약)", "caused" not in _unt.CHOICES)
+
+with tempfile.TemporaryDirectory() as _d:
+    store = GraphStore(Path(_d) / "unt.sqlite")
+    N = lambda i, t, l: Node(id=i, type=t, label=l, source="wd")
+    store.upsert_nodes([
+        N("wd:S", "person", "성혼"), N("wd:J", "person", "조헌"), N("wd:K", "person", "김집"),
+        N("wd:Y", "person", "이이"), N("wd:JO", "org", "조선"), N("wd:E", "event", "3·1 운동"),
+        N("wd:P", "person", "손병희"), N("wd:A", "person", "정약용"), N("wd:B", "person", "정약전"),
+        N("wd:PL", "place", "강진군"),
+    ])
+    store.upsert_edges([
+        # 인포박스 스승: 예전 매핑 OUT (주인공 조헌 → 스승 성혼)
+        Edge(src="wd:J", dst="wd:S", type="related_to", source="kowiki:infobox", props={"infobox_field": "스승"}),
+        # Wikidata 완화: 출생지 '조선'
+        Edge(src="wd:Y", dst="wd:JO", type="related_to", source="wd", label="출생지",
+             props={"original_type": "born_in", "wikidata_property": "P19"}),
+        Edge(src="wd:P", dst="wd:E", type="related_to", source="wd", label="소속",
+             props={"original_type": "member_of"}),
+        # 겹침: 정약전은 이미 정약용의 형(child_of 는 없지만 spouse 아님) — 뜻 있는 엣지가 있는 짝
+        Edge(src="wd:A", dst="wd:B", type="related_to", source="extract", props={"evidence": "형 정약전"}),
+        Edge(src="wd:B", dst="wd:A", type="taught", source="kowiki:infobox"),
+        # 모델에 물을 것
+        Edge(src="wd:K", dst="wd:Y", type="related_to", source="extract",
+             props={"evidence": "김집은 이이의 문인이다.", "extracted_from": "wd:K"}),
+        Edge(src="wd:A", dst="wd:PL", type="related_to", source="extract",
+             props={"evidence": "정약용은 강진에서 18년을 유배 살았다."}),
+    ])
+    rep = _unt.Report()
+    _unt.apply_rules(store, rep)
+    e = lambda s_, d, t: store.conn.execute(
+        "SELECT 1 FROM edges WHERE src=? AND dst=? AND type=?", (s_, d, t)).fetchone() is not None
+    check("인포박스 스승은 taught 로, 방향은 스승 → 제자", e("wd:S", "wd:J", "taught") and not e("wd:J", "wd:S", "related_to"))
+    check("출생지 '조선'은 from_period 조선으로", e("wd:Y", "wd:JO", "from_period") and not e("wd:Y", "wd:JO", "related_to"))
+    check("3·1 운동의 구성원은 참여자로", e("wd:P", "wd:E", "participated_in"))
+    check("규칙 보고는 셋", len(rep.relaxed) == 3, str(rep.relaxed))
+    _unt.fold_redundant(store, rep)
+    check("뜻 있는 엣지가 있는 짝의 related_to 는 접는다", rep.folded == 1 and not e("wd:A", "wd:B", "related_to"))
+    mp = store.conn.execute("SELECT props FROM edges WHERE src='wd:B' AND dst='wd:A' AND type='taught'").fetchone()[0]
+    check("접을 때 근거는 뜻 있는 쪽으로 옮긴다", "형 정약전" in mp, mp)
+    cands = _unt.candidates(store.conn)
+    check("모델에 물을 것은 근거 있는 추출 엣지 둘", {(r["src"], r["dst"]) for r in cands} == {("wd:K", "wd:Y"), ("wd:A", "wd:PL")})
+
+    class _FakeBackend:
+        model = "fake"
+        def __init__(self, answers): self.answers = answers
+        def complete_json(self, system, user, schema):
+            for key, ans in self.answers.items():
+                if key in user:
+                    assert ans["type"] in schema["properties"]["type"]["enum"], (ans, schema["properties"]["type"]["enum"])
+                    return ans
+            return {"type": "none", "direction": "A→B", "confidence": "certain"}
+    fake = _FakeBackend({
+        "김집": {"type": "taught", "direction": "B→A", "confidence": "certain"},
+        "강진": {"type": "born_in", "direction": "A→B", "confidence": "possible"},
+    })
+    _unt.run_model(store, fake, rep)
+    check("문인 관계는 스승(이이) → 제자(김집) taught 가 된다", e("wd:Y", "wd:K", "taught") and not e("wd:K", "wd:Y", "related_to"))
+    check("확신이 '가능'뿐이면 적지 않고 판정만 남긴다", e("wd:A", "wd:PL", "related_to") and rep.weak == 1)
+    left = store.conn.execute("SELECT props FROM edges WHERE src='wd:A' AND dst='wd:PL'").fetchone()[0]
+    check("판정은 원래 줄에 남는다", '"untangled": "born_in/possible"' in left, left)
+    check("다시 돌리면 판정한 것은 묻지 않는다", _unt.candidates(store.conn) == [])
+    check("--redo 면 다시 묻는다", len(_unt.candidates(store.conn, redo=True)) == 1)
+    # 카디널리티: 이미 출생지가 있는 사람에게 두 번째 출생지를 주지 않는다
+    store.upsert_nodes([N("wd:PL2", "place", "광주"), N("wd:C", "person", "김성우")])
+    store.upsert_edges([
+        Edge(src="wd:C", dst="wd:PL2", type="born_in", source="wd"),
+        Edge(src="wd:C", dst="wd:PL", type="related_to", source="extract", props={"evidence": "강진 출생"}),
+    ])
+    rep2 = _unt.Report()
+    _unt.run_model(store, _FakeBackend({"김성우": {"type": "born_in", "direction": "A→B", "confidence": "certain"}}), rep2)
+    check("카디널리티를 넘는 판정은 적지 않고 센다", rep2.over_cardinality == [("wd:C", "wd:PL", "born_in")]
+          and e("wd:C", "wd:PL", "related_to"), str(rep2.over_cardinality))
+    rem = _unt.remaining(store.conn)
+    check("남는 것을 갈래별로 센다", rem.get("모델이 확신하지 못한 것") == 1, str(rem))
+    store.close()
+
+# 표 경로 — 로컬 모델 대신 사람(또는 Claude)이 적은 판정 (data/untangle.tsv)
+with tempfile.TemporaryDirectory() as _d:
+    store = GraphStore(Path(_d) / "unt2.sqlite")
+    N = lambda i, t, l: Node(id=i, type=t, label=l, source="wd")
+    store.upsert_nodes([N("wd:T", "person", "이항로"), N("wd:S", "person", "최익현"),
+                        N("wd:X", "person", "김평묵"), N("wd:W", "artwork", "용의 눈물")])
+    store.upsert_edges([
+        Edge(src="wd:S", dst="wd:T", type="related_to", source="extract", props={"evidence": "그의 스승 이항로"}),
+        Edge(src="wd:S", dst="wd:X", type="related_to", source="extract", props={"evidence": "친구 김평묵"}),
+        Edge(src="wd:S", dst="wd:W", type="related_to", source="extract", props={"evidence": "배우: 아무개"}),
+    ])
+    tbl = Path(_d) / "untangle.tsv"
+    tbl.write_text("# 머리\nwd:S\twd:T\ttaught\tB→A\tcertain\t스승\nwd:S\twd:X\tnone\tA→B\tcertain\t친구\n"
+                   "wd:S\twd:W\tdepicts\tB→A\tcertain\t배역\n", encoding="utf-8")
+    table = _unt.load_verdicts(tbl)
+    check("표를 (src, dst) 로 읽는다", set(table) == {("wd:S", "wd:T"), ("wd:S", "wd:X"), ("wd:S", "wd:W")})
+    rep = _unt.Report()
+    _unt.run_table(store, table, rep)
+    e = lambda s_, d, t: store.conn.execute(
+        "SELECT 1 FROM edges WHERE src=? AND dst=? AND type=?", (s_, d, t)).fetchone() is not None
+    check("표의 스승 판정은 taught 이항로 → 최익현", e("wd:T", "wd:S", "taught") and not e("wd:S", "wd:T", "related_to"))
+    check("표의 none 은 related_to 로 남고 판정 표식이 붙는다", e("wd:S", "wd:X", "related_to")
+          and '"untangled": "none"' in store.conn.execute("SELECT props FROM edges WHERE dst='wd:X'").fetchone()[0])
+    check("작품 → 인물은 depicts 로 뒤집힌다", e("wd:W", "wd:S", "depicts"))
+    check("표에 있는 것만 묻고 모델 이름은 표로 적는다", rep.asked == 3 and _unt.TABLE_MODEL in
+          store.conn.execute("SELECT props FROM edges WHERE src='wd:T' AND type='taught'").fetchone()[0])
+    try:
+        (Path(_d) / "bad.tsv").write_text("wd:S\twd:T\tfriend_of\tA→B\tcertain\n", encoding="utf-8")
+        _unt.load_verdicts(Path(_d) / "bad.tsv")
+        check("모르는 타입은 표를 거부한다", False)
+    except ValueError:
+        check("모르는 타입은 표를 거부한다", True)
+    store.close()
+
+print("\n[연대 — 원인은 결과보다 먼저다 (chronology)]")
+with tempfile.TemporaryDirectory() as _d:
+    from histgraph import chronology as _ch
+
+    store = GraphStore(Path(_d) / "ch.sqlite")
+    def _ev(i, label, start, end=None):
+        return Node(id=i, type="event", label=label, source="wd", description=f"{label} 설명",
+                    start_date=start, end_date=end)
+    store.upsert_nodes([
+        _ev("wd:H", "병자호란", "1636-12-09"), _ev("wd:G", "공석신주사건", "1636", "1636"),
+        _ev("wd:Y", "요동 정벌", "1388"), _ev("wd:W", "위화도 회군", "1388-06-11"),
+        _ev("wd:S", "서울의 봄", "1979-10-27"), _ev("wd:K", "5·18", "1980-05-18"),
+        _ev("wd:M", "만주사변", "1931-09-18"), _ev("wd:N", "신사참배", "1931"),
+    ])
+    _c = lambda a, b, **kw: Edge(src=a, dst=b, type="caused", source="causes", label="원인",
+                                 confidence=0.8, props={"evidence": "…", "doc": a}, **kw)
+    store.upsert_edges([_c("wd:H", "wd:G"), _c("wd:W", "wd:Y"), _c("wd:K", "wd:S"), _c("wd:M", "wd:N")])
+
+    check("거친 결과 날짜가 원인을 품으면 within", _ch.order("1636-12-09", "1636") == "within")
+    check("같은 날도 within", _ch.order("1907-08-01", "1907-08-01") == "within")
+    check("원인이 결과보다 뒤면 after", _ch.order("1980-05-18", "1979-10-27") == "after"
+          and _ch.order("1388-06-11", "1388-05") == "after")
+    check("원인이 앞이면 ok, 모르면 unknown", _ch.order("1388-05", "1388-06-11") == "ok"
+          and _ch.order("", "1636") == "unknown")
+    check("기원전은 뒤집히지 않는다", _ch.order("-0100", "-0057") == "ok")
+    rep = _ch.find(store.conn)
+    # 위화도 회군(06-11) → 요동 정벌(1388)은 방향이 뒤집혔지만 날짜로는 못
+    # 잡는다 — 결과의 거친 날짜가 원인을 품는다. 그래서 표(flip)가 있다.
+    check("찾기: 원인이 뒤인 것만 backwards, 품는 것은 within",
+          [s.effect for s in rep.backwards] == ["서울의 봄"]
+          and sorted(s.effect for s in rep.within) == ["공석신주사건", "신사참배", "요동 정벌"],
+          f"{[s.effect for s in rep.backwards]} {[s.effect for s in rep.within]}")
+
+    tbl = Path(_d) / "chronology.tsv"
+    tbl.write_text(
+        "# 주석\n"
+        "date\twd:G\t1638-01\t\t민백: 1638년 1월 탄핵\n"
+        "date\twd:Y\t1388-05\t\t음력 4월 출정\n"
+        "drop\twd:K\twd:S\t끝낸 것이지 원인이 아니다\n"
+        "flip\twd:W\twd:Y\t배경\t정벌군이 회군했다\n"
+        "date\twd:NOPE\t1900\t\t없는 노드\n",
+        encoding="utf-8")
+    table = _ch.load_table(tbl)
+    check("표를 읽는다 (주석 건너뜀)", len(table) == 5 and table[0].action == "date" and table[3].c == "배경")
+    bad = Path(_d) / "bad.tsv"
+    bad.write_text("date\twd:G\t언젠가\t\t근거\n", encoding="utf-8")
+    try:
+        _ch.load_table(bad); check("날짜가 아니면 거부한다", False)
+    except _ch.ChronologyTableError:
+        check("날짜가 아니면 거부한다", True)
+    bad.write_text("drop\twd:K\twd:S\n", encoding="utf-8")
+    try:
+        _ch.load_table(bad); check("근거가 없으면 거부한다", False)
+    except _ch.ChronologyTableError:
+        check("근거가 없으면 거부한다", True)
+
+    ap = _ch.apply(store, table)
+    d = lambda i: store.conn.execute("SELECT start_date, end_date FROM nodes WHERE id=?", (i,)).fetchone()
+    e = lambda a, b: store.conn.execute(
+        "SELECT source, label FROM edges WHERE src=? AND dst=? AND type='caused'", (a, b)).fetchall()
+    check("날짜를 씌운다 — 새 시작보다 앞선 옛 끝은 비운다", tuple(d("wd:G")) == ("1638-01", None) and d("wd:Y")[0] == "1388-05",
+          f"{tuple(d('wd:G'))} {tuple(d('wd:Y'))}")
+    check("지운 인과는 없다", e("wd:K", "wd:S") == [])
+    check("뒤집은 인과는 결과 → 원인으로 선다", e("wd:W", "wd:Y") == [] and [tuple(r) for r in e("wd:Y", "wd:W")] == [("chronology", "배경")],
+          str(e("wd:Y", "wd:W")))
+    check("없는 노드는 세어 보고만 한다", [r.a for r in ap.absent] == ["wd:NOPE"] and ap.dated == 2 and ap.dropped == 1 and ap.flipped == 1)
+    check("씌운 뒤에는 원인이 뒤인 것이 없다", _ch.find(store.conn).backwards == [])
+    # 수집이 옛 날짜와 지운 엣지를 되살려도 편집 계층이 다시 씌운다
+    store.upsert_nodes([_ev("wd:G", "공석신주사건", "1636", "1636")])
+    store.upsert_edges([_c("wd:K", "wd:S"), _c("wd:W", "wd:Y")])
+    check("재수집 뒤에도 날짜는 표의 것이다", tuple(d("wd:G")) == ("1638-01", None), str(tuple(d("wd:G"))))
+    check("재수집이 되살린 인과는 다시 지워진다", e("wd:K", "wd:S") == [] and e("wd:W", "wd:Y") == [])
+    check("두 번 돌려도 뒤집은 엣지는 하나다", len(e("wd:Y", "wd:W")) == 1 and _ch.apply(store, table).flipped == 1
+          and len(e("wd:Y", "wd:W")) == 1)
+    store.close()
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
