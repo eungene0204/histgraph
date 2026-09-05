@@ -29,6 +29,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import overrides
+
 HANGUL = re.compile(r"[가-힣]")
 QID_RE = re.compile(r"^Q\d+$")
 
@@ -110,6 +112,10 @@ def apply_overrides(
         old = row[0]
         if old == ov.label:
             report.already += 1
+            if not dry_run:
+                # 이미 맞는 이름이라도 표에는 적는다 — 다음 수집이 영어로
+                # 되돌리는 순간 `upsert_nodes` 가 이 줄로 되살린다.
+                overrides.record(conn, "node", ov.node_id, "label", ov.label, "relabel", ov.note)
             continue
 
         twin = conn.execute(
@@ -126,6 +132,7 @@ def apply_overrides(
             "UPDATE nodes SET label = ?, updated_at = datetime('now') WHERE id = ?",
             (ov.label, ov.node_id),
         )
+        overrides.record(conn, "node", ov.node_id, "label", ov.label, "relabel", ov.note)
         # 옛 이름을 별칭으로 남긴다. QID 가 라벨이던 노드는 남길 게 없다.
         if old and old != ov.qid:
             conn.execute(

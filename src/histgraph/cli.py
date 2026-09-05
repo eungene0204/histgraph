@@ -20,6 +20,7 @@ from .backends import build_backend
 from .http import Fetcher
 from .ontology import EDGE_TYPES, FORMS, NODE_TYPES, Edge, Node, validate_edge_endpoints
 from .sources import culture, datagokr, heritage, wikidata
+from . import overrides as overrides_mod
 from .store import GraphStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1149,6 +1150,12 @@ def cmd_precision(args: argparse.Namespace) -> int:
                 "updated_at = datetime('now') WHERE id = ?",
                 updates,
             )
+            # 잘라 둔 날짜는 편집 계층에 남는다 — 수집이 1월 1일을 되돌려
+            # 놓아도 저장소가 다시 자른다 (`overrides`).
+            for start, end, nid in updates:
+                for col, val in (("start_date", start), ("end_date", end)):
+                    if val:
+                        overrides_mod.record(store.conn, "node", nid, col, val, "precision")
             store.conn.commit()
 
         trimmed = len(updates)
@@ -1431,6 +1438,13 @@ def cmd_reigns(args: argparse.Namespace) -> int:
                     WHERE src = ? AND dst = ? AND type = 'held_position'""",
                 (start, end, kind, r["src"], r["dst"]),
             )
+            # 재위는 편집 계층에도 남는다 — 수집이 props 를 덮어써도
+            # 저장소가 되돌린다 (`overrides`). 예전엔 이걸 잊으면 띠가 사라졌다.
+            ekey = overrides_mod.edge_key(r["src"], r["dst"], "held_position")
+            overrides_mod.record(store.conn, "edge", ekey, "props.reign", kind, "reigns")
+            for col, val in (("start_date", start), ("end_date", end)):
+                if val:
+                    overrides_mod.record(store.conn, "edge", ekey, col, val, "reigns")
         if not args.dry_run:
             store.conn.commit()
 
@@ -1450,6 +1464,40 @@ def cmd_reigns(args: argparse.Namespace) -> int:
         if failures:
             print(f"  ⚠ 실패한 쿼리 {len(failures)}건 — 재실행하면 그 구간만 다시 시도합니다.",
                   file=sys.stderr)
+    return 0
+
+
+def cmd_overrides(args: argparse.Namespace) -> int:
+    """편집 계층 — 사람과 후처리가 고친 값의 표 (`overrides` 모듈 머리글).
+
+    기본은 무엇이 얼마나 고쳐져 있는지 센다. `--reapply` 는 표 전부를
+    그래프에 다시 씌운다 (저장소가 쓸 때마다 하는 일을 손으로 한 번).
+    `--seed` 는 표가 없던 때 고쳐 둔 값(재위·잘라 둔 날짜·정본 설명)을
+    지금 DB 에서 되짚어 표에 적는다 — DB 마다 한 번:
+
+        uv run histgraph overrides --seed
+        uv run histgraph --db data/korea.sqlite overrides --seed
+    """
+    with GraphStore(args.db) as store:
+        if args.seed:
+            counts = overrides_mod.seed_from_db(store.conn)
+            print("  되짚어 적음: " + " · ".join(
+                f"{k} {v:,}" for k, v in counts.items()))
+        if args.reapply:
+            rep = overrides_mod.reapply(store, everything=True)
+            store.conn.commit()
+            print(f"  다시 씌움: 노드 칸 {rep.nodes:,} · 엣지 칸 {rep.edges:,}"
+                  f" · 다시 합침 {len(rep.remerged):,} · 조건이 안 맞아 물러남 {rep.skipped:,}")
+            for drop, keep in rep.remerged[:10]:
+                print(f"    {drop} → {keep}")
+        rows = overrides_mod.summary(store.conn)
+        if not rows:
+            print("  편집 계층이 비어 있습니다.")
+            return 0
+        total = sum(n for *_, n in rows)
+        print(f"  고친 칸 {total:,}개")
+        for target, origin, fld, n in rows:
+            print(f"    {target:<5} {origin:<12} {fld:<22} {n:>7,}")
     return 0
 
 
@@ -1601,6 +1649,18 @@ def cmd_nikh(args: argparse.Namespace) -> int:
         if stale:
             print(f"  이전에 실록 기사에 붙인 참여 엣지 {stale:,}건을 지우고 다시 만든다")
         _persist(store, nikh.SOURCE, nodes, edges)
+        # 정본은 편집 계층에 남는다 — 다음 `ingest` 가 Wikidata 설명으로
+        # 덮어쓰고 `canon` 표식을 지워도 저장소가 되돌린다 (`overrides`).
+        canon_rows = 0
+        for node in nodes:
+            if node.props.get("canon") == nikh.SOURCE:
+                canon_rows += overrides_mod.record_many(
+                    store.conn, overrides_mod.canon_rows(
+                        node.id, node.description, node.start_date, node.end_date, node.props
+                    )
+                )
+        store.conn.commit()
+        print(f"  편집 계층에 정본 {canon_rows:,}칸 기록")
         merged = nikh.apply_merges(store, rep.merges)
         if merged:
             print(f"  ✓ 추출 고아 {merged}개를 정본 노드로 합침")
@@ -2191,6 +2251,12 @@ def main(argv: list[str] | None = None) -> int:
     p_pr.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_pr.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_pr.set_defaults(func=cmd_precision)
+
+    p_ov = sub.add_parser("overrides", help="편집 계층 — 고친 값의 표를 세고(--seed 되짚기, --reapply 다시 씌우기)")
+    p_ov.add_argument("--seed", action="store_true",
+                      help="표가 없던 때 고쳐 둔 값을 지금 DB 에서 되짚어 적는다 (DB 마다 한 번)")
+    p_ov.add_argument("--reapply", action="store_true", help="표 전부를 그래프에 다시 씌운다")
+    p_ov.set_defaults(func=cmd_overrides)
 
     p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
     p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,

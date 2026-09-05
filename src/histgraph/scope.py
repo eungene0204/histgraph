@@ -518,6 +518,7 @@ def extract(
 
     ordered = sorted(keep)
     node_rows, edge_rows, alias_rows, name_rows, summary_rows = [], [], [], [], []
+    override_rows: list = []
     for i in range(0, len(ordered), 500):
         batch = ordered[i : i + 500]
         marks = ",".join("?" * len(batch))
@@ -545,6 +546,14 @@ def extract(
         # 위키 원문 도입부로 물러난다.
         summary_rows += store.conn.execute(
             f"SELECT * FROM summaries WHERE node_id IN ({marks})", batch
+        ).fetchall()
+        # 편집 계층도 따라간다 — 파생본에 `relabel` 을 또 돌리지 않아도
+        # 고친 이름·정본·재위가 그대로 서고, 파생본 위의 수집도 되돌린다.
+        override_rows += store.conn.execute(
+            f"""SELECT * FROM overrides
+                 WHERE (target = 'node' AND key IN ({marks}))
+                    OR (target = 'edge' AND substr(key, 1, instr(key, char(9)) - 1) IN ({marks}))""",
+            batch + batch,
         ).fetchall()
 
     edge_rows = [r for r in edge_rows if r["dst"] in keep]
@@ -575,6 +584,13 @@ def extract(
     dest.conn.executemany(
         "INSERT OR REPLACE INTO summaries (node_id,text,model,src_hash,made_at) VALUES (?,?,?,?,?)",
         [(r["node_id"], r["text"], r["model"], r["src_hash"], r["made_at"]) for r in summary_rows],
+    )
+    ocols = "target,key,field,value,origin,reason,apply_when,made_at"
+    dest.conn.executemany(
+        f"INSERT OR REPLACE INTO overrides ({ocols}) VALUES ({','.join('?' * 8)})",
+        [tuple(r[c] for c in ocols.split(",")) for r in {
+            (r["target"], r["key"], r["field"]): r for r in override_rows
+        }.values()],
     )
     dest.conn.commit()
 

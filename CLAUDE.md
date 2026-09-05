@@ -1,7 +1,7 @@
 # histgraph — 세션마다 먼저 읽는 규칙
 
 이 파일은 짧게 둔다. 설계 배경은 [README.md](README.md), 지금 상태와
-최근 작업은 [HANDOFF.md](HANDOFF.md) 에 있다. 여기는 **어겨서 지적받은
+최근 작업은 [HANDOFF.md](HANDOFF.md), 화면 디자인은 [design.md](design.md) 에 있다. 여기는 **어겨서 지적받은
 것**만 적는다.
 
 ## 1. 화면에 한글 아닌 글을 띄우지 않는다
@@ -147,9 +147,14 @@ merge<TAB>남길 id<TAB>없앨 id<TAB>근거      keep<TAB>id<TAB>id<TAB>왜 다
 
 ## 2. 그래프를 다시 만들 때
 
-수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 그래서
-수집 뒤에는 `relabel → redescribe → describe → reigns → precision → dedupe`
-를 다시 돌리고, 그 다음 `scope korea` 로 파생본을 만든다 (README "수집 뒤마다" 절).
+수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 고친 값은
+**편집 계층(`overrides` 표)**에 남아 저장소가 쓸 때마다 다시 씌운다 (2026-09-05,
+README "편집 계층" 절) — `relabel`·`redescribe`·`describe`·`nikh`·`precision`·
+`reigns`·`dedupe` 가 거기 적는다. 그래서 수집 뒤에 그 여섯을 **잊어도 고친
+값은 돌아온다.** 다시 돌리는 것은 새로 고칠 것이 생겼을 때다. 그 다음
+`scope korea` 로 파생본을 만든다. **SQL 로 라벨·설명·날짜를 직접 고치는 경로를
+새로 만들면** `overrides.record` 를 거기서 한 번 더 건다 — 안 걸면 옛 구조로
+되돌아간다.
 인과 엣지(`causes`, MLX 필요)는 `scope` 뒤에 `--sync-to data/korea.sqlite` 로
 옮긴다 — 노드를 만들지 않으므로 파생본을 다시 만들 필요가 없다.
 **정본이 아닌 설명을 우리 말로 새로 쓴 글(`paraphrase`, MLX 필요)도 같다** —

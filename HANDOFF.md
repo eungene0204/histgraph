@@ -35,6 +35,40 @@
 | 승격 보강 (`promote`) | 불필요 | 신규 노드 69 · 관계 189건 |
 | 공공데이터포털 / 문화광장 | **활용신청 대기** | 0 |
 
+## 2026-09-05 — 편집 계층 (`overrides`) — 팔란티어 설계에서 가져온 것
+
+사용자 요청: "팔란티어의 온톨로지 그래프와 우리의 온톨로지 그래프의 차이점을
+분석해봐" → "우리가 팔란티어 설계에서 배울게 있나?" → "1,2,3번 순서대로
+진행 하자". 배울 것 셋 — (1) 고친 값은 원천 위에 겹쳐 두고 읽을 때 합친다,
+(2) 엣지 타입에 카디널리티를 선언한다, (3) `related_to` 를 갈라 낸다.
+
+**(1) 끝.** `src/histgraph/overrides.py` — `overrides` 표와 `reapply`.
+`GraphStore.upsert_nodes`·`upsert_edges` 가 끝나면서 방금 쓴 것에 걸린 줄을
+다시 씌운다. `relabel`·`redescribe`·`describe`·`nikh`·`precision`·`reigns`·
+`merge_node` 가 적는다. `histgraph overrides --seed` 로 두 DB 의 옛 값을
+되짚어 적었다 (원본 10,833칸 · 파생본 10,874칸). 테스트 16건 (`[편집 계층]`).
+README "편집 계층" 절, CLAUDE.md §2.
+
+## 2026-09-05 — 화면을 Obsidian 스타일로
+
+사용자 요청: "우리 그래프 디자인을 obsidian 디자인 스타일로 변경해줘. 그리고
+design.md 파일을 만들어서 디자인 내용을 기록해줘."
+
+[design.md](design.md) 를 다시 썼다 (09-04 판의 캔버스·연표·상세·상호작용 절은
+그대로 두고 값과 Obsidian 절을 얹었다). 바뀐 것:
+
+- 토큰을 Obsidian 이름·값으로 (`--background-primary #1e1e1e`, 강조 보라
+  `hsl(254 80% 68%)`). `web/style.css`·`web/doc.css`·`pages.py STYLE`·
+  `index.html` noscript 네 벌이 같은 값.
+- 캔버스: 선은 회색 한 가지, 가리킨 노드의 선만 강조색. 노드 팔레트를
+  Obsidian 색으로 다시 골랐고 `check_palette.py` 정상 10.9 · 2형 6.8 · 1형 5.5.
+- 설정(시작점·범례·표시)은 왼쪽 사이드바에서 **캔버스 오른쪽 위에 뜨는
+  상자**로 (Obsidian graph-controls). 기본 접힘. 노드·엣지 수는 상태 줄로.
+- 상세 패널은 문서 한 장처럼 — 본문은 상자 없이, 관계는 카드 대신 줄.
+
+테스트 `npm test` 48/48 (관계 수 검사는 칩 `.flair` 를 건너뛰게 고침),
+`test_pipeline.py` 897/897. 아직 커밋 안 함.
+
 ## 2026-09-05 — 연표는 조선 건국에서 시작한다
 
 사용자 요청: "타임라인 시작을 항상 조선에서 시작해줘. 지금 조선 시작이 그냥

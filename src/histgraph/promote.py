@@ -211,6 +211,13 @@ def merge_node(
 
     _record_provenance(conn, new_id, old_id, old_row["label"], method, score)
     conn.execute("DELETE FROM nodes WHERE id = ?", (old_id,))
+    # **없앤 노드는 되살아난다** — `upsert_nodes` 는 id 로 노드를 다시 세우므로
+    # 다음 `ingest`·`nikh` 가 같은 id 를 가져오면 중복이 돌아온다. 편집
+    # 계층에 '이 id 는 저쪽으로 합쳐졌다'를 남기면 저장소가 그때 다시 합친다.
+    from . import overrides
+    overrides.record(conn, "node", old_id, "merged_into", new_id, method, old_row["label"])
+    # 남긴 쪽이 다른 곳으로 또 합쳐졌던 흔적이 있으면 지운다 — 사슬의 끝은 산 노드다.
+    overrides.forget(conn, "node", new_id, "merged_into")
     return stats
 
 

@@ -4292,5 +4292,114 @@ with tempfile.TemporaryDirectory() as tmp:
     store.close()
 
 
+
+print("\n[편집 계층 — 수집이 덮어써도 고친 값이 되살아난다]")
+with tempfile.TemporaryDirectory() as _d:
+    from histgraph import overrides as _ov
+    from histgraph import labels as _labels_mod
+    from histgraph import koreanize as _kz
+    from histgraph.promote import merge_node as _merge_node
+
+    store = GraphStore(Path(_d) / "ov.sqlite")
+
+    # 1. relabel — 표의 이름은 수집이 영어로 되돌려도 남는다
+    _wd = lambda **kw: Node(id="wd:Q1", type="event", label="Sayuksin plot", source="wd",
+                            description="사육신 사건", **kw)
+    store.upsert_nodes([_wd()])
+    _labels_mod.apply_overrides(store.conn, [_labels_mod.Override("Q1", "사육신 사건", "표")])
+    store.upsert_nodes([_wd()])          # 다시 수집
+    row = store.conn.execute("SELECT label FROM nodes WHERE id='wd:Q1'").fetchone()
+    check("relabel 한 이름은 재수집 뒤에도 한국어다", row[0] == "사육신 사건", row[0])
+    check("영어 옛 이름은 별칭으로 남는다", store.conn.execute(
+        "SELECT 1 FROM aliases WHERE node_id='wd:Q1' AND alias='Sayuksin plot'").fetchone() is not None)
+    # 이미 맞는 이름도 표에 적혀야 다음 수집을 막는다
+    store.upsert_nodes([Node(id="wd:Q2", type="person", label="세종", source="wd")])
+    _labels_mod.apply_overrides(store.conn, [_labels_mod.Override("Q2", "세종", "표")])
+    check("이미 한국어인 이름도 편집 계층에 적힌다", store.conn.execute(
+        "SELECT value FROM overrides WHERE key='wd:Q2' AND field='label'").fetchone() is not None)
+
+    # 2. redescribe — 사전이 비운 설명은 영어가 돌아오면 다시 비우고, 진짜 한국어가 오면 물러난다
+    store.conn.execute("UPDATE nodes SET description='Something in English only' WHERE id='wd:Q2'")
+    _kz.redescribe(store.conn)
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q2'").fetchone()
+    check("사전에 없는 영어 설명은 비운다", not row[0], repr(row[0]))
+    # Node.__post_init__ 을 거치지 않는 SQL 경로가 영어를 다시 앉힌 상황
+    store.conn.execute("UPDATE nodes SET description='Something in English only' WHERE id='wd:Q2'")
+    _ov.reapply(store, node_ids=["wd:Q2"])
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q2'").fetchone()
+    check("영어가 되돌아오면 편집 계층이 다시 비운다", not row[0], repr(row[0]))
+    store.upsert_nodes([Node(id="wd:Q2", type="person", label="세종", source="wd",
+                             description="조선의 제4대 국왕")])
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q2'").fetchone()
+    check("진짜 한국어 설명이 오면 번역은 물러난다 (foreign 조건)", row[0] == "조선의 제4대 국왕", row[0])
+
+    # 3. precision — 잘라 둔 날짜는 1월 1일이 돌아와도 남는다
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             start_date="1592-01-01", description="전쟁")])
+    store.conn.execute("UPDATE nodes SET start_date='1592' WHERE id='wd:Q3'")
+    _ov.record(store.conn, "node", "wd:Q3", "start_date", "1592", "precision")
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             start_date="1592-01-01", description="전쟁")])
+    row = store.conn.execute("SELECT start_date FROM nodes WHERE id='wd:Q3'").fetchone()
+    check("precision 이 자른 날짜는 재수집 뒤에도 '1592'", row[0] == "1592", row[0])
+
+    # 4. reigns — 엣지의 재위 표식과 날짜가 props 덮어쓰기를 견딘다
+    store.upsert_nodes([Node(id="wd:Q4", type="role", label="조선 임금", source="wd")])
+    _e = lambda: Edge(src="wd:Q2", dst="wd:Q4", type="held_position", source="wd", props={"p": 1})
+    store.upsert_edges([_e()])
+    store.conn.execute("""UPDATE edges SET start_date='1418', end_date='1450',
+                          props=json_set(props,'$.reign','monarch') WHERE src='wd:Q2'""")
+    ek = _ov.edge_key("wd:Q2", "wd:Q4", "held_position")
+    _ov.record(store.conn, "edge", ek, "props.reign", "monarch", "reigns")
+    _ov.record(store.conn, "edge", ek, "start_date", "1418", "reigns")
+    _ov.record(store.conn, "edge", ek, "end_date", "1450", "reigns")
+    store.upsert_edges([_e()])
+    row = store.conn.execute("SELECT start_date, end_date, props FROM edges WHERE src='wd:Q2'").fetchone()
+    check("재위 표식이 재수집 뒤에도 남는다", '"reign": "monarch"' in row[2] and '"p": 1' in row[2], row[2])
+    check("재위 날짜가 재수집 뒤에도 남는다", (row[0], row[1]) == ("1418", "1450"), (row[0], row[1]))
+
+    # 5. describe — 정본 정의(always)는 수집이 위키 도입부를 가져와도 이긴다
+    _ov.record(store.conn, "node", "wd:Q3", "description", "1592년 일본이 조선을 침략한 전쟁", "describe", "민백 정의")
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             description="위키백과 도입부")])
+    row = store.conn.execute("SELECT description FROM nodes WHERE id='wd:Q3'").fetchone()
+    check("정본 설명은 수집이 덮어써도 남는다 (always)", row[0].startswith("1592년"), row[0])
+
+    # 6. dedupe — 없앤 노드는 되살아나면 다시 합쳐진다
+    store.upsert_nodes([Node(id="ex:event:임오화변", type="event", label="임오화변", source="extract",
+                             description="사도세자가 뒤주에서 죽은 일"),
+                        Node(id="wd:Q5", type="event", label="사도세자 사건", source="wd",
+                             description="사도세자가 뒤주에서 죽은 일")])
+    store.upsert_edges([Edge(src="wd:Q2", dst="ex:event:임오화변", type="participated_in", source="extract")])
+    _merge_node(store, "ex:event:임오화변", "wd:Q5", method="duplicate_table")
+    check("합친 노드는 사라진다", store.conn.execute(
+        "SELECT 1 FROM nodes WHERE id='ex:event:임오화변'").fetchone() is None)
+    store.upsert_nodes([Node(id="ex:event:임오화변", type="event", label="임오화변", source="extract")])
+    store.upsert_edges([Edge(src="wd:Q2", dst="ex:event:임오화변", type="participated_in", source="extract")])
+    check("되살아난 노드는 저장소가 다시 합친다", store.conn.execute(
+        "SELECT 1 FROM nodes WHERE id='ex:event:임오화변'").fetchone() is None)
+    check("되살아난 노드의 엣지는 남긴 쪽으로 간다", store.conn.execute(
+        "SELECT COUNT(*) FROM edges WHERE dst='wd:Q5' AND type='participated_in'").fetchone()[0] == 1
+        and store.conn.execute("SELECT COUNT(*) FROM edges WHERE dst='ex:event:임오화변'").fetchone()[0] == 0)
+
+    # 7. 되짚기 — 표가 없던 DB 에서 재위·부분 날짜·정본을 표로 옮긴다
+    store.conn.execute("DELETE FROM overrides")
+    store.conn.execute("""UPDATE nodes SET props=json_set(props,'$.canon','nikh','$.desc_source','nikh'),
+                          description='국편 글' WHERE id='wd:Q3'""")
+    counts = _ov.seed_from_db(store.conn)
+    check("되짚기가 재위·날짜·정본을 센다",
+          counts["reigns"] == 1 and counts["precision"] == 1 and counts["nikh"] == 1, str(counts))
+    store.upsert_nodes([Node(id="wd:Q3", type="event", label="임진왜란", source="wd",
+                             start_date="1592-01-01", description="위키백과 도입부", props={})])
+    row = store.conn.execute("SELECT description, start_date, props FROM nodes WHERE id='wd:Q3'").fetchone()
+    check("되짚은 정본이 다음 수집을 이긴다",
+          row[0] == "국편 글" and row[1] == "1592" and '"canon": "nikh"' in row[2], tuple(row))
+    try:
+        _ov.record(store.conn, "node", "x:1", "type", "event", "t")
+        check("노드 타입은 편집 계층으로 못 바꾼다", False)
+    except _ov.OverrideError:
+        check("노드 타입은 편집 계층으로 못 바꾼다", True)
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

@@ -399,6 +399,15 @@ def fill_descriptions(
                   AND (description IS NULL OR trim(description) = '')""",
             updates,
         )
+        # 정본 정의는 편집 계층에 남는다 — 다음 수집이 위키 도입부로
+        # 덮어써도 저장소가 되돌린다 (`overrides`). 국편이 나중에 같은 칸을
+        # 적으면 그쪽이 이긴다 (마지막 줄이 남는다).
+        from .. import overrides
+        for text, url, nid in updates:
+            overrides.record(store.conn, "node", nid, "description", text, "describe", "민백 정의")
+            overrides.record(store.conn, "node", nid, "props.desc_source", "aks", "describe")
+            if url:
+                overrides.record(store.conn, "node", nid, "props.desc_url", url, "describe")
         store.conn.commit()
     return {
         "entries": len(entries),
