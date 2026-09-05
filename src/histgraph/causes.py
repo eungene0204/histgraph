@@ -630,7 +630,9 @@ def ingest_answers(store: GraphStore, corpus, items: list[dict], model: str) -> 
             dropped["문서 없음"] = dropped.get("문서 없음", 0) + 1
             continue
         doc = dict(row, props=json.loads(row["props"] or "{}"))
-        passages = doc_passages(corpus, doc["id"])
+        # 사람은 문서 전체를 읽는다 — 모델에게 주는 예산(DOC_CHARS)으로 자르면
+        # 뒤쪽 절에서 인용한 근거가 '없음'으로 버려진다 (실측: 인조반정 문서).
+        passages = doc_passages(corpus, doc["id"], budget=10**8)
         if not passages:
             dropped["글 없음"] = dropped.get("글 없음", 0) + 1
             continue
