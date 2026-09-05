@@ -18,7 +18,10 @@ from pathlib import Path
 
 from .backends import build_backend
 from .http import Fetcher
-from .ontology import EDGE_TYPES, FORMS, NODE_TYPES, Edge, Node, validate_edge_endpoints
+from .ontology import (
+    EDGE_TYPES, FORMS, MAX_TARGETS, NODE_TYPES, Edge, Node, cardinality_problems,
+    validate_edge_endpoints,
+)
 from .sources import culture, datagokr, heritage, wikidata
 from . import overrides as overrides_mod
 from .store import GraphStore
@@ -51,6 +54,9 @@ def _persist(
 ) -> None:
     node_map = {n.id: n for n in nodes}
     problems = [msg for e in edges if (msg := validate_edge_endpoints(e, node_map))]
+    # 카디널리티도 쓰기 전에 본다 — 한 묶음이 한 사람의 출생지를 둘 주면
+    # 그 묶음 안에서 이미 무엇인가 섞인 것이다 (`ontology.MAX_TARGETS`).
+    problems += cardinality_problems(edges)
     if problems:
         for msg in sorted(set(problems))[:5]:
             print(f"  ⚠ 스키마 경고: {msg}", file=sys.stderr)
@@ -1467,6 +1473,47 @@ def cmd_reigns(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cardinality(args: argparse.Namespace) -> int:
+    """카디널리티를 넘는 노드 — 출생지가 둘인 사람, 부모가 셋인 사람
+    (`cardinality` 모듈 머리글). 지우지 않고 보여 준다: 충돌은 동명이인
+    문서가 섞였거나 소스가 틀린 곳이고, 해상도 차이는 틀린 것이 없다.
+
+        uv run histgraph cardinality
+        uv run histgraph --db data/korea.sqlite cardinality --type born_in --list
+    """
+    from . import cardinality as card
+
+    types = tuple(t.strip() for t in args.type.split(",")) if args.type else None
+    with GraphStore(args.db) as store:
+        if args.fetch_places:
+            # 해상도 차이를 알아보려면 장소끼리의 상위 관계가 있어야 한다.
+            fetcher = Fetcher(DEFAULT_CACHE, min_interval=1.5)
+            failures: list[str] = []
+            got = card.fill_place_hierarchy(store, fetcher, failures=failures)
+            print(f"  장소 {got['asked']:,}곳의 상위 행정구역 조회 · located_in {got['edges']:,}건")
+            if failures:
+                print(f"  ⚠ 실패한 쿼리 {len(failures)}건", file=sys.stderr)
+        vs = card.violations(store.conn, types)
+    if not vs:
+        print("  카디널리티를 넘는 노드가 없습니다.")
+        return 0
+    shape = card.summarize(vs)
+    total_conf = sum(b["conflict"] for b in shape.values())
+    print(f"  넘는 노드 {len(vs):,}개 — 충돌 {total_conf:,} · 해상도 차이 {len(vs) - total_conf:,}")
+    for etype, b in shape.items():
+        print(f"    {etype:<16} 최대 {MAX_TARGETS[etype]}"
+              f"  충돌 {b['conflict']:>4,} · 해상도 차이 {b['resolution']:>4,}")
+    conflicts = [v for v in vs if v.kind == "conflict"]
+    shown = conflicts if args.list else conflicts[:15]
+    print("\n  충돌 — 동명이인 문서가 섞였거나 소스 하나가 틀린 곳 (지우지 않는다):")
+    for v in shown:
+        tg = " | ".join(f"{lbl}({src})" for _, lbl, src in v.targets)
+        print(f"    {v.edge_type:<12} {v.src_label[:16]:18} {tg[:110]}")
+    if len(conflicts) > len(shown):
+        print(f"    … 그 밖 {len(conflicts) - len(shown):,}개 (--list 로 전부)")
+    return 0
+
+
 def cmd_overrides(args: argparse.Namespace) -> int:
     """편집 계층 — 사람과 후처리가 고친 값의 표 (`overrides` 모듈 머리글).
 
@@ -2251,6 +2298,13 @@ def main(argv: list[str] | None = None) -> int:
     p_pr.add_argument("--interval", type=float, default=1.5, help="요청 간격(초)")
     p_pr.add_argument("--dry-run", action="store_true", help="쓰지 않고 계획만 출력")
     p_pr.set_defaults(func=cmd_precision)
+
+    p_cd = sub.add_parser("cardinality", help="출생지가 둘인 사람처럼 카디널리티를 넘는 노드를 센다 (보고만)")
+    p_cd.add_argument("--type", default=None, help="엣지 타입 (쉼표). 기본은 MAX_TARGETS 전부")
+    p_cd.add_argument("--list", action="store_true", help="충돌을 전부 나열")
+    p_cd.add_argument("--fetch-places", action="store_true",
+                      help="걸린 장소들의 상위 행정구역(P131)을 받아 located_in 으로 잇는다")
+    p_cd.set_defaults(func=cmd_cardinality)
 
     p_ov = sub.add_parser("overrides", help="편집 계층 — 고친 값의 표를 세고(--seed 되짚기, --reapply 다시 씌우기)")
     p_ov.add_argument("--seed", action="store_true",

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -113,6 +114,22 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
 }
 
 
+# --- 카디널리티 -----------------------------------------------------------
+# 한 출발 노드가 이 엣지로 가리킬 수 있는 **서로 다른 도착 노드**의 최대 수.
+# 팔란티어 파운드리는 링크마다 1:N 인지 N:M 인지를 반드시 적는데, 우리는
+# 출발·도착 타입만 있었다. 사람은 한 곳에서 태어나고 한 곳에서 죽고 부모가
+# 둘이다 — 그 이상이면 같은 곳을 다른 해상도로 말한 것(함경도·명천군)이거나
+# 동명이인의 문서가 섞인 것이다 (실측: 정의공주의 어머니가 원경왕후와
+# 소헌왕후, 김성우의 출생지가 부산과 광주). 여기 없는 타입은 제한이 없다.
+# 재는 것은 `cardinality` 모듈, 쓸 때 경고하는 것은 `cardinality_problems`.
+MAX_TARGETS: dict[str, int] = {
+    "born_in": 1,
+    "died_in": 1,
+    "occurred_during": 1,
+    "child_of": 2,   # 양부모는 여기 걸린다 — 인평대군의 양부 능창대군. 보고만 한다.
+}
+
+
 class OntologyError(ValueError):
     pass
 
@@ -195,3 +212,18 @@ def validate_edge_endpoints(edge: Edge, nodes: dict[str, Node]) -> str | None:
     if dst_node.type not in allowed_dst:
         return f"{edge.type}: 도착 타입 {dst_node.type} 허용 안 됨 ({allowed_dst})"
     return None
+
+
+def cardinality_problems(edges: Iterable[Edge]) -> list[str]:
+    """한 묶음 안에서 카디널리티를 넘는 출발 노드. 쓰기 전에 경고할 재료."""
+    targets: dict[tuple[str, str], set[str]] = {}
+    for e in edges:
+        limit = MAX_TARGETS.get(e.type)
+        if limit is None:
+            continue
+        targets.setdefault((e.src, e.type), set()).add(e.dst)
+    return [
+        f"{etype}: {src} 가 {len(dsts)}곳을 가리킴 (최대 {MAX_TARGETS[etype]})"
+        for (src, etype), dsts in sorted(targets.items())
+        if len(dsts) > MAX_TARGETS[etype]
+    ]

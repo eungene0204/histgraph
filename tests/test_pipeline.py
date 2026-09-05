@@ -4401,5 +4401,67 @@ with tempfile.TemporaryDirectory() as _d:
         check("노드 타입은 편집 계층으로 못 바꾼다", True)
     store.close()
 
+
+print("\n[카디널리티 — 출생지가 둘이면 무엇이 틀린 것인가]")
+from histgraph.ontology import MAX_TARGETS as _MAXT, cardinality_problems as _cardp
+from histgraph import cardinality as _card
+check("카디널리티를 선언한 엣지 타입은 전부 스키마에 있다", set(_MAXT) <= set(EDGE_TYPES))
+_pb = _cardp([
+    Edge(src="p:1", dst="pl:a", type="born_in", source="t"),
+    Edge(src="p:1", dst="pl:b", type="born_in", source="t"),
+    Edge(src="p:1", dst="pl:a", type="born_in", source="u"),   # 같은 곳을 두 소스가 — 문제 아님
+    Edge(src="p:2", dst="pl:a", type="born_in", source="t"),
+])
+check("한 묶음 안에서 출생지가 둘인 인물을 경고한다", len(_pb) == 1 and "p:1" in _pb[0], str(_pb))
+check("소스만 다른 같은 사실은 세지 않는다", "p:2" not in " ".join(_pb))
+
+with tempfile.TemporaryDirectory() as _d:
+    store = GraphStore(Path(_d) / "card.sqlite")
+    pl = lambda i, name: Node(id=f"wd:{i}", type="place", label=name, source="wd")
+    store.upsert_nodes([
+        pl("H", "함경도"), pl("M", "명천군"), pl("B", "부산광역시"), pl("G", "광주시"),
+        pl("S", "서울특별시"), pl("J", "종로구"), pl("HS", "한성부"), pl("GY", "광양시"),
+        pl("JN", "전라남도"), pl("JD", "전라도"),
+        Node(id="wd:P1", type="person", label="이용익", source="wd"),
+        Node(id="wd:P2", type="person", label="김성우", source="wd"),
+        Node(id="wd:P3", type="person", label="김두한", source="wd"),
+        Node(id="wd:P4", type="person", label="김안로", source="wd"),
+        Node(id="wd:P5", type="person", label="강희열", source="wd"),
+        Node(id="wd:P6", type="person", label="정의공주", source="wd"),
+        Node(id="wd:F", type="person", label="조선 세종", source="wd"),
+        Node(id="wd:M1", type="person", label="소헌왕후", source="wd"),
+        Node(id="wd:M2", type="person", label="원경왕후", source="wd"),
+    ])
+    E = lambda s_, d, t, src="wd": Edge(src=s_, dst=d, type=t, source=src)
+    store.upsert_edges([
+        E("wd:M", "wd:H", "located_in"), E("wd:J", "wd:S", "located_in"),
+        E("wd:GY", "wd:JN", "located_in"),
+        E("wd:P1", "wd:H", "born_in"), E("wd:P1", "wd:M", "born_in", "kowiki:infobox"),   # 해상도
+        E("wd:P2", "wd:B", "born_in"), E("wd:P2", "wd:G", "born_in", "kowiki:infobox"),   # 충돌
+        E("wd:P3", "wd:S", "born_in"), E("wd:P3", "wd:J", "born_in", "kowiki:infobox"),   # 해상도
+        E("wd:P4", "wd:S", "born_in"), E("wd:P4", "wd:HS", "born_in", "kowiki:infobox"),  # 옛 이름
+        E("wd:P5", "wd:GY", "born_in"), E("wd:P5", "wd:JD", "born_in", "kowiki:infobox"), # 8도
+        E("wd:P6", "wd:F", "child_of"), E("wd:P6", "wd:M1", "child_of", "kowiki:infobox"),
+        E("wd:P6", "wd:M2", "child_of"),                                                   # 부모 셋
+    ])
+    vs = {v.src: v for v in _card.violations(store.conn)}
+    check("출생지가 둘인 인물을 전부 잡는다", set(vs) == {"wd:P1", "wd:P2", "wd:P3", "wd:P4", "wd:P5", "wd:P6"}, str(set(vs)))
+    check("함경도·명천군은 해상도 차이다", vs["wd:P1"].kind == "resolution")
+    check("부산·광주는 충돌이다", vs["wd:P2"].kind == "conflict")
+    check("서울·종로구는 해상도 차이다 (located_in 사슬)", vs["wd:P3"].kind == "resolution")
+    check("한성부는 서울의 옛 이름이다", vs["wd:P4"].kind == "resolution")
+    check("전라남도의 광양시는 전라도 안이다 (8도 표)", vs["wd:P5"].kind == "resolution")
+    check("부모가 셋이면 충돌이다", vs["wd:P6"].kind == "conflict" and len(vs["wd:P6"].targets) == 3)
+    shape = _card.summarize(list(vs.values()))
+    check("요약은 타입별로 충돌·해상도를 센다",
+          shape["born_in"] == {"conflict": 1, "resolution": 4} and shape["child_of"]["conflict"] == 1, str(shape))
+    store.close()
+
+from histgraph.sources.wikidata import ancestors_from_rows as _afr
+_rows = [{"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q2"}},
+         {"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q3"}},
+         {"item": {"value": "http://www.wikidata.org/entity/Q1"}, "up": {"value": "http://www.wikidata.org/entity/Q1"}}]
+check("상위 행정구역 응답을 QID 집합으로 읽고 자기 자신은 뺀다", _afr(_rows) == {"Q1": {"Q2", "Q3"}}, str(_afr(_rows)))
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

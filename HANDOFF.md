@@ -42,6 +42,14 @@
 진행 하자". 배울 것 셋 — (1) 고친 값은 원천 위에 겹쳐 두고 읽을 때 합친다,
 (2) 엣지 타입에 카디널리티를 선언한다, (3) `related_to` 를 갈라 낸다.
 
+**(2) 끝.** `ontology.MAX_TARGETS` (출생지 1 · 사망지 1 · 발생 시기 1 · 부모 2),
+`_persist` 의 쓰기 전 경고, `histgraph cardinality [--fetch-places] [--list]`
+(`src/histgraph/cardinality.py`). 충돌과 해상도 차이를 가르고 보고만 한다.
+파생본 실측: 넘는 노드 172 — 충돌 73 · 해상도 차이 99. `--fetch-places` 로
+장소 `located_in` 을 원본 568 · 파생본 212건 더했다. README "카디널리티" 절.
+**남은 일**: 충돌 73건은 사람이 보는 목록이다 — 동명이인 문서가 섞인 것은
+`homonyms`·`dedupe` 쪽, 소스가 틀린 것은 `ko_labels.tsv` 처럼 표로.
+
 **(1) 끝.** `src/histgraph/overrides.py` — `overrides` 표와 `reapply`.
 `GraphStore.upsert_nodes`·`upsert_edges` 가 끝나면서 방금 쓴 것에 걸린 줄을
 다시 씌운다. `relabel`·`redescribe`·`describe`·`nikh`·`precision`·`reigns`·

@@ -1146,3 +1146,44 @@ def fetch_aliases(
     if failures:
         log.warning("별칭 조회 실패 %d구간", len(failures))
     return out
+
+
+def fetch_place_ancestors(
+    fetcher: Fetcher,
+    qids: list[str],
+    chunk: int = 150,
+    failures: list[str] | None = None,
+) -> dict[str, set[str]]:
+    """QID -> 그 장소가 속한 상위 행정구역 QID 전부 (P131 사슬).
+
+    카디널리티 검사(`cardinality`)가 '함경도와 명천군은 같은 곳을 다른
+    굵기로 말한 것'을 알려면 장소끼리의 `located_in` 이 있어야 하는데,
+    우리 그래프에는 84건뿐이었다 (2026-09-05). 한 번에 사슬 전체를
+    받는다 (`wdt:P131+`) — 깊이를 몰라도 되고 쿼리도 하나다."""
+    out: dict[str, set[str]] = {}
+    ordered = sorted({q for q in qids if QID_RE.match(q)})
+    for i in range(0, len(ordered), chunk):
+        values = " ".join(f"wd:{q}" for q in ordered[i : i + chunk])
+        rows = _safe_query(
+            fetcher,
+            f"""SELECT ?item ?up WHERE {{
+                  VALUES ?item {{ {values} }}
+                  ?item wdt:P131+ ?up .
+                }}""",
+            f"장소상위/{i}",
+            failures if failures is not None else [],
+        )
+        for qid, ups in ancestors_from_rows(rows).items():
+            out.setdefault(qid, set()).update(ups)
+    return out
+
+
+def ancestors_from_rows(rows: list[dict]) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for r in rows:
+        item, up = _val(r, "item"), _val(r, "up")
+        if not (item and up and is_real_qid(item) and is_real_qid(up)):
+            continue
+        if _qid(item) != _qid(up):
+            out.setdefault(_qid(item), set()).add(_qid(up))
+    return out
