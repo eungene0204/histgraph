@@ -533,8 +533,14 @@ function shortName(label) {
 // **그 해가 정말 생년일 때**뿐이다: 날짜가 없어 이어진 사건으로 자리만
 // 가늠한 인물(basis 'near')이나 시대 노드에서 연도를 받은 인물에게
 // '탄생'을 적으면 모르는 것을 아는 척한 것이 된다.
+//
+// **나라는 첫 해에 '건국'을 단다.** '조선'이 1392년에 홀로 서 있으면 그 해에
+// 조선이 무엇을 했다는 말인지 알 수 없다 — 그 해는 조선이 선 해다. 어느
+// 나라가 건국인지는 서버가 정한다 (`founded`, 시대 묶음의 정체 노드 중
+// 나라인 것). 일제강점기는 나라가 아니라 받지 않는다.
 export function markName(m) {
   const label = String(m.label || '');
+  if (m.founded) return `${label} 건국`;
   if (m.type !== 'person') return label;
   const own = /^(-?\d{1,4})/.exec(String(m.date || ''));
   if (!own || Number(own[1]) !== m.year) return label;

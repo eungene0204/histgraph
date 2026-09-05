@@ -1544,6 +1544,17 @@ with tempfile.TemporaryDirectory() as tmp:
         # 왕자의 난이었다.
         Node(id="wd:Q28179", type="org", label="조선", source="wd",
              start_date="1392-08-13", end_date="1897-10-12"),
+        # 건국 앞의 고려 사건. 맥락으로 그래프에 남지만 연표는 조선에서
+        # 시작한다 (실측: 1100년 '삼사'가 축을 1097년부터 늘여 놓았다).
+        # 조선 시대의 뒷부분인 나라 — 시대가 아니라도 자기 건국을 알린다
+        Node(id="wd:Q28233", type="org", label="대한제국", source="wd",
+             start_date="1897-10-12", end_date="1910-08-29"),
+        Node(id="wd:G1", type="event", label="위화도 회군", source="wd",
+             start_date="1388-06-11"),
+        Node(id="wd:G0", type="event", label="삼사", source="wd", start_date="1100"),
+        # 건국보다 먼저 태어난 사람 — 자기 자리는 서야 한다
+        Node(id="wd:P4", type="person", label="조선 태조", source="wd",
+             start_date="1335-10-19", end_date="1408-06-18"),
     ])
     store.upsert_edges([
         Edge(src="wd:E2", dst="time:1504", type="from_period", source="timeline"),
@@ -1559,6 +1570,10 @@ with tempfile.TemporaryDirectory() as tmp:
         Edge(src="ex:event:홀로", dst="wd:E5", type="related_to", source="extract"),
         Edge(src="ex:event:여럿", dst="wd:E5", type="related_to", source="extract"),
         Edge(src="ex:event:여럿", dst="wd:D3", type="related_to", source="extract"),
+        Edge(src="wd:G1", dst="wd:E1", type="related_to", source="wd"),
+        Edge(src="wd:G0", dst="wd:E1", type="related_to", source="wd"),
+        Edge(src="wd:G1", dst="wd:G0", type="related_to", source="wd"),
+        Edge(src="wd:P4", dst="wd:G1", type="participated_in", source="wd"),
     ])
     tl_api = GraphAPI(store, era="joseon")
 
@@ -1620,12 +1635,39 @@ with tempfile.TemporaryDirectory() as tmp:
     era_mark = [m for m in t["marks"] if m["kind"] == "era"]
     check("왕조가 자기 존속 기간으로 연표에 선다",
           [(m["id"], m["year"], m["end"]) for m in era_mark]
-          == [("wd:Q28179", 1392, 1897)], str(era_mark))
+          == [("wd:Q28179", 1392, 1897), ("wd:Q28233", 1897, 1910)], str(era_mark))
+    # 이름만 세우면 '조선'이 1392년에 무엇을 했다는 것처럼 읽힌다. 화면이
+    # '건국'을 달 수 있게 나라라고 표식한다 (2026-09-05 사용자 요청).
+    check("나라 표식에는 건국 표식이 붙는다", all(m.get("founded") for m in era_mark))
+    check("사건 뼈대에는 건국 표식이 없다",
+          not any(m.get("founded") for m in t["marks"] if m["kind"] == "anchor"))
+    # **연표는 조선 건국에서 시작한다.** 고려 사건은 맥락으로 그래프에
+    # 남지만 축을 1100년까지 늘이지 않는다.
+    check("건국 앞의 사건은 연표에 서지 않는다",
+          not any(m["year"] < 1392 for m in t["marks"]),
+          str([(m["label"], m["year"]) for m in t["marks"] if m["year"] < 1392]))
+    check("축은 건국 몇 해 앞에서 시작한다", t["axis"]["from"] == 1389, str(t["axis"]))
+    e1 = tl_api.timeline("wd:E1")
+    check("건국 앞의 이웃도 서지 않는다",
+          "wd:G1" not in {m["id"] for m in e1["marks"]})
+    # 고른 노드가 건국보다 앞서면 그 해까지는 연다 — 자기 자리를 못 세우는
+    # 연표는 연표가 아니다. 그 뒤의 이웃도 함께 산다.
+    g1 = tl_api.timeline("wd:G1")
+    g1_ids = {m["id"]: m["year"] for m in g1["marks"]}
+    check("건국 앞의 사건을 고르면 자기 자리로 선다", g1_ids.get("wd:G1") == 1388, str(g1_ids))
+    check("그래도 그보다 더 앞은 열지 않는다", "wd:G0" not in g1_ids, str(g1_ids))
+    check("건국 앞 사건을 골라도 조선 건국은 선다", g1_ids.get("wd:Q28179") == 1392)
+    p4 = tl_api.timeline("wd:P4")
+    check("건국보다 먼저 난 사람은 생년에 선다",
+          p4["year"] == 1335 and any(m["id"] == "wd:G1" for m in p4["marks"]),
+          str([(m["id"], m["year"]) for m in p4["marks"]]))
     # 왕조를 고르면 그건 '자기 자리'다. 둘 다 세우면 같은 줄이 두 번 찍힌다.
     own = tl_api.timeline("wd:Q28179")
     check("왕조를 고르면 자기 자리로만 선다",
           [m["kind"] for m in own["marks"] if m["id"] == "wd:Q28179"] == ["self"],
           str([m for m in own["marks"] if m["id"] == "wd:Q28179"]))
+    check("나라 자신을 골라도 건국 표식은 붙는다",
+          [m.get("founded") for m in own["marks"] if m["id"] == "wd:Q28179"] == [True])
     store.close()
 
 # --- 재시도가 질문을 바꿔치기하지 않는가 ---------------------------------
