@@ -49,9 +49,15 @@ export function nodeRadius(n) {
 // 돌린다. d3 가 자기 타이머로 돌게 두면 화면 주사율을 따라가는데, 힘
 // 계수가 전부 "한 틱당"으로 잡혀 있어서 120Hz 화면에서는 같은 그래프에
 // 힘이 두 배로 들어간다. 초당 60틱을 지키는 건 호출부의 일이다.
-export function buildSimulation({ nodes, edges, center, width, height }) {
+// `forces` 는 Obsidian 그래프 설정의 '힘' 절이 주는 배율이다 — 중심 힘·
+// 반발 힘·링크 거리. 1 이 위의 기본 계수 그대로다. 계수 자체를 바꾸지
+// 않고 곱만 하므로 배치 검증(layout.test.mjs)은 배율 1 로 그대로 돈다.
+export const DEFAULT_FORCES = { center: 1, repel: 1, link: 1 };
+
+export function buildSimulation({ nodes, edges, center, width, height, forces = DEFAULT_FORCES }) {
   const cx = width / 2;
   const cy = height / 2;
+  const f = { ...DEFAULT_FORCES, ...forces };
 
   const links = edges.filter((e) => e.kind !== 'same_as');
   const sameAs = edges.filter((e) => e.kind === 'same_as');
@@ -60,21 +66,22 @@ export function buildSimulation({ nodes, edges, center, width, height }) {
     .velocityDecay(VELOCITY_DECAY)
     .alphaDecay(ALPHA_DECAY)
     .force('charge', forceManyBody()
-      .strength((n) => -(REPEL_BASE + (n.r || 0) * REPEL_PER_RADIUS))
+      .strength((n) => -(REPEL_BASE + (n.r || 0) * REPEL_PER_RADIUS) * f.repel)
       .distanceMax(REPEL_MAX_DIST))
     // 겹침 방지. 옛 MIN_REPEL_DIST 가 하던 일을 대신한다.
     .force('collide', forceCollide().radius((n) => (n.r || 0) + 6).strength(0.7))
     .force('link', forceLink(links)
       .id((n) => n.id)
-      .distance((e) => LINK_BASE_DISTANCE + (e.source.r || 0) + (e.target.r || 0))
+      .distance((e) => LINK_BASE_DISTANCE * f.link + (e.source.r || 0) + (e.target.r || 0))
       .strength(LINK_STRENGTH))
     .force('same', forceLink(sameAs)
       .id((n) => n.id)
       .distance(SAME_AS_DISTANCE)
       .strength(SAME_AS_STRENGTH))
-    .force('x', forceX(cx).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL)))
-    .force('y', forceY(cy).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL)));
+    .force('x', forceX(cx).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL) * f.center))
+    .force('y', forceY(cy).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL) * f.center));
 
+  sim.forces = f;   // retarget 이 같은 배율을 이어 쓴다
   sim.stop();
   return sim;
 }
@@ -83,6 +90,7 @@ export function buildSimulation({ nodes, edges, center, width, height }) {
 export function retarget(sim, { center, width, height }) {
   const fx = sim.force('x');
   const fy = sim.force('y');
-  if (fx) fx.x(width / 2).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL));
-  if (fy) fy.y(height / 2).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL));
+  const c = (sim.forces || DEFAULT_FORCES).center;
+  if (fx) fx.x(width / 2).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL) * c);
+  if (fy) fy.y(height / 2).strength((n) => (n.id === center ? CENTER_PULL : NODE_PULL) * c);
 }

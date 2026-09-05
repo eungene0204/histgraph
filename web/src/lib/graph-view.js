@@ -6,9 +6,11 @@
 //
 // React 가 감싸긴 하지만 이 클래스는 React 를 모른다. 캔버스는 매 프레임
 // 60번 다시 그려지는 곳이라 가상 DOM 을 통과시킬 이유가 없다.
-import { buildSimulation, retarget, nodeRadius } from './layout.js';
+import { buildSimulation, retarget, nodeRadius, DEFAULT_FORCES } from './layout.js';
 
 const TAU = Math.PI * 2;
+// style.css 의 --font-interface 와 같은 순서. 캔버스는 CSS 변수를 못 읽는다.
+const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif';
 
 // **시뮬레이션은 화면 주사율과 무관하게 초당 60틱으로 돈다.** 힘 계수가
 // 전부 "한 틱당"으로 잡혀 있어서, 프레임마다 한 번 돌리면 120Hz 화면
@@ -22,38 +24,38 @@ const TICK_MS = 1000 / 60;
 // 두면 색을 잃은 눈에도 차이가 남는다. `python3 tools/check_palette.py` 가
 // 이 파일의 값을 직접 읽어 잰다 (OKLab ΔE ×100, 최악 쌍):
 //
-//   정상 10.7 · 2형(deutan) 5.9 · 1형(protan) 5.7   — 눈금 5.0 을 넘긴다
+//   정상 10.9 · 2형(deutan) 6.8 · 1형(protan) 5.5   — 눈금 5.0 을 넘긴다
 //   (3형은 근사라 판정에서 뺀다. 검증기 주석에 이유를 적어 뒀다.)
 //
 // 색을 고치면 저 검증기를 다시 돌린다. 여기 적힌 숫자는 그때의 기록일 뿐
 // 이고, 실제 값은 검증기가 말한다.
 //
 // 갈래는 색상 계열로 남는다 — 인물·단체는 파랑~보라, 사건은 주황, 장소·
-// 유물·작품은 초록~금~분홍~청록, 시대·직위는 무채색. 화면이 먼저 네
+// 유물·작품은 초록~노랑~분홍~청록, 시대·직위는 무채색. 화면이 먼저 네
 // 덩어리로 읽히고 그 안에서 타입이 갈린다. 뼈대(시대·직위)는 어둡게 묶어
 // 물러나 있게 했다.
 //
-// 5.9 는 "다르다"이지 "나란히 놓지 않아도 읽힌다"가 아니다. 그래서 **색만
+// 5.5 는 "다르다"이지 "나란히 놓지 않아도 읽힌다"가 아니다. 그래서 **색만
 // 으로 읽어야 하는 자리를 만들지 않는다**: 범례는 색 견본 옆에 타입 이름을
 // 적고, 노드를 고르면 상세 패널이 타입을 글자로 말한다.
 export const TYPE_COLOR = {
-  person: '#4a6ad8',   // 파랑
-  org: '#b394f2',      // 연보라 — 인물과 같은 계열, 밝기를 크게 벌렸다
-  event: '#ec7e3e',    // 주황
-  place: '#3fb968',    // 초록
-  heritage: '#ffbb31', // 금 — 유물·문화재
-  artwork: '#cf7bb0',  // 분홍 — 예술작품
-  media: '#7edde2',    // 옅은 청록 — 영화·드라마
-  period: '#5f5f5c',   // 어두운 회색 — 뼈대라서 물러나 있어야 한다
-  role: '#9a8b6c',     // 흙빛 — 뼈대의 다른 한쪽
+  person: '#3d84f5',   // 파랑 — Obsidian 의 blue 를 바탕에 맞춰 밝힘
+  org: '#c2a4ff',      // 연보라 — 인물과 같은 계열, 밝기를 크게 벌렸다
+  event: '#f29a50',    // 주황
+  place: '#32c261',    // 초록
+  heritage: '#f4ea8a', // 노랑 — 유물·문화재
+  artwork: '#fba6d4',  // 분홍 — 예술작품
+  media: '#1fa8a6',    // 청록 — 영화·드라마. 분홍과 밝기로 갈라 어둡게 눌렀다
+  period: '#5c5c5c',   // 어두운 회색 — 뼈대라서 물러나 있어야 한다
+  role: '#a08a5f',     // 흙빛 — 뼈대의 다른 한쪽
 };
 
 // 갈래 색. 타입을 모를 때 물러날 자리다.
 export const GROUP_COLOR = {
-  actor: '#4a6ad8', // 인물·단체
-  event: '#ec7e3e', // 사건
-  thing: '#3fb968', // 장소·유물·작품
-  frame: '#5f5f5c', // 시대·직위
+  actor: '#3d84f5', // 인물·단체
+  event: '#f29a50', // 사건
+  thing: '#32c261', // 장소·유물·작품
+  frame: '#5c5c5c', // 시대·직위
 };
 
 // 노드 색은 타입이 정한다. 모르는 타입은 갈래로 물러난다.
@@ -61,11 +63,17 @@ export function nodeColor(type, group) {
   return TYPE_COLOR[type] || GROUP_COLOR[group] || GROUP_COLOR.thing;
 }
 
-const SURFACE = '#141413';
-const EDGE_BASE = 'rgba(198,196,186,0.30)';
-const EDGE_SOFT = 'rgba(198,196,186,0.16)';
-const TEXT = '#f0efec';
-const TEXT_DIM = 'rgba(240,239,236,0.55)';
+// Obsidian 의 그래프 뷰를 따른다 (design.md §3). 바탕은 --background-primary,
+// 선은 --graph-line (회색 한 가지), 가리킨 노드의 선과 테두리만 강조색.
+// 선에 타입 색을 입히던 것을 걷어냈다 — 색은 점에만 있고 선은 조용하다.
+const SURFACE = '#1e1e1e';
+const EDGE_BASE = '#4a4a4a';                 // --graph-line 보다 한 단 밝다 (1px 선은 #3f3f3f 로는 안 보인다)
+const EDGE_SOFT = 'rgba(74,74,74,0.35)';     // 가리키는 동안 물러난 선
+const EDGE_SAME = '#3f3f3f';                 // 동일 실체 (same_as) — 관계가 아니라 이음이라 더 어둡다
+const ACCENT = '#8a6cef';                    // --color-accent
+const ACCENT_SOFT = '#af9af4';               // --color-accent-2
+const TEXT = '#dadada';                      // --text-normal
+const TEXT_DIM = 'rgba(218,218,218,0.62)';   // --text-muted 와 같은 무게
 
 export class GraphView {
   constructor(canvas, opts = {}) {
@@ -85,6 +93,12 @@ export class GraphView {
     this.onExpand = opts.onExpand || (() => {});
     this.onHover = opts.onHover || (() => {});
     this.showLabels = true;
+    // Obsidian 그래프 설정의 '표시'·'필터'·'힘' 절 (design.md §4).
+    // nodeScale·lineScale 은 배율, textFade 는 이름표가 사라지는 확대 문턱
+    // (0 = 늘 보임 · 1 = 많이 확대해야 보임), arrows 는 화살촉 여부.
+    this.display = { nodeScale: 1, lineScale: 1, textFade: 0.3, arrows: true };
+    this.hiddenEdgeTypes = new Set();   // 필터로 끈 관계 종류
+    this.forces = { ...DEFAULT_FORCES };
 
     this._acc = 0;
     this._prev = 0;
@@ -148,7 +162,7 @@ export class GraphView {
       } else {
         Object.assign(node, { degree: Math.max(node.degree, n.degree) });
       }
-      node.r = nodeRadius(node);
+      node.r = nodeRadius(node) * this.display.nodeScale;
     }
 
     const seen = new Set(this.edges.map(edgeKey));
@@ -185,6 +199,41 @@ export class GraphView {
 
   // d3 의 forceLink 는 링크 배열을 자기 것으로 삼아 source/target 을 노드
   // 객체로 바꿔 끼운다. 그리기는 여전히 e.s / e.t 를 쓰므로 서로 밟지 않는다.
+  // --- 설정 -------------------------------------------------------------
+  setDisplay(patch) {
+    const before = this.display.nodeScale;
+    this.display = { ...this.display, ...patch };
+    if (this.display.nodeScale !== before && this.nodes.length) {
+      for (const n of this.nodes) n.r = nodeRadius(n) * this.display.nodeScale;
+      // 겹침 방지 반지름이 바뀌었으니 배치를 다시 데운다 (자리는 지킨다)
+      this._rebuildSim(this.canvas.clientWidth, this.canvas.clientHeight);
+      this.sim.alpha(0.4);
+    }
+  }
+
+  setForces(patch) {
+    this.forces = { ...this.forces, ...patch };
+    if (!this.nodes.length) return;
+    this._rebuildSim(this.canvas.clientWidth, this.canvas.clientHeight);
+    this.sim.alpha(0.6);
+  }
+
+  // 관계 종류를 끄면 그 선은 안 그리고, 그래서 선이 하나도 안 남은 노드도
+  // 안 그린다 — Obsidian 필터가 그래프에서 노드를 빼는 것과 같다.
+  // 시뮬레이션에는 그대로 남아 있어 켜면 제자리로 돌아온다.
+  setEdgeFilter(hidden) {
+    this.hiddenEdgeTypes = new Set(hidden || []);
+    this.adjacency = null;
+    if (this.hover && !this.nodeShown(this.hover)) this.hover = null;
+  }
+
+  edgeShown(e) { return !this.hiddenEdgeTypes.has(e.type); }
+
+  nodeShown(id) {
+    if (!this.hiddenEdgeTypes.size || id === this.center) return true;
+    return this.neighborsOf(id).size > 0;
+  }
+
   _rebuildSim(w, h) {
     this.sim?.stop();
     for (const e of this.edges) {
@@ -197,6 +246,7 @@ export class GraphView {
       center: this.center,
       width: w,
       height: h,
+      forces: this.forces,
     });
     this.sim.alpha(1);
   }
@@ -205,6 +255,7 @@ export class GraphView {
     if (!this.adjacency) {
       this.adjacency = new Map();
       for (const e of this.edges) {
+        if (!this.edgeShown(e)) continue;
         if (!this.adjacency.has(e.s)) this.adjacency.set(e.s, new Set());
         if (!this.adjacency.has(e.t)) this.adjacency.set(e.t, new Set());
         this.adjacency.get(e.s).add(e.t);
@@ -305,23 +356,27 @@ export class GraphView {
     for (const e of this.edges) {
       const a = this.byId.get(e.s);
       const b = this.byId.get(e.t);
-      if (!a || !b) continue;
+      if (!a || !b || !this.edgeShown(e)) continue;
       const active = spot && (e.s === spot || e.t === spot);
-      // 선은 출발 노드의 색을 그대로 입는다 — 사람이 건 관계인지 사건이
-      // 건 관계인지가 한눈에 갈린다.
-      const color = e.kind === 'same_as' ? EDGE_BASE : nodeColor(a.type, a.group);
+      // 선은 회색 한 가지다. 가리킨 노드에 붙은 선만 강조색으로 선다 —
+      // Obsidian 이 그렇다. 무엇이 무엇에게 건 관계인지는 화살촉이 말한다.
       if (spot && !active) {
         ctx.globalAlpha = 1;
         ctx.strokeStyle = EDGE_SOFT;
         ctx.lineWidth = 1;
+      } else if (active) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = e.kind === 'same_as' ? ACCENT_SOFT : ACCENT;
+        ctx.lineWidth = 1.8;
       } else {
-        ctx.globalAlpha = active ? 1 : 0.6;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = active ? 1.9 : 1.3;
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = e.kind === 'same_as' ? EDGE_SAME : EDGE_BASE;
+        ctx.lineWidth = 1.1;
       }
       // 인과(원인 → 결과)는 다른 관계보다 굵다. 이 그래프가 온톨로지인
       // 이유가 이 선이라, 참여·장소 선 사이에서 같은 굵기로 묻히면 안 된다.
       if (e.type === 'caused') ctx.lineWidth += 1.2;
+      ctx.lineWidth *= this.display.lineScale;
       // 추출로 얻은 관계(신뢰도 < 1)는 점선. 구조화 소스가 준 사실과
       // 텍스트에서 추론한 사실을 화면에서 구분하지 않으면 둘 다 못 믿는다.
       ctx.setLineDash(e.kind === 'same_as' ? [2, 4] : e.conf < 1 ? [5, 4] : []);
@@ -331,7 +386,7 @@ export class GraphView {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      if (e.kind !== 'same_as' && (!spot || active)) {
+      if (this.display.arrows && e.kind !== 'same_as' && (!spot || active)) {
         drawArrow(ctx, a, b, ctx.strokeStyle);
       }
       if (active && showEdgeLabels) {
@@ -341,6 +396,7 @@ export class GraphView {
     }
 
     for (const node of this.nodes) {
+      if (!this.nodeShown(node.id)) continue;
       drawNode(ctx, node, {
         dim: !lit(node.id),
         focused: node.id === focus,
@@ -359,8 +415,11 @@ export class GraphView {
       const next = new Set();
       const rank = (n) => (n.id === focus ? 3 : n.id === this.center ? 2 : 0) + Math.min(n.degree / 40, 1);
       const candidates = this.nodes
-        .filter((n) => lit(n.id))
+        .filter((n) => lit(n.id) && this.nodeShown(n.id))
         .sort((a, b) => rank(b) - rank(a));
+      // 멀리서 보면 이름표가 흐려진다 — Obsidian 의 '텍스트 흐림 문턱'.
+      // 중심과 초점의 이름은 늘 그린다.
+      const fade = labelAlpha(this.k, this.display.textFade);
 
       for (const node of candidates) {
         const strong = node.id === focus || node.id === this.center;
@@ -373,7 +432,8 @@ export class GraphView {
         if (!strong && placed.some((p) => overlaps(p, test))) continue;
         placed.push(box);
         next.add(node.id);
-        drawLabel(ctx, node, strong, this.k);
+        if (!strong && fade <= 0) continue;
+        drawLabel(ctx, node, strong, this.k, strong ? 1 : fade);
       }
       this._shownLabels = next;
     }
@@ -415,6 +475,7 @@ export class GraphView {
     let best = null;
     let bestD = Infinity;
     for (const n of this.nodes) {
+      if (!this.nodeShown(n.id)) continue;
       const d = Math.hypot(n.x - p.x, n.y - p.y);
       if (d < n.r + 6 && d < bestD) { best = n; bestD = d; }
     }
@@ -529,7 +590,7 @@ export class GraphView {
 function drawNode(ctx, n, { dim, focused, center, selected }) {
   const color = nodeColor(n.type, n.group);
 
-  ctx.globalAlpha = dim ? 0.22 : 1;
+  ctx.globalAlpha = dim ? 0.16 : 1;
 
   // 배경색 링 — 노드가 겹쳐도 서로 먹히지 않는다
   ctx.lineWidth = 2;
@@ -543,14 +604,16 @@ function drawNode(ctx, n, { dim, focused, center, selected }) {
   ctx.arc(n.x, n.y, n.r, 0, TAU);
   ctx.fill();
 
+  // 고른 노드·중심·가리킨 노드의 테두리 — Obsidian 은 초점 노드를 강조색으로
+  // 칠하지만 우리 노드는 타입 색을 지고 있으므로 테두리로 두른다.
   if (selected || center) {
-    ctx.strokeStyle = selected ? TEXT : 'rgba(240,239,236,0.5)';
+    ctx.strokeStyle = selected ? ACCENT : 'rgba(218,218,218,0.45)';
     ctx.lineWidth = selected ? 2 : 1.5;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r + 4.5, 0, TAU);
     ctx.stroke();
   } else if (focused) {
-    ctx.strokeStyle = 'rgba(240,239,236,0.35)';
+    ctx.strokeStyle = ACCENT_SOFT;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r + 3.5, 0, TAU);
@@ -560,8 +623,8 @@ function drawNode(ctx, n, { dim, focused, center, selected }) {
 }
 
 function labelFont(ctx, strong, k) {
-  const size = strong ? 13 : 11.5;
-  ctx.font = `${strong ? 600 : 400} ${size / k}px "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif`;
+  const size = strong ? 12.5 : 11;
+  ctx.font = `${strong ? 600 : 400} ${size / k}px ${FONT}`;
   return size / k;
 }
 
@@ -590,7 +653,7 @@ function labelBox(ctx, n, strong, k) {
 
 function coFont(ctx, k) {
   const size = 9.5;
-  ctx.font = `400 ${size / k}px "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif`;
+  ctx.font = `400 ${size / k}px ${FONT}`;
   return size / k;
 }
 
@@ -605,7 +668,15 @@ function overlaps(a, b) {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
-function drawLabel(ctx, n, strong, k) {
+// 이름표가 보이기 시작하는 배율. fade 0 이면 0.3 배에서, 1 이면 1.5 배에서
+// 완전히 나타나고, 그보다 0.35 배 아래까지 서서히 흐려진다.
+export function labelAlpha(k, fade) {
+  const kMin = 0.3 + fade * 1.2;
+  return Math.max(0, Math.min(1, (k - kMin) / 0.35 + 1));
+}
+
+function drawLabel(ctx, n, strong, k, alpha = 1) {
+  ctx.globalAlpha = alpha;
   labelFont(ctx, strong, k);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -619,21 +690,23 @@ function drawLabel(ctx, n, strong, k) {
   ctx.fillText(n.label, n.x, y);
 
   const co = coName(n);
-  if (!co) return;
-  const size = labelFont(ctx, strong, k);
-  const y2 = y + size * 1.1;
-  coFont(ctx, k);
-  ctx.strokeStyle = SURFACE;
-  ctx.strokeText(co, n.x, y2);
-  ctx.fillStyle = TEXT_DIM;
-  ctx.fillText(co, n.x, y2);
+  if (co) {
+    const size = labelFont(ctx, strong, k);
+    const y2 = y + size * 1.1;
+    coFont(ctx, k);
+    ctx.strokeStyle = SURFACE;
+    ctx.strokeText(co, n.x, y2);
+    ctx.fillStyle = TEXT_DIM;
+    ctx.fillText(co, n.x, y2);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawEdgeLabel(ctx, a, b, text, k) {
   if (!text) return;
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
-  ctx.font = `${10.5 / k}px "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif`;
+  ctx.font = `${10.5 / k}px ${FONT}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 3 / k;

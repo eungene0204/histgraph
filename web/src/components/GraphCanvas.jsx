@@ -4,7 +4,7 @@ import { GraphView } from '../lib/graph-view.js';
 // 캔버스는 React 가 그리지 않는다. 초당 60번 다시 그려지는 곳이라 가상
 // DOM 을 통과시킬 이유가 없다 — React 는 자리를 잡아주고 GraphView 의
 // 수명만 관리한다.
-export function GraphCanvas({ viewRef, onSelect, onExpand, showLabels, note, empty, offline }) {
+export function GraphCanvas({ viewRef, onSelect, onExpand, settings, note, empty, offline }) {
   const canvasRef = useRef(null);
   // **콜백을 ref 에 담아 넘긴다.** 그냥 넘기면 onSelect 가 바뀔 때마다
   // GraphView 를 새로 만들어야 하고, 그러면 매번 배치가 처음부터 다시
@@ -24,9 +24,25 @@ export function GraphCanvas({ viewRef, onSelect, onExpand, showLabels, note, emp
     };
   }, [viewRef]);
 
+  // 설정은 GraphView 의 필드·메서드로 흘러간다. 절마다 효과를 따로 두어
+  // 슬라이더 하나가 움직일 때 배치를 다시 데우는 일이 없게 한다.
+  const { showLabels, arrows, textFade, nodeScale, lineScale,
+          centerForce, repelForce, linkDistance, hiddenEdges } = settings;
   useEffect(() => {
     if (viewRef.current) viewRef.current.showLabels = showLabels;
   }, [showLabels, viewRef]);
+  useEffect(() => {
+    viewRef.current?.setDisplay({ arrows, textFade, lineScale });
+  }, [arrows, textFade, lineScale, viewRef]);
+  useEffect(() => {
+    viewRef.current?.setDisplay({ nodeScale });
+  }, [nodeScale, viewRef]);
+  useEffect(() => {
+    viewRef.current?.setForces({ center: centerForce, repel: repelForce, link: linkDistance });
+  }, [centerForce, repelForce, linkDistance, viewRef]);
+  useEffect(() => {
+    viewRef.current?.setEdgeFilter(hiddenEdges);
+  }, [hiddenEdges, viewRef]);
 
   return (
     <main className="stage">
@@ -42,7 +58,7 @@ export function GraphCanvas({ viewRef, onSelect, onExpand, showLabels, note, emp
         <div className="empty">
           {offline
             ? <p>자료 서버에 닿지 못했습니다. 새로고침해도 그대로면 자료 서버(8100)가 떠 있는지 봅니다.</p>
-            : <p>왼쪽 위 메뉴(☰)에서 시작점을 고르거나 위에서 검색하세요.</p>}
+            : <p>위에서 검색하거나, 왼쪽 위 조절 단추에서 시작점을 고르세요.</p>}
         </div>
       )}
     </main>

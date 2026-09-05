@@ -16,8 +16,12 @@ function hashId() {
 export default function App() {
   const [meta, setMeta] = useState(null);
   const [seeds, setSeeds] = useState([]);
+  // Obsidian 그래프 설정과 같은 네 절 — 필터·묶음(범례)·표시·힘 (design.md §5).
   const [settings, setSettings] = useState({
-    depth: 2, limit: 120, includePeriod: false, showLabels: true, showRail: true,
+    depth: 2, limit: 120, includePeriod: false, hiddenEdges: [],     // 필터
+    showLabels: true, showRail: true, arrows: true,                  // 표시
+    textFade: 0.3, nodeScale: 1, lineScale: 1,
+    centerForce: 1, repelForce: 1, linkDistance: 1,                  // 힘
   });
   const [detail, setDetail] = useState(null);       // 상세 패널에 그릴 노드 (서버 응답)
   const [timeline, setTimeline] = useState(null);   // 연표 자료
@@ -209,17 +213,6 @@ export default function App() {
     <>
       <header className="top">
         <div className="brand">
-          <button
-            className="menu-toggle"
-            aria-label={sideOpen ? '패널 닫기' : '패널 열기'}
-            aria-expanded={sideOpen}
-            title="시작점·범례·표시 설정"
-            onClick={() => setSideOpen((v) => !v)}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
           <span className="mark" />
           <h1>histgraph</h1>
           {/* 어디까지 파고 들어가도 한 번에 중심으로 돌아올 수 있어야 한다.
@@ -232,26 +225,17 @@ export default function App() {
 
         {/* 검색으로 찾은 노드는 그래프만이 아니라 오른쪽 상세도 바로 연다 */}
         <Search nodeTypes={meta?.node_types} onPick={(id) => { load(id); showDetail(id); }} />
-
-        <div className="counts">
-          {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
-        </div>
       </header>
 
-      <div className={`layout${sideOpen ? ' side-open' : ''}`}>
-        <SidePanel
-          meta={meta}
-          seeds={seeds}
-          settings={settings}
-          onSettings={changeSettings}
-          onPick={(id) => load(id)}
-        />
-
+      <div className="layout">
         <TimelinePanel railRef={railRef} data={timeline} onPick={visit} />
 
+        {/* 그래프 설정은 캔버스 위 오른쪽 위에 뜬다 (Obsidian 의 graph-controls).
+            사이드바가 아니라 캔버스의 일부라서 같은 틀에 담는다. */}
+        <div className="stage-wrap">
         <GraphCanvas
           viewRef={viewRef}
-          showLabels={settings.showLabels}
+          settings={settings}
           note={note}
           empty={!ready}
           offline={offline}
@@ -263,6 +247,16 @@ export default function App() {
           // 더블클릭은 자리를 지킨 채 이웃만 얹는다 (지금 보던 배치를 잃지 않는다)
           onExpand={(node) => load(node.id, { merge: true })}
         />
+        <SidePanel
+          open={sideOpen}
+          onToggle={() => setSideOpen((v) => !v)}
+          meta={meta}
+          seeds={seeds}
+          settings={settings}
+          onSettings={changeSettings}
+          onPick={(id) => load(id)}
+        />
+        </div>
 
         <DetailPanel
           node={detail}
@@ -280,6 +274,10 @@ export default function App() {
         <span className="foot-copy">© 2026 histgraph</span>
         <a href="/privacy.html">개인정보처리방침</a>
         <a href="/terms.html">이용약관</a>
+        {/* 노드·엣지 수는 글자 수처럼 상태 줄 오른쪽 끝에 선다 */}
+        <span className="counts">
+          {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
+        </span>
       </footer>
     </>
   );

@@ -144,66 +144,84 @@ def _josa(word: str, with_batchim: str, without: str) -> str:
 STYLE = """
 :root {
   color-scheme: dark;
-  --surface: #141413; --surface-2: #1a1a19; --surface-3: #232321;
-  --line: #2f2f2c; --text: #f0efec; --text-2: #c3c2b7; --text-3: #8b8b84;
-  --accent: #3987e5;
-  --actor: #4a6ad8; --event: #ec7e3e; --thing: #3fb968; --frame: #8b8b84;
-  --font: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  /* Obsidian 의 기본 다크 테마 — 값은 web/style.css 와 같다 (설명은 design.md). */
+  --background-primary:   #1e1e1e;
+  --background-secondary: #262626;
+  --background-modifier-border: #363636;
+  --background-modifier-hover: rgba(255,255,255,.075);
+  --text-normal: #dadada;
+  --text-muted:  #b3b3b3;
+  --text-faint:  #666666;
+  --color-accent: hsl(254 80% 68%);
+  --color-accent-2: hsl(254 80% 78%);
+  --radius-s: 4px; --radius-m: 8px;
+  --file-line-width: 700px;
+  --font-interface: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter,
+                    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  /* 옛 이름 다리 */
+  --surface: var(--background-primary); --surface-2: var(--background-secondary);
+  --line: var(--background-modifier-border);
+  --text: var(--text-normal); --text-2: var(--text-muted); --text-3: var(--text-faint);
+  --accent: var(--color-accent);
+  --font: var(--font-interface);
+  --actor: #3d84f5; --event: #f29a50; --thing: #32c261; --frame: #666666;
 }
 * { box-sizing: border-box; }
-html { background: var(--surface); }
+html { background: var(--background-primary); }
 body {
-  margin: 0; background: var(--surface); color: var(--text-2);
-  font-family: var(--font); font-size: 15px; line-height: 1.75;
+  margin: 0; background: var(--background-primary); color: var(--text-normal);
+  font-family: var(--font-interface); font-size: 16px; line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-.top { border-bottom: 1px solid var(--line); background: var(--surface-2); }
+::selection { background: hsla(254 80% 68% / .25); }
+.top { border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
 .top a {
-  display: flex; align-items: center; gap: 9px;
-  max-width: 760px; margin: 0 auto; padding: 11px 22px;
-  color: var(--text); text-decoration: none; font-weight: 650; letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 8px;
+  max-width: var(--file-line-width); margin: 0 auto; padding: 10px 22px;
+  color: var(--text-normal); text-decoration: none; font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
 }
 .top .mark {
   width: 13px; height: 13px; border-radius: 50%; background: var(--actor);
   box-shadow: 9px 5px 0 -3px var(--event), 16px -3px 0 -4px var(--thing);
 }
-.top .back { margin-left: auto; font-weight: 400; font-size: 12.5px; color: var(--text-3); }
-.top a:hover .back { color: var(--accent); }
-main { max-width: 760px; margin: 0 auto; padding: 36px 22px 70px; }
-h1 { color: var(--text); font-size: 28px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 8px; }
-h1 .also { color: var(--text-3); font-weight: 400; font-size: 19px; margin-left: 8px; }
-.kind { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 13px; margin: 0 0 26px; }
+.top .back { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--text-muted); }
+.top a:hover .back { color: var(--color-accent); }
+main { max-width: var(--file-line-width); margin: 0 auto; padding: 36px 22px 70px; }
+h1 { color: var(--text-normal); font-size: 1.8em; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 8px; }
+h1 .also { color: var(--text-muted); font-weight: 400; font-size: .65em; margin-left: 8px; }
+.kind { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.lead { color: var(--text); font-size: 16px; margin: 0 0 14px; }
-.desc { color: var(--text-2); font-size: 15px; margin: 0 0 8px; }
-.src { color: var(--text-3); font-size: 12px; margin: 0 0 18px; }
-.src a { color: var(--text-3); text-decoration: underline; text-underline-offset: 2px; }
-.src a:hover { color: var(--accent); }
-.empty { color: var(--text-3); font-size: 14px; margin: 0 0 18px; }
-.aka { color: var(--text-3); font-size: 13px; margin: 0 0 8px; }
-h2 {
-  color: var(--text); font-size: 15px; font-weight: 650;
-  margin: 34px 0 12px; padding-top: 16px; border-top: 1px solid var(--line);
+.lead { color: var(--text-normal); font-size: 17px; margin: 0 0 14px; }
+.desc { color: var(--text-normal); font-size: 16px; margin: 0 0 8px; }
+.src { color: var(--text-faint); font-size: 12px; margin: 0 0 18px; }
+.src a { color: var(--text-faint); text-decoration: underline; text-underline-offset: 2px; }
+.src a:hover { color: var(--color-accent); }
+.empty {
+  color: var(--text-muted); font-size: 14px; margin: 0 0 18px;
+  background: rgba(255,255,255,.04); border-left: 3px solid #555555; border-radius: var(--radius-s); padding: 10px 14px;
 }
-h3 { color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: .04em; margin: 18px 0 6px; }
+.aka { color: var(--text-muted); font-size: 13px; margin: 0 0 8px; }
+h2 { color: var(--text-normal); font-size: 1.25em; font-weight: 600; line-height: 1.3; margin: 34px 0 12px; }
+h3 { color: var(--text-faint); font-size: 12px; font-weight: 600; margin: 18px 0 6px; }
 ul { list-style: none; margin: 0; padding: 0; }
-li { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 14.5px; }
-li a { color: var(--text); text-decoration: none; }
-li a:hover { color: var(--accent); text-decoration: underline; }
-li .meta { color: var(--text-3); font-size: 12px; }
-.more { color: var(--text-3); font-size: 12.5px; padding: 4px 0; }
+li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; margin: 0 -6px; border-radius: var(--radius-s); font-size: 15px; }
+li:hover { background: var(--background-modifier-hover); }
+li a { color: var(--text-normal); text-decoration: none; }
+li a:hover { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+li .meta { color: var(--text-faint); font-size: 12px; }
+.more { color: var(--text-faint); font-size: 12.5px; padding: 4px 0; }
 .open {
-  display: inline-block; margin-top: 26px; padding: 8px 14px;
-  border: 1px solid var(--line); border-radius: 8px;
-  color: var(--text-2); text-decoration: none; font-size: 13.5px;
+  display: inline-block; margin-top: 26px; padding: 7px 14px;
+  border: 1px solid var(--background-modifier-border); border-radius: 5px;
+  color: var(--text-muted); text-decoration: none; font-size: 13px;
 }
-.open:hover { color: var(--text); border-color: var(--text-3); }
+.open:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .foot {
-  max-width: 760px; margin: 0 auto; padding: 0 22px 60px;
-  color: var(--text-3); font-size: 12.5px;
+  max-width: var(--file-line-width); margin: 0 auto; padding: 0 22px 60px;
+  color: var(--text-faint); font-size: 12px;
 }
-.foot a { color: var(--text-3); text-decoration: none; }
-.foot a:hover { color: var(--accent); }
+.foot a { color: var(--text-faint); text-decoration: none; }
+.foot a:hover { color: var(--color-accent); }
 .foot span { margin: 0 7px; }
 """
 
