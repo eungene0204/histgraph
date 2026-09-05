@@ -36,6 +36,15 @@ class Era:
     polity_label: str
     # 유물 시대 라벨에서 이 왕조를 가리키는 표기들
     aliases: list[str] = field(default_factory=list)
+    # 정체 노드가 **나라**인가. 연표는 나라를 자기 존속 기간으로 세우고
+    # 시작 해에 '건국'을 단다 (2026-09-05 사용자 요청). 일제강점기는
+    # 시대이지 나라가 아니라 세우지 않는다 — '일제강점기 건국'은 말이
+    # 안 된다.
+    state: bool = True
+    # 같은 시대 안에서 뒤따르는 나라의 QID. 조선은 1897년에 대한제국이 되는데
+    # 대한제국은 시대(Era)가 아니라 조선 시대의 뒷부분이다 — 연표에는 자기
+    # 존속 기간(1897~1910)으로 서서 '대한제국 건국'을 알린다.
+    successor_states: list[str] = field(default_factory=list)
     # 이 시대의 **사건**을 함께 담을 후계 정체. 조선은 1897년에 대한제국이
     # 되고 1910년에 끝나는데, Wikidata 는 경술국치·을사조약·군대해산의
     # P17 을 대한제국으로 적는다. 1897년에서 자르면 '조선이 어떻게 끝났나'가
@@ -72,7 +81,8 @@ class Era:
 
 
 ERAS: dict[str, Era] = {
-    "joseon": Era("조선", "Q28179", "조선", ["조선"], successor_events=["대한제국"]),
+    "joseon": Era("조선", "Q28179", "조선", ["조선"], successor_events=["대한제국"],
+                  successor_states=["Q28233"]),
     "goryeo": Era("고려", "Q28208", "고려", ["고려"]),
     "silla": Era("신라", "Q28456", "신라", ["신라", "통일신라"]),
     "goguryeo": Era("고구려", "Q28370", "고구려", ["고구려"]),
@@ -83,6 +93,7 @@ ERAS: dict[str, Era] = {
         # 사람이 한 명뿐이라, 이 이름은 실제로 그 시대를 가리킨다.
         person_polities=["대한제국"],
         person_window=(1910, 1945),
+        state=False,
     ),
 }
 

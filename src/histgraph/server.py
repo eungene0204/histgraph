@@ -575,6 +575,42 @@ class GraphAPI:
         linked = self._linked_years({row["id"]}).get(row["id"])
         return (linked, None, "edge") if linked is not None else (None, None, "")
 
+    def _polities(self) -> list[dict]:
+        """연표에 세울 나라들 — 시대 묶음의 정체 노드 중 나라인 것.
+
+        맨 앞이 이 그래프의 중심(`root`)이고, 연표의 시작이다. 날짜가
+        없는 정체(대한민국 Q884 는 장소로 앉아 있고 날짜가 없다)는 세울
+        자리가 없어 뺀다 — 그 해는 '대한민국 정부 수립' 사건이 맡는다."""
+        cached = getattr(self._local, "polities", None)
+        if cached is not None:
+            return cached
+        from .scope import ERAS, eras_of
+
+        out: list[dict] = []
+        for key in eras_of(self.era):
+            era = ERAS.get(key)
+            if era is None or not era.state:
+                continue
+            for qid in (era.polity_qid, *era.successor_states):
+                row = self.store.conn.execute(
+                    "SELECT id, type, label, start_date, end_date FROM nodes WHERE id = ?",
+                    (f"wd:{qid}",),
+                ).fetchone()
+                if row is None:
+                    continue
+                p_start, p_end = _span(row)
+                if p_start is None:
+                    continue
+                out.append({
+                    "id": row["id"], "label": row["label"], "type": row["type"],
+                    "group": TYPE_GROUP.get(row["type"], "thing"),
+                    "year": p_start, "end": p_end,
+                    "date": row["start_date"] or "",
+                    "founded": True,
+                })
+        self._local.polities = out
+        return out
+
     def _anchors(self) -> list[dict]:
         """시대의 뼈대 — 그 무렵의 큰일. 연표 전체에 고르게 깔린다.
 
@@ -720,6 +756,8 @@ class GraphAPI:
             return None
 
         start, end, origin = self._year_of(row)
+        polities = self._polities()
+        founded_ids = {p["id"] for p in polities}
         marks: list[dict] = []
         if start is not None:
             marks.append({
@@ -727,6 +765,8 @@ class GraphAPI:
                 "group": TYPE_GROUP.get(row["type"], "thing"),
                 "year": start, "end": end, "kind": "self",
                 "date": row["start_date"] or "",
+                # 나라 자신을 골랐으면 그 첫 해도 건국이다
+                "founded": row["id"] in founded_ids,
             })
 
         # --- 연도를 아는 직접 이웃 -------------------------------------
@@ -800,28 +840,34 @@ class GraphAPI:
             dict(a, kind="anchor") for a in anchors
             if a["id"] not in seen and (a["label"], a["year"]) not in seen_labels
         )
-        # **왕조 자신도 세운다.** 조선의 존속 기간은 1392-08-13~1897-10-12
+        # **나라 자신도 세운다.** 조선의 존속 기간은 1392-08-13~1897-10-12
         # 인데 org 라서 사건 뼈대에 못 들어왔고, 1392년 자리가 비어 있었다 —
         # 연표를 훑으면 위화도 회군(1388) 다음이 곧장 제1차 왕자의
         # 난(1398)이다. 그래프에 '조선 건국' 이라는 사건 노드가 있지만
         # 날짜가 없고 엣지 둘뿐인 추출 고아라, 거기에 왕조의 P571 을
-        # 옮겨 적는 것은 추측이 된다. 왕조 노드가 자기 날짜로 서면 된다.
-        root = self.root()
-        if root and root not in {m["id"] for m in marks}:
-            row_root = self.store.conn.execute(
-                "SELECT id, type, label, start_date, end_date FROM nodes WHERE id = ?",
-                (root,),
-            ).fetchone()
-            if row_root is not None:
-                r_start, r_end = _span(row_root)
-                if r_start is not None:
-                    marks.append({
-                        "id": row_root["id"], "label": row_root["label"],
-                        "type": row_root["type"],
-                        "group": TYPE_GROUP.get(row_root["type"], "thing"),
-                        "year": r_start, "end": r_end, "kind": "era",
-                        "date": row_root["start_date"] or "",
-                    })
+        # 옮겨 적는 것은 추측이 된다. 나라 노드가 자기 날짜로 서면 된다.
+        #
+        # 묶음(조선~대한민국)이면 뒤따르는 나라(대한제국)도 같은 꼴로 선다.
+        # `founded` 는 화면이 그 첫 해에 '건국'을 달라는 표식이다 — 이름만
+        # 적으면 '조선'이 1392년에 무엇을 했다는 것처럼 읽힌다.
+        seen = {m["id"] for m in marks}
+        marks.extend(
+            dict(p, kind="era") for p in polities if p["id"] not in seen
+        )
+
+        # **연표는 맨 앞 나라의 건국에서 시작한다** (2026-09-05 사용자 요청).
+        # 조선 그래프에 고려의 사건이 맥락으로 남아 있어(위화도 회군 1388,
+        # 멀리는 1100년 '삼사') 축이 1097년부터 늘어져 있었고, 왼쪽 띠에는
+        # 고려 공양왕이 섰다. 건국 앞의 뼈대·이웃·재위는 뺀다.
+        #
+        # **고른 노드 자신이 건국보다 앞서면 그 해까지는 연다** (태조 이성계는
+        # 1335년생, 정도전은 1342년생). 자기 자리를 못 세우는 연표는 연표가
+        # 아니다 — 그때는 그 해 뒤의 이웃·뼈대도 함께 남긴다.
+        floor = polities[0]["year"] if polities else None
+        if floor is not None:
+            if start is not None:
+                floor = min(floor, start)
+            marks = [m for m in marks if m["kind"] == "self" or m["year"] >= floor]
 
         marks.sort(key=lambda m: (m["year"], m["label"]))
 
@@ -833,6 +879,8 @@ class GraphAPI:
         # **왕의 띠도 축 안에 들어와야 한다.** 축을 사건만으로 잡으면
         # 고종이 1919년에 죽은 것이 축 밖으로 밀려 띠가 잘린다.
         reigns = self._reigns()
+        if floor is not None:
+            reigns = [r for r in reigns if r["start"] >= floor]
         span_years = [m["year"] for m in marks] + [
             m["end"] for m in marks if m.get("end") is not None
         ] + [r["start"] for r in reigns] + [

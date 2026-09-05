@@ -318,10 +318,10 @@ export class TimelineRail {
     // 이 걷어냈으므로, 빈 칸은 '1월'이 아니라 '모른다'는 뜻이다.
     const items = place.map(({ m, ty }, i) => `
       <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${ty.toFixed(1)}px"
-              title="${esc(m.label)} · ${esc(whenText(m))}">
+              title="${esc(markName(m))} · ${esc(whenText(m))}">
         <span class="tl-y">${i && place[i - 1].m.year === m.year
           ? esc(monthOf(m.date)) : esc(shortYear(m.year))}</span>
-        <span class="tl-name">${esc(m.label)}</span>
+        <span class="tl-name">${esc(markName(m))}</span>
         ${m.rel ? `<span class="tl-rel">${esc(relHead(m.rel))}</span>` : ''}
       </button>`).join('');
 
@@ -488,6 +488,25 @@ const DYNASTY_HEAD = /^(고구려|백제|신라|가야|발해|후백제|태봉|�
 
 function shortName(label) {
   return String(label || '').replace(DYNASTY_HEAD, '');
+}
+
+// 인물은 생년 자리에 선다. 이름만 적으면 그 해에 무엇을 했다는 것처럼
+// 읽힌다 — 띠의 '사망'과 같은 꼴로 '탄생'을 붙인다. 붙이는 조건은
+// **그 해가 정말 생년일 때**뿐이다: 날짜가 없어 이어진 사건으로 자리만
+// 가늠한 인물(basis 'near')이나 시대 노드에서 연도를 받은 인물에게
+// '탄생'을 적으면 모르는 것을 아는 척한 것이 된다.
+//
+// **나라는 첫 해에 '건국'을 단다.** '조선'이 1392년에 홀로 서 있으면 그 해에
+// 조선이 무엇을 했다는 말인지 알 수 없다 — 그 해는 조선이 선 해다. 어느
+// 나라가 건국인지는 서버가 정한다 (`founded`, 시대 묶음의 정체 노드 중
+// 나라인 것). 일제강점기는 나라가 아니라 받지 않는다.
+export function markName(m) {
+  const label = String(m.label || '');
+  if (m.founded) return `${label} 건국`;
+  if (m.type !== 'person') return label;
+  const own = /^(-?\d{1,4})/.exec(String(m.date || ''));
+  if (!own || Number(own[1]) !== m.year) return label;
+  return `${label} 탄생`;
 }
 
 function yr(y) {
