@@ -502,7 +502,7 @@ function shortName(label) {
 // 나라인 것). 일제강점기는 나라가 아니라 받지 않는다.
 export function markName(m) {
   const label = String(m.label || '');
-  if (m.founded) return `${label} 건국`;
+  if (m.founded) return `${label}건국`;   // 띄지 않는다 — '조선건국' (사용자 표기)
   if (m.type !== 'person') return label;
   const own = /^(-?\d{1,4})/.exec(String(m.date || ''));
   if (!own || Number(own[1]) !== m.year) return label;

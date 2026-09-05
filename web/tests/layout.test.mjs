@@ -246,9 +246,9 @@ console.log('\n배치 (d3-force)');
      markName({ label: '서장옥', type: 'person', group: 'actor', year: 1894, date: '' }) === '서장옥');
   // 나라는 첫 해에 건국을 단다 — 서버가 나라라고 표식한 것만.
   ok('나라는 건국을 단다',
-     markName({ label: '조선', type: 'org', group: 'actor', year: 1392, date: '1392-08-13', founded: true }) === '조선 건국');
+     markName({ label: '조선', type: 'org', group: 'actor', year: 1392, date: '1392-08-13', founded: true }) === '조선건국');
   ok('고른 나라 자신도 건국이다',
-     markName({ label: '대한제국', type: 'org', group: 'actor', year: 1897, date: '1897-10-12', kind: 'self', founded: true }) === '대한제국 건국');
+     markName({ label: '대한제국', type: 'org', group: 'actor', year: 1897, date: '1897-10-12', kind: 'self', founded: true }) === '대한제국건국');
   ok('표식 없는 단체에는 붙이지 않는다',
      markName({ label: '집현전', type: 'org', group: 'actor', year: 1420, date: '1420' }) === '집현전');
   ok('연도가 날짜와 다르면 붙이지 않는다',
