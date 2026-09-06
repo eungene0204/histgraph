@@ -8,6 +8,7 @@ import {
   pt, sentence, groupRelations, relHead, byYear, cardsFor,
   whyEmpty, fmtDate, chainRows, chainGuides, pathSteps, pathSentence,
 } from '../src/lib/relations.js';
+import { imeKey, moveCursor } from '../src/lib/keys.js';
 
 let pass = 0;
 let fail = 0;
@@ -237,3 +238,13 @@ console.log('\n인과');
 console.log('\n==============================================');
 console.log(`통과 ${pass} / 실패 ${fail}`);
 process.exit(fail ? 1 : 0);
+
+console.log('\n검색 목록 키보드');
+eq('아무것도 안 고른 채 ↓ 는 맨 위', moveCursor(-1, 'ArrowDown', 4), 0);
+eq('아무것도 안 고른 채 ↑ 는 맨 아래', moveCursor(-1, 'ArrowUp', 4), 3);
+eq('↓ 는 한 칸', moveCursor(0, 'ArrowDown', 4), 1);
+eq('맨 아래서 ↓ 는 맨 위로 돈다', moveCursor(3, 'ArrowDown', 4), 0);
+eq('맨 위서 ↑ 는 맨 아래로 돈다', moveCursor(0, 'ArrowUp', 4), 3);
+eq('목록이 비면 -1', moveCursor(2, 'ArrowDown', 0), -1);
+ok('한글 조립 중의 키는 입력기 것', imeKey({ key: 'ArrowDown', isComposing: true }) && imeKey({ key: 'Process', keyCode: 229 }));
+ok('조립이 끝난 키는 우리 것', !imeKey({ key: 'ArrowDown', isComposing: false, keyCode: 40 }));

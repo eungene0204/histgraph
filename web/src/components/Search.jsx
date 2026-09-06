@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { Glyph } from './Glyph.jsx';
+import { imeKey, moveCursor } from '../lib/keys.js';
 
 // 검색. 치는 동안 계속 물으면 서버가 놀아나므로 140ms 쉬고 묻는다.
 const DEBOUNCE_MS = 140;
@@ -67,12 +68,15 @@ export function Search({ nodeTypes, onPick }) {
   };
 
   const onKeyDown = (ev) => {
+    // 조립 중인 한글을 끝내는 키는 입력기에 맡긴다 (keys.js 머리글). 여기서
+    // 받으면 ↓ 가 두 칸 가고, Enter 는 '명성황' 의 옛 결과를 고른다.
+    if (imeKey(ev)) return;
     if (ev.key === 'Escape') { close(); inputRef.current?.blur(); return; }
     if (ev.key === 'Enter') { ev.preventDefault(); submit(); return; }
     if (!rows?.length) return;
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
       ev.preventDefault();
-      setCursor((c) => (c + (ev.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length);
+      setCursor((c) => moveCursor(c, ev.key, rows.length));
     }
   };
 

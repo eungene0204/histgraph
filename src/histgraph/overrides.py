@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS overrides (
 """
 
 NODE_COLUMNS = ("label", "description", "start_date", "end_date")
-EDGE_COLUMNS = ("label", "start_date", "end_date")
+EDGE_COLUMNS = ("label", "start_date", "end_date", "confidence")
 WHEN = ("always", "foreign", "empty")
 EDGE_SEP = "\t"
 

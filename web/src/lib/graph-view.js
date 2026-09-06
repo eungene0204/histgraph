@@ -279,8 +279,12 @@ export class GraphView {
       if (!this.byId.has(s.a) || !this.byId.has(s.b)) continue;
       const key = `${s.a}|${s.b}|same_as`;
       if (seen.has(key)) continue;
-      seen.add(key);
-      this.edges.push({ s: s.a, t: s.b, type: 'same_as', label: '동일 실체', conf: 1, kind: 'same_as' });
+      // seen 은 Map 이다. 여기서 .add 를 불러 same_as 가 하나라도 있는 화면은
+      // setData 가 중간에 죽었다 — 노드는 이미 실렸는데 center·selected 가
+      // 안 잡혀 검색한 노드에 조명이 안 들었다 (2026-09-06 지적: 명성황후).
+      const row = { s: s.a, t: s.b, type: 'same_as', label: '동일 실체', conf: 1, kind: 'same_as' };
+      seen.set(key, row);
+      this.edges.push(row);
     }
 
     this.center = payload.center;

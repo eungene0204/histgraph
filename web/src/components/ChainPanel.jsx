@@ -48,6 +48,24 @@ function Row({ row, guide, nodes, onVisit }) {
   );
 }
 
+// 사슬의 머리는 노드 타입을 따라 부른다. '이 일이 부른 것' 은 사건에게만
+// 맞는 말이라, 명성황후(인물) 상세에 서면 사람을 사건처럼 부르게 된다
+// (2026-09-06 지적). 사건이 아닌 노드는 '이 인물 관련'처럼 제 타입 이름으로
+// 부른다 — 나무는 네 걸음까지 따라간 것이라, 그 60건을 한 사람이 '불렀다'고
+// 단정하지 않는 말이기도 하다.
+const CHAIN_NOUN = {
+  person: '인물', place: '장소', org: '단체', concept: '개념',
+  artwork: '작품', media: '작품', heritage: '유물', period: '시대', role: '직위',
+};
+
+// [원인 쪽 머리, 결과 쪽 머리]. 타입을 모르면 사건으로 읽는다 — 인과 엣지의
+// 대부분이 사건이고, 사건의 말이 가장 좁게 맞는 말이다.
+export function chainHeads(type) {
+  const noun = CHAIN_NOUN[type];
+  if (!noun) return ['이 일을 부른 것', '이 일이 부른 것'];
+  return [`이 ${noun}에 앞선 일`, `이 ${noun} 관련`];
+}
+
 // 원인 나무와 결과 나무. 둘 다 비어 있으면 아무것도 그리지 않는다 —
 // "인과 없음"이라고 적어 봐야 아직 안 물어본 것인지 정말 없는 것인지 모른다.
 export function ChainTree({ data, onVisit }) {
@@ -57,17 +75,18 @@ export function ChainTree({ data, onVisit }) {
   if (!causes.length && !effects.length) return null;
   const causeGuides = chainGuides(causes);
   const effectGuides = chainGuides(effects);
+  const [causeHead, effectHead] = chainHeads(data.nodes?.[data.center]?.type);
   return (
     <div className="chain">
       {causes.length > 0 && (
         <>
-          <div className="chain-head">이 일을 부른 것 · {causes.length}</div>
+          <div className="chain-head">{causeHead} · {causes.length}</div>
           {causes.map((r, i) => <Row key={`c-${r.id}-${i}`} row={r} guide={causeGuides[i]} nodes={data.nodes} onVisit={onVisit} />)}
         </>
       )}
       {effects.length > 0 && (
         <>
-          <div className="chain-head">이 일이 부른 것 · {effects.length}</div>
+          <div className="chain-head">{effectHead} · {effects.length}</div>
           {effects.map((r, i) => <Row key={`e-${r.id}-${i}`} row={r} guide={effectGuides[i]} nodes={data.nodes} onVisit={onVisit} />)}
         </>
       )}

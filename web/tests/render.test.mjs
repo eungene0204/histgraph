@@ -206,6 +206,21 @@ let detailHtml = '';
   ok('자식이 있는 줄은 점 아래로 줄기를 내려 자식의 선과 잇는다',
      (chainRaw.match(/chain-stem/g) || []).length === 1 && /chain-stem" style="left:18px"/.test(chainRaw) && /chain-elbow" style="left:18px"/.test(chainRaw),
      chainRaw.match(/chain-(stem|elbow)" style="[^"]*"/g)?.join(' '));
+  // 노드가 사건이 아니면 머리도 그 타입으로 부른다 (2026-09-06 지적:
+  // 명성황후 상세에 '이 일이 부른 것'이 서 있었다).
+  const personTree = { center: 'wd:MS',
+    causes: [],
+    effects: [{ id: 'wd:EU', kind: '원인', how: '', as: '', evidence: [], children: [] }],
+    nodes: { 'wd:MS': { id: 'wd:MS', label: '명성황후', type: 'person', group: 'actor' },
+             'wd:EU': { id: 'wd:EU', label: '을미사변', type: 'event', group: 'event' } } };
+  const personChain = plain(renderToString(h(ChainTree, { data: personTree, onVisit: () => {} })));
+  ok('인물 사슬의 머리는 사람을 사건처럼 부르지 않는다',
+     personChain.includes('이 인물 관련') && !personChain.includes('이 일이 부른 것'), personChain.slice(0, 160));
+  const placeTree = { ...personTree, center: 'wd:SEOUL',
+    nodes: { ...personTree.nodes, 'wd:SEOUL': { id: 'wd:SEOUL', label: '서울', type: 'place', group: 'thing' } } };
+  ok('장소 사슬의 머리는 장소로 부른다',
+     plain(renderToString(h(ChainTree, { data: placeTree, onVisit: () => {} }))).includes('이 장소 관련'));
+
   ok('비어 있으면 사슬을 그리지 않는다', renderToString(h(ChainTree, { data: { causes: [], effects: [], nodes: {} }, onVisit: () => {} })) === '');
   const pathHtml = plain(renderToString(h(PathView, { data: {
     found: true, reversed: false, nodes: tree.nodes,

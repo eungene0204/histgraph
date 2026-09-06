@@ -7,7 +7,7 @@
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
 import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, isCause, causeWire, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
-import { causalReach, causalLayout } from '../src/lib/graph-view.js';
+import { causalReach, causalLayout, GraphView } from '../src/lib/graph-view.js';
 
 let pass = 0;
 let fail = 0;
@@ -389,6 +389,57 @@ console.log('\n배치 (d3-force)');
   ok('열 목록은 왼쪽부터', L.depths.join(',') === '-3,-2,-1,0,1,2');
   ok('기원전은 글자로', causalLayout({ center: 'a', causes: [it('b', '원인')], effects: [], nodes: { a: { id: 'a', label: '가', type: 'event', start: '-0057-01-01' }, b: { id: 'b', label: '나', type: 'event' } } }).nodes.find((n) => n.id === 'a').names[1] === '기원전 57');
   ok('인과가 없으면 도면도 없다', causalLayout({ center: 'a', causes: [], effects: [], nodes: {} }) === null);
+}
+
+// --- setData 는 same_as 가 있어도 끝까지 간다 ------------------------------
+// 명성황후를 검색하면 노드는 120개 실렸는데 조명이 안 들었다 (2026-09-06).
+// same_as 묶음을 넣는 줄이 Map 에 .add 를 불러 setData 가 중간에 죽었고,
+// center·selected 가 안 잡혀 검색한 노드가 그냥 무리 속 점 하나였다.
+// 캔버스 없이 세우기 위해 브라우저 것들을 흉내낸다 — 그리기는 안 돈다.
+console.log('\nsetData 와 same_as');
+{
+  const noop = () => {};
+  const ctx = new Proxy({}, { get: () => noop, set: () => true });
+  const canvas = {
+    getContext: () => ctx, clientWidth: 800, clientHeight: 600, width: 0, height: 0,
+    style: {}, parentElement: {}, addEventListener: noop,
+    setPointerCapture: noop, releasePointerCapture: noop,
+  };
+  const saved = { RO: globalThis.ResizeObserver, raf: globalThis.requestAnimationFrame,
+                  caf: globalThis.cancelAnimationFrame, win: globalThis.window };
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  globalThis.requestAnimationFrame = () => 0;
+  globalThis.cancelAnimationFrame = noop;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const view = new GraphView(canvas);
+    const payload = {
+      center: 'wd:MS',
+      nodes: [
+        { id: 'wd:MS', label: '명성황후', type: 'person', group: 'actor', degree: 3 },
+        { id: 'wd:JOSEON', label: '조선', type: 'org', group: 'actor', degree: 9 },
+        { id: 'kr:period:조선시대', label: '조선시대', type: 'period', group: 'frame', degree: 5 },
+      ],
+      edges: [{ s: 'wd:MS', t: 'wd:JOSEON', type: 'member_of', label: '소속', conf: 1 }],
+      same_as: [{ a: 'wd:JOSEON', b: 'kr:period:조선시대' }],
+    };
+    let threw = null;
+    try { view.setData(payload); } catch (e) { threw = e; }
+    ok('same_as 가 있어도 setData 가 죽지 않는다', !threw, String(threw));
+    ok('중심이 잡힌다', view.center === 'wd:MS', String(view.center));
+    ok('same_as 가 한 줄로 실린다', view.edges.filter((e) => e.kind === 'same_as').length === 1);
+    view.select('wd:MS');
+    ok('검색한 노드가 고른 노드가 된다', view.selected === 'wd:MS');
+    // 같은 자료를 얹어도(merge) same_as 가 두 번 실리지 않는다
+    view.setData(payload, { merge: true });
+    ok('얹어도 same_as 는 하나', view.edges.filter((e) => e.kind === 'same_as').length === 1);
+    view.destroy();
+  } finally {
+    globalThis.ResizeObserver = saved.RO;
+    globalThis.requestAnimationFrame = saved.raf;
+    globalThis.cancelAnimationFrame = saved.caf;
+    if (saved.win === undefined) delete globalThis.window; else globalThis.window = saved.win;
+  }
 }
 
 console.log('\n==============================================');

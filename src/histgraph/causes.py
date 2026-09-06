@@ -24,6 +24,8 @@
    모델은 "A 의 배경에 B 가 있다"를 "A 가 B 의 배경"으로 뒤집어 내기도
    하는데, 스키마는 방향을 강제하지 못하고 연대는 한다.
 4. 구조화 소스(Wikidata)가 반대 방향을 이미 알고 있으면 추출본을 버린다.
+5. **근거 문장이 그 인과를 말해야 한다** (`fact_check`) — 상징·추정 표현, 양끝
+   이름이 없는 근거, 'X의 해소'를 X 로 푼 것, "X 이후"라는 시간 순서뿐인 것은 버린다.
 
 엣지는 언제나 원인 → 결과다. 라벨이 인과의 종류(`KINDS`)고, '어떻게'는
 `props.how` 한 구절이 말한다. 화면(`relations.js`)이 이 이름을 그대로 읽는다.
@@ -510,6 +512,100 @@ def reversed_by_source(store: GraphStore, cause: str, effect: str) -> bool:
     ).fetchone() is not None
 
 
+# --- 팩트체크 관문 ------------------------------------------------------------
+# 2026-09-06 지적: "서울올림픽이 냉전체제에 영향을 줬다는 거 사실이 아니야.
+# 이런 논리비약을 피하면서 인과 사슬을 만들어야 해." 모델이 '냉전체제의 해소'를
+# 결과로 냈고 해소기가 그것을 냉전체제로 풀었으며, 근거는 "서울올림픽 **이후**
+# 소련이 해체되고 … 냉전체제는 해소되었다" — 시간 순서를 인과로 읽은 것이다.
+# 네 가지를 근거 문장에서 직접 잰다. 배경지식으로 판정하지 않는다.
+END_OF = re.compile(
+    r"(?:의\s*)?(해소|해체|붕괴|종식|몰락|소멸|폐지|쇠퇴|약화|실패|패배|중단|퇴색|철폐|해산|멸망|종결|와해"
+    r"|축소|폐쇄|퇴진|실각|패망|패전|좌절|무산|파탄|상실|단절|종료|폐기)$")
+STRONG = re.compile(
+    r"때문|인해|인하여|인한|계기|초래|야기|촉발|기인|비롯|말미암|으로써|로써|따라|따른|영향|불러|이끌"
+    r"|낳[아았]|가져[오왔]|등으로|의해|의하여|결과|이에 |함께")
+HEDGE = re.compile(r"상징적|상징으로|설도 있|일각에서|풍문|소문|추정된다|것으로 보인다|것으로 여겨|평가되기도|불리기도|일컫기도")
+WINDOW = 250      # 근거 문장 앞뒤로 이만큼 안에서 이름을 찾는다 — "이러한 상황에서 …"는 앞 문장을 가리킨다
+TEMPORAL_CAP = 0.5
+TEMPORAL = re.compile(r"이후|뒤|후에|이래|다음")
+
+
+def _names(store: GraphStore, node_id: str, matched: str, phrase: str) -> set[str]:
+    names = {matched, phrase, *heads(phrase)}
+    row = store.conn.execute("SELECT label FROM nodes WHERE id = ?", (node_id,)).fetchone()
+    if row:
+        names.add(row["label"])
+    names.update(r["alias"] for r in store.conn.execute("SELECT alias FROM aliases WHERE node_id = ?", (node_id,)))
+    return {loose_key(n) for n in names if n and len(loose_key(n)) >= 2}
+
+
+# 근거 쪽 열쇠는 괄호 안을 남긴다 — "쿠데타를 일으켰다(위화도 회군)"의 이름은 괄호 안에 있다.
+_TEXT_STRIP = re.compile(r"[\s·‧•・․.\-–—_'\"‘’“”()]")
+HEDGE_CAP = 0.5
+
+
+def loose_text(text: str) -> str:
+    return _TEXT_STRIP.sub("", text)
+
+
+def _found(names: set[str], key: str) -> bool:
+    # 표기 차이를 봐준다 — 마지막 글자('계유정난'/'계유정란'), 앞 두 글자('흥선대원군'/'대원군').
+    for n in names:
+        if n in key or (len(n) >= 4 and n[:-1] in key) or (len(n) >= 5 and n[2:] in key):
+            return True
+    return False
+
+
+def evidence_window(evidence: str, text: str) -> str:
+    i = text.find(evidence)
+    if i < 0:
+        return evidence
+    return text[max(0, i - WINDOW): i + len(evidence) + WINDOW]
+
+
+def fact_check(
+    store: GraphStore, doc: dict, kind: str, evidence: str,
+    cause: tuple[str, str, str], effect: tuple[str, str, str], context: str | None = None,
+) -> tuple[str | None, str, float | None]:
+    """근거 문장이 그 인과를 **말하는지** 잰다. (버릴 이유 또는 None, 종류, 확신도 상한).
+
+    - 상징·추정 표현("냉전 해체의 상징적 사건으로 평가되기도 한다")은 확신도를 낮춘다.
+    - 근거 앞뒤(`context`, 없으면 근거만)에 양끝 이름이 있어야 한다 — 문서의 주인공은
+      주어가 생략되므로 예외. 둘 다 없으면 버리고, 한쪽만 없으면 확신도를 낮춘다
+      (별칭·서술로 가리킨 것일 수 있다). 한 문장이 아니라 앞뒤 `WINDOW` 자를 보는 것은
+      "이러한 상황에서 … 의병이 일어났다"가 앞 문장의 원인을 가리키기 때문이다.
+    - 결과가 'X의 해소·붕괴·폐지…' 꼴이면 그것은 X 가 아니라 X 의 끝이다 — 종류를
+      '영향'으로 바꾸고, 근거에 인과 표현(때문·계기·초래…)이 없으면 버린다.
+      (서울올림픽 → '냉전체제의 해소'가 냉전체제로 풀려 "서울올림픽이 냉전체제에
+      영향을 줬다"가 됐던 것.)
+    - '원인'·'영향'인데 근거가 원인을 "X 이후/뒤"로만 두면 시간 순서지 인과가 아니다 —
+      버리지는 않고 '배경'으로 낮추고 확신도를 `TEMPORAL_CAP` 으로 막는다
+      (삼포왜란 뒤 삼포를 폐쇄한 것은 참인 인과이므로)."""
+    cid, cname, cphrase = cause
+    eid, ename, ephrase = effect
+    cap: float | None = HEDGE_CAP if HEDGE.search(evidence) else None
+    key = loose_text(evidence)
+    wide = loose_text(context) if context else key
+    c_names = _names(store, cid, cname, cphrase)
+    c_ok = cid == doc["id"] or _found(c_names, wide)
+    e_ok = eid == doc["id"] or _found(_names(store, eid, ename, ephrase), wide)
+    if not c_ok and not e_ok:
+        return "근거에 양끝 이름 없음", kind, None
+    if not (c_ok and e_ok):
+        # 한쪽은 별칭·서술로 가리켰을 수 있다('흥선대원군의 천주교 탄압' = 병인박해) — 지우지 않고 확신도만 낮춘다.
+        cap = HEDGE_CAP
+    if ephrase != ename and END_OF.search(ephrase):
+        if not STRONG.search(evidence):
+            return "끝난 것을 결과로 (인과 표현 없음)", kind, None
+        kind = "영향"
+    if kind in ("원인", "영향") and not STRONG.search(evidence):
+        for n in c_names:
+            if re.search(re.escape(n) + r".{0,6}?(?:" + TEMPORAL.pattern + ")", key):
+                kind, cap = "배경", TEMPORAL_CAP
+                break
+    return None, kind, cap
+
+
 def accept(
     store: GraphStore, doc: dict, answers: list[dict], passages: list[dict], model: str,
 ) -> tuple[list[Edge], dict[str, int], list[str]]:
@@ -558,6 +654,15 @@ def accept(
         if part_of_each_other(store, cid, eid):
             drop("상하위 관계")
             continue
+        why_fc, kind, cap = fact_check(
+            store, doc, kind, evidence,
+            (cid, cname, normalize_name(str(a.get("cause", "")))),
+            (eid, ename, normalize_name(str(a.get("effect", "")))),
+            evidence_window(evidence, text),
+        )
+        if why_fc:
+            drop(why_fc)
+            continue
         how = " ".join(str(a.get("how", "")).split())
         if not has_hangul(how) or len(how) > HOW_MAX:
             how = ""
@@ -569,6 +674,8 @@ def accept(
             if phrase != matched and has_hangul(phrase):
                 props[key] = phrase
         conf = CONFIDENCE.get(str(a.get("confidence")), 0.5)
+        if cap is not None:
+            conf = min(conf, cap)
         prev = edges.get((cid, eid))
         if prev is not None and prev.confidence >= conf:
             continue
@@ -686,6 +793,32 @@ def reresolve(store: GraphStore, corpus, scope: set[str] | None = None) -> dict[
     return {"counts": counts, "dropped": dropped, "unresolved": unresolved, "samples": samples}
 
 
+def safe_sync(store: GraphStore, target: GraphStore) -> GraphStore:
+    """화면 DB 로 옮기되, 실패해도 하루짜리 실행을 죽이지 않는다.
+
+    2026-09-06 실측: 인물 문서 40건째 `sync` 가 "attempt to write a readonly
+    database" 로 죽었다 — 다른 세션이 `data/korea.sqlite` 파일을 바꿔치운
+    (git checkout 등) 사이 열어 둔 연결이 옛 파일을 가리킨 것이다. 파생본은
+    10분마다 `--sync-only` 가 따로 옮기고 마지막에 한 번 더 옮기므로, 여기서는
+    경고만 남기고 연결을 새로 연다."""
+    import sqlite3
+
+    try:
+        log.info("화면 DB 로 옮김: 인과 엣지 %d건", sync(store, target))
+        return target
+    except sqlite3.OperationalError as err:
+        log.warning("화면 DB 로 못 옮김 (%s) — 연결을 다시 연다: %s", err, target.path)
+        try:
+            target.close()
+        except Exception:
+            pass
+        try:
+            return GraphStore(target.path)
+        except Exception as err2:
+            log.warning("화면 DB 를 다시 열지 못함: %s", err2)
+            return target
+
+
 def run(
     store: GraphStore,
     corpus,
@@ -729,7 +862,7 @@ def run(
         counts["엣지"] += n
         counts["물음"] = counts.get("물음", 0) + 1
         if sync_target is not None and counts["물음"] % sync_every == 0:
-            log.info("화면 DB 로 옮김: 인과 엣지 %d건", sync(store, sync_target))
+            sync_target = safe_sync(store, sync_target)
         for k, v in why.items():
             dropped[k] = dropped.get(k, 0) + v
         for name in missing:
