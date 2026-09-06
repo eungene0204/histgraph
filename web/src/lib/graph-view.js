@@ -79,17 +79,17 @@ export const TYPE_COLOR_LIGHT = {
   org: '#b08a45',      // 크림을 어둡게 누른 황갈색
   event: '#fb6c13',
   place: '#22854c',    // 초록 — 원색 004F2D 보다 한 단 밝다 (직위와 갈리게)
-  heritage: '#cfa300', // 노랑을 어둡게 — 흰 바탕의 F9C80E 는 대비 1.4
+  heritage: '#c29500', // 노랑을 어둡게 — 흰 바탕의 F9C80E 는 대비 1.4, 이 값은 2.3
   artwork: '#d62828',  // 팔레트 원색 빨강
   media: '#003049',    // 팔레트 원색 남색
-  period: '#a9c4d6',   // 옅은 남색 — 뼈대는 물러난다
-  role: '#a3cdb6',     // 옅은 초록
+  period: '#7fa3bd',   // 옅은 남색 — 뼈대는 물러나되 보이기는 해야 한다 (2.6:1)
+  role: '#6fae8e',     // 옅은 초록 (2.5:1)
 };
 export const GROUP_COLOR_LIGHT = {
   actor: '#3d84f5',
   event: '#fb6c13',
   thing: '#22854c',
-  frame: '#a9c4d6',
+  frame: '#7fa3bd',
 };
 
 // 노드 색은 타입이 정한다. 모르는 타입은 갈래로 물러난다. 테마는 그릴 때마다
@@ -121,19 +121,22 @@ const DARK = {
   textDim: 'rgba(218,218,218,0.62)',      // --text-muted 와 같은 무게
   ring: 'rgba(218,218,218,0.45)',         // 중심 노드의 테두리
 };
+// 라이트. 처음 값(선 #c4c4c4·글자 62%)은 흰 바탕에서 안 보였다 (2026-09-06
+// 지적). 선은 Radix gray 9 (#8d8d8d) 수준으로, 가리킨 선은 글자만큼 어둡게.
+// 값의 근거는 style.css 의 [data-theme="light"] 주석.
 const LIGHT = {
   surface: '#ffffff',
-  edgeBase: '#c4c4c4',
-  edgeSoft: 'rgba(196,196,196,0.35)',
-  edgeSame: '#d8d8d8',
-  edgeLit: '#5a5a5a',
-  edgeLitSame: '#8a8a8a',
-  causeLit: '#2f6f9f',                    // --color-blue (라이트)
-  accent: '#8a5cf5',                      // hsl(258 88% 66%)
-  accentSoft: '#ac8cf8',                  // hsl(258 88% 76%)
-  text: '#222222',
-  textDim: 'rgba(34,34,34,0.62)',
-  ring: 'rgba(34,34,34,0.45)',
+  edgeBase: '#9a9a9a',                    // 흰 바탕 2.7:1 — 1px 선이 보이는 하한 근처
+  edgeSoft: 'rgba(154,154,154,0.4)',
+  edgeSame: '#b8b8b8',
+  edgeLit: '#2e2e2e',                     // 가리킨 노드의 선 — 글자와 같은 무게
+  edgeLitSame: '#6a6a6a',
+  causeLit: '#2a6a9a',                    // --color-blue (라이트)
+  accent: '#7a4be0',                      // hsl(258 80% 56%)
+  accentSoft: '#9b76ea',                  // hsl(258 80% 68%)
+  text: '#1f1f1f',
+  textDim: 'rgba(31,31,31,0.72)',         // ≈ #5a5a5a — 보조 글자와 같은 무게
+  ring: 'rgba(31,31,31,0.5)',
 };
 function chrome() { return isLight() ? LIGHT : DARK; }
 

@@ -29,20 +29,20 @@
   --mark-thing: #32c261;
 }
 
-/* 라이트 테마 — 값은 web/style.css 의 [data-theme="light"] 와 같다.
+/* 라이트 테마 — 값은 web/style.css 의 [data-theme="light"] 와 같다 (근거도 거기).
    그래프 화면에서 고른 테마가 localStorage 'theme' 로 넘어오고
    public/theme-boot.js 가 <html data-theme> 에 박는다. */
 :root[data-theme="light"] {
   color-scheme: light;
   --background-primary:   #ffffff;
-  --background-secondary: #f6f6f6;
-  --background-modifier-border: #e0e0e0;
-  --background-modifier-hover: rgba(0,0,0,.05);
-  --text-normal: #222222;
-  --text-muted:  #5c5c5c;
-  --text-faint:  #ababab;
-  --color-accent: hsl(258 88% 66%);
-  --color-accent-2: hsl(258 88% 76%);
+  --background-secondary: #f2f2f2;
+  --background-modifier-border: #d0d0d0;
+  --background-modifier-hover: rgba(0,0,0,.06);
+  --text-normal: #1f1f1f;
+  --text-muted:  #555555;
+  --text-faint:  #767676;
+  --color-accent: hsl(258 80% 56%);
+  --color-accent-2: hsl(258 80% 68%);
 }
 
 * { box-sizing: border-box; }
