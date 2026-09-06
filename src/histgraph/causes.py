@@ -406,7 +406,10 @@ def _rows(store: GraphStore, ids: list[str], node_type: str | None) -> list:
     ).fetchall()
 
 
-def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[str, str, str] | None:
+def resolve(
+    store: GraphStore, name: str, node_type: str, doc: dict,
+    allowed: tuple[str, ...] | None = None,
+) -> tuple[str, str, str] | None:
     """이름 -> (노드 id, 타입, 실제로 맞춘 표기). 없으면 None — 노드를 만들지 않는다.
 
     타입이 맞는 후보를 먼저, 없으면 타입을 무시하고 한 번 더 (모델이
@@ -417,7 +420,12 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
 
     그래도 없으면 **표기 차이**로 보고 느슨한 열쇠(`LooseIndex`)로 한 번
     더 — 정확한 표기가 먼저고 느슨한 것은 그 뒤다. 자국 왕조는 어느
-    길로도 풀지 않는다."""
+    길로도 풀지 않는다.
+
+    `allowed` 는 이 자리에 설 수 있는 타입이다. 타입을 무시하고 찾을 때도
+    **그 자리에 못 서는 타입은 고르지 않는다** — '훈민정음'이 국보
+    해례본(유물)으로 풀려 "세종이 국보를 일으켰다"가 되고 '타입 안 맞음'으로
+    버려졌다 (2026-09-06). 유물을 건너뛰어야 별칭·느슨한 열쇠까지 간다."""
     from .promote import life_span
 
     name = normalize_name(name)
@@ -425,14 +433,17 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
         return None
     doc_span = life_span(doc.get("start_date"), doc.get("end_date"))
     candidates = [name, *heads(name)]
+
+    def pick(rows):
+        if allowed is not None:
+            rows = [r for r in rows if r["type"] in allowed]
+        return pick_candidate(rows, doc_span, doc["id"])
+
     for candidate in candidates:
         if candidate in HOME_POLITIES:
             return None
         for clause, args in (("AND n.type = ?2", (candidate, node_type)), ("", (candidate,))):
-            row = pick_candidate(
-                store.conn.execute(CANDIDATES.format(type_clause=clause), args).fetchall(),
-                doc_span, doc["id"],
-            )
+            row = pick(store.conn.execute(CANDIDATES.format(type_clause=clause), args).fetchall())
             if row:
                 return row["id"], row["type"], candidate
     idx = loose_index(store)
@@ -442,7 +453,7 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
             return None
         ids = idx.lookup(candidate, node_type)
         for typed in (node_type, None):
-            row = pick_candidate(_rows(store, ids, typed), doc_span, doc["id"])
+            row = pick(_rows(store, ids, typed))
             if row:
                 return row["id"], row["type"], candidate
     return None
@@ -632,8 +643,11 @@ def accept(
         if not evidence:
             drop("근거 없음")
             continue
-        cause = resolve(store, str(a.get("cause", "")), str(a.get("cause_type", "event")), doc)
-        effect = resolve(store, str(a.get("effect", "")), str(a.get("effect_type", "event")), doc)
+        cause = resolve(store, str(a.get("cause", "")), str(a.get("cause_type", "event")), doc,
+                        allowed=CAUSE_TYPES)
+        # 결과 자리에 사람은 못 서지만 여기서는 받는다 — 아래에서 참여로 돌린다.
+        effect = resolve(store, str(a.get("effect", "")), str(a.get("effect_type", "event")), doc,
+                         allowed=(*EFFECT_TYPES, "person"))
         if cause is None or effect is None:
             for got, name in ((cause, a.get("cause")), (effect, a.get("effect"))):
                 if got is None and name:

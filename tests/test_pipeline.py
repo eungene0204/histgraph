@@ -4957,5 +4957,151 @@ with tempfile.TemporaryDirectory() as _d:
         "SELECT value FROM overrides WHERE key='ex:event:성호사설' AND field='merged_into'").fetchone()[0] == '"nikh:R1"')
     store.close()
 
+# --- 세종 사슬에 한글이 없던 세 가지 뿌리 (2026-09-06) -------------------------
+from histgraph import labels as labels_mod2, overrides as overrides_mod  # noqa: E402
+from histgraph.extract import complete_evidence as _ce  # noqa: E402
+from histgraph.sources import aks as aks_mod2  # noqa: E402
+
+print("\n[민족문화대백과 — 연대가 어긋나면 잇지 않는다]")
+_E2 = lambda i, label, kind, era, definition="정의.": aks_mod2.Entry(  # noqa: E731
+    id=i, url=f"https://encykorea.aks.ac.kr/Article/{i}", label=label, hanja="",
+    field="", kind=kind, era=era, definition=definition)
+check("시대 칸을 연도 구간으로 읽는다 — 하위 시대는 좁게, '고려 | 조선'은 합쳐서",
+      aks_mod2.era_span("조선/조선 후기") == (1592, 1897) and aks_mod2.era_span("고려 | 조선") == (918, 1897)
+      and aks_mod2.era_span("") is None and aks_mod2.era_span("미상") is None)
+check("글의 연도만 센다 — '제30호'·'3·1'은 아니다",
+      aks_mod2.text_years("1397년(태조 6)에 나서 1450년에 죽었다. 국보 제30호. 3·1 운동") == [1397, 1450])
+ido = _E2("E0044022", "이도", "인물/전통 인물", "조선",
+          "조선 후기에, 정묘호란이 발발하자 의병을 일으켜 활동한 의병장.")
+check("시대 칸이 '조선'뿐이어도 정의의 '조선 후기'가 가른다 — 세종(1397~1450)은 아니다",
+      not aks_mod2.consistent(ido, (1397, 1450))
+      and aks_mod2.consistent(ido, (1600, 1660)))
+bare = _E2("E0044022", "이도", "인물/전통 인물", "조선", "의병장.")
+check("시대 칸도 정의도 말이 없으면 못 가른다 — 본문을 받아야 한다", aks_mod2.consistent(bare, (1397, 1450)))
+check("본문의 연도가 생몰년에서 110년 넘게 떨어지면 다른 사람이다",
+      not aks_mod2.consistent(bare, (1397, 1450), "1627년 정묘호란이 일어나자 의병을 일으켰다. 1636년 병자호란.")
+      and aks_mod2.consistent(bare, (1397, 1450), "1443년 훈민정음을 만들었다."))
+check("하위 시대가 적혀 있으면 그것으로 가른다",
+      not aks_mod2.consistent(_E2("E1", "이도", "인물/전통 인물", "조선/조선 후기"), (1397, 1450)))
+check("정의의 연도로도 가른다",
+      not aks_mod2.consistent(_E2("E1", "강봉수", "인물/전통 인물", "조선", "1573년에 난 문신."), (1971, None)))
+check("현대 인물에 조선 항목은 잇지 않는다",
+      not aks_mod2.consistent(_E2("E1", "강봉수", "인물/전통 인물", "조선"), (1971, None)))
+check("시대 경계는 무르다 — 고려 말에 난 조선 개국공신",
+      aks_mod2.consistent(_E2("E1", "정도전", "인물/전통 인물", "조선"), (1342, 1398)))
+check("노드 연대를 모르면 막지 않는다", aks_mod2.consistent(ido, None) and aks_mod2.consistent(ido, (None, None)))
+check("연도가 있으면 연도가 이긴다 — 시대 칸이 틀린 항목",
+      aks_mod2.consistent(_E2("E1", "오익창", "인물/전통 인물", "선사/청동기", "조선 후기 의병."), (1557, 1643),
+                          "1592년 임진왜란 때 의병을 일으켰다."))
+check("아직 있는 단체는 뒤가 열려 있다 — 1200년에 선 종단의 1962년 출범 글",
+      aks_mod2.consistent(_E2("E1", "대한불교조계종", "단체", "현대/대한민국", "1962년 출범한 종단."), (1200, 2100)))
+m = aks_mod2.match_nodes([ido], [("wd:SEJONG", "이도", "person")], {"wd:SEJONG": (1397, 1450)})
+check("match_nodes 는 연대를 주면 시대·정의로 거른다",
+      m == {} and aks_mod2.match_nodes([_E2("E1", "이도", "인물/전통 인물", "조선/조선 후기")],
+                                       [("wd:SEJONG", "이도", "person")], {"wd:SEJONG": (1397, 1450)}) == {}
+      and aks_mod2.match_nodes([ido], [("wd:SEJONG", "이도", "person")]) == {"E0044022": "wd:SEJONG"})
+
+with tempfile.TemporaryDirectory() as tmp:
+    raw = Path(tmp) / "raw"
+    raw.mkdir()
+    head = "항목 아이디,항목 고유 웹주소,대표 미디어 아이디,항목명,원어,항목 분야,항목 유형,시대,항목 정의,집필자 정보"
+    rows = [("E0044022", "이도", "인물/전통 인물", "조선", "조선 후기에 정묘호란이 발발하자 의병을 일으킨 의병장."),
+            ("E2", "정도전", "인물/전통 인물", "조선", "조선 개국공신."),
+            ("E3", "강봉수", "인물/전통 인물", "조선", "1573년에 난 문신.")]
+    body = "\n".join(f"{i},https://encykorea.aks.ac.kr/Article/{i},x,{label},,,{kind},{era},{d},글쓴이"
+                     for i, label, kind, era, d in rows)
+    (raw / aks_mod2.INDEX_CSV).write_text("\ufeff" + head + "\n" + body + "\n", encoding="utf-8")
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:SEJONG", type="person", label="조선 세종", source="wd", start_date="1397-05-15", end_date="1450-04-08",
+             aliases=["이도", "세종대왕"]),
+        Node(id="wd:JDJ", type="person", label="정도전", source="wd", start_date="1342", end_date="1398"),
+        Node(id="wd:KBS", type="person", label="강봉수 (야구 선수)", source="wd", start_date="1971", aliases=["강봉수"]),
+        Node(id="nikh:JAS", type="heritage", label="장안성", source="nikh", start_date="1935"),
+    ])
+    check("국가유산의 날짜는 지정일이라 연대로 재지 않는다", aks_mod2.node_years(store)["nikh:JAS"] == (None, None)
+          and aks_mod2.node_years(store)["wd:KBS"] == (1971, 2061))
+    rep = aks_mod2.fill_descriptions(store, raw_dir=raw)
+    got = dict(store.conn.execute("SELECT id, description FROM nodes"))
+    check("빈 설명 채우기도 같은 검사를 지난다 — 세종에 의병장 정의를 붙이지 않는다",
+          not got["wd:SEJONG"] and not got["wd:KBS"] and got["wd:JDJ"] == "조선 개국공신." and rep["mismatched"] == 2, str(rep))
+
+    # 검사가 없던 때 이어진 문서·설명을 되돌아본다
+    conn = corpus_mod.open_corpus(Path(tmp) / "corpus.sqlite")
+    corpus_mod.put_doc(conn, "wd:SEJONG", "이도", "== 정의 ==\n의병장.\n\n== 생애 ==\n1627년 정묘호란이 일어나자 의병을 일으켰다.",
+                       "aks", "https://encykorea.aks.ac.kr/Article/E0044022")
+    corpus_mod.put_doc(conn, "wd:SEJONG", "세종", "== 정의 ==\n조선 제4대 왕. 1443년 훈민정음을 만들었다.", "nikh")
+    corpus_mod.put_doc(conn, "wd:JDJ", "정도전", "== 정의 ==\n1342년에 나서 1398년에 죽은 개국공신.",
+                       "aks", "https://encykorea.aks.ac.kr/Article/E2")
+    store.conn.execute("""UPDATE nodes SET description = '1573년에 난 문신.',
+                          props = json_set(props, '$.desc_source', 'aks', '$.desc_url', 'https://encykorea.aks.ac.kr/Article/E3')
+                          WHERE id = 'wd:KBS'""")
+    overrides_mod.record(store.conn, "node", "wd:KBS", "description", "1573년에 난 문신.", "describe")
+    dry = aks_mod2.audit_bindings(store, conn, raw_dir=raw, dry_run=True)
+    check("미리보기는 바꾸지 않는다", corpus_mod.has_doc(conn, "wd:SEJONG", "aks") and len(dry["rebound"]) == 1)
+    got = aks_mod2.audit_bindings(store, conn, raw_dir=raw)
+    check("어긋난 문서는 고아 아이디로 옮기고 맞는 것은 둔다",
+          [r[:2] for r in got["rebound"]] == [("wd:SEJONG", "E0044022")]
+          and not corpus_mod.has_doc(conn, "wd:SEJONG", "aks") and corpus_mod.has_doc(conn, "aks:E0044022", "aks")
+          and corpus_mod.has_doc(conn, "wd:SEJONG", "nikh") and corpus_mod.has_doc(conn, "wd:JDJ", "aks"), str(got))
+    check("문단도 함께 옮긴다 — 세종의 문단에 의병장 글이 남지 않는다",
+          {r["source"] for r in causes_mod.doc_passages(conn, "wd:SEJONG")} == {"nikh"})
+    desc, props = store.conn.execute("SELECT description, props FROM nodes WHERE id='wd:KBS'").fetchone()
+    check("어긋난 정의로 채운 설명은 비우고 편집 계층에서도 지운다",
+          not desc and "desc_source" not in props
+          and store.conn.execute("SELECT COUNT(*) FROM overrides WHERE key='wd:KBS'").fetchone()[0] == 0, str((desc, props)))
+    check("두 번 돌리면 할 일이 없다", aks_mod2.audit_bindings(store, conn, raw_dir=raw)["rebound"] == [])
+    conn.close()
+    store.close()
+
+print("\n[근거 대조 — 한자 괄호는 양쪽에서 뺀다]")
+_T = "훈민정음(訓民正音)의 창제는 세종이 남긴 문화유산 가운데 가장 빛나는 업적이다. 세종이 훈민정음을 처음 창제한 것은 1443년(세종 25)이었다."
+check("모델이 한자 괄호를 빼고 인용해도 문장을 되찾는다",
+      _ce("훈민정음의 창제는 세종이 남긴 문화유산 가운데 가장 빛나는 업적이다.", _T)
+      == "훈민정음(訓民正音)의 창제는 세종이 남긴 문화유산 가운데 가장 빛나는 업적이다.")
+check("한자 괄호를 그대로 인용해도 된다",
+      _ce("훈민정음(訓民正音)의 창제는 세종이 남긴 문화유산 가운데", _T) is not None)
+check("한글·숫자 괄호는 그대로 대조한다 — '(세종 25)'는 빼지 않는다",
+      _ce("세종이 훈민정음을 처음 창제한 것은 1443년(세종 25)이었다.", _T) is not None
+      and _ce("세종이 훈민정음을 처음 창제한 것은 1443년이었다.", _T) is None)
+
+print("\n[해소기 — 그 자리에 못 서는 타입은 고르지 않는다]")
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "r.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:SEJONG", type="person", label="조선 세종", source="wd", start_date="1397", end_date="1450", aliases=["세종"]),
+        Node(id="khs:HMJ", type="heritage", label="훈민정음", source="khs", start_date="1443"),
+        Node(id="wd:HANGUL", type="event", label="한글", source="wd", start_date="1443"),
+    ])
+    doc = {"id": "wd:SEJONG", "start_date": "1397", "end_date": "1450"}
+    got = causes_mod.resolve(store, "훈민정음", "event", doc)
+    check("자리를 안 주면 전처럼 이름 그대로 — 유물", got and got[0] == "khs:HMJ", str(got))
+    got = causes_mod.resolve(store, "훈민정음", "event", doc, allowed=causes_mod.EFFECT_TYPES)
+    check("결과 자리에는 유물을 고르지 않는다 — 별칭이 없으면 못 푼다", got is None, str(got))
+    table = Path(tmp) / "aliases.tsv"
+    table.write_text("# 별칭 표\nwd:HANGUL\t훈민정음\t창제 당시 이름\n", encoding="utf-8")
+    rows = labels_mod2.load_alias_table(table)
+    arep = labels_mod2.apply_aliases(store.conn, rows)
+    got = causes_mod.resolve(store, "훈민정음", "event", doc, allowed=causes_mod.EFFECT_TYPES)
+    check("별칭 표를 적용하면 한글로 풀린다", arep.added == [("wd:HANGUL", "훈민정음")] and got and got[0] == "wd:HANGUL", str(got))
+    answers = [{"cause": "세종", "cause_type": "person", "effect": "훈민정음", "effect_type": "event", "kind": "원인",
+                "how": "창제하여 반포", "evidence": "훈민정음의 창제는 세종이 남긴 문화유산 가운데 가장 빛나는 업적이다.",
+                "confidence": "certain"}]
+    edges, why, _ = causes_mod.accept(store, doc, answers, [{"text": _T}], "m")
+    check("세종 → 한글 인과가 선다", [(e.src, e.dst, e.label) for e in edges] == [("wd:SEJONG", "wd:HANGUL", "원인")], str(why))
+    store.conn.execute("DELETE FROM aliases WHERE node_id='wd:HANGUL'")
+    overrides_mod.reapply(store, node_ids=["wd:HANGUL"])
+    check("별칭은 편집 계층에 남아 수집 뒤에 되살아난다",
+          store.conn.execute("SELECT alias FROM aliases WHERE node_id='wd:HANGUL'").fetchone()[0] == "훈민정음")
+    check("표를 두 번 적용해도 같다", labels_mod2.apply_aliases(store.conn, rows).already == 1)
+    bad = Path(tmp) / "bad.tsv"
+    bad.write_text("Q8222\t훈민정음\n", encoding="utf-8")
+    try:
+        labels_mod2.load_alias_table(bad)
+        check("별칭 표는 노드 id 를 통째로 적는다", False)
+    except labels_mod2.LabelTableError:
+        check("별칭 표는 노드 id 를 통째로 적는다", True)
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

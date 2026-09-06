@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "data" / "histgraph.sqlite"
 DEFAULT_CACHE = ROOT / "data" / "cache"
 DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
+DEFAULT_ALIASES = ROOT / "data" / "aliases.tsv"
 DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
 DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
@@ -1213,6 +1214,22 @@ def cmd_corpus(args: argparse.Namespace) -> int:
     from . import corpus as corpus_mod
 
     sources = ["aks", "nikh", "kowiki"] if args.source == "all" else [args.source]
+    if args.audit:
+        # 연대 검사가 없던 때 이어진 민백 문서·설명을 되돌아본다 (네트워크 없음).
+        # 원본과 파생본에 한 번씩 — 말뭉치는 하나라 두 번째는 설명만 본다.
+        from .sources import aks
+        with GraphStore(args.db) as store:
+            conn = corpus_mod.open_corpus(args.corpus)
+            got = aks.audit_bindings(store, conn, dry_run=args.dry_run)
+            verb = "옮길" if args.dry_run else "옮긴"
+            print(f"  민족문화대백과 문서 {got['checked']:,}건 검사 · 연대가 어긋나 고아로 {verb} 것"
+                  f" {len(got['rebound']):,}건 · 고아 글이 이미 있어 지운 것 {len(got['dropped']):,}건"
+                  f" · 비운 설명 {len(got['cleared']):,}건")
+            for nid, eid, title in got["rebound"][:12]:
+                print(f"    {nid:>18}  {title} ({eid})")
+            if len(got["rebound"]) > 12:
+                print(f"    … 그 밖 {len(got['rebound']) - 12:,}건")
+        return 0
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
     with GraphStore(args.db) as store:
         conn = corpus_mod.open_corpus(args.corpus)
@@ -1237,7 +1254,8 @@ def cmd_corpus(args: argparse.Namespace) -> int:
                                  refresh=args.refresh, eras=eras)
                 print(f"  민족문화대백과: 노드에 이은 것 {got['matched']:,}건 · 받음 {got['fetched']:,}건"
                       f" / 대상 {got['todo']:,}건 · 빈 문서 {got['empty']:,}건"
-                      f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개")
+                      f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개"
+                      f" · 본문 연대가 어긋나 고아로 둔 것 {got['mismatched']:,}건")
         if "nikh" in sources and not args.dry_run:
             got = corpus_mod.build_nikh(store, conn, refresh=args.refresh)
             print(f"  한국사연대기: 항목 {got['entries']:,}건 · 노드에 이은 것 {got['linked']:,}건"
@@ -1712,6 +1730,14 @@ def cmd_relabel(args: argparse.Namespace) -> int:
         print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
         return 1
 
+    alias_table: list = []
+    if args.aliases.exists():
+        try:
+            alias_table = labels_mod.load_alias_table(args.aliases)
+        except (OSError, labels_mod.LabelTableError) as err:
+            print(f"  별칭 표를 읽지 못했습니다: {err}", file=sys.stderr)
+            return 1
+
     with GraphStore(args.db) as store:
         report = labels_mod.apply_overrides(
             store.conn, table, dry_run=args.dry_run
@@ -1719,6 +1745,13 @@ def cmd_relabel(args: argparse.Namespace) -> int:
         head = "바꿀 이름" if args.dry_run else "바꾼 이름"
         print(f"  표 {len(table):,}개 · {head} {len(report.applied):,}개"
               f" · 이미 한국어 {report.already:,}개")
+        if alias_table:
+            arep = labels_mod.apply_aliases(store.conn, alias_table, dry_run=args.dry_run)
+            print(f"  별칭 표 {len(alias_table):,}줄 · {'더할' if args.dry_run else '더한'} 별칭"
+                  f" {len(arep.added):,}개 · 이미 있음 {arep.already:,}개"
+                  + (f" · 그래프에 없는 노드 {len(arep.absent):,}개" if arep.absent else ""))
+            for nid, alias in arep.added[:12]:
+                print(f"    {nid:>16}  + {alias}")
         for node_id, old, new in report.applied[:12]:
             print(f"    {node_id:>16}  {old} → {new}")
         if len(report.applied) > 12:
@@ -2413,6 +2446,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="민족문화대백과에서 노드와 무관하게도 받을 근현대 항목 유형 (쉼표)")
     p_cp.add_argument("--eras", nargs="*", default=None,
                       help="근현대 대신 이 시대의 항목을 받는다 (사전 '시대' 칸 앞머리, 예: 고려)")
+    p_cp.add_argument("--audit", action="store_true",
+                      help="이미 이어진 민백 문서·설명을 연대로 다시 검사해 어긋난 것을 뗀다 (네트워크 없음)")
     p_cp.set_defaults(func=cmd_corpus)
 
     p_ask = sub.add_parser("ask", help="말뭉치에서 물음에 가까운 문단을 찾는다")
@@ -2496,6 +2531,8 @@ def main(argv: list[str] | None = None) -> int:
     p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
     p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,
                       help=f"한국어 라벨 표 (기본 {DEFAULT_LABELS.name})")
+    p_rl.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES,
+                      help=f"별칭 표 `노드 id<TAB>별칭<TAB>근거` (기본 {DEFAULT_ALIASES.name}, 없으면 건너뜀)")
     p_rl.add_argument("--dry-run", action="store_true", help="바꾸지 않고 계획만 출력")
     p_rl.add_argument("--list-remaining", action="store_true",
                       help="아직 영문인 노드를 전부 나열 (표에 더 적을 때)")
