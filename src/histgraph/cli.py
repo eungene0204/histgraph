@@ -751,12 +751,19 @@ def cmd_promote(args: argparse.Namespace) -> int:
             store.conn.commit()
 
         if not args.no_retype:
-            plan = pr.retype(store, dry_run=args.dry_run)["plan"]
-            print(f"→ 타입 교정 {len(plan)}건")
+            rt = pr.retype(store, dry_run=args.dry_run)
+            plan = rt["plan"]
+            print(f"→ 타입 교정 {len(plan)}건 · 같은 이름의 실제 노드에 흡수 {len(rt['absorbed'])}건"
+                  f" · 서술구 사건 지움 {len(rt['abstract'])}건")
             for old_id, _, label, new_type in plan[:12]:
                 print(f"    {label} : {old_id.split(':')[1]} → {new_type}")
             if len(plan) > 12:
                 print(f"    … 외 {len(plan) - 12}건")
+            for old_id, new_id in rt["absorbed"][:8]:
+                print(f"    {old_id} → {new_id}")
+            if rt["abstract"]:
+                print("    지움: " + " · ".join(a.split(":", 2)[2] for a in rt["abstract"][:15])
+                      + (f" … 외 {len(rt['abstract']) - 15}" if len(rt["abstract"]) > 15 else ""))
 
         fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
         result = pr.promote(

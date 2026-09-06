@@ -4783,5 +4783,39 @@ with tempfile.TemporaryDirectory() as _d:
           and len(e("wd:Y", "wd:W")) == 1)
     store.close()
 
+
+print("\n[서술구 사건 — 표지도 숫자도 없는 이름은 사건 노드가 아니다]")
+from histgraph.extract import is_abstract_event as _abs
+check("개념·서술구는 사건이 아니다", all(_abs(x) for x in
+      ["세력 강화", "민족정신", "문맹퇴치", "충군", "학문", "심리학적인 관점", "단독정부 수립론", "성호사설", "동아일보"]))
+check("사건 표지가 있으면 사건이다", not any(_abs(x) for x in
+      ["임진왜란", "제1차 왕자의 난", "갑신정변", "3·1 운동", "안악 사건", "신간회 결성", "조선 건국",
+       "훈민정음 창제", "을사조약 체결", "만민공동회", "부산항의 개항", "정조 즉위", "이양선의 출현"]))
+check("숫자가 있으면 사건으로 본다", not _abs("1971년 대통령선거") and not _abs("6.25 남침 전쟁"))
+with tempfile.TemporaryDirectory() as _d:
+    from histgraph import promote as _pr
+    store = GraphStore(Path(_d) / "abs.sqlite")
+    store.upsert_nodes([
+        Node(id="nikh:R1", type="heritage", label="성호사설", source="nikh", description="이익의 저술"),
+        Node(id="ex:event:성호사설", type="event", label="성호사설", source="extract"),
+        Node(id="ex:event:세력 강화", type="event", label="세력 강화", source="extract"),
+        Node(id="ex:event:임진왜란 발발", type="event", label="임진왜란 발발", source="extract"),
+        Node(id="wd:P", type="person", label="이익", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:P", dst="ex:event:성호사설", type="related_to", source="extract"),
+        Edge(src="wd:P", dst="ex:event:세력 강화", type="related_to", source="extract"),
+    ])
+    rt = _pr.retype(store)
+    e = lambda s_, d: store.conn.execute("SELECT 1 FROM edges WHERE src=? AND dst=?", (s_, d)).fetchone() is not None
+    check("같은 이름의 유물이 있으면 그쪽으로 흡수한다", rt["absorbed"] == [("ex:event:성호사설", "nikh:R1")]
+          and e("wd:P", "nikh:R1") and store.conn.execute("SELECT 1 FROM nodes WHERE id='ex:event:성호사설'").fetchone() is None)
+    check("서술구 사건은 엣지와 함께 지운다", rt["abstract"] == ["ex:event:세력 강화"]
+          and store.conn.execute("SELECT COUNT(*) FROM edges WHERE dst='ex:event:세력 강화'").fetchone()[0] == 0)
+    check("표지 있는 사건 고아는 그대로다", store.conn.execute("SELECT 1 FROM nodes WHERE id='ex:event:임진왜란 발발'").fetchone() is not None)
+    check("흡수는 편집 계층에 남아 되살아나면 다시 합친다", store.conn.execute(
+        "SELECT value FROM overrides WHERE key='ex:event:성호사설' AND field='merged_into'").fetchone()[0] == '"nikh:R1"')
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

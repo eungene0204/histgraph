@@ -501,6 +501,7 @@ def to_graph(
     edges: list[Edge] = []
     dropped_evidence = dropped_schema = flipped = self_loops = 0
     dropped_possessive = dropped_anachronism = dropped_reversed = 0
+    dropped_abstract = 0
     dropped_unnamed = dropped_loss = dropped_departure = dropped_kin = 0
     dropped_denied = completed = 0
 
@@ -587,6 +588,10 @@ def to_graph(
         )
         if row:
             return row["id"], row["type"]
+        if node_type == "event" and is_abstract_event(name):
+            # 사건 표지도 숫자도 없는 이름은 사건이 아니다 — 개념·서술구·책·
+            # 단체가 사건 자리에 앉는 것을 여기서 막는다 (`is_abstract_event`).
+            return None, None
         nid = f"ex:{node_type}:{name}"
         nodes.setdefault(
             nid, Node(id=nid, type=node_type, label=name, source="extract",
@@ -655,6 +660,9 @@ def to_graph(
 
             src, src_type = resolve(rel["subject"], rel["subject_type"])
             dst, dst_type = resolve(rel["object"], rel["object_type"])
+            if src is None or dst is None:
+                dropped_abstract += 1
+                continue
 
             # 모델이 같은 개체를 양끝에 놓는 일이 있다 (실측: '기사환국이
             # 기사환국과 관련된다'). 자기순환은 아무 사실도 말하지 않는다.
@@ -725,17 +733,18 @@ def to_graph(
     if (dropped_evidence or dropped_schema or flipped or self_loops
             or dropped_possessive or dropped_anachronism or dropped_reversed
             or dropped_unnamed or dropped_loss or dropped_departure
-            or dropped_kin or dumped or dropped_denied or completed):
+            or dropped_kin or dumped or dropped_denied or completed
+            or dropped_abstract):
         log.info(
             "  근거없음 %d건 버림 · 스키마불일치 %d건 버림 · 자기순환 %d건 버림"
             " · 소유격오독 %d건 버림 · 소실문형 %d건 버림 · 연대충돌 %d건 버림"
             " · 역방향 %d건 버림 · 근거무지목 %d건 버림 · 가제티어덤프 %d건 버림"
             " · 떠난자리 %d건 버림 · 친족호칭 %d건 버림 · 참여부인 %d건 버림"
-            " · 방향교정 %d건 · 근거문장복원 %d건",
+            " · 서술구사건 %d건 버림 · 방향교정 %d건 · 근거문장복원 %d건",
             dropped_evidence, dropped_schema, self_loops, dropped_possessive,
             dropped_loss, dropped_anachronism, dropped_reversed, dropped_unnamed,
             len(dumped), dropped_departure, dropped_kin, dropped_denied,
-            flipped, completed,
+            dropped_abstract, flipped, completed,
         )
     return list(nodes.values()), edges
 
@@ -966,6 +975,41 @@ def normalize_name(name: str) -> str:
 def is_descriptive_name(name: str) -> bool:
     """`양윤순의 따님` 처럼 이름이 아니라 설명구인가."""
     return bool(DESCRIPTIVE_NAME.search(name.strip()))
+
+
+# 사건 이름이 사건임을 말해 주는 표지. 모델은 '세력 강화'·'민족정신'·
+# '문맹퇴치'·'충군' 같은 서술구·개념을 사건 타입으로 낸다 (실측: 추출 고아
+# 사건 451개 중 175개가 표지도 숫자도 없었고, 그 대부분이 개념·책·단체였다).
+# 표지도 숫자도 없는 이름은 **사건 노드를 만들지 않는다** — 개체가 아닌
+# 것을 노드로 세우면 `related_to` 실뭉치가 된다 (concept.md §7).
+#
+# 표지는 라벨 **끝**에 건다. 가운데를 보면 '운동선수'도 운동이 된다.
+# 표지는 넉넉히 둔다 — 여기서 놓친 진짜 사건은 다음 수집이 다시 낼 수
+# 있지만, 한 번 만든 개념 노드는 지우기 전까지 남는다.
+EVENT_MARK = re.compile(
+    r"(?:전투|전쟁|대첩|사변|정변|조약|반란|민란|왜란|호란|의\s*난|난|란|사화|박해|운동|회의|회담"
+    r"|협약|협정|협상|옥사|환국|반정|봉기|항쟁|학살|사건|습격|침공|침입|원정|정벌"
+    r"|토벌|출병|즉위|천도|개항|파업|시위|폭동|선언|선거|재판|화재|기근|공방전"
+    r"|작전|해전|방어전|추존|편찬|창제|반포|설립|창립|창당|결성|조직|체결|병합"
+    r"|할양|봉쇄|위기|공수|공습|암살|피살|처형|사사|폐출|유배|복권|간행|강연"
+    r"|총회|대회|출연|축조|방문|파견|청원|제출|발표|해산|해방|진압|평정|격퇴"
+    r"|논쟁|논의|상소|폭격|공격|철수|점령|함락|수복|동맹|통합|정간|도굴|투신"
+    r"|기록|지정|선정|양위|양전|사검|단발령|폐위|삭제|교환|배척|저격|체포"
+    r"|파헤침|제사|부묘|개국|건국|창설|창간|친정|수립|통일|독립|광복|전역|시해"
+    r"|피난|망명|귀국|순교|순절|의거|거사|기의|혁명|쿠데타|내란|내전|대전|사태"
+    r"|참변|참사|테러|폭발|조인|비준|파기|통첩|담판|출현|발발|발생|항복|멸망"
+    r"|붕괴|승리|패배|승전|패전|종전|정복|회|식|호|령|제)$"
+)
+
+
+def is_abstract_event(name: str) -> bool:
+    """사건 이름인데 사건 표지도 숫자도 없는가 — 개념·서술구·책·단체다."""
+    text = name.strip()
+    if not text:
+        return True
+    if re.search(r"\d", text):
+        return False
+    return not EVENT_MARK.search(text)
 
 
 # 가족 관계는 두 사람이 **같은 시대를 살아야** 성립한다.
