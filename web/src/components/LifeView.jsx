@@ -130,14 +130,21 @@ export default function LifeView() {
     if (typeof history !== 'undefined') history.replaceState(null, '', selected ? `#${encodeURIComponent(selected)}` : location.pathname);
   }, [selected]);
   // 그래프는 통째로 싣는다 — 수십 노드라 자를 이유가 없다. 고른 노드가 중심.
-  // 캔버스는 자료가 있을 때 붙어 있다(GraphCanvas 가 그때 마운트). 같은
-  // 커밋에서 자식 효과가 먼저 돌아 viewRef 가 채워진 뒤 이 효과가 돈다.
-  useEffect(() => {
-    const gv = viewRef.current;
-    if (!gv || !life) return;
-    gv.setData(graphPayload(life, selected));
-    if (selected) { gv.select(selected); gv.focusOn(selected); }
-  }, [life]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 캔버스는 자료가 있을 때 붙어 있다(GraphCanvas 가 그때 마운트). 자료가
+  // 바뀔 때(효과)와 **캔버스가 새로 만들어질 때**(onReady) 둘 다 싣는다 —
+  // 개발 모드의 StrictMode 가 캔버스를 한 번 떼었다 다시 붙이므로, 효과
+  // 한 번으로는 떼어진 첫 캔버스에만 실리고 화면의 캔버스는 빈 채였다.
+  const lifeRef = useRef(null);
+  lifeRef.current = life;
+  const selectedRef = useRef(null);
+  selectedRef.current = selected;
+  const loadGraph = useCallback((gv) => {
+    const cur = lifeRef.current;
+    if (!gv || !cur) return;
+    gv.setData(graphPayload(cur, selectedRef.current));
+    if (selectedRef.current) { gv.select(selectedRef.current); gv.focusOn(selectedRef.current); }
+  }, []);
+  useEffect(() => { loadGraph(viewRef.current); }, [life, loadGraph]);
   // 연표에서 고르든 그래프에서 고르든 같은 노드다 — 그래프의 조명도 따라간다.
   useEffect(() => {
     const gv = viewRef.current;
@@ -215,6 +222,7 @@ export default function LifeView() {
               offline={false}
               onSelect={(node) => { setSelected(node.id); setTab('event'); }}
               onExpand={(node) => { setSelected(node.id); setTab('event'); }}
+              onReady={loadGraph}
             />
             <SidePanel
               open={sideOpen}

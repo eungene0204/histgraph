@@ -86,6 +86,10 @@
   것(confidence < 1). 범례·관계 필터는 자료에서 센다 (`graphMeta`).
   헤드리스 검증은 `--screenshot` 만으로 안 되면 CDP 로 `window.__histgraphView`
   를 읽는다 — 이번에 효과 하나가 편집에서 빠진 것을 그렇게 잡았다 (노드 0).
+  **개발 서버(5173)에서만 안 보이던 것**: StrictMode 가 캔버스를 떼었다 다시
+  붙이는데 자료는 첫 캔버스에만 실렸다. `GraphCanvas` 의 `onReady(view)` 가
+  캔버스를 만들 때마다 불리고, `LifeView.loadGraph` 가 거기서 다시 싣는다.
+  빌드본(8100)만 보고 "된다"고 하지 말 것 — 사용자는 5173 을 본다.
 
 **아직 배포하지 않는다** (같은 날 사용자: "이건 아직 배포 하면 안돼. 로컬에서
 개발하고 테스트 해야 함"). 스위치는 `web/vite.config.js` `LIFE_PAGE = !VERCEL`
