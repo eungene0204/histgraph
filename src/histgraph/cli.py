@@ -1356,6 +1356,24 @@ def cmd_causes(args: argparse.Namespace) -> int:
     메모리를 35GB 잡는다 — 다른 `extract`·`roles` 와 함께 띄우지 말 것.
     끝나면 `--sync-to data/korea.sqlite` 로 화면 DB 에 옮긴다 (양끝이 거기
     있는 엣지만). 노드를 새로 만들지 않으므로 `scope` 를 다시 돌릴 필요가 없다."""
+    if args.answers:
+        # **사람(Claude)이 문서를 읽고 적은 인과.** 모델 답과 같은 관문을 지난다 —
+        # 근거가 원문에 있어야 하고, 양끝이 있는 노드로 풀려야 한다
+        # (2026-09-07: 내가 지운 정도전 → 제1차 왕자의 난 을 되살리며 문을 달았다).
+        from . import causes as causes_mod
+        from . import corpus as corpus_mod
+
+        items = json.loads(args.answers.read_text(encoding="utf-8"))
+        conn = corpus_mod.open_corpus(args.corpus)
+        with GraphStore(args.db) as store:
+            got = causes_mod.ingest_answers(store, conn, items, args.model or "claude")
+        print("  " + " · ".join(f"{k} {v:,}" for k, v in got["counts"].items()))
+        for k, v in (got.get("dropped") or {}).items():
+            print(f"    버림 — {k} {v}")
+        for line in (got.get("samples") or [])[:10]:
+            print(f"    {line}")
+        return 0
+
     from . import causes as causes_mod
     from . import corpus as corpus_mod
 
@@ -2579,6 +2597,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="이 파생본(화면 DB)에 있는 노드만 묻는다 — 화면에 선 것부터")
     p_ca.add_argument("--reresolve", action="store_true",
                       help="저장된 모델 답을 모델 없이 다시 판정한다 (해소기가 좋아졌을 때)")
+    p_ca.add_argument("--answers", type=Path, default=None,
+                      help="사람이 문서를 읽고 적은 인과 (JSON). 모델 답과 같은 관문을 지난다")
     p_ca.set_defaults(func=cmd_causes)
 
     p_ch = sub.add_parser("chain", help="인과 사슬을 글로 읽는다 (--to 를 주면 두 노드 사이의 경로)")
