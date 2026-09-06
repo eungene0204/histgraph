@@ -793,6 +793,32 @@ def reresolve(store: GraphStore, corpus, scope: set[str] | None = None) -> dict[
     return {"counts": counts, "dropped": dropped, "unresolved": unresolved, "samples": samples}
 
 
+def safe_sync(store: GraphStore, target: GraphStore) -> GraphStore:
+    """화면 DB 로 옮기되, 실패해도 하루짜리 실행을 죽이지 않는다.
+
+    2026-09-06 실측: 인물 문서 40건째 `sync` 가 "attempt to write a readonly
+    database" 로 죽었다 — 다른 세션이 `data/korea.sqlite` 파일을 바꿔치운
+    (git checkout 등) 사이 열어 둔 연결이 옛 파일을 가리킨 것이다. 파생본은
+    10분마다 `--sync-only` 가 따로 옮기고 마지막에 한 번 더 옮기므로, 여기서는
+    경고만 남기고 연결을 새로 연다."""
+    import sqlite3
+
+    try:
+        log.info("화면 DB 로 옮김: 인과 엣지 %d건", sync(store, target))
+        return target
+    except sqlite3.OperationalError as err:
+        log.warning("화면 DB 로 못 옮김 (%s) — 연결을 다시 연다: %s", err, target.path)
+        try:
+            target.close()
+        except Exception:
+            pass
+        try:
+            return GraphStore(target.path)
+        except Exception as err2:
+            log.warning("화면 DB 를 다시 열지 못함: %s", err2)
+            return target
+
+
 def run(
     store: GraphStore,
     corpus,
@@ -836,7 +862,7 @@ def run(
         counts["엣지"] += n
         counts["물음"] = counts.get("물음", 0) + 1
         if sync_target is not None and counts["물음"] % sync_every == 0:
-            log.info("화면 DB 로 옮김: 인과 엣지 %d건", sync(store, sync_target))
+            sync_target = safe_sync(store, sync_target)
         for k, v in why.items():
             dropped[k] = dropped.get(k, 0) + v
         for name in missing:
