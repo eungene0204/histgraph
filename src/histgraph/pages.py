@@ -50,6 +50,7 @@ DIR_HEAD = {
     "caused": {"out": "결과", "in": "원인"},
 }
 TIME_TYPES = ("from_period", "dated_to")
+ROLE_HEADS = frozenset({"주도", "가담", "대항", "피해", "표적", "수습", "지휘관", "주요 인물", "교전", "가해"})
 
 # 한 묶음에 이만큼까지만 적는다. 세종의 '자녀'처럼 수십이 붙는 자리가
 # 있는데, 문서로 읽는 화면에서 목록이 화면을 넘기면 아무도 안 읽는다.
@@ -266,6 +267,8 @@ def _why_empty(node: dict) -> str:
 def _head(rel: dict) -> str:
     if rel["type"] in TIME_TYPES:
         return "시기" if rel["dir"] == "out" else "이 시기의 개체"
+    if rel["type"] in ("participated_in", "related_to") and rel.get("edge_label") in ROLE_HEADS:
+        return rel["edge_label"]   # '피해'·'주도' — 화면(`relations.js` relHead)과 같은 규칙
     return DIR_HEAD.get(rel["type"], {}).get(rel["dir"]) or rel["label"]
 
 

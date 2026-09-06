@@ -5324,6 +5324,18 @@ if True:
     check("재수집이 되살린 동명이인은 다시 지워진다", rows("wd:KY", "wd:COUP") == [])
     check("재수집이 지휘관으로 되돌려도 표의 주도가 이긴다", rows("wd:TJ", "wd:COUP") == [("participated_in", "kowiki:infobox", "주도", "주도", None)], str(rows("wd:TJ", "wd:COUP")))
     check("두 번 씌워도 같다", roles_mod.apply_table(store, table).moved == 0 and len(rows("wd:JD", "wd:COUP")) == 2)
+    # 2026-09-07 지적: 피해로 옮긴 정도전이 사건 상세·그래프에서 '관련'에 묻혀 사라진 것처럼 보였다.
+    # 역할이 선의 이름이고 묶음의 머리다. 참여 바로 뒤에 선다.
+    from histgraph import pages as _pg
+    from histgraph.server import GraphAPI as _API
+    api = _API(store)
+    ev = api.node("wd:COUP")
+    heads = [(r["other"]["label"], r["type"], r["edge_label"]) for r in ev["relations"]]
+    check("피해는 참여 바로 뒤에 선다", heads[:2] == [("태종", "participated_in", "주도"), ("정도전", "related_to", "피해")], str(heads))
+    check("정적 페이지의 묶음 머리도 역할이다", [h for h, _ in _pg._groups(ev["relations"])][:2] == ["주도", "피해"])
+    g = api.graph("wd:COUP")
+    labels = {(e["s"], e["t"]): e["label"] for e in g["edges"]}
+    check("그래프의 선 이름이 '관련'이 아니라 '피해'다", labels.get(("wd:JD", "wd:COUP")) == "피해" and labels.get(("wd:TJ", "wd:COUP")) == "주도", str(labels))
     bad = Path(path.parent / "bad.tsv"); bad.write_text("wd:JD\twd:COUP\t영웅\t근거\n", encoding="utf-8")
     try:
         roles_mod.load_table(bad); check("모르는 역할은 거부한다", False)

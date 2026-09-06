@@ -220,6 +220,15 @@ console.log('\n역할 — 표식과 편 이름');
   const fromEvent = rel({ type: 'participated_in', dir: 'in', other: { id: 'p', label: '정도전', type: 'person', group: 'actor' },
                           edge_label: '피해', fate: '사망' });
   eq('사건 쪽에서 봐도 같다', sentence(fromEvent, { id: 'e', label: '제1차 왕자의 난', type: 'event' }), '정도전은 제1차 왕자의 난에서 살해되었다');
+  // 2026-09-07 지적: 피해로 옮긴 정도전이 사건 상세의 '관련' 더미에 묻혀 사라진 것처럼 보였다
+  eq('피해는 관련이 아니라 피해 묶음이다', relHead(fromEvent), '피해');
+  eq('주도도 묶음 이름이다', relHead(rel({ type: 'participated_in', dir: 'in', other: jd, edge_label: '주도', label: '참여' })), '주도');
+  eq('언급은 관련에 남는다', relHead(rel({ type: 'related_to', dir: 'in', other: jd, edge_label: '언급', label: '관련' })), '관련');
+  const g = groupRelations([
+    rel({ type: 'related_to', dir: 'in', other: { ...jd, group: 'actor' }, edge_label: '피해', label: '관련' }),
+    rel({ type: 'related_to', dir: 'in', other: other('p9', '아무개'), edge_label: null, label: '관련' }),
+  ]);
+  eq('피해와 관련은 다른 묶음', g.groups.map((x) => x.head).join(','), '피해,관련');
 }
 
 // --- 인과 -----------------------------------------------------------------

@@ -167,8 +167,15 @@ export function mergeEvidence(card, r) {
   if (!card.edge_label && r.edge_label) card.edge_label = r.edge_label;
 }
 
+// 역할이 있는 참여·관련은 역할이 묶음 머리다 — '피해 · 3', '주도 · 1'.
+// 2026-09-07 지적: 정도전을 피해로 판정해 '관련'으로 옮겼더니 사건 상세에서
+// 잡다한 관련 사이에 묻혀 "아예 지워 버렸네"가 됐다. 그 난에 죽은 대표
+// 인물은 사건의 얼굴이지 부록이 아니다. '언급'·'근거 없음'만 관련에 남는다.
+export const ROLE_HEADS = new Set(Object.keys(ROLE_SENTENCE).filter((k) => k !== '언급' && k !== '근거 없음'));
+
 export function relHead(r) {
   if (TIME_TYPES.has(r.type)) return r.dir === 'out' ? '시기' : '이 시기의 개체';
+  if ((r.type === 'participated_in' || r.type === 'related_to') && ROLE_HEADS.has(r.edge_label)) return r.edge_label;
   return DIR_HEAD[r.type]?.[r.dir] || r.label;
 }
 

@@ -130,6 +130,11 @@ NEAR_WINDOW = 150
 MAX_SPAN = {"person": 110, "event": 60}
 
 # 관계를 볼 때 사람이 먼저 궁금해하는 순서. 상세 패널의 정렬 기준이다.
+# 역할이 적힌 참여·관련은 역할이 곧 이름이다 (`roles.ROLES`·인포박스 칸 이름).
+# 그래프의 선과 상세의 묶음이 '관련' 대신 '피해'·'주도'라고 말한다 —
+# 2026-09-07 지적: 피해로 옮긴 정도전이 사건 상세에서 사라진 것처럼 보였다.
+ROLE_HEADS = frozenset({"주도", "가담", "대항", "피해", "표적", "수습", "지휘관", "주요 인물", "교전", "가해"})
+
 RELATION_ORDER = [
     "caused", "participated_in", "held_position", "member_of", "created",
     "child_of", "spouse_of", "taught", "born_in", "died_in",
@@ -410,6 +415,8 @@ class GraphAPI:
                 label = EDGE_TYPES[e["type"]][0]
                 if e["type"] == "caused" and e["label"]:
                     label = e["label"]
+                if e["type"] in ("participated_in", "related_to") and e["label"] in ROLE_HEADS:
+                    label = e["label"]
                 merged[key] = {
                     "s": e["src"], "t": e["dst"], "type": e["type"],
                     "label": label,
@@ -420,6 +427,8 @@ class GraphAPI:
                 row["conf"] = max(row["conf"], e["confidence"])
                 if e["source"] not in row["sources"]:
                     row["sources"].append(e["source"])
+                if e["type"] in ("participated_in", "related_to") and e["label"] in ROLE_HEADS:
+                    row["label"] = e["label"]
         edges = list(merged.values())
         return {
             "center": node_id,
@@ -528,9 +537,14 @@ class GraphAPI:
         # 같은 종류 안에서는 확인할 수 있는 것을 먼저 보여준다 — 여러
         # 소스가 확인해 준 사실, 그다음 근거 구절이 달린 관계 순이다.
         order = {t: i for i, t in enumerate(RELATION_ORDER)}
+        # 역할이 적힌 관련(피해·표적·수습)은 참여 바로 뒤에 선다 — 맨 끝의 '관련'
+        # 더미가 아니라 사건의 사람들 자리다.
+        rank = lambda x: (order["participated_in"] + 0.5
+                          if x["type"] == "related_to" and x["edge_label"] in ROLE_HEADS
+                          else order.get(x["type"], 99))
         relations.sort(
             key=lambda x: (
-                order.get(x["type"], 99),
+                rank(x),
                 -len(x["sources"]),
                 -x["confidence"],
                 0 if x["evidence"] else 1,
