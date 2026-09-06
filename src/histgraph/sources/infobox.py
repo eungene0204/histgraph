@@ -422,6 +422,103 @@ def field_links(value: str, drop_parens: bool = False) -> list[str]:
     return out
 
 
+
+# **인포박스는 그 사람이 어떻게 됐는지도 적는다.** 지휘관 이름 뒤의 표식이다:
+#
+#     |지휘관1 = [[정도전]][[작전 중 사망|†]]<br />[[남은]][[작전 중 사망|†]]
+#     |지휘관1 = 경상우병사 [[최경회]]{{KIA}}
+#     |지휘관2 = [[이괄]] [[암살|☠]]<br />[[흥안군 (1598년)|흥안군 이제]] [[처형|☠]]
+#     |지휘관1 = [[회안대군]] [[귀양|‡]]<br />[[박포]]{{처형}}
+#
+# 2026-09-05 지적: "정도전은 제1차 왕자의 난을 지휘했다" — 이 † 를 버려서
+# 죽은 사람이 지휘관이 됐다. 표식은 링크 바로 뒤에서 다음 이름 앞까지 본다.
+FATE_MARKS: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"\{\{\s*KIA\s*\}\}|\[\[작전 ?중 ?사망(?:\|[^\]]*)?\]\]|†|\{\{\s*전사\s*\}\}"), "사망"),
+    (re.compile(r"\{\{\s*처형\s*\}\}|\[\[처형(?:\|[^\]]*)?\]\]"), "처형"),
+    (re.compile(r"\[\[암살(?:\|[^\]]*)?\]\]|\{\{\s*암살\s*\}\}"), "피살"),
+    (re.compile(r"\[\[귀양(?:\|[^\]]*)?\]\]|\[\[유배(?:\|[^\]]*)?\]\]|‡"), "귀양"),
+    (re.compile(r"\{\{\s*POW\s*\}\}|\[\[포로(?:\|[^\]]*)?\]\]"), "포로"),
+    (re.compile(r"\{\{\s*WIA\s*\}\}"), "부상"),
+)
+FATE_FIELDS = frozenset({"지휘관1", "지휘관2", "주요인물1", "주요인물2", "참가자"})
+# 표식을 찾는 범위 — 링크 뒤부터 다음 링크·줄바꿈·목록 표시 앞까지.
+_AFTER_LINK = re.compile(r"\[\[(?!작전|처형|암살|귀양|유배|포로)|<br\s*/?>|\n|\*")
+# 교전국 칸의 이름. `{{국기나라 그림|…}}` 은 그림이라 버리고 `{{국기|청나라}}`·
+# `{{중앙|[[조선]]}}` 은 안쪽 글을 쓴다.
+_FILE_LINK = re.compile(r"\[\[(?:파일|파일명|이미지|File|Image):[^\]]*\]\]")
+_TPL_PIC = re.compile(r"\{\{\s*(?:국기나라 그림|국기그림|국기 그림)\s*\|[^{}]*\}\}")
+# 감싸는 틀 — 안쪽 글을 그대로 쓴다 (링크·파이프가 들어 있어도)
+_TPL_WRAP = re.compile(r"\{\{\s*(?:중앙|center|가운데|nowrap|small|작게|기호 없는 목록|plainlist|unbulleted list|ubl)\s*\|((?:[^{}]|\{\{[^{}]*\}\})*)\}\}", re.I)
+# 이름이 아닌 조각 — 연도 범위 "1927년 ~ 1936년", 괄호 주석 "(-1948)", 같은 줄에 `||` 로 붙은 다음 칸
+_NOISE = re.compile(r"^[(\-~]|^\d{3,4}년|지휘관\d?\s*=|=")
+# 국기 틀 — 첫 인자가 나라 이름이다
+_TPL_FLAG = re.compile(r"\{\{\s*(?:국기|국기나라)\s*\|([^{}|]+)(?:\|[^{}]*)?\}\}")
+_PX = re.compile(r"\d+\s*px|^\d+$")
+_HANGUL = re.compile(r"[가-힣]")   # 화면에 서는 이름이라 한글이 없으면 버린다 (CLAUDE.md §1) — `{{국기나라|PRK}}`
+_TPL_ANY = re.compile(r"\{\{[^{}]*\}\}")
+_HTML = re.compile(r"<[^>]+>")
+_QUOTES = re.compile(r"'{2,3}")
+
+
+def link_fates(value: str) -> dict[str, str]:
+    """필드 값에서 **링크 대상 → 표식** (사망·처형·피살·귀양·포로·부상)."""
+    value = REF.sub("", value)
+    out: dict[str, str] = {}
+    for m in WIKILINK.finditer(value):
+        target = m.group(1).strip()
+        if not target or LINK_SKIP.match(target):
+            continue
+        tail = value[m.end():]
+        stop = _AFTER_LINK.search(tail)
+        tail = tail[: stop.start()] if stop else tail
+        # 표식이 링크 모양(`[[작전 중 사망|†]]`)이라 바로 뒤에 붙어 있으면
+        # `_AFTER_LINK` 가 그것은 건너뛰고 다음 이름에서 멈춘다.
+        for pat, fate in FATE_MARKS:
+            if pat.search(tail):
+                out[target] = fate
+                break
+    return out
+
+
+def side_names(wikitext: str) -> dict[int, str]:
+    """`교전국1`·`교전국2` 의 이름. '조선'·'도요토미 정권'·'이방석 지지파'.
+
+    실측 함정: `{{가운데|[[파일:Flag.svg|65px]]<br>[[조선]]}}` — 그림 링크와
+    감싸는 틀을 먼저 벗기지 않으면 '가운데|65px조선'이 이름이 된다."""
+    values = parse_infobox_values(wikitext, ("교전국1", "교전국2"))
+    out: dict[int, str] = {}
+    for field, raw in values.items():
+        side = int(field[-1])
+        text = REF.sub("", raw).split("||", 1)[0]
+        text = _FILE_LINK.sub(" ", text)
+        text = _TPL_PIC.sub(" ", text)
+        for _ in range(3):
+            text = _TPL_WRAP.sub(r"\1", text)
+        text = _TPL_FLAG.sub(r"\1", text)
+        text = _TPL_ANY.sub(" ", text)
+        text = re.sub(r"\[\[([^\]|]+)(?:\|([^\]]*))?\]\]", lambda m: m.group(2) or m.group(1), text)
+        text = _QUOTES.sub("", _HTML.sub("\n", text))
+        names = [n.strip(" *:·,;|") for n in re.split(r"[\n\*|]+", text)]
+        names = [n for n in names if n and len(n) <= 20 and _HANGUL.search(n) and not _PX.search(n) and not _NOISE.search(n)]
+        if names:
+            out[side] = "·".join(dict.fromkeys(names[:2]))
+    return out
+
+
+def parse_infobox_marks(wikitext: str) -> tuple[dict[tuple[str, str], str], dict[int, str]]:
+    """(필드, 링크 대상) → 표식 과, 편 번호 → 교전국 이름."""
+    span = infobox_span(wikitext, EVENT_FIELDS)
+    fates: dict[tuple[str, str], str] = {}
+    if span:
+        parts = re.split(r"^\s*\|\s*([가-힣A-Za-z0-9_ ]+?)\s*=", span, flags=re.M)
+        for i in range(1, len(parts) - 1, 2):
+            field = parts[i].strip()
+            if field in FATE_FIELDS:
+                for target, fate in link_fates(parts[i + 1]).items():
+                    fates[(field, target)] = fate
+    return fates, side_names(wikitext)
+
+
 def parse_infobox_links(
     wikitext: str, fields: dict[str, tuple[str, tuple[str, ...], str]] | None = None
 ) -> dict[str, list[str]]:
@@ -596,6 +693,8 @@ def ingest(
     all_titles: set[str] = set()
     # 링크가 아닌 값 필드 — 날짜와 별칭. 엣지가 아니라 노드 자신의 속성이다.
     attrs: dict[str, dict] = {}
+    # 지휘관 뒤의 표식(†·처형·귀양)과 교전국 이름 — 엣지 props 로 간다.
+    marks: dict[str, tuple[dict, dict]] = {}
     for r in rows:
         url = _json.loads(r["props"])["kowiki_url"]
         title = urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
@@ -607,6 +706,8 @@ def ingest(
             per_subject[r["id"]] = links
             subject_types[r["id"]] = r["type"]
             all_titles.update(t for ts in links.values() for t in ts)
+            if r["type"] == "event":
+                marks[r["id"]] = parse_infobox_marks(wikitext)
         if r["type"] == "event":
             values = parse_infobox_values(
                 wikitext, EVENT_VALUE_FIELDS, FIELDS_BY_TYPE[r["type"]]
@@ -715,8 +816,13 @@ def ingest(
                     skipped_anachronism += 1
                     continue
                 props: dict = {"infobox_field": field}
+                fates, sides = marks.get(subject_id, ({}, {}))
                 if side := FIELD_SIDE.search(field):
                     props["side"] = int(side.group(1))
+                    if name := sides.get(props["side"]):
+                        props["side_name"] = name
+                if fate := fates.get((field, target)):
+                    props["fate"] = fate
                 edges.append(
                     Edge(
                         src=src,
@@ -772,3 +878,52 @@ def apply_event_attrs(
             aliased += store.conn.total_changes - before
     store.conn.commit()
     return dated, aliased
+
+
+def annotate_marks(fetcher: Fetcher, store: GraphStore) -> dict[str, int]:
+    """이미 있는 인포박스 엣지에 표식(`props.fate`)과 편 이름(`props.side_name`)을
+    채운다 — 파서가 표식을 읽기 전에 수집한 엣지용. 위키 원문은 캐시에서 온다."""
+    import json as _json
+    import urllib.parse
+
+    rows = store.conn.execute(
+        """SELECT DISTINCT n.id, n.props FROM nodes n
+             JOIN edges e ON e.dst = n.id AND e.source = ?
+            WHERE n.type = 'event' AND json_extract(n.props, '$.kowiki_url') IS NOT NULL""",
+        (SOURCE,),
+    ).fetchall()
+    counts = {"사건": 0, "표식": 0, "편 이름": 0}
+    for r in rows:
+        url = _json.loads(r["props"])["kowiki_url"]
+        title = urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
+        wikitext = fetch_wikitext(fetcher, title)
+        if not wikitext:
+            continue
+        fates, sides = parse_infobox_marks(wikitext)
+        if not fates and not sides:
+            continue
+        counts["사건"] += 1
+        titles = {t for _, t in fates}
+        qids = resolve_titles(fetcher, sorted(titles)) if titles else {}
+        by_qid = {f"wd:{qids[t]}": fate for (_, t), fate in fates.items() if t in qids}
+        edges = store.conn.execute(
+            "SELECT rowid, src, props FROM edges WHERE dst = ? AND source = ?", (r["id"], SOURCE)
+        ).fetchall()
+        for e in edges:
+            props = _json.loads(e["props"] or "{}")
+            changed = False
+            if (fate := by_qid.get(e["src"])) and props.get("fate") != fate:
+                props["fate"] = fate
+                counts["표식"] += 1
+                changed = True
+            if (name := sides.get(props.get("side"))) and props.get("side_name") != name:
+                props["side_name"] = name
+                counts["편 이름"] += 1
+                changed = True
+            if changed:
+                store.conn.execute(
+                    "UPDATE edges SET props = ? WHERE rowid = ?",
+                    (_json.dumps(props, ensure_ascii=False), e["rowid"]),
+                )
+        store.conn.commit()
+    return counts

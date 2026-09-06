@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .extract import evidence_supported
@@ -34,6 +36,19 @@ from .store import GraphStore
 log = logging.getLogger(__name__)
 
 SOURCE_MARK = "roles"
+TABLE_ORIGIN = "roles"      # 편집 계층(`overrides.origin`)에 적는 이름
+
+# **편이 곧 역할이 아닌 사건.** 인포박스의 `지휘관1`·`지휘관2` 는 전투에서는
+# 양쪽 사령관이지만, 정변·난·사화에서는 한쪽이 일으킨 쪽이고 다른 쪽이
+# 당한 쪽이다 (2026-09-05 지적: "정도전은 제1차 왕자의 난을 지휘했다" —
+# 그는 그 난에 죽은 사람이다). 어느 편이 무엇을 했는지는 인포박스가 말해
+# 주지 않으므로, 이 이름을 가진 사건으로 들어가는 인물 참여는 **역할이
+# 적혀 있어야** 한다. 없으면 `roles --table` 이 종료 코드 1 로 묻는다.
+# 운동·항쟁·혁명·시위는 빼둔다 — '3·1 운동에 참여했다'는 그대로 참이다.
+CONTESTED = re.compile(
+    r"의 난$|난$|정변|반란|사화$|옥사|의 옥$|쿠데타|학살|암살|봉기|사변|반정|숙청"
+    r"|참변|내란|고변|모반|역모|왜변|사건$|독살|피살|처형"
+)
 
 # 역할 -> (뜻, 참여인가). 화면(`relations.js`)이 이 이름을 그대로 읽는다.
 ROLES: dict[str, tuple[str, bool]] = {
@@ -162,6 +177,10 @@ def candidates(
         props = json.loads(r["props"] or "{}")
         if not redo and props.get("role"):
             continue
+        # 사람이 표(`data/roles.tsv`)에 적은 판정은 `--redo` 로도 다시 묻지 않는다.
+        # 표는 언제나 기계를 이긴다 (CLAUDE.md §1-4 와 같은 규칙).
+        if props.get("role_origin") == TABLE_ORIGIN:
+            continue
         if only_roles is not None and props.get("role") not in only_roles:
             continue
         if not has_doc(corpus, r["dst"]):
@@ -220,7 +239,12 @@ def apply(store: GraphStore, edge: dict, verdict: dict | None, model: str) -> st
     """판정을 엣지에 적는다. 돌려주는 값은 무엇을 했나 (기록용).
 
     참여 역할이면 라벨·역할·근거만 적고, 아니면 related_to 로 옮긴다.
-    근거 없음(verdict None)도 옮긴다 — 근거 없는 '참여'를 화면에 두지 않는다."""
+    근거 없음(verdict None)도 옮긴다 — 근거 없는 '참여'를 화면에 두지 않는다.
+
+    판정은 편집 계층에도 적는다 — 2026-09-06 실측: 인포박스 재수집이 12·12
+    군사 반란의 판정 16건을 '지휘관'으로 되돌려 놓았다 (`upsert_edges` 는
+    라벨·props 를 통째로 덮어쓴다). 표(`data/roles.tsv`)와 같은 칸에 적되
+    origin 을 달리해 표가 이기게 둔다."""
     c = store.conn
     props = dict(edge["props"])
     props.pop("was", None)
@@ -228,11 +252,14 @@ def apply(store: GraphStore, edge: dict, verdict: dict | None, model: str) -> st
         props["role"] = "근거 없음"
         props["role_model"] = model
         props.pop("role_evidence", None)
+        _remember(c, edge, "근거 없음", "", participant=False)
         return _move(c, edge, "related_to", label="근거 없음", props=props, confidence=0.5)
     props["role"] = verdict["role"]
     props["role_evidence"] = verdict["evidence"]
     props["role_model"] = model
-    if verdict["role"] in PARTICIPANT_ROLES:
+    participant = verdict["role"] in PARTICIPANT_ROLES
+    _remember(c, edge, verdict["role"], verdict["evidence"], participant=participant)
+    if participant:
         c.execute(
             """UPDATE edges SET label = ?, confidence = ?, props = ?
                 WHERE src = ? AND dst = ? AND type = 'participated_in' AND source = ?""",
@@ -242,6 +269,30 @@ def apply(store: GraphStore, edge: dict, verdict: dict | None, model: str) -> st
         return "참여"
     return _move(c, edge, "related_to", label=verdict["role"], props=props,
                  confidence=verdict["confidence"])
+
+
+MODEL_ORIGIN = "roles-model"
+
+
+def _remember(c, edge: dict, role: str, evidence: str, *, participant: bool) -> None:
+    """모델 판정을 편집 계층에 적는다. 표의 판정이 이미 있으면 건드리지 않는다."""
+    from . import overrides as ov
+
+    k_part = ov.edge_key(edge["src"], edge["dst"], "participated_in")
+    k_rel = ov.edge_key(edge["src"], edge["dst"], "related_to")
+    if c.execute(
+        "SELECT 1 FROM overrides WHERE target = 'edge' AND key IN (?, ?) AND origin = ? LIMIT 1",
+        (k_part, k_rel, TABLE_ORIGIN),
+    ).fetchone():
+        return
+    for k in (k_part, k_rel):
+        ov.forget(c, "edge", k, "deleted")
+        ov.record(c, "edge", k, "label", role, MODEL_ORIGIN, evidence)
+        ov.record(c, "edge", k, "props.role", role, MODEL_ORIGIN, evidence)
+        if evidence:
+            ov.record(c, "edge", k, "props.role_evidence", evidence, MODEL_ORIGIN, evidence)
+    if not participant:
+        ov.record(c, "edge", k_part, "deleted", True, MODEL_ORIGIN, evidence)
 
 
 def _move(c, edge: dict, new_type: str, label: str, props: dict, confidence: float) -> str:
@@ -302,3 +353,168 @@ def run(
     if not dry_run and backend is not None:
         store.conn.commit()
     return {"counts": counts, "by_role": by_role, "samples": samples}
+
+
+# --- 표 --------------------------------------------------------------------
+#
+# 모델이 못 읽는 것(말뭉치에 문단이 없는 옛 사건)과 모델이 틀린 것은 사람이
+# 정본을 읽고 `data/roles.tsv` 에 적는다. 2026-09-06: 정변·난·사화·옥사
+# 127건의 인물 참여 905쌍을 Claude 가 직접 읽어 적었다.
+#
+#     인물 id<TAB>사건 id<TAB>역할<TAB>근거
+#
+# 역할은 `ROLES` 일곱 중 하나, 또는 `삭제` — 엣지 자체가 거짓일 때
+# (동명이인: 야구 감독 김응용이 1594년 송유진의 난에, 배우 박훈이 기묘사화에).
+#
+# 고친 값은 편집 계층에 남는다: 참여 역할이면 `label`·`props.role`,
+# 참여가 아니면 거기에 `deleted` 를 더해 재수집이 되살린 participated_in 을
+# 다시 지운다 — 옮겨 둔 related_to 는 수집이 덮어쓰지 않으므로 그대로 산다.
+
+TABLE_ROLES = frozenset(ROLES) | {"삭제"}
+
+
+class RolesTableError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class TableRow:
+    person: str
+    event: str
+    role: str
+    note: str
+
+
+@dataclass
+class TableReport:
+    applied: int = 0
+    moved: int = 0        # 참여 ↔ 관련 사이를 옮긴 것
+    deleted: int = 0
+    absent: list[TableRow] = field(default_factory=list)   # 이 그래프에 없는 노드
+    unjudged: list[tuple[str, str, str, str]] = field(default_factory=list)  # (인물, 사건, 인물 id, 사건 id)
+
+
+def load_table(path: Path) -> list[TableRow]:
+    rows: list[TableRow] = []
+    seen: set[tuple[str, str]] = set()
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        parts = [p.strip() for p in raw.rstrip("\n").split("\t")]
+        if len(parts) < 4 or not all(parts[:4]):
+            raise RolesTableError(f"{path}:{lineno} 인물 id·사건 id·역할·근거 네 칸입니다: {raw!r}")
+        person, event, role, note = parts[:4]
+        if role not in TABLE_ROLES:
+            raise RolesTableError(f"{path}:{lineno} 역할은 {'/'.join(sorted(TABLE_ROLES))} 중 하나: {role!r}")
+        if (person, event) in seen:
+            raise RolesTableError(f"{path}:{lineno} 같은 쌍이 두 번 적혔습니다: {raw!r}")
+        seen.add((person, event))
+        rows.append(TableRow(person, event, role, note))
+    return rows
+
+
+def _pair_edges(conn, person: str, event: str) -> list:
+    return conn.execute(
+        """SELECT rowid, src, dst, type, source, label, confidence, props FROM edges
+            WHERE src = ? AND dst = ? AND type IN ('participated_in', 'related_to')""",
+        (person, event),
+    ).fetchall()
+
+
+def apply_table(store: GraphStore, table: list[TableRow]) -> TableReport:
+    """표를 편집 계층에 적고 그래프에 씌운다. 여러 번 돌려도 결과가 같다."""
+    from . import overrides as ov
+
+    c = store.conn
+    rep = TableReport()
+    has = lambda nid: c.execute("SELECT 1 FROM nodes WHERE id = ?", (nid,)).fetchone() is not None
+
+    for row in table:
+        if not (has(row.person) and has(row.event)):
+            rep.absent.append(row)
+            continue
+        k_part = ov.edge_key(row.person, row.event, "participated_in")
+        k_rel = ov.edge_key(row.person, row.event, "related_to")
+        edges = _pair_edges(c, row.person, row.event)
+
+        if row.role == "삭제":
+            for k in (k_part, k_rel):
+                ov.record(c, "edge", k, "deleted", True, TABLE_ORIGIN, row.note)
+            n = c.execute(
+                "DELETE FROM edges WHERE src = ? AND dst = ? AND type IN ('participated_in','related_to')",
+                (row.person, row.event),
+            ).rowcount
+            rep.deleted += n
+            rep.applied += 1
+            continue
+
+        participant = row.role in PARTICIPANT_ROLES
+        target_type = "participated_in" if participant else "related_to"
+        for k in (k_part, k_rel):
+            ov.forget(c, "edge", k, "deleted")
+        # 어느 타입으로 되살아나든 표의 역할이 씌워진다
+        for k in (k_part, k_rel):
+            ov.record(c, "edge", k, "label", row.role, TABLE_ORIGIN, row.note)
+            ov.record(c, "edge", k, "props.role", row.role, TABLE_ORIGIN, row.note)
+            ov.record(c, "edge", k, "props.role_evidence", row.note, TABLE_ORIGIN, row.note)
+            ov.record(c, "edge", k, "props.role_origin", TABLE_ORIGIN, TABLE_ORIGIN, row.note)
+        if not participant:
+            # 재수집이 participated_in 을 다시 세우면 지운다. related_to 는 남는다.
+            ov.record(c, "edge", k_part, "deleted", True, TABLE_ORIGIN, row.note)
+
+        for e in edges:
+            props = json.loads(e["props"] or "{}")
+            props["role"] = row.role
+            props["role_evidence"] = row.note
+            props["role_origin"] = TABLE_ORIGIN
+            props.pop("role_model", None)
+            if e["type"] == target_type:
+                props.pop("was", None) if participant else props.setdefault("was", "participated_in")
+                c.execute(
+                    "UPDATE edges SET label = ?, props = ? WHERE rowid = ?",
+                    (row.role, json.dumps(props, ensure_ascii=False), e["rowid"]),
+                )
+                continue
+            # 타입을 옮긴다. 같은 소스의 목적지 엣지가 이미 있으면 그쪽을 갱신하고 이쪽은 지운다.
+            if participant:
+                props.pop("was", None)
+            else:
+                props["was"] = "participated_in"
+            c.execute("DELETE FROM edges WHERE rowid = ?", (e["rowid"],))
+            c.execute(
+                """INSERT INTO edges (src, dst, type, source, label, confidence, props)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(src, dst, type, source) DO UPDATE SET
+                     label = excluded.label, props = excluded.props""",
+                (e["src"], e["dst"], target_type, e["source"], row.role, e["confidence"],
+                 json.dumps(props, ensure_ascii=False)),
+            )
+            rep.moved += 1
+        rep.applied += 1
+    c.commit()
+    return rep
+
+
+def unjudged(store: GraphStore) -> list[tuple[str, str, str, str]]:
+    """편이 곧 역할이 아닌 사건(`CONTESTED`)으로 들어가는 인물 참여 중 역할이
+    없는 것. 화면이 '참여했다'·'지휘했다'로 읽어 버리는 자리다."""
+    rows = store.conn.execute(
+        """SELECT e.src, e.dst, e.props, p.label AS person, v.label AS event
+             FROM edges e
+             JOIN nodes p ON p.id = e.src AND p.type = 'person'
+             JOIN nodes v ON v.id = e.dst AND v.type = 'event'
+            WHERE e.type = 'participated_in'
+            ORDER BY v.start_date, v.label, p.label"""
+    ).fetchall()
+    out: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for r in rows:
+        if not CONTESTED.search(r["event"]):
+            continue
+        if json.loads(r["props"] or "{}").get("role"):
+            continue
+        if (r["src"], r["dst"]) in seen:
+            continue
+        seen.add((r["src"], r["dst"]))
+        out.append((r["person"], r["event"], r["src"], r["dst"]))
+    return out

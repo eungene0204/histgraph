@@ -238,6 +238,13 @@ def cmd_infobox(args: argparse.Namespace) -> int:
     from .sources import infobox
 
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
+    if args.marks:
+        # 파서가 표식(†·처형·귀양)과 교전국 이름을 읽기 전에 수집한 엣지에
+        # 채운다. 원문은 캐시에서 오므로 네트워크가 거의 필요 없다.
+        with GraphStore(args.db) as store:
+            got = infobox.annotate_marks(fetcher, store)
+        print("  " + " · ".join(f"{k} {v:,}" for k, v in got.items()))
+        return 0
     with GraphStore(args.db) as store:
         types = tuple(args.types)
         before = store.stats()["by_edge_type"]
@@ -1299,6 +1306,30 @@ def cmd_roles(args: argparse.Namespace) -> int:
     from . import corpus as corpus_mod
     from . import roles as roles_mod
 
+    if args.table is not None:
+        # 표만 씌운다 — 모델·말뭉치 불필요. 원본과 파생본에 한 번씩:
+        #   uv run histgraph roles --table
+        #   uv run histgraph --db data/korea.sqlite roles --table
+        try:
+            table = roles_mod.load_table(args.table)
+        except (OSError, roles_mod.RolesTableError) as err:
+            print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
+            return 1
+        with GraphStore(args.db) as store:
+            rep = roles_mod.apply_table(store, table)
+            left = roles_mod.unjudged(store)
+        print(f"  표 {len(table):,}줄 → 씌움 {rep.applied:,} · 참여↔관련 옮김 {rep.moved:,}"
+              f" · 지움 {rep.deleted:,} · 이 그래프에 없는 노드 {len(rep.absent):,}줄")
+        if left:
+            print(f"\n  ⚠ 정변·난·사화·옥사에 역할 없이 '참여'한 인물 {len(left):,}건 —"
+                  f" 정본을 읽고 표에 적어야 합니다 ({args.table}):")
+            for person, event, pid, eid in left[:args.show]:
+                print(f"    {person} / {event}   {pid}\t{eid}")
+            print("\n    인물 id<TAB>사건 id<TAB>역할(주도·가담·대항·피해·표적·수습·언급·삭제)<TAB>근거")
+            return 1
+        print("  역할 없이 선 참여가 없습니다.")
+        return 0
+
     backend = None if args.dry_run else build_backend(args.backend, args.model)
     conn = corpus_mod.open_corpus(args.corpus)
     with GraphStore(args.db) as store:
@@ -2284,6 +2315,8 @@ def main(argv: list[str] | None = None) -> int:
                            "스승을 LLM 없이 준다")
     p_ib.add_argument("--refresh", action="store_true",
                       help="이미 날짜가 있는 사건도 인포박스 값으로 덮어쓴다")
+    p_ib.add_argument("--marks", action="store_true",
+                      help="있는 엣지에 지휘관 표식(†·처형·귀양)과 교전국 이름만 채운다")
     p_ib.set_defaults(func=cmd_infobox)
 
     p_en = sub.add_parser("enrich", help="한국어 위키백과 서사로 노드 보강")
@@ -2526,6 +2559,9 @@ def main(argv: list[str] | None = None) -> int:
                       help="이 소스가 만든 참여만 판정 (쉼표, 예: causes)")
     p_ro.add_argument("--redo-roles", default=None,
                       help="이 역할로 판정됐던 엣지만 다시 묻는다 (쉼표, 예: 주도)")
+    p_ro.add_argument("--table", nargs="?", type=Path, const=ROOT / "data" / "roles.tsv", default=None,
+                      help="사람이 적은 판정 표를 씌우고, 정변·난·사화에 역할 없이 선 참여가 남으면 종료 코드 1")
+    p_ro.add_argument("--show", type=int, default=40, help="--table 이 보여줄 남은 건수")
     p_ro.set_defaults(func=cmd_roles)
 
     p_ca = sub.add_parser("causes", help="사건 문서에 서술된 인과(원인 → 결과)를 말뭉치 근거로 적는다")

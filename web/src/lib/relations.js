@@ -61,16 +61,50 @@ export const ROLE_SENTENCE = {
   '수습': (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 수사·재판했다`,
   '언급': (a, b) => `${a}${pt(a, '은', '는')} ${b} 기록에 이름이 나온다`,
   '근거 없음': (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다고 하나 근거를 찾지 못했다`,
-  '지휘관': (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지휘했다`,
+  // 인포박스 `지휘관N` 은 그 편의 사령관이지 사건 전체의 지휘자가 아니다.
+  // 교전국 이름이 있으면 "옥포 해전에서 조선 측을 지휘했다"라고 편을 말한다
+  // ('고종은 동학 농민 혁명을 지휘했다'가 나왔다).
+  '지휘관': (a, b, side) => (side
+    ? `${a}${pt(a, '은', '는')} ${b}에서 ${side} 측을 지휘했다`
+    : `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지휘했다`),
   '주요 인물': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 주요 인물이다`,
   '교전': (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 싸웠다`,
   '가해': (a, b) => `${a}${pt(a, '은', '는')} ${b}의 가해자다`,
 };
 
+// 인포박스가 이름 뒤에 적은 표식(†·{{KIA}}·☠·‡ → props.fate). 2026-09-05
+// 지적: "정도전은 제1차 왕자의 난을 지휘했다" — 그는 그 난에 죽은 사람이다.
+// 역할 문장 뒤에 그가 어떻게 됐는지를 잇는다. '피해'는 그 자체가 결말이라
+// 표식이 곧 문장이다: "정도전은 제1차 왕자의 난에서 살해되었다".
+export const FATE_TAIL = {
+  '사망': '죽었다', '처형': '처형되었다', '피살': '살해되었다',
+  '귀양': '귀양 갔다', '포로': '포로가 되었다', '부상': '다쳤다',
+};
+const VICTIM_TAIL = { ...FATE_TAIL, '사망': '살해되었다' };
+const COMMANDER_TAIL = { ...FATE_TAIL, '사망': '전사했다' };
+
+export function roleSentence(role, a, b, o = {}) {
+  const make = ROLE_SENTENCE[role];
+  if (!make) return null;
+  const base = make(a, b, o.side_name);
+  const fate = o.fate;
+  if (!fate || !FATE_TAIL[fate]) return base;
+  if (role === '피해') return `${a}${pt(a, '은', '는')} ${b}에서 ${VICTIM_TAIL[fate]}`;
+  if (role === '지휘관') {
+    // "…측을 지휘했다" → "…측을 지휘하다 전사했다"
+    return `${base.replace(/지휘했다$/, '지휘하다')} ${COMMANDER_TAIL[fate]}`;
+  }
+  if (role === '주도' || role === '가담' || role === '대항') {
+    // "…를 주도했다" → "…를 주도했고 처형되었다"
+    return `${base.replace(/다$/, '고')} ${FATE_TAIL[fate]}`;
+  }
+  return base;
+}
+
 // 엣지 방향 그대로 주어와 목적어를 놓는다. src -> dst 순서다.
 export const SENTENCE = {
   participated_in: (a, b, o = {}) => (ROLE_SENTENCE[o.label]
-    ? ROLE_SENTENCE[o.label](a, b)
+    ? roleSentence(o.label, a, b, o)
     : `${a}${pt(a, '은', '는')} ${b}에 참여했다`),
   occurred_at: (a, b) => `${a}${pt(a, '은', '는')} ${b}에서 일어났다`,
   occurred_during: (a, b) => `${a}${pt(a, '은', '는')} ${b}에 일어났다`,
@@ -93,7 +127,7 @@ export const SENTENCE = {
     : o.label === '원인'
     ? `${a}${pt(a, '은', '는')} ${b}의 원인이 되었다`
     : ROLE_SENTENCE[o.label]
-    ? ROLE_SENTENCE[o.label](a, b)
+    ? roleSentence(o.label, a, b, o)
     : `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다`),
   // 엣지에 '아버지'·'어머니'가 적혀 있으면 그대로 부른다 (실측 479건)
   child_of: (a, b, o) => {
@@ -123,7 +157,7 @@ export function sentence(r, self) {
   const [src, dst] = r.dir === 'out' ? [me, other] : [other, me];
   const make = SENTENCE[r.type];
   return make
-    ? make(src.label, dst.label, { label: r.edge_label, srcType: src.type })
+    ? make(src.label, dst.label, { label: r.edge_label, srcType: src.type, fate: r.fate, side_name: r.side_name })
     : `${src.label} → ${dst.label} · ${r.label}`;
 }
 

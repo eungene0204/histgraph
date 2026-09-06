@@ -5256,5 +5256,81 @@ with tempfile.TemporaryDirectory() as tmp:
           rep2["made"] == [] and [c[0] for c in rep2["collided"]] == ["국자감시"], str(rep2["collided"]))
     store.close()
 
+
+# --- 역할 표 ---------------------------------------------------------------
+# 2026-09-05 지적: "정도전은 제1차 왕자의 난을 지휘했다". 인포박스 지휘관1 이
+# 그대로 라벨이 됐고 † 는 버려졌다. 표가 판정하고 표식이 결말을 말한다.
+print("\n[역할 표 — 정변·난·사화의 편은 역할이 아니다]")
+if True:
+    import json as _json
+    import tempfile as _tf
+    from histgraph.sources import infobox as _ib
+
+    # 인포박스 표식·편 이름
+    wt = ("{{전쟁 정보\n|분쟁 = 제1차 왕자의 난\n|교전국1 = 이방석 지지파\n|교전국2 = 이방원 지지파\n"
+          "|지휘관1 = [[의안대군 (1382년)|이방석]][[작전 중 사망|†]]<br />[[정도전]][[작전 중 사망|†]]\n"
+          "|지휘관2 = [[태종 (조선)|정안대군]]<br /> [[하륜]]\n}}")
+    fates, sides = _ib.parse_infobox_marks(wt)
+    check("† 는 사망 표식이다", fates == {("지휘관1", "의안대군 (1382년)"): "사망", ("지휘관1", "정도전"): "사망"}, str(fates))
+    check("교전국 이름을 편 번호로 준다", sides == {1: "이방석 지지파", 2: "이방원 지지파"}, str(sides))
+    check("{{KIA}}·{{처형}}·☠·‡", _ib.link_fates("[[최경회]]{{KIA}}<br />[[박포]]{{처형}}<br />[[이괄]] [[암살|☠]]<br />[[회안대군]] [[귀양|‡]]<br />[[김충선]]")
+          == {"최경회": "사망", "박포": "처형", "이괄": "피살", "회안대군": "귀양"})
+    check("그림 링크·감싸는 틀·목록 틀·같은 줄의 다음 칸·연도 주석을 벗긴다",
+          _ib.side_names("{{전쟁 정보\n|교전국1 = {{가운데|[[파일:Flag.svg|65px]]<br>[[조선]]}}\n|교전국2 = 홍경래 반란군 ||지휘관1 = [[순조]]\n|지휘관1 = [[이순신]]\n}}") == {1: "조선", 2: "홍경래 반란군"}
+          and _ib.side_names("{{전쟁 정보\n|교전국1 = {{기호 없는 목록 |{{국기나라 그림|a.svg}} [[중화민국]] |[[소련]]}}\n|교전국2 = {{국기그림|미국|1912}} [[미군정]] <small>(-1948)</small>\n|지휘관1 = [[장제스]]\n}}") == {1: "중화민국·소련", 2: "미군정"})
+    check("한글 없는 편 이름은 화면에 세우지 않는다", _ib.side_names("{{전쟁 정보\n|교전국1 = {{국기나라|PRK}}\n|교전국2 = [[유엔]]\n|지휘관1 = [[김일성]]\n}}") == {2: "유엔"})
+    check("국기 그림 틀은 버리고 국기 틀은 이름만", _ib.side_names("{{전쟁 정보\n|교전국1 = {{국기나라 그림|Flag.svg}} [[조선]]<br />{{국기|청나라}}\n|교전국2 = {{중앙|[[도요토미 정권]]}}\n|지휘관1 = [[고종]]\n}}")
+          == {1: "조선·청나라", 2: "도요토미 정권"})
+
+    store = GraphStore(":memory:")
+    store.upsert_nodes([
+        Node(id="wd:JD", type="person", label="정도전", source="wd", start_date="1342", end_date="1398"),
+        Node(id="wd:TJ", type="person", label="태종", source="wd", start_date="1367", end_date="1422"),
+        Node(id="wd:KY", type="person", label="김응용", source="wd", start_date="1941"),
+        Node(id="wd:COUP", type="event", label="제1차 왕자의 난", source="wd", start_date="1398"),
+        Node(id="wd:SEA", type="event", label="옥포 해전", source="wd", start_date="1592"),
+    ])
+    part = lambda s, d, src, label=None, props=None: Edge(src=s, dst=d, type="participated_in", source=src, label=label, confidence=0.9, props=props or {})
+    store.upsert_edges([
+        part("wd:JD", "wd:COUP", "kowiki:infobox", "지휘관", {"side": 1, "fate": "사망"}),
+        part("wd:JD", "wd:COUP", "wd"),
+        part("wd:TJ", "wd:COUP", "kowiki:infobox", "지휘관", {"side": 2}),
+        part("wd:KY", "wd:COUP", "extract", None, {"evidence": "김응용이 반란군을 설득했다"}),
+        part("wd:TJ", "wd:SEA", "wd"),
+    ])
+    left = roles_mod.unjudged(store)
+    check("정변에 역할 없이 선 참여를 센다 (전투는 안 센다)", sorted(p for p, _, _, _ in left) == ["김응용", "정도전", "태종"], str(left))
+
+    with _tf.NamedTemporaryFile("w", suffix=".tsv", delete=False, encoding="utf-8") as fh:
+        fh.write("# 표\nwd:JD\twd:COUP\t피해\t이방원 측에 살해되었다\nwd:TJ\twd:COUP\t주도\t난을 일으켰다\n"
+                 "wd:KY\twd:COUP\t삭제\t동명이인\nwd:NOPE\twd:COUP\t가담\t없는 노드\n")
+        path = Path(fh.name)
+    table = roles_mod.load_table(path)
+    check("표를 읽는다", len(table) == 4 and table[0].role == "피해")
+    rep = roles_mod.apply_table(store, table)
+    rows = lambda s, d: [tuple(r) for r in store.conn.execute(
+        "SELECT type, source, label, json_extract(props,'$.role'), json_extract(props,'$.fate') FROM edges WHERE src=? AND dst=? ORDER BY source", (s, d))]
+    check("피해는 모든 소스가 관련으로 물러나고 라벨·역할이 붙는다",
+          rows("wd:JD", "wd:COUP") == [("related_to", "kowiki:infobox", "피해", "피해", "사망"), ("related_to", "wd", "피해", "피해", None)], str(rows("wd:JD", "wd:COUP")))
+    check("주도는 참여로 남고 라벨이 바뀐다", rows("wd:TJ", "wd:COUP") == [("participated_in", "kowiki:infobox", "주도", "주도", None)], str(rows("wd:TJ", "wd:COUP")))
+    check("삭제는 엣지를 지운다", rows("wd:KY", "wd:COUP") == [] and rep.deleted == 1)
+    check("없는 노드는 세어 보고만 한다", [r.person for r in rep.absent] == ["wd:NOPE"] and rep.applied == 3 and rep.moved == 2)
+    check("씌운 뒤에는 역할 없는 참여가 없다", roles_mod.unjudged(store) == [], str(roles_mod.unjudged(store)))
+    check("표의 판정은 모델 후보에서 빠진다",
+          all(_json.loads(r["props"])["role_origin"] == "roles" for r in store.conn.execute("SELECT props FROM edges WHERE dst='wd:COUP'")))
+    # 재수집이 participated_in 을 되살려도 편집 계층이 다시 지우고, 표의 역할이 다시 씌워진다
+    store.upsert_edges([part("wd:JD", "wd:COUP", "wd"), part("wd:KY", "wd:COUP", "extract"), part("wd:TJ", "wd:COUP", "kowiki:infobox", "지휘관", {"side": 2})])
+    check("재수집이 되살린 피해자의 참여는 다시 사라진다", rows("wd:JD", "wd:COUP") == [("related_to", "kowiki:infobox", "피해", "피해", "사망"), ("related_to", "wd", "피해", "피해", None)], str(rows("wd:JD", "wd:COUP")))
+    check("재수집이 되살린 동명이인은 다시 지워진다", rows("wd:KY", "wd:COUP") == [])
+    check("재수집이 지휘관으로 되돌려도 표의 주도가 이긴다", rows("wd:TJ", "wd:COUP") == [("participated_in", "kowiki:infobox", "주도", "주도", None)], str(rows("wd:TJ", "wd:COUP")))
+    check("두 번 씌워도 같다", roles_mod.apply_table(store, table).moved == 0 and len(rows("wd:JD", "wd:COUP")) == 2)
+    bad = Path(path.parent / "bad.tsv"); bad.write_text("wd:JD\twd:COUP\t영웅\t근거\n", encoding="utf-8")
+    try:
+        roles_mod.load_table(bad); check("모르는 역할은 거부한다", False)
+    except roles_mod.RolesTableError:
+        check("모르는 역할은 거부한다", True)
+    path.unlink(); bad.unlink()
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

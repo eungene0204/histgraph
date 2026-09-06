@@ -502,12 +502,20 @@ class GraphAPI:
                     "how": edge_props.get("how") or None,
                     # 상대가 서술구('후금의 파약 행위')로 적혀 있었으면 그 구.
                     "as": edge_props.get("cause_as" if direction == "in" else "effect_as") or None,
+                    # 인포박스 지휘관 뒤의 표식(사망·처형·피살·귀양)과 그 편의
+                    # 이름('조선'·'이방석 지지파'). "지휘했다"가 "조선 측을
+                    # 지휘하다 전사했다"·"살해되었다"가 되는 재료다.
+                    "fate": edge_props.get("fate") or None,
+                    "side_name": edge_props.get("side_name") or None,
                 }
             fact["confidence"] = max(fact["confidence"], r["confidence"])
             if not fact["how"] and edge_props.get("how"):
                 fact["how"] = edge_props["how"]
             if not fact["edge_label"] and r["edge_label"]:
                 fact["edge_label"] = r["edge_label"]
+            for k in ("fate", "side_name"):
+                if not fact[k] and edge_props.get(k):
+                    fact[k] = edge_props[k]
             if r["source"] not in fact["sources"]:
                 fact["sources"].append(r["source"])
             if edge_props.get("evidence"):

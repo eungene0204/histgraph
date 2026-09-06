@@ -192,6 +192,36 @@ console.log('\n역할 — 참여로 뭉개지 않는다');
      '이재명은 12.3 내란의 원인이 되었다');
 }
 
+// 2026-09-05 지적: "정도전은 제1차 왕자의 난을 지휘했다" — 인포박스 지휘관1
+// 뒤의 † 를 버려서 그 난에 죽은 사람이 지휘자가 됐다. 표(`data/roles.tsv`)가
+// 피해로 판정하고, 표식(props.fate)이 결말을 말한다.
+console.log('\n역할 — 표식과 편 이름');
+{
+  const jd = { id: 'p', label: '정도전', type: 'person' };
+  const coup = other('e', '제1차 왕자의 난', 'event', 'event');
+  const r = (label, extra = {}, type = 'participated_in') => rel({ type, dir: 'out', other: coup, edge_label: label, ...extra });
+  eq('피해 + 사망은 살해되었다', sentence(r('피해', { fate: '사망' }, 'related_to'), jd), '정도전은 제1차 왕자의 난에서 살해되었다');
+  eq('피해 + 처형', sentence(r('피해', { fate: '처형' }, 'related_to'), jd), '정도전은 제1차 왕자의 난에서 처형되었다');
+  eq('피해 + 귀양', sentence(r('피해', { fate: '귀양' }, 'related_to'), jd), '정도전은 제1차 왕자의 난에서 귀양 갔다');
+  eq('표식이 없으면 피해자다', sentence(r('피해', {}, 'related_to'), jd), '정도전은 제1차 왕자의 난의 피해자다');
+  eq('주도 + 사망', sentence(r('주도', { fate: '사망' }), jd), '정도전은 제1차 왕자의 난을 주도했고 죽었다');
+  eq('가담 + 처형', sentence(r('가담', { fate: '처형' }), jd), '정도전은 제1차 왕자의 난에 가담했고 처형되었다');
+  eq('대항 + 피살', sentence(r('대항', { fate: '피살' }), jd), '정도전은 제1차 왕자의 난에 맞섰고 살해되었다');
+  eq('모르는 표식은 무시', sentence(r('주도', { fate: '실종' }), jd), '정도전은 제1차 왕자의 난을 주도했다');
+
+  const lee = { id: 'p2', label: '이순신', type: 'person' };
+  const sea = other('e2', '옥포 해전', 'event', 'event');
+  const c = (extra = {}) => rel({ type: 'participated_in', dir: 'out', other: sea, edge_label: '지휘관', ...extra });
+  eq('지휘관은 편을 말한다', sentence(c({ side_name: '조선' }), lee), '이순신은 옥포 해전에서 조선 측을 지휘했다');
+  eq('편 이름이 없으면 예전대로', sentence(c(), lee), '이순신은 옥포 해전을 지휘했다');
+  eq('지휘관 + 사망은 전사', sentence(c({ side_name: '조선', fate: '사망' }), lee), '이순신은 옥포 해전에서 조선 측을 지휘하다 전사했다');
+  eq('지휘관 + 처형', sentence(c({ side_name: '야인여진', fate: '처형' }), lee), '이순신은 옥포 해전에서 야인여진 측을 지휘하다 처형되었다');
+  // 상대 쪽에서 보아도(사건 → 인물) 같은 문장이다
+  const fromEvent = rel({ type: 'participated_in', dir: 'in', other: { id: 'p', label: '정도전', type: 'person', group: 'actor' },
+                          edge_label: '피해', fate: '사망' });
+  eq('사건 쪽에서 봐도 같다', sentence(fromEvent, { id: 'e', label: '제1차 왕자의 난', type: 'event' }), '정도전은 제1차 왕자의 난에서 살해되었다');
+}
+
 // --- 인과 -----------------------------------------------------------------
 // "온톨로지 그래프이므로 인과관계를 보여줘야 한다 — 임진왜란 → 명의 쇠퇴 →
 // 여진족의 성장 → 병자호란" (2026-09-04). 엣지는 원인 → 결과, 라벨이 종류다.
