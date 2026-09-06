@@ -138,5 +138,18 @@ console.log('\n개인 역사 — 빈 자료');
   ok('연표가 비어도 표시 목록은 빈 배열', personalMarks(life).length === 0 && historyMarks(life, null).length === 0);
 }
 
+console.log('\n개인 역사 — 아직 배포하지 않는다');
+{
+  // 사용자 결정(2026-09-07): 로컬에서만 개발·테스트한다. Vercel 빌드에는 장이 없어야 한다.
+  delete process.env.VERCEL;
+  const local = (await import('../vite.config.js?local')).default;
+  process.env.VERCEL = '1';
+  const vercel = (await import('../vite.config.js?vercel')).default;
+  delete process.env.VERCEL;
+  ok('로컬 빌드에는 life.html 이 있다', !!local.build.rollupOptions.input.life && local.define['import.meta.env.VITE_LIFE'] === '"1"');
+  ok('Vercel 빌드에는 life.html 이 없다', !vercel.build.rollupOptions.input.life && vercel.define['import.meta.env.VITE_LIFE'] === '""');
+  ok('Vercel 빌드는 예시 자료를 뺀다', vercel.plugins.some((p) => p.name === 'strip-life'));
+}
+
 console.log(`\n${'='.repeat(46)}\n통과 ${pass} / 실패 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -74,9 +74,15 @@
 - 예시 `web/public/life-sample.json` (지어낸 인물, `data/life/예시.txt` 로
   `--json` 을 거친 것). 실제 모델 실행은 이 세션에서 안 했다 — MLX 35GB.
 
+**아직 배포하지 않는다** (같은 날 사용자: "이건 아직 배포 하면 안돼. 로컬에서
+개발하고 테스트 해야 함"). 스위치는 `web/vite.config.js` `LIFE_PAGE = !VERCEL`
+하나 — Vercel 빌드에서 `life.html`·예시·머리의 링크가 빠진다 (`life.test.mjs`
+가 두 빌드를 잰다). 사용자가 넣으라고 할 때 그 줄을 푼다. main 에 합쳐도 화면에는
+안 나간다.
+
 남는 것: 실제 이야기로 MLX 를 한 번 돌려 스키마 강제가 이 크기(11 절)에서
-잘리지 않는지 본다 (`complete_json` 은 800 토큰이라 **`life.analyze` 는 더 큰
-`max_tokens` 가 필요할 수 있다** — 백엔드에 인자를 여는 일). 모바일 배치 없음.
+잘리지 않는지 본다 (`life.analyze` 는 `MAX_TOKENS` 12,000 으로 묻는다). 모바일
+배치 없음.
 
 ## 2026-09-07 — "정도전은 제1차 왕자의 난을 지휘했다" (역할 전수 조사 · `roles --table`)
 
