@@ -3950,7 +3950,7 @@ with tempfile.TemporaryDirectory() as tmp:
 임진왜란으로 명나라의 국력이 크게 소진되었고, 그 틈을 타 여진의 후금이 성장하였다. 정묘호란 뒤 후금은 조선에 형제 관계를 요구하였다.
 
 == 경과 ==
-인조는 남한산성으로 피신하였다.
+인조는 남한산성으로 피신하였다. 병자호란 이후 명나라는 멸망하였다. 명나라 멸망은 병자호란의 상징적 결과로 평가되기도 한다. 임진왜란 때문에 명나라는 쇠퇴하였다.
 
 == 결과 ==
 병자호란의 결과 조선은 청과 군신 관계를 맺었다."""
@@ -4109,6 +4109,46 @@ with tempfile.TemporaryDirectory() as tmp:
     store.upsert_edges([Edge(src="wd:IMJIN", dst="wd:HS", type="caused", source="causes", label="배경")])
     check("이미 적힌 것은 되돌아가 지운다", causes_mod.prune_part_of(store) == 1
           and store.conn.execute("SELECT COUNT(*) FROM edges WHERE type='caused' AND dst='wd:HS'").fetchone()[0] == 0)
+
+    # 팩트체크 관문 — 2026-09-06 "서울올림픽이 냉전체제에 영향을 줬다는 거 사실이 아니야. 논리비약을 피해"
+    fc_edges, fc_why, _ = causes_mod.accept(store, doc, [
+        # 'X의 멸망'은 X 가 아니라 X 의 끝 — 근거에 인과 표현이 없으면 버린다 ("이후"는 시간 순서다)
+        {"cause": "병자호란", "cause_type": "event", "effect": "명나라의 멸망", "effect_type": "org", "kind": "원인",
+         "how": "", "evidence": "병자호란 이후 명나라는 멸망하였다.", "confidence": "certain"},
+        # 인과 표현('때문에')이 있으면 남기되 종류는 '영향'으로
+        {"cause": "임진왜란", "cause_type": "event", "effect": "명나라의 쇠퇴", "effect_type": "org", "kind": "원인",
+         "how": "", "evidence": "임진왜란 때문에 명나라는 쇠퇴하였다.", "confidence": "certain"},
+        # 상징·추정 표현은 확신도를 낮춘다
+        {"cause": "임진왜란", "cause_type": "event", "effect": "명나라", "effect_type": "org", "kind": "배경",
+         "how": "", "evidence": "명나라 멸망은 병자호란의 상징적 결과로 평가되기도 한다.", "confidence": "certain"},
+        # "X 이후"뿐인 '원인'은 '배경'으로 낮춘다
+        {"cause": "병자호란", "cause_type": "event", "effect": "명나라", "effect_type": "org", "kind": "원인",
+         "how": "", "evidence": "병자호란 이후 명나라는 멸망하였다.", "confidence": "certain"},
+    ], passages, "m")
+    fc = {(e.src, e.dst): e for e in fc_edges}
+    check("'X의 멸망'을 X 로 풀고 근거가 시간 순서뿐이면 버린다", fc_why.get("끝난 것을 결과로 (인과 표현 없음)") == 1, str(fc_why))
+    check("'X의 쇠퇴'라도 근거에 인과 표현이 있으면 '영향'으로 남긴다",
+          ("wd:IMJIN", "wd:MING") in fc and fc[("wd:IMJIN", "wd:MING")].label == "영향", str({k: v.label for k, v in fc.items()}))
+    check("\"X 이후\"뿐인 '원인'은 '배경'이 되고 확신도가 낮아진다",
+          ("wd:BJ", "wd:MING") in fc and fc[("wd:BJ", "wd:MING")].label == "배경" and fc[("wd:BJ", "wd:MING")].confidence == 0.5,
+          str([(e.label, e.confidence) for e in fc_edges]))
+    far = {"id": "wd:FAR"}
+    check("근거에 양끝 이름이 다 없으면 버린다",
+          causes_mod.fact_check(store, far, "원인", "인조는 남한산성으로 피신하였다.",
+                                ("wd:IMJIN", "임진왜란", "임진왜란"), ("wd:MING", "명나라", "명나라"))[0] == "근거에 양끝 이름 없음")
+    check("한쪽만 없으면 지우지 않고 확신도만 낮춘다",
+          causes_mod.fact_check(store, far, "원인", "임진왜란으로 명나라의 국력이 크게 소진되었고",
+                                ("wd:IMJIN", "임진왜란", "임진왜란"), ("wd:JIN", "후금", "후금")) == (None, "원인", 0.5))
+    check("상징·추정 표현은 확신도 상한 0.5",
+          causes_mod.fact_check(store, far, "배경", "명나라 멸망은 병자호란의 상징적 결과로 평가되기도 한다.",
+                                ("wd:BJ", "병자호란", "병자호란"), ("wd:MING", "명나라", "명나라"))[2] == 0.5)
+    check("이름은 앞뒤 문맥에서 찾는다 (앞 문장의 원인을 '이러한 상황에서'로 가리킨다)",
+          causes_mod.fact_check(store, far, "원인", "그 틈을 타 여진의 후금이 성장하였다.",
+                                ("wd:IMJIN", "임진왜란", "임진왜란"), ("wd:JIN", "후금", "후금"),
+                                context="임진왜란으로 명나라의 국력이 크게 소진되었고, 그 틈을 타 여진의 후금이 성장하였다.") == (None, "원인", None))
+    check("괄호 안의 이름도 이름이다", causes_mod.loose_text("쿠데타를 일으켰다(위화도 회군).") == "쿠데타를일으켰다위화도회군")
+    check("표기 차이를 봐준다 — 계유정난/계유정란, 흥선대원군/대원군",
+          causes_mod._found({"계유정난"}, "계유정란을일으켜") and causes_mod._found({"흥선대원군"}, "이에대원군은"))
 
     # 사슬 — 임진왜란 → 명나라 (영향) · 후금 → 병자호란 (배경) · 정묘호란 → 병자호란 (wd)
     store.upsert_edges([Edge(src="wd:MING", dst="wd:JIN", type="caused", source="causes", label="배경",
