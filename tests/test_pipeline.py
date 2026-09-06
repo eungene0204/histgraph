@@ -4119,6 +4119,18 @@ with tempfile.TemporaryDirectory() as tmp:
           _join[0].props.get("evidence", "").startswith("인조는 남한산성")
           and _join[0].props.get("from_causes") is True, str(_join[0].props))
     check("돌린 참여에는 역할이 아직 없다", "role" not in _join[0].props)
+    # 죽은 뒤의 일에는 참여할 수 없다 — 김종직(1431~1492)이 무오사화(1498)를
+    # '주도'한 것으로 판정된 적이 있다. 그는 부관참시된 쪽이다.
+    store.upsert_nodes([Node(id="wd:DEAD", type="person", label="김종직", source="wd",
+                             start_date="1431", end_date="1492")])
+    _late = [{"cause": "병자호란", "cause_type": "event", "effect": "김종직", "effect_type": "person",
+              "kind": "영향", "how": "", "evidence": "인조는 남한산성으로 피신하였다.",
+              "confidence": "certain"}]
+    _e2, _w2, _ = causes_mod.accept(store, doc, _late, passages, "test-model")
+    check("죽은 뒤의 일은 참여로 돌리지 않는다",
+          _w2.get("죽은 뒤의 일") == 1 and not [e for e in _e2 if e.type == "participated_in"],
+          str(_w2))
+    check("생몰을 모르면 막지 않는다", causes_mod.alive_at(store, "wd:P", "wd:BJ"))
     check("근거는 문장 단위로 되살린다",
           next(e for e in edges if e.src == "wd:IMJIN").props["evidence"].endswith("성장하였다."),
           next(e for e in edges if e.src == "wd:IMJIN").props["evidence"])
@@ -5101,6 +5113,28 @@ with tempfile.TemporaryDirectory() as tmp:
         check("별칭 표는 노드 id 를 통째로 적는다", False)
     except labels_mod2.LabelTableError:
         check("별칭 표는 노드 id 를 통째로 적는다", True)
+    store.close()
+
+print("\n[사슬의 갈래가 잘릴 때 — 종류·관계 수 순, 아이디 순이 아니다]")
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "f.sqlite")
+    nodes = [Node(id="wd:SEJONG", type="person", label="조선 세종", source="wd", start_date="1397")]
+    edges = []
+    for i in range(7):   # 아이디가 앞서는 결과 일곱 — 관계는 이 엣지 하나뿐
+        nodes.append(Node(id=f"wd:Q1{i}", type="event", label=f"작은 일 {i}", source="wd", start_date="1420"))
+        edges.append(Edge(src="wd:SEJONG", dst=f"wd:Q1{i}", type="caused", source="causes",
+                          label="영향" if i == 0 else "원인", confidence=0.9))
+    nodes.append(Node(id="wd:Q9", type="event", label="한글", source="wd", start_date="1443"))
+    edges.append(Edge(src="wd:SEJONG", dst="wd:Q9", type="caused", source="causes", label="원인", confidence=0.9))
+    for k in range(5):   # 한글은 관계가 많다
+        nodes.append(Node(id=f"wd:H{k}", type="event", label=f"한글 뒤 {k}", source="wd", start_date="1500"))
+        edges.append(Edge(src="wd:Q9", dst=f"wd:H{k}", type="caused", source="causes", label="배경", confidence=0.5))
+    store.upsert_nodes(nodes)
+    store.upsert_edges(edges)
+    got = causes_mod.chain(store, "wd:SEJONG")
+    top = [r["id"] for r in got["effects"]]
+    check("관계 많은 결과가 아이디에 밀려 잘리지 않는다", top[0] == "wd:Q9" and len(top) == causes_mod.FANOUT, str(top))
+    check("'영향'은 '원인' 뒤라 먼저 잘린다", "wd:Q10" not in top, str(top))
     store.close()
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")

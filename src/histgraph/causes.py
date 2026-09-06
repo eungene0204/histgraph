@@ -958,7 +958,12 @@ def sync(store: GraphStore, target: GraphStore) -> int:
 
 
 # --- 사슬 읽기 ---------------------------------------------------------------
-FANOUT = 6      # 한 노드에서 따라갈 원인·결과 수 (확신도 순)
+FANOUT = 6      # 한 노드에서 따라갈 원인·결과 수 (`_links` 의 순서대로)
+# 잘릴 때 무엇이 남는가. 종류가 먼저다 — 직접 원인이 '영향'보다 앞이다. 그
+# 다음 소스 수·확신도, 그 다음은 **상대 노드의 관계 수**다. 아이디로 가르면
+# 세종의 결과 8건에서 한글(`wd:Q8222`)이 공녀·경연 뒤로 밀려 잘렸다
+# (2026-09-06). 관계가 많은 노드가 그래프에서 더 중심이다.
+KIND_RANK = {"원인": 0, "계기": 1, "배경": 2, "영향": 3}
 TREE_BUDGET = 60
 
 
@@ -999,7 +1004,15 @@ def _links(store: GraphStore, node_id: str, direction: str) -> list[dict]:
             row["evidence"].append(props["evidence"])
         if r["source"] not in row["sources"]:
             row["sources"].append(r["source"])
-    return sorted(merged.values(), key=lambda x: (-len(x["sources"]), -x["confidence"], x["id"]))
+    degree: dict[str, int] = {}
+    if merged:
+        ids = list(merged)
+        marks = ",".join("?" * len(ids))
+        degree = dict(store.conn.execute(
+            f"""SELECT n.id, (SELECT COUNT(*) FROM edges e WHERE e.src = n.id OR e.dst = n.id)
+                  FROM nodes n WHERE n.id IN ({marks})""", ids).fetchall())
+    return sorted(merged.values(), key=lambda x: (
+        KIND_RANK.get(x["kind"], 9), -len(x["sources"]), -x["confidence"], -degree.get(x["id"], 0), x["id"]))
 
 
 def _tree(store: GraphStore, root: str, direction: str, depth: int, budget: list[int]) -> list[dict]:
