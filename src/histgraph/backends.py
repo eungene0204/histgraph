@@ -40,8 +40,12 @@ class Backend(Protocol):
         """관계 목록을 돌려준다. 실패 시 빈 목록."""
         ...
 
-    def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict | None:
-        """스키마대로의 JSON 객체 하나. 관계 목록이 아닌 것(요약 한 편)을 받을 때."""
+    def complete_json(self, system: str, user: str, schema: dict[str, Any],
+                      max_tokens: int | None = None) -> dict | None:
+        """스키마대로의 JSON 객체 하나. 관계 목록이 아닌 것(요약 한 편)을 받을 때.
+
+        `max_tokens` 는 답의 크기가 요약 한 편과 다를 때 준다 — 개인 역사
+        (`life`)의 JSON 은 절 열한 개라 기본값(800)에서 잘린다."""
         ...
 
 
@@ -112,10 +116,11 @@ class AnthropicBackend:
             self._client = anthropic.Anthropic()
         return self._client
 
-    def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict | None:
+    def complete_json(self, system: str, user: str, schema: dict[str, Any],
+                      max_tokens: int | None = None) -> dict | None:
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=2000,
+            max_tokens=max_tokens or 2000,
             system=system,
             output_config={
                 "format": {"type": "json_schema", "schema": schema},
@@ -322,10 +327,11 @@ class MLXBackend:
             return None
         return _extract_json(text)
 
-    def complete_json(self, system: str, user: str, schema: dict[str, Any]) -> dict | None:
+    def complete_json(self, system: str, user: str, schema: dict[str, Any],
+                      max_tokens: int | None = None) -> dict | None:
         # 요약 한 편은 짧다. 관계 추출의 12,000 토큰을 주면 잘못 샌 생성이
-        # 그만큼 오래 돈다.
-        payload = self._generate(system, user, schema, max_tokens=800)
+        # 그만큼 오래 돈다. 큰 답(개인 역사)은 부르는 쪽이 상한을 준다.
+        payload = self._generate(system, user, schema, max_tokens=max_tokens or 800)
         return payload if isinstance(payload, dict) else None
 
     def complete(self, system: str, user: str, schema: dict[str, Any]) -> list[dict]:

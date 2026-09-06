@@ -102,6 +102,19 @@ Wikidata 한국어 한 줄 설명을 갖고 있었고, `props.no_kowiki` 표식�
 서드파티는 추출 백엔드에만 붙는다 — `--extra mlx` 는 로컬 추출(Apple
 Silicon), `--extra anthropic` 은 원격 추출. 둘 다 없어도 수집·화면은 돈다.
 
+### 개인 역사 — 내 삶을 한국사 옆에 (`life`)
+
+```
+uv run histgraph life data/life/나.txt      # 이야기(글) → data/life/나.json (MLX, 35GB)
+uv run histgraph life --json 받은.json      # 채팅으로 받은 JSON 을 검증·연결만
+open http://127.0.0.1:8100/life.html       # 왼쪽 왕·대통령 · 가운데 한국사 · 오른쪽 내 역사
+```
+
+지시문은 `src/histgraph/life_prompt.md` 그대로다. 모델의 답은 `life.validate`
+(모르는 타입 버림 · 날짜를 해로 · 점수 자르기) 와 `life.link` (역사 사건 이름을
+그래프 노드에) 를 지난다. 개인 자료는 `data/life/` 에만 있고 저장소에 안 올라간다.
+화면은 세 열이 자 하나를 쓴다 — 같은 해는 같은 높이. 자세한 것은 HANDOFF 2026-09-07.
+
 ## 설계에서 가장 중요한 사실
 
 **공공 API 는 개체를 주지만 관계를 주지 않는다.** 그래프의 가치는 엣지에

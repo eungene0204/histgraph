@@ -1,0 +1,1418 @@
+{
+ "nodes": [
+  {
+   "id": "me",
+   "type": "Person",
+   "name": "나",
+   "description": "1985년 대구에서 태어나 서울에서 자란 개발자. 창업과 실패를 거쳐 독립 개발자가 되었다.",
+   "start_date": "1985-04",
+   "end_date": null,
+   "location": "대구",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "개발자",
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1985,
+   "end_year": null,
+   "precision": "exact"
+  },
+  {
+   "id": "father",
+   "type": "FamilyMember",
+   "name": "아버지",
+   "description": "대구에서 작은 인쇄소를 운영했다. 1997년 외환위기로 부도를 맞았다.",
+   "start_date": null,
+   "end_date": null,
+   "location": "대구",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "인쇄소 운영",
+   "influence": null,
+   "confidence": 1.0,
+   "year": null,
+   "end_year": null,
+   "precision": ""
+  },
+  {
+   "id": "mother",
+   "type": "FamilyMember",
+   "name": "어머니",
+   "description": "초등학교 교사.",
+   "start_date": null,
+   "end_date": null,
+   "location": "대구",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "초등학교 교사",
+   "influence": null,
+   "confidence": 1.0,
+   "year": null,
+   "end_year": null,
+   "precision": ""
+  },
+  {
+   "id": "grandfather",
+   "type": "Ancestor",
+   "name": "할아버지",
+   "description": "경북 영천에서 농사를 지었고 6·25 전쟁에 참전했다.",
+   "start_date": null,
+   "end_date": null,
+   "location": "경북 영천",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "농부",
+   "influence": null,
+   "confidence": 1.0,
+   "year": null,
+   "end_year": null,
+   "precision": ""
+  },
+  {
+   "id": "minjun",
+   "type": "Person",
+   "name": "민준",
+   "description": "중학교 컴퓨터 동아리에서 만난 친구. 뒤에 함께 창업했다.",
+   "start_date": null,
+   "end_date": null,
+   "location": "서울 관악구",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": null,
+   "end_year": null,
+   "precision": ""
+  },
+  {
+   "id": "daughter",
+   "type": "FamilyMember",
+   "name": "딸",
+   "description": "2024년에 태어났다.",
+   "start_date": "2024",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2024,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "daegu",
+   "type": "BirthPlace",
+   "name": "대구",
+   "description": "태어나 열두 해를 산 곳. 아버지의 인쇄소가 있었다.",
+   "start_date": "1985",
+   "end_date": "1998",
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "출생지",
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1985,
+   "end_year": 1998,
+   "precision": "year"
+  },
+  {
+   "id": "seoul_gwanak",
+   "type": "Residence",
+   "name": "서울 관악구",
+   "description": "1998년 이사한 뒤 자란 동네. 중학교를 전학한 곳.",
+   "start_date": "1998",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "거주지",
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1998,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "yeongcheon",
+   "type": "Location",
+   "name": "경북 영천",
+   "description": "할아버지가 농사를 지은 고향.",
+   "start_date": null,
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": "본가",
+   "influence": null,
+   "confidence": 1.0,
+   "year": null,
+   "end_year": null,
+   "precision": ""
+  },
+  {
+   "id": "print_shop",
+   "type": "Business",
+   "name": "아버지의 인쇄소",
+   "description": "대구의 작은 인쇄소. 1997년 외환위기로 부도가 났다.",
+   "start_date": null,
+   "end_date": "1997",
+   "location": "대구",
+   "participants": [
+    "아버지"
+   ],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": null,
+   "end_year": 1997,
+   "precision": ""
+  },
+  {
+   "id": "middle_school",
+   "type": "School",
+   "name": "서울의 중학교",
+   "description": "1998년 전학한 학교. 컴퓨터 동아리에서 민준을 만났다.",
+   "start_date": "1998",
+   "end_date": null,
+   "location": "서울 관악구",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1998,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "university",
+   "type": "University",
+   "name": "서울의 대학 컴퓨터공학과",
+   "description": "2004년 입학.",
+   "start_date": "2004",
+   "end_date": null,
+   "location": "서울",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2004,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "first_company",
+   "type": "Company",
+   "name": "첫 직장 (소프트웨어 회사)",
+   "description": "2010년 입사한 소프트웨어 회사.",
+   "start_date": "2010",
+   "end_date": "2014",
+   "location": "서울",
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 0.8,
+   "year": 2010,
+   "end_year": 2014,
+   "precision": "year"
+  },
+  {
+   "id": "startup",
+   "type": "Business",
+   "name": "앱 서비스 창업",
+   "description": "2014년 민준과 함께 세운 회사. 2017년에 접었다.",
+   "start_date": "2014",
+   "end_date": "2017",
+   "location": "서울",
+   "participants": [
+    "민준"
+   ],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2014,
+   "end_year": 2017,
+   "precision": "year"
+  },
+  {
+   "id": "indie",
+   "type": "Occupation",
+   "name": "독립 개발자",
+   "description": "2021년부터 혼자 제품을 만든다. 요즘은 AI 도구를 쓴다.",
+   "start_date": "2021",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2021,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_birth",
+   "type": "PersonalEvent",
+   "name": "출생",
+   "description": "1985년 4월 대구에서 태어났다.",
+   "start_date": "1985-04",
+   "end_date": null,
+   "location": "대구",
+   "participants": [
+    "아버지",
+    "어머니"
+   ],
+   "importance_score": 10,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1985,
+   "end_year": null,
+   "precision": "exact"
+  },
+  {
+   "id": "ev_bankrupt",
+   "type": "Crisis",
+   "name": "아버지 인쇄소 부도",
+   "description": "1997년 말 외환위기가 오면서 아버지의 인쇄소가 부도났다.",
+   "start_date": "1997-12",
+   "end_date": null,
+   "location": "대구",
+   "participants": [
+    "아버지"
+   ],
+   "importance_score": 9,
+   "emotional_impact": "불안",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1997,
+   "end_year": null,
+   "precision": "exact"
+  },
+  {
+   "id": "ev_move",
+   "type": "TurningPoint",
+   "name": "서울 관악구로 이사",
+   "description": "1998년 봄 온 가족이 대구에서 서울 관악구로 옮겼다.",
+   "start_date": "1998-03",
+   "end_date": null,
+   "location": "서울 관악구",
+   "participants": [
+    "아버지",
+    "어머니"
+   ],
+   "importance_score": 9,
+   "emotional_impact": "낯섦",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 0.9,
+   "year": 1998,
+   "end_year": null,
+   "precision": "exact"
+  },
+  {
+   "id": "ev_transfer",
+   "type": "PersonalEvent",
+   "name": "중학교 전학",
+   "description": "이사와 함께 서울의 중학교로 전학했다.",
+   "start_date": "1998",
+   "end_date": null,
+   "location": "서울 관악구",
+   "participants": [],
+   "importance_score": 7,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1998,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_meet_minjun",
+   "type": "PersonalEvent",
+   "name": "민준과의 만남",
+   "description": "전학한 학교의 컴퓨터 동아리에서 민준을 만났다.",
+   "start_date": "1998",
+   "end_date": null,
+   "location": "서울 관악구",
+   "participants": [
+    "민준"
+   ],
+   "importance_score": 8,
+   "emotional_impact": "반가움",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1998,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_first_pc",
+   "type": "Memory",
+   "name": "첫 컴퓨터",
+   "description": "1999년 집에 처음 컴퓨터가 생겼다. 스타크래프트와 PC통신에 빠졌다.",
+   "start_date": "1999",
+   "end_date": null,
+   "location": "서울 관악구",
+   "participants": [],
+   "importance_score": 8,
+   "emotional_impact": "설렘",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 1999,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_start_coding",
+   "type": "Decision",
+   "name": "프로그래밍 시작",
+   "description": "게임과 PC통신을 계기로 프로그래밍을 시작했다.",
+   "start_date": "1999",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": 9,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 0.9,
+   "year": 1999,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_worldcup",
+   "type": "Memory",
+   "name": "2002년 월드컵의 기억",
+   "description": "지금도 가장 강하게 남은 기억.",
+   "start_date": "2002-06",
+   "end_date": null,
+   "location": "서울",
+   "participants": [],
+   "importance_score": 5,
+   "emotional_impact": "벅참",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2002,
+   "end_year": null,
+   "precision": "exact"
+  },
+  {
+   "id": "ev_univ",
+   "type": "PersonalEvent",
+   "name": "대학 입학 (컴퓨터공학)",
+   "description": "2004년 서울의 대학 컴퓨터공학과에 들어갔다.",
+   "start_date": "2004-03",
+   "end_date": null,
+   "location": "서울",
+   "participants": [],
+   "importance_score": 7,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2004,
+   "end_year": null,
+   "precision": "exact"
+  },
+  {
+   "id": "ev_first_job",
+   "type": "PersonalEvent",
+   "name": "첫 직장 입사",
+   "description": "2010년 소프트웨어 회사에 들어갔다.",
+   "start_date": "2010",
+   "end_date": null,
+   "location": "서울",
+   "participants": [],
+   "importance_score": 6,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2010,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_found",
+   "type": "Decision",
+   "name": "창업",
+   "description": "2014년 민준과 앱 서비스로 창업했다.",
+   "start_date": "2014",
+   "end_date": null,
+   "location": "서울",
+   "participants": [
+    "민준"
+   ],
+   "importance_score": 8,
+   "emotional_impact": "기대",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2014,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_fail",
+   "type": "Failure",
+   "name": "창업 실패 (폐업)",
+   "description": "2017년 회사를 접었다. 이 실패가 나를 많이 바꿨다.",
+   "start_date": "2017",
+   "end_date": null,
+   "location": "서울",
+   "participants": [
+    "민준"
+   ],
+   "importance_score": 10,
+   "emotional_impact": "좌절",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2017,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_rejoin",
+   "type": "PersonalEvent",
+   "name": "회사 재입사",
+   "description": "2018년 다시 회사에 들어갔다.",
+   "start_date": "2018",
+   "end_date": null,
+   "location": "서울",
+   "participants": [],
+   "importance_score": 5,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2018,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_remote",
+   "type": "TurningPoint",
+   "name": "코로나 재택근무",
+   "description": "2020년 재택근무를 하며 혼자 일하는 것이 맞다는 것을 알았다.",
+   "start_date": "2020",
+   "end_date": null,
+   "location": "서울",
+   "participants": [],
+   "importance_score": 8,
+   "emotional_impact": "확신",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2020,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_indie",
+   "type": "Decision",
+   "name": "독립 개발자로 전환",
+   "description": "2021년 회사를 나와 혼자 일하기 시작했다.",
+   "start_date": "2021",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": 9,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2021,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_marriage",
+   "type": "PersonalEvent",
+   "name": "결혼",
+   "description": "2023년 결혼했다.",
+   "start_date": "2023",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": 9,
+   "emotional_impact": "기쁨",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2023,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_daughter",
+   "type": "PersonalEvent",
+   "name": "딸 출생",
+   "description": "2024년 딸이 태어났다.",
+   "start_date": "2024",
+   "end_date": null,
+   "location": null,
+   "participants": [
+    "딸"
+   ],
+   "importance_score": 10,
+   "emotional_impact": "기쁨",
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 1.0,
+   "year": 2024,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ev_ai",
+   "type": "PersonalEvent",
+   "name": "AI 도구로 혼자 제품 만들기",
+   "description": "요즘 AI 도구로 혼자 제품을 만들고 있다.",
+   "start_date": "2025",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": 6,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": null,
+   "confidence": 0.7,
+   "year": 2025,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "starcraft",
+   "type": "Game",
+   "name": "스타크래프트",
+   "description": "첫 컴퓨터로 빠져 살던 게임. 프로그래밍으로 이어졌다.",
+   "start_date": "1999",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": "컴퓨터에 대한 흥미",
+   "confidence": 1.0,
+   "year": 1999,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "pc_tongsin",
+   "type": "Technology",
+   "name": "PC통신",
+   "description": "1999년 무렵 빠져 살던 것. 프로그래밍의 계기.",
+   "start_date": "1999",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": "온라인 세계 경험",
+   "confidence": 1.0,
+   "year": 1999,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "matrix",
+   "type": "Movie",
+   "name": "매트릭스",
+   "description": "컴퓨터가 세상을 바꿀 수 있다고 믿게 한 영화.",
+   "start_date": "1999",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": "기술에 대한 믿음",
+   "confidence": 1.0,
+   "year": 1999,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "cosmos",
+   "type": "Book",
+   "name": "코스모스",
+   "description": "고등학교 때 읽고 과학을 좋아하게 된 책.",
+   "start_date": "2001",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": "칼 세이건",
+   "category": null,
+   "influence": "과학에 대한 애정",
+   "confidence": 0.8,
+   "year": 2001,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "seotaiji",
+   "type": "Music",
+   "name": "서태지의 음악",
+   "description": "고등학교 시절 듣던 음악.",
+   "start_date": "2001",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": "서태지",
+   "category": null,
+   "influence": null,
+   "confidence": 0.8,
+   "year": 2001,
+   "end_year": null,
+   "precision": "year"
+  },
+  {
+   "id": "ai_tools",
+   "type": "Technology",
+   "name": "AI 도구",
+   "description": "요즘 혼자 제품을 만들 때 쓰는 것.",
+   "start_date": "2025",
+   "end_date": null,
+   "location": null,
+   "participants": [],
+   "importance_score": null,
+   "emotional_impact": null,
+   "author": null,
+   "category": null,
+   "influence": "혼자 만드는 일의 범위",
+   "confidence": 0.7,
+   "year": 2025,
+   "end_year": null,
+   "precision": "year"
+  }
+ ],
+ "edges": [
+  {
+   "source": "father",
+   "target": "me",
+   "type": "parent_of",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "mother",
+   "target": "me",
+   "type": "parent_of",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "grandfather",
+   "target": "me",
+   "type": "grandparent_of",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "daughter",
+   "type": "parent_of",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "daegu",
+   "type": "born_in",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "seoul_gwanak",
+   "type": "moved_to",
+   "description": "1998년 봄",
+   "confidence": 1.0
+  },
+  {
+   "source": "grandfather",
+   "target": "yeongcheon",
+   "type": "lived_in",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "middle_school",
+   "type": "studied_at",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "university",
+   "type": "studied_at",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "first_company",
+   "type": "worked_at",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "minjun",
+   "type": "met",
+   "description": "컴퓨터 동아리",
+   "confidence": 1.0
+  },
+  {
+   "source": "minjun",
+   "target": "me",
+   "type": "worked_with",
+   "description": "창업",
+   "confidence": 1.0
+  },
+  {
+   "source": "ev_bankrupt",
+   "target": "ev_move",
+   "type": "caused",
+   "description": "부도로 살림이 어려워져 서울로 옮겼다",
+   "confidence": 0.9
+  },
+  {
+   "source": "ev_move",
+   "target": "ev_transfer",
+   "type": "led_to",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "ev_transfer",
+   "target": "ev_meet_minjun",
+   "type": "led_to",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "ev_first_pc",
+   "target": "ev_start_coding",
+   "type": "caused",
+   "description": "게임과 PC통신이 계기",
+   "confidence": 0.9
+  },
+  {
+   "source": "ev_start_coding",
+   "target": "ev_univ",
+   "type": "led_to",
+   "description": null,
+   "confidence": 0.7
+  },
+  {
+   "source": "ev_meet_minjun",
+   "target": "ev_found",
+   "type": "led_to",
+   "description": "함께 창업",
+   "confidence": 0.9
+  },
+  {
+   "source": "ev_found",
+   "target": "ev_fail",
+   "type": "resulted_in",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "ev_fail",
+   "target": "ev_rejoin",
+   "type": "led_to",
+   "description": null,
+   "confidence": 0.8
+  },
+  {
+   "source": "ev_remote",
+   "target": "ev_indie",
+   "type": "caused",
+   "description": "혼자 일하는 것이 맞다고 확신",
+   "confidence": 1.0
+  },
+  {
+   "source": "ev_fail",
+   "target": "me",
+   "type": "changed",
+   "description": "실패가 나를 많이 바꿨다",
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "starcraft",
+   "type": "played",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "starcraft",
+   "target": "ev_start_coding",
+   "type": "inspired",
+   "description": null,
+   "confidence": 0.8
+  },
+  {
+   "source": "me",
+   "target": "pc_tongsin",
+   "type": "used",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "pc_tongsin",
+   "target": "ev_start_coding",
+   "type": "inspired",
+   "description": null,
+   "confidence": 0.8
+  },
+  {
+   "source": "me",
+   "target": "matrix",
+   "type": "watched",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "matrix",
+   "target": "me",
+   "type": "changed_view",
+   "description": "컴퓨터가 세상을 바꿀 수 있다는 믿음",
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "cosmos",
+   "type": "read",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "cosmos",
+   "target": "me",
+   "type": "shaped_interest",
+   "description": "과학",
+   "confidence": 0.9
+  },
+  {
+   "source": "me",
+   "target": "seotaiji",
+   "type": "listened_to",
+   "description": null,
+   "confidence": 1.0
+  },
+  {
+   "source": "me",
+   "target": "ai_tools",
+   "type": "used",
+   "description": null,
+   "confidence": 0.9
+  },
+  {
+   "source": "ai_tools",
+   "target": "ev_ai",
+   "type": "enabled",
+   "description": null,
+   "confidence": 0.7
+  },
+  {
+   "source": "me",
+   "target": "indie",
+   "type": "member_of",
+   "description": null,
+   "confidence": 0.8
+  }
+ ],
+ "timeline": [
+  {
+   "event_id": "ev_birth",
+   "life_stage": "출생",
+   "year": 1985,
+   "age": 0,
+   "date_text": "1985년 4월",
+   "previous_event": null,
+   "next_event": "ev_bankrupt"
+  },
+  {
+   "event_id": "ev_bankrupt",
+   "life_stage": "초등학교",
+   "year": 1997,
+   "age": 12,
+   "date_text": "1997년 말",
+   "previous_event": "ev_birth",
+   "next_event": "ev_move"
+  },
+  {
+   "event_id": "ev_move",
+   "life_stage": "중학교",
+   "year": 1998,
+   "age": 13,
+   "date_text": "1998년 봄",
+   "previous_event": "ev_bankrupt",
+   "next_event": "ev_transfer"
+  },
+  {
+   "event_id": "ev_transfer",
+   "life_stage": "중학교",
+   "year": 1998,
+   "age": 13,
+   "date_text": "1998년",
+   "previous_event": "ev_move",
+   "next_event": "ev_meet_minjun"
+  },
+  {
+   "event_id": "ev_meet_minjun",
+   "life_stage": "중학교",
+   "year": 1998,
+   "age": 13,
+   "date_text": "1998년",
+   "previous_event": "ev_transfer",
+   "next_event": "ev_first_pc"
+  },
+  {
+   "event_id": "ev_first_pc",
+   "life_stage": "중학교",
+   "year": 1999,
+   "age": 14,
+   "date_text": "1999년",
+   "previous_event": "ev_meet_minjun",
+   "next_event": "ev_start_coding"
+  },
+  {
+   "event_id": "ev_start_coding",
+   "life_stage": "중학교",
+   "year": 1999,
+   "age": 14,
+   "date_text": "1999년",
+   "previous_event": "ev_first_pc",
+   "next_event": "ev_worldcup"
+  },
+  {
+   "event_id": "ev_worldcup",
+   "life_stage": "고등학교",
+   "year": 2002,
+   "age": 17,
+   "date_text": "2002년 6월",
+   "previous_event": "ev_start_coding",
+   "next_event": "ev_univ"
+  },
+  {
+   "event_id": "ev_univ",
+   "life_stage": "대학",
+   "year": 2004,
+   "age": 19,
+   "date_text": "2004년 3월",
+   "previous_event": "ev_worldcup",
+   "next_event": "ev_first_job"
+  },
+  {
+   "event_id": "ev_first_job",
+   "life_stage": "사회생활",
+   "year": 2010,
+   "age": 25,
+   "date_text": "2010년",
+   "previous_event": "ev_univ",
+   "next_event": "ev_found"
+  },
+  {
+   "event_id": "ev_found",
+   "life_stage": "창업",
+   "year": 2014,
+   "age": 29,
+   "date_text": "2014년",
+   "previous_event": "ev_first_job",
+   "next_event": "ev_fail"
+  },
+  {
+   "event_id": "ev_fail",
+   "life_stage": "창업",
+   "year": 2017,
+   "age": 32,
+   "date_text": "2017년",
+   "previous_event": "ev_found",
+   "next_event": "ev_rejoin"
+  },
+  {
+   "event_id": "ev_rejoin",
+   "life_stage": "사회생활",
+   "year": 2018,
+   "age": 33,
+   "date_text": "2018년",
+   "previous_event": "ev_fail",
+   "next_event": "ev_remote"
+  },
+  {
+   "event_id": "ev_remote",
+   "life_stage": "사회생활",
+   "year": 2020,
+   "age": 35,
+   "date_text": "2020년",
+   "previous_event": "ev_rejoin",
+   "next_event": "ev_indie"
+  },
+  {
+   "event_id": "ev_indie",
+   "life_stage": "사회생활",
+   "year": 2021,
+   "age": 36,
+   "date_text": "2021년",
+   "previous_event": "ev_remote",
+   "next_event": "ev_marriage"
+  },
+  {
+   "event_id": "ev_marriage",
+   "life_stage": "가족 형성",
+   "year": 2023,
+   "age": 38,
+   "date_text": "2023년",
+   "previous_event": "ev_indie",
+   "next_event": "ev_daughter"
+  },
+  {
+   "event_id": "ev_daughter",
+   "life_stage": "가족 형성",
+   "year": 2024,
+   "age": 39,
+   "date_text": "2024년",
+   "previous_event": "ev_marriage",
+   "next_event": "ev_ai"
+  },
+  {
+   "event_id": "ev_ai",
+   "life_stage": "현재",
+   "year": 2025,
+   "age": 40,
+   "date_text": "요즘",
+   "previous_event": "ev_daughter",
+   "next_event": null
+  }
+ ],
+ "historical_connections": [
+  {
+   "personal_event": "ev_bankrupt",
+   "historical_event": "대한민국의 IMF 구제금융 요청",
+   "year": 1997,
+   "impact_type": "direct",
+   "description": "외환위기로 중소 자영업이 무너지던 때 아버지의 인쇄소도 부도가 났다.",
+   "confidence": 1.0,
+   "node_id": "wd:Q625457",
+   "node_label": "대한민국의 IMF 구제금융 요청"
+  },
+  {
+   "personal_event": "ev_move",
+   "historical_event": "대한민국의 IMF 구제금융 요청",
+   "year": 1997,
+   "impact_type": "indirect",
+   "description": "부도 뒤의 살림 때문에 대구를 떠나 서울로 옮겼다.",
+   "confidence": 0.8,
+   "node_id": "wd:Q625457",
+   "node_label": "대한민국의 IMF 구제금융 요청"
+  },
+  {
+   "personal_event": "ev_worldcup",
+   "historical_event": "2002년 FIFA 월드컵",
+   "year": 2002,
+   "impact_type": "direct",
+   "description": "한일 월드컵의 거리 응원이 가장 강한 기억으로 남았다.",
+   "confidence": 1.0,
+   "node_id": null
+  },
+  {
+   "personal_event": "ev_remote",
+   "historical_event": "대한민국의 코로나19 범유행",
+   "year": 2020,
+   "impact_type": "direct",
+   "description": "감염병으로 재택근무가 강제되면서 혼자 일하는 방식을 겪었다.",
+   "confidence": 1.0,
+   "node_id": "wd:Q83872398",
+   "node_label": "대한민국의 코로나19 범유행"
+  },
+  {
+   "personal_event": "ev_birth",
+   "historical_event": "6.25 전쟁",
+   "year": 1950,
+   "impact_type": "indirect",
+   "description": "할아버지가 참전한 전쟁. 가족의 이야기로 전해진다.",
+   "confidence": 0.6,
+   "node_id": "wd:Q8663",
+   "node_label": "6.25 전쟁"
+  },
+  {
+   "personal_event": "ev_first_pc",
+   "historical_event": "PC통신·인터넷 보급",
+   "year": 1999,
+   "impact_type": "direct",
+   "description": "1990년대 말 가정용 컴퓨터와 PC통신이 퍼지던 때 첫 컴퓨터를 갖게 됐다.",
+   "confidence": 0.7,
+   "node_id": null
+  }
+ ],
+ "family_analysis": {
+  "origin": "경북 영천의 농가에서 대구의 자영업 가정으로, 다시 서울로 옮겨 온 흐름이다.",
+  "members": [
+   {
+    "node_id": "grandfather",
+    "relation": "조부",
+    "description": "영천의 농부. 6·25 참전 세대."
+   },
+   {
+    "node_id": "father",
+    "relation": "부",
+    "description": "대구의 자영업자. 외환위기의 직격을 맞았다."
+   },
+   {
+    "node_id": "mother",
+    "relation": "모",
+    "description": "초등학교 교사. 부도 뒤에도 가계를 받쳤을 가능성이 있다."
+   }
+  ],
+  "historical_flow": "농촌에서 지방 도시의 자영업으로, 외환위기를 거쳐 수도권으로 — 한 세대 안에 한국 경제의 세 국면을 지났다.",
+  "values": "부도와 이사를 겪은 뒤 '혼자서도 설 수 있는 일'을 찾는 태도가 형성된 것으로 보인다."
+ },
+ "impact_analysis": [
+  {
+   "event": "대한민국의 IMF 구제금융 요청",
+   "impact_type": "direct",
+   "description": "가정의 경제 기반이 무너지고 거주지가 바뀌었다. 이후의 만남과 진로가 여기서 갈렸다.",
+   "strength": 9,
+   "confidence": 0.9
+  },
+  {
+   "event": "PC통신·인터넷 보급",
+   "impact_type": "direct",
+   "description": "첫 컴퓨터와 온라인 경험이 프로그래밍으로 이어졌다.",
+   "strength": 8,
+   "confidence": 0.8
+  },
+  {
+   "event": "대한민국의 코로나19 범유행",
+   "impact_type": "direct",
+   "description": "재택근무가 혼자 일하는 방식을 확인시켜 독립으로 이어졌다.",
+   "strength": 7,
+   "confidence": 0.9
+  },
+  {
+   "event": "6.25 전쟁",
+   "impact_type": "indirect",
+   "description": "할아버지 세대의 경험이 가족 이야기로 전해졌다. 직접 영향은 확인되지 않는다.",
+   "strength": 3,
+   "confidence": 0.5
+  }
+ ],
+ "turning_points": [
+  {
+   "event": "ev_fail",
+   "turning_point_score": 10,
+   "reason": "본인이 '나를 많이 바꿨다'고 말한 유일한 사건이다."
+  },
+  {
+   "event": "ev_move",
+   "turning_point_score": 9,
+   "reason": "거주지·학교·친구가 한꺼번에 바뀌었고 뒤의 창업 동료를 여기서 만났다."
+  },
+  {
+   "event": "ev_start_coding",
+   "turning_point_score": 9,
+   "reason": "직업의 출발점이다."
+  },
+  {
+   "event": "ev_indie",
+   "turning_point_score": 8,
+   "reason": "일하는 방식이 회사에서 혼자로 바뀌었다."
+  },
+  {
+   "event": "ev_daughter",
+   "turning_point_score": 8,
+   "reason": "가족 형성의 완성."
+  }
+ ],
+ "counterfactual_analysis": [
+  {
+   "event": "ev_bankrupt",
+   "question": "인쇄소가 부도나지 않았다면?",
+   "possibilities": [
+    "대구에 남아 다른 학교를 다녔을 가능성",
+    "민준을 만나지 않아 창업이 달라졌을 가능성",
+    "첫 컴퓨터를 갖는 시기가 달랐을 가능성"
+   ]
+  },
+  {
+   "event": "ev_fail",
+   "question": "창업이 실패하지 않았다면?",
+   "possibilities": [
+    "회사를 키우는 길에 남았을 가능성",
+    "독립 개발자가 되지 않았을 가능성",
+    "실패에서 얻은 태도가 형성되지 않았을 가능성"
+   ]
+  }
+ ],
+ "life_patterns": [
+  {
+   "pattern": "큰 외부 충격(외환위기·코로나) 뒤에 스스로 방향을 바꾼다.",
+   "kind": "반복되는 선택",
+   "evidence": [
+    "1997년 부도 → 1998년 이사·전학",
+    "2020년 재택 → 2021년 독립"
+   ]
+  },
+  {
+   "pattern": "새로운 기술이 손에 들어오면 그것을 일로 만든다.",
+   "kind": "강점",
+   "evidence": [
+    "1999년 첫 컴퓨터 → 프로그래밍",
+    "2025년 AI 도구 → 혼자 제품"
+   ]
+  },
+  {
+   "pattern": "사람과의 관계가 큰 결정의 계기가 된다.",
+   "kind": "반복되는 선택",
+   "evidence": [
+    "민준과의 만남 → 창업"
+   ]
+  }
+ ],
+ "influence_ranking": {
+  "items": [
+   {
+    "category": "인물",
+    "node": "minjun",
+    "influence_score": 8,
+    "reason": "만남에서 창업까지 이어졌다."
+   },
+   {
+    "category": "사건",
+    "node": "ev_fail",
+    "influence_score": 10,
+    "reason": "본인이 꼽은 가장 큰 변화."
+   },
+   {
+    "category": "장소",
+    "node": "seoul_gwanak",
+    "influence_score": 8,
+    "reason": "성장·만남·진로가 모두 여기서 시작됐다."
+   },
+   {
+    "category": "기술",
+    "node": "pc_tongsin",
+    "influence_score": 8,
+    "reason": "프로그래밍의 계기."
+   },
+   {
+    "category": "영화",
+    "node": "matrix",
+    "influence_score": 6,
+    "reason": "기술에 대한 믿음을 심었다."
+   },
+   {
+    "category": "책",
+    "node": "cosmos",
+    "influence_score": 5,
+    "reason": "과학에 대한 애정."
+   },
+   {
+    "category": "게임",
+    "node": "starcraft",
+    "influence_score": 6,
+    "reason": "컴퓨터에 빠진 계기."
+   },
+   {
+    "category": "결정",
+    "node": "ev_indie",
+    "influence_score": 8,
+    "reason": "일하는 방식을 바꿨다."
+   }
+  ]
+ },
+ "follow_up_questions": [
+  "대구에서 다닌 초등학교와 그때의 친구 관계는 어땠나요?",
+  "어머니의 직업은 부도 뒤 가계에 어떤 역할을 했나요?",
+  "창업한 앱 서비스는 무엇이었고 왜 접게 됐나요?",
+  "배우자는 어떻게 만났나요?",
+  "할아버지의 참전 이야기는 어떤 식으로 전해졌나요?"
+ ],
+ "subject": {
+  "id": "me",
+  "name": "나",
+  "birth_year": 1985
+ },
+ "notes": []
+}

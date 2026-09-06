@@ -261,6 +261,8 @@ export default function App() {
                   onClick={() => meta?.root && load(meta.root)}>
             {era}
           </button>
+          {/* 개인 역사 — 내 삶을 왕·대통령의 띠와 한국사 옆에 세우는 장 (life.html) */}
+          <a className="era" href="/life.html" title="내 삶을 한국사 옆에 세웁니다">내 역사</a>
         </div>
 
         {/* 검색으로 찾은 노드는 그래프만이 아니라 오른쪽 상세도 바로 연다 */}

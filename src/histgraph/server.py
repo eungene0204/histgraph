@@ -1046,6 +1046,40 @@ class GraphAPI:
         }
 
 
+    # --- 개인 역사 -----------------------------------------------------
+    def context(self, year_from: int, year_to: int) -> dict:
+        """어느 구간의 왕·대통령 재위 띠와 큰 사건 — 개인 연표의 왼쪽과 가운데.
+
+        개인 연표는 한 사람의 일생(수십 년)이라 시대 전체의 뼈대를 다 보낼
+        이유가 없다. 구간에 걸치는 재위(끝이 시작보다 뒤, 시작이 끝보다 앞)와
+        그 안의 사건만 준다. 사건은 `_anchors` 와 같은 규칙으로 고른 것이라
+        시대 연표와 개인 연표가 같은 사건을 세운다."""
+        if year_to < year_from:
+            year_from, year_to = year_to, year_from
+        # 구간을 재는 것은 재위이지 몰년이 아니다 — 윤보선(재위 1960~62, 몰
+        # 1990)이 1985년생의 축에 서면 안 된다. 띠 안의 몰년 꼬리는 화면이 긋는다.
+        reigns = [r for r in self._reigns()
+                  if r["start"] <= year_to and r["end"] >= year_from]
+        anchors = [dict(a, kind="anchor") for a in self._anchors()
+                   if year_from <= a["year"] <= year_to]
+        return {"axis": {"from": year_from, "to": year_to},
+                "reigns": reigns, "anchors": anchors}
+
+    def life(self, name: str | None = None) -> dict | None:
+        """저장된 개인 그래프 (`histgraph life` 가 만든 data/life/*.json).
+
+        배포에는 없다 — 개인 자료는 저장소 밖이다. 그때 화면은 사람이 붙여
+        넣은 JSON 을 쓴다."""
+        from . import life as life_mod
+
+        path = life_mod.find(name)
+        if path is None:
+            return None
+        payload = life_mod.load(path)
+        payload["_file"] = path.name
+        return payload
+
+
 def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
     """정적 파일 경로. 루트 밖을 가리키면 None.
 
@@ -1108,6 +1142,12 @@ def dispatch(
     if path == "/api/timeline":
         tl = api.timeline(one("id"))
         return (200, tl) if tl else (404, {"error": "not found"})
+    # 개인 역사 (web/life.html). 저장된 개인 그래프와, 그 구간의 재위 띠·큰 사건.
+    if path == "/api/life":
+        got = api.life(one("name") or None)
+        return (200, got) if got else (404, {"error": "저장된 개인 역사가 없습니다"})
+    if path == "/api/context":
+        return 200, api.context(int(one("from", "0")), int(one("to", "0")))
     if path.startswith("/api/node/"):
         node = api.node(unquote(path[len("/api/node/"):]))
         return (200, node) if node else (404, {"error": "not found"})

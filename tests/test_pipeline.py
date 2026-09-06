@@ -2708,6 +2708,7 @@ check("아는 매체 구분은 통과",
 # `-으나` 에서 끊긴 채였고, 원문의 뒤집는 절은 통째로 사라져 있었다.
 print("\n[근거 문장 복원 · 참여 부인]")
 
+import datetime  # noqa: E402
 import re  # noqa: E402
 
 from histgraph.extract import (  # noqa: E402
@@ -5396,6 +5397,118 @@ if True:
     from histgraph.server import LABEL_HEADS as _LH
     _js_heads = set(_re.findall(r"'([^']+)'", _js[_js.index("export const LABEL_HEADS"):_js.index("export function relHead")]))
     check("라벨 머리 표가 서버·화면·정적 페이지에서 같다", _LH == _pgs.LABEL_HEADS, f"{sorted(_LH ^ _pgs.LABEL_HEADS)}")
+
+
+# ---------------------------------------------------------------------------
+print("\n[개인 역사 — life]")
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import life as life_mod
+    from histgraph.server import GraphAPI as _LifeAPI, dispatch as _life_dispatch
+
+    # 지시문의 식별자는 빠짐없이 한국어 이름이 있어야 한다 — 화면에 영어가 뜨는 자리다.
+    prompt = life_mod.system_prompt()
+    core = prompt[prompt.index("# Node 타입"):prompt.index("# Person Node 구조")]
+    node_types = {ln.strip() for ln in core.splitlines() if re.fullmatch(r"[A-Z][a-z][A-Za-z]+", ln.strip())}
+    node_types |= set(re.findall(r'type:"([A-Za-z]+)"', prompt))
+    node_types |= set(re.findall(r"^## [^(\n]+\(([A-Z][A-Za-z]+)\)", prompt, re.M))
+    check("지시문의 노드 타입 전부에 한국어 이름이 있다 (%d)" % len(node_types),
+          node_types <= set(life_mod.NODE_TYPE_KO) and len(node_types) >= 38, str(node_types - set(life_mod.NODE_TYPE_KO)))
+    check("이름표는 전부 한글", all(re.search(r"[가-힣]", v) for v in
+          [*life_mod.NODE_TYPE_KO.values(), *life_mod.EDGE_TYPE_KO.values(), *life_mod.IMPACT_KO.values()]))
+    check("스키마의 타입·관계 enum 이 표와 같다",
+          set(life_mod.SCHEMA["properties"]["nodes"]["items"]["properties"]["type"]["enum"]) == set(life_mod.NODE_TYPE_KO)
+          and set(life_mod.SCHEMA["properties"]["edges"]["items"]["properties"]["type"]["enum"]) == set(life_mod.EDGE_TYPE_KO))
+    class _Fake:
+        model = "fake"
+        def complete_json(self, system, user, schema, max_tokens=None):
+            self.got = (system, user, schema, max_tokens)
+            return {"nodes": []}
+    fake = _Fake()
+    check("analyze 는 지시문·스키마·넉넉한 상한으로 묻는다",
+          life_mod.analyze("이야기", fake) == {"nodes": []} and fake.got[0] == prompt
+          and fake.got[2] is life_mod.SCHEMA and fake.got[3] >= 8000)
+    check("사용자 프롬프트가 그래프의 사건 이름을 보인다",
+          "대한민국의 IMF 구제금융 요청(1997)" in life_mod.build_user("이야기", anchors=[{"label": "대한민국의 IMF 구제금융 요청", "year": 1997}]))
+
+    # 날짜 — 지어내지 않는다
+    check("'2000년대 초반' 은 2000~2003", life_mod.parse_when("2000년대 초반") == (2000, 2003, "decade"))
+    check("'20대 초반' 은 생년 없이는 모른다", life_mod.parse_when("20대 초반") == (None, None, "age"))
+    check("'20대 초반' + 생년 1985", life_mod.parse_when("20대 초반", 1985) == (2005, 2008, "age"))
+    check("ISO 는 exact", life_mod.parse_when("1997-12-03") == (1997, 1997, "exact"))
+
+    raw = {
+        "nodes": [
+            {"id": "me", "type": "Person", "name": "나", "start_date": "1985-04", "confidence": 1.0},
+            {"id": "e1", "type": "Crisis", "name": "아버지 인쇄소 부도", "start_date": "1997-12", "importance_score": 14, "confidence": 1.0},
+            {"id": "e2", "type": "TurningPoint", "name": "서울 이사", "start_date": "20대 초반", "confidence": 0.9},
+            {"id": "x", "type": "Alien", "name": "외계", "confidence": 1.0},
+            {"id": "en", "type": "Book", "name": "Cosmos", "description": "Science book", "confidence": 1.0},
+        ],
+        "edges": [
+            {"source": "e1", "target": "e2", "type": "caused", "confidence": 1.0},
+            {"source": "me", "target": "x", "type": "met", "confidence": 1.0},
+            {"source": "me", "target": "e1", "type": "flew", "confidence": 1.0},
+        ],
+        "timeline": [
+            {"event_id": "e1", "life_stage": "초등학교"},
+            {"event_id": "e2", "life_stage": "없는 단계", "age": 13},
+            {"event_id": "ghost", "life_stage": "대학"},
+        ],
+        "historical_connections": [
+            {"personal_event": "e1", "historical_event": "대한민국의 IMF 구제금융 요청", "year": 1997, "impact_type": "direct", "description": "외환위기", "confidence": 1.0},
+            {"personal_event": "e1", "historical_event": "없는 사건", "year": None, "impact_type": "뭐", "description": "…", "confidence": 0.5},
+        ],
+        "influence_ranking": {"인물": {"node": "me", "influence_score": 9, "reason": "…"}},
+        "follow_up_questions": ["q%d" % i for i in range(9)],
+    }
+    payload, notes = life_mod.validate(raw)
+    ids = {n["id"] for n in payload["nodes"]}
+    check("모르는 타입은 버리고 적는다", "x" not in ids and any("Alien" in n for n in notes), str(notes))
+    check("양끝 없는 관계·모르는 관계는 버린다", [e["type"] for e in payload["edges"]] == ["caused"])
+    check("점수는 1~10 로 자른다", next(n for n in payload["nodes"] if n["id"] == "e1")["importance_score"] == 10)
+    check("주인공과 생년", payload["subject"] == {"id": "me", "name": "나", "birth_year": 1985})
+    e2 = next(n for n in payload["nodes"] if n["id"] == "e2")
+    check("'20대 초반' 이 생년으로 풀린다", (e2["year"], e2["end_year"], e2["precision"]) == (2005, 2008, "age"), str(e2))
+    tl = {t["event_id"]: t for t in payload["timeline"]}
+    check("연표: 노드의 해를 받고 나이를 센다", tl["e1"]["year"] == 1997 and tl["e1"]["age"] == 12, str(tl["e1"]))
+    check("연표: 나이만 있으면 생년으로 푼다 · 모르는 단계는 비운다",
+          tl["e2"]["year"] == 1998 and tl["e2"]["life_stage"] is None, str(tl["e2"]))
+    check("연표: 노드에 없는 사건은 버린다", "ghost" not in tl)
+    check("영향 종류가 표 밖이면 '가능성'", payload["historical_connections"][1]["impact_type"] == "possible")
+    check("순위표: 범주 → 항목 꼴도 목록으로", payload["influence_ranking"]["items"][0]["category"] == "인물")
+    check("물음은 다섯까지", len(payload["follow_up_questions"]) == 5)
+    check("한글 없는 노드는 경고", any("Cosmos" in n for n in notes), str(notes))
+    check("구간은 생년부터 오늘까지", life_mod.span(payload, datetime.date(2026, 9, 7)) == (1985, 2026))
+
+    # 그래프에 잇기 + 엔드포인트
+    store = GraphStore(Path(tmp) / "korea.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:IMF", type="event", label="대한민국의 IMF 구제금융 요청", source="wd", start_date="1997-12-03"),
+        Node(id="wd:IMF2", type="event", label="대한민국의 IMF 구제금융 요청", source="wd", start_date="1897"),
+        Node(id="wd:COV", type="event", label="대한민국의 코로나19 범유행", source="wd", start_date="2020-01-20"),
+        Node(id="wd:KDJ", type="person", label="김대중", source="wd", start_date="1924-01-06", end_date="2009-08-18"),
+        Node(id="wd:PRES", type="role", label="대한민국의 대통령", source="wd"),
+    ])
+    store.upsert_edges([Edge(src="wd:KDJ", dst="wd:PRES", type="held_position", source="wd",
+                             start_date="1998-02-25", end_date="2003-02-24", props={"reign": "president"})])
+    api = _LifeAPI(store, era="korea")
+    linked = life_mod.link(payload, api)
+    c0 = payload["historical_connections"][0]
+    check("이름과 해가 맞는 사건 노드에 잇는다 (1897 년의 동명 사건이 아니라)", linked == 1 and c0["node_id"] == "wd:IMF", str(c0))
+    check("못 이은 것은 None 으로 둔다", payload["historical_connections"][1]["node_id"] is None)
+    st, ctx = _life_dispatch(api, "/api/context", {"from": ["1985"], "to": ["2026"]})
+    check("/api/context 가 구간의 재위 띠와 사건을 준다",
+          st == 200 and [r["label"] for r in ctx["reigns"]] == ["김대중"] and {a["id"] for a in ctx["anchors"]} == {"wd:IMF", "wd:COV"}, str(ctx))
+    st, ctx = _life_dispatch(api, "/api/context", {"from": ["1900"], "to": ["1990"]})
+    check("구간 밖의 재위·사건은 안 준다", ctx["reigns"] == [] and ctx["anchors"] == [])
+    life_mod.LIFE_DIR, keep_dir = Path(tmp) / "life", life_mod.LIFE_DIR
+    st, body = _life_dispatch(api, "/api/life", {})
+    check("저장된 개인 역사가 없으면 404 를 한국어로", st == 404 and "없" in body["error"])
+    life_mod.save(payload, life_mod.LIFE_DIR / "나.json")
+    st, body = _life_dispatch(api, "/api/life", {})
+    check("저장하면 /api/life 가 그것을 준다", st == 200 and body["subject"]["name"] == "나" and body["_file"] == "나.json")
+    life_mod.LIFE_DIR = keep_dir
+    check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

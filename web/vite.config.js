@@ -34,6 +34,8 @@ export default {
         main: here('index.html'),
         privacy: here('privacy.html'),
         terms: here('terms.html'),
+        // 개인 역사 — 그래프와 다른 앱(React 뿌리)이라 장을 따로 낸다.
+        life: here('life.html'),
       },
     },
   },

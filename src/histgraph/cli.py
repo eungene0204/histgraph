@@ -2280,6 +2280,62 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_life(args: argparse.Namespace) -> int:
+    """인생 이야기(글 파일)를 개인 역사 그래프(JSON)로. `life` 모듈 머리글.
+
+        uv run histgraph life data/life/나.txt                # MLX 로 분석해 data/life/나.json
+        uv run histgraph life --json data/life/나.json         # 이미 받은 JSON 을 검증·연결만
+        uv run histgraph life data/life/나.txt --dry-run       # 프롬프트만 찍는다
+
+    모델은 MLX 가 기본이고 35GB 를 잡는다 — `extract`·`roles`·`causes` 와
+    함께 띄우지 말 것. 지시문을 그대로 Claude 채팅에 넣어 받은 JSON 도
+    `--json` 으로 같은 관문을 지난다. 결과는 data/life/ 에 남고 저장소에는
+    안 올라간다. 화면은 http://127.0.0.1:8100/life.html 이다."""
+    from . import life as life_mod
+    from .server import GraphAPI
+
+    if args.json is None and args.text is None:
+        print("  이야기 글 파일이나 --json 을 주세요.", file=sys.stderr)
+        return 2
+    db = ROOT / "data" / f"{args.era}.sqlite"
+    api = GraphAPI(db, era=args.era, readonly=True) if db.exists() else None
+    if args.json is not None:
+        raw = life_mod.load(Path(args.json))
+        name = args.name or Path(args.json).stem
+    else:
+        text = Path(args.text).read_text(encoding="utf-8")
+        name = args.name or Path(args.text).stem
+        # 이야기가 걸칠 만한 구간의 사건 이름을 모델에게 보인다 (life.build_user).
+        # 생년은 아직 모르니 --from-year 부터 오늘까지다.
+        import datetime as _dt
+        anchors = (api.context(args.from_year, _dt.date.today().year)["anchors"]
+                   if api is not None else [])
+        if args.dry_run:
+            print(life_mod.system_prompt())
+            print("\n" + "=" * 46 + "\n")
+            print(life_mod.build_user(text, anchors=anchors))
+            return 0
+        backend = build_backend(args.backend, args.model)
+        raw = life_mod.analyze(text, backend, anchors=anchors)
+        if raw is None:
+            print("  모델이 JSON 을 돌려주지 않았습니다.", file=sys.stderr)
+            return 1
+        raw["_model"] = backend.model
+    payload, notes = life_mod.validate(raw)
+    linked = life_mod.link(payload, api) if api is not None else 0
+    out = Path(args.out) if args.out else life_mod.LIFE_DIR / f"{name}.json"
+    life_mod.save(payload, out)
+    lo, hi = life_mod.span(payload)
+    print(f"  노드 {len(payload['nodes'])} · 관계 {len(payload['edges'])} · 연표 {len(payload['timeline'])}"
+          f" · 역사 연결 {len(payload['historical_connections'])} (그래프에 이은 것 {linked})")
+    if lo is not None:
+        print(f"  구간 {lo}~{hi}")
+    for line in notes:
+        print(f"    · {line}")
+    print(f"  저장: {out}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     with GraphStore(args.db) as store:
         print(json.dumps(store.stats(), ensure_ascii=False, indent=2))
@@ -2661,6 +2717,19 @@ def main(argv: list[str] | None = None) -> int:
     p_sv.add_argument("--host", default="127.0.0.1")
     p_sv.add_argument("--port", type=int, default=8100)
     p_sv.set_defaults(func=cmd_serve)
+
+    p_lf = sub.add_parser("life", help="인생 이야기를 개인 역사 그래프로 (data/life/)")
+    p_lf.add_argument("text", nargs="?", help="이야기 글 파일 (.txt)")
+    p_lf.add_argument("--json", help="이미 받은 그래프 JSON 을 검증·연결만 한다")
+    p_lf.add_argument("--name", help="저장 이름 (기본: 파일 이름)")
+    p_lf.add_argument("--out", help="저장 경로 (기본: data/life/{이름}.json)")
+    p_lf.add_argument("--era", default="korea", help="역사 사건을 이을 그래프 (data/{era}.sqlite)")
+    p_lf.add_argument("--from-year", type=int, default=1940,
+                      help="모델에게 보일 그래프 사건 목록의 시작 해 (생년보다 앞이면 된다)")
+    p_lf.add_argument("--backend", default="mlx", choices=["mlx", "anthropic"])
+    p_lf.add_argument("--model", default=None)
+    p_lf.add_argument("--dry-run", action="store_true", help="프롬프트만 찍고 모델은 안 부른다")
+    p_lf.set_defaults(func=cmd_life)
 
     sub.add_parser("stats", help="그래프 통계").set_defaults(func=cmd_stats)
 
