@@ -5,6 +5,7 @@ import { TimelinePanel } from './components/TimelinePanel.jsx';
 import { SidePanel } from './components/SidePanel.jsx';
 import { DetailPanel } from './components/DetailPanel.jsx';
 import { Search } from './components/Search.jsx';
+import { ThemeToggle } from './components/ThemeToggle.jsx';
 
 // 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
 // 더할 때마다 두 곳을 고쳐야 하고, 빠뜨린 하나가 화면에 영어로 뜬다.
@@ -264,6 +265,9 @@ export default function App() {
 
         {/* 검색으로 찾은 노드는 그래프만이 아니라 오른쪽 상세도 바로 연다 */}
         <Search nodeTypes={meta?.node_types} onPick={(id) => { load(id); showDetail(id); }} />
+        {/* 연표는 색을 문자열로 박아 두므로(SVG) 테마가 바뀌면 다시 그려 준다.
+            캔버스는 매 프레임 그리니 스스로 따라온다. */}
+        <ThemeToggle onChange={() => railRef.current?.layout({ keepView: true })} />
       </header>
 
       <div className="layout">
@@ -315,10 +319,6 @@ export default function App() {
         <span className="foot-copy">© 2026 histgraph</span>
         <a href="/privacy.html">개인정보처리방침</a>
         <a href="/terms.html">이용약관</a>
-        {/* 노드·엣지 수는 글자 수처럼 상태 줄 오른쪽 끝에 선다 */}
-        <span className="counts">
-          {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
-        </span>
       </footer>
     </>
   );

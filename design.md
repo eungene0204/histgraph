@@ -140,6 +140,22 @@ Obsidian 은 Inter 를 싣는다. 우리는 싣지 않는다 — 한글은 어�
 | `--pill-radius` | 2em | 타입 딱지, 다른 이름, 인과 종류, 연결된 연도, 재위 띠 단추 |
 | `--shadow-s` / `--shadow-l` | Obsidian 값 그대로 | 설정 상자 / 검색 결과 |
 
+**라이트 테마 (2026-09-06)**. 진실은 `<html data-theme>` 하나다. `public/theme-boot.js`
+가 CSS 보다 먼저 저장값(`localStorage.theme`)이나 운영체제 설정을 읽어 박고 —
+React 뒤에 바꾸면 어두운 화면이 한 번 번쩍인다 — 머리 줄의 `.theme-toggle`
+(`src/lib/theme.js`)이 바꾼다. CSS 는 `:root[data-theme="light"]` 에서 **회색
+사다리와 반투명 값만** 뒤집는다. 뜻을 가진 이름은 사다리를 가리키므로 저절로
+따라온다. **값은 Obsidian 라이트가 아니다** — 그대로 옮겼더니 "시인성이 너무
+떨어진다"고 지적받았다 (옅은 글자 #ababab 대비 2.3, 테두리 #e0e0e0 대비 1.3).
+GitHub Primer·Radix gray·Tailwind 를 실측해 셋의 공통 수준으로 맞췄다: 본문
+`#1f1f1f`, 보조 `#555555`, 가장 옅은 글자도 `#767676`(4.5:1), 테두리 `#d0d0d0`,
+사이드바 `#f2f2f2`, 강조 hsl(258 80% 56%). 캔버스는 CSS 변수를 못 읽어
+`graph-view.js` 의 `DARK`·`LIGHT` 표가 같은 값을 들고(선 `#9a9a9a`, 가리킨 선은
+글자 무게), 노드 색은 `TYPE_COLOR_LIGHT` — **색상은 그대로, 밝기만 뒤집었다**
+(크림 → 황갈, 노랑 → 어두운 노랑, 연빨강 → 원색 D62828, 남색 → 원색 003049,
+뼈대(시대·직위)는 옅어져 물러나되 2.5:1 은 지킨다). 인물 파랑·사건 주황·재위 띠
+파랑은 두 바탕에서 다 읽혀 그대로다. 방침·약관(`doc.css`)도 같은 선택자로 따라온다.
+
 그림자는 **떠 있는 것**에만 쓴다. 사이드바와 목록에는 없다 — Obsidian 은
 층을 그림자가 아니라 바탕색 한 단(secondary)과 1px 선으로 가른다.
 
@@ -379,8 +395,8 @@ arrows }` · `hiddenEdgeTypes` · `forces = { center, repel, link }`. 각각
 ## 5. 배치
 
 ```
-┌ .top  머리 줄 (secondary, 44px) ────────────────────────────────────┐
-│ ● histgraph  [조선~대한민국]   [검색 ─────────────]                  │
+┌ .top  머리 줄 (secondary, 52px) ────────────────────────────────────┐
+│ ● histgraph  [조선~대한민국]        [검색 ─────────────]         [☾] │
 ├───────────┬──────────────────────────────────────┬──────────────────┤
 │ .timeline │ .stage-wrap                          │ .detail          │
 │ 252px     │ [⚙]┌ 설정 ─┐  .stage 캔버스 (primary)│ 348px            │
@@ -397,8 +413,9 @@ arrows }` · `hiddenEdgeTypes` · `forces = { center, repel, link }`. 각각
 
 | 자리 | Obsidian 의 무엇 | 클래스 | 정한 것 |
 |---|---|---|---|
-| 머리 줄 | 탭 머리 줄 | `.top` | 44px, secondary 바탕. 시대 이름은 열린 문서 탭처럼 보이는 단추(`.era`) — 누르면 중심으로 |
-| 검색 | 빠른 전환(quick switcher) | `.search`, `.results` | 입력칸은 form-field 바탕·5px·30px 높이. 결과는 primary 바탕·12px·`--shadow-l`. 고른 줄은 hover 바탕 + 강조색 글자 |
+| 머리 줄 | 탭 머리 줄 | `.top` | 52px, secondary 바탕. 세 칸 격자(1fr · 640px · 1fr)라 검색이 화면 한가운데 온다. 시대 이름은 열린 문서 탭처럼 보이는 단추(`.era`) — 누르면 중심으로 |
+| 테마 단추 | 설정의 외형(라이트/다크) | `.theme-toggle` | 격자 셋째 칸 오른쪽 끝, `.clickable-icon`. 아이콘은 **누르면 되는 것**(어두운 화면엔 해, 밝은 화면엔 달). 이름표도 '밝은 화면으로'·'어두운 화면으로' |
+| 검색 | 빠른 전환(quick switcher) | `.search`, `.results` | 입력칸은 form-field 바탕·5px·38px 높이·15px 글자 (09-06: 작아서 있는 줄 모른다는 지적). 결과는 primary 바탕·12px·`--shadow-l`. 고른 줄은 hover 바탕 + 강조색 글자 |
 | 연표 | 왼쪽 사이드바의 파일 트리 | `.timeline` | §6 |
 | 캔버스 | 그래프 뷰 | `.stage`, `#canvas` | §4. 왼쪽 아래 안내 칩(`.stage-note`), 비었으면 가운데 안내 |
 | 설정 상자 | graph-controls | `.graph-controls`, `.graph-controls-toggle` | 캔버스 **왼쪽 위**(Obsidian 과 같은 자리), 240px, `--shadow-s`. **기본 접힘** — 조절 단추(lucide sliders)만 남는다. 절은 `<details>` 라 따로 접힌다. 아래 표 |

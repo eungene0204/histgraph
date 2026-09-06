@@ -32,7 +32,7 @@ import re
 import sqlite3
 import urllib.parse
 
-from .extract import HANJA_TAIL, kin_title_mismatch, name_variants, orient
+from .extract import HANJA_TAIL, is_abstract_event, kin_title_mismatch, name_variants, orient
 from .http import Fetcher
 from .ontology import EDGE_TYPES, Node
 from .store import GraphStore
@@ -77,11 +77,28 @@ ROLE_PATTERN = re.compile(
 )
 
 
+# 사건으로 들어왔지만 사건 표지가 없는 고아 가운데 단체인 것의 꼬리.
+# `ORG_PATTERN` 보다 넓다 — 이 길은 이미 '사건이 아니다'가 판정된 뒤라
+# '김정부' 같은 인물이 걸릴 자리가 아니다.
+EVENT_ORG_HINT = re.compile(
+    r"(당|신보|일보|은행|대학|학교|연맹|총본부|위원회|기구|정부|의원|사령부|"
+    r"군정서|독군부|별초|의군|교|연맹|협회|학회|양성소|공영권)$"
+)
+
+
+# 접미사 규칙에 걸리지만 사람인 이름. '강문회'(강일순의 아버지)가 '신간회'
+# 와 같은 꼴이라 단체가 됐다 (2026-09-06). 규칙을 좁히면 진짜 단체를 놓치니
+# 예외를 적는다 — 표는 기계를 이긴다.
+NOT_AN_ORG: frozenset[str] = frozenset({"강문회"})
+
+
 def classify(label: str) -> str | None:
     """라벨이 명백히 조직·직위면 그 타입, 아니면 None.
 
     직위를 먼저 본다. '대한민국 임시정부 대통령'처럼 두 규칙이 함께
     걸릴 수 있는 라벨은 자리 이름이 더 구체적인 답이다."""
+    if label in NOT_AN_ORG:
+        return None
     if ROLE_PATTERN.search(label):
         return "role"
     if ORG_PATTERN.search(label):
@@ -93,20 +110,58 @@ def retype(store: GraphStore, dry_run: bool = False) -> dict[str, object]:
     """ex 노드의 타입 오분류를 고친다.
 
     타입이 id 에 들어 있으므로(`ex:person:조선총독부`) id 도 함께 바뀐다.
-    엣지·별칭을 옮기는 일은 병합과 똑같아서 `merge_node` 를 그대로 쓴다."""
+    엣지·별칭을 옮기는 일은 병합과 똑같아서 `merge_node` 를 그대로 쓴다.
+
+    사건으로 들어온 고아는 둘을 더 본다 (2026-09-06). **같은 이름의 다른
+    타입 노드가 있으면** 그쪽이 답이다 — '성호사설'·'대동여지도'는 국편
+    유물로, '정의부'·'북로군정서'는 단체로 이미 있었다 (실측 22개). 그것도
+    없는데 **사건 표지도 숫자도 없는 이름**(`extract.is_abstract_event`)은
+    개념·서술구다 — '세력 강화'·'민족정신'·'충군'. 지운다. 이 두 갈래가 추출
+    고아 사건 451개의 175개였다."""
     plan: list[tuple[str, str, str, str]] = []  # (old_id, new_id, label, new_type)
+    absorbed: list[tuple[str, str]] = []        # (ex 사건, 같은 이름의 실제 노드)
+    abstract: list[str] = []                    # 지울 서술구 사건
     for row in store.conn.execute(
         "SELECT id, type, label FROM nodes WHERE id LIKE ?", (EX_PREFIX + "%",)
     ):
+        if row["type"] == "event":
+            twin = store.conn.execute(
+                """SELECT id FROM nodes WHERE label = ? AND id <> ? AND type <> 'event'
+                    ORDER BY CASE WHEN id LIKE 'ex:%' THEN 1 ELSE 0 END, id LIMIT 1""",
+                (row["label"], row["id"]),
+            ).fetchone()
+            if twin:
+                absorbed.append((row["id"], twin["id"]))
+                continue
+            if is_abstract_event(row["label"]):
+                # 단체 꼬리(당·일보·은행·대학…)면 지우지 않고 단체로 옮긴다 —
+                # 조선혁명당·동아일보가 관계 여섯을 달고 사건 자리에 있었다.
+                if EVENT_ORG_HINT.search(row["label"]):
+                    plan.append((row["id"], f"{EX_PREFIX}org:{row['label']}", row["label"], "org"))
+                else:
+                    abstract.append(row["id"])
+                continue
         want = classify(row["label"])
         if not want or want == row["type"]:
             continue
         plan.append((row["id"], f"{EX_PREFIX}{want}:{row['label']}", row["label"], want))
 
     if dry_run:
-        return {"retyped": 0, "plan": plan}
+        return {"retyped": 0, "plan": plan, "absorbed": absorbed, "abstract": abstract}
+
+    for old_id, new_id in absorbed:
+        merge_node(store, old_id, new_id, method="same_label")
+    for nid in abstract:
+        store.conn.execute("DELETE FROM edges WHERE src = ? OR dst = ?", (nid, nid))
+        store.conn.execute("DELETE FROM nodes WHERE id = ?", (nid,))
 
     for old_id, new_id, label, new_type in plan:
+        if new_id == old_id:
+            # id 의 타입 칸은 맞는데 type 열만 다른 노드 (손으로 고친 것).
+            # 자기 자신에게 합치면 엣지가 전부 자기순환이 되어 지워지고
+            # 노드도 사라진다 — 열만 고친다.
+            store.conn.execute("UPDATE nodes SET type = ? WHERE id = ?", (new_type, old_id))
+            continue
         exists = store.conn.execute(
             "SELECT 1 FROM nodes WHERE id = ?", (new_id,)
         ).fetchone()
@@ -118,8 +173,9 @@ def retype(store: GraphStore, dry_run: bool = False) -> dict[str, object]:
         merge_node(store, old_id, new_id, method="retype")
 
     store.conn.commit()
-    log.info("타입 교정 %d건", len(plan))
-    return {"retyped": len(plan), "plan": plan}
+    log.info("타입 교정 %d건 · 같은 이름에 흡수 %d건 · 서술구 사건 지움 %d건",
+             len(plan), len(absorbed), len(abstract))
+    return {"retyped": len(plan), "plan": plan, "absorbed": absorbed, "abstract": abstract}
 
 
 # --- 병합 원시연산 --------------------------------------------------------

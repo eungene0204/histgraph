@@ -36,6 +36,9 @@
   --background-modifier-border-hover: var(--color-base-35);
   --background-modifier-border-focus: var(--color-base-40);
   --background-modifier-hover:        rgba(255, 255, 255, .075);
+  --background-modifier-subtle:       rgba(255, 255, 255, .04);   /* 안내 상자 바탕 */
+  --scrollbar-thumb:       rgba(255, 255, 255, .1);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, .2);
   --background-modifier-active-hover: hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .15);
   --background-modifier-form-field:   var(--color-base-00);
   --text-normal:  var(--color-base-100);
@@ -95,6 +98,45 @@
   --font:      var(--font-interface);
 }
 
+/* --- 라이트 테마 ---
+   진실은 <html data-theme> 하나다 — public/theme-boot.js 가 첫 그림 전에 박고
+   머리 줄 단추(.theme-toggle)가 바꾼다. 여기서는 회색 사다리와 반투명 값만
+   뒤집는다. 뜻을 가진 이름(--background-*, --text-*)은 사다리를 가리키므로
+   저절로 따라온다. 캔버스 색은 graph-view.js 의 LIGHT 표가 같은 값을 든다.
+
+   처음엔 Obsidian 라이트를 그대로 옮겼다가 "시인성이 너무 떨어진다"고 지적받았다
+   (2026-09-06). 옅은 글자 ababab(대비 2.3)·테두리 e0e0e0(1.3) 이 원인. 대표
+   시스템 셋을 실측해 맞췄다 —
+     GitHub Primer  fg-muted 59636e · fg-disabled 818b98 · border d1d9e0 · bg-muted f6f8fa
+     Radix gray     텍스트는 11 646464 이 하한, 테두리 7 cecece · 8 bbbbbb, 12 202020
+     Tailwind       gray-500 6b7280 (보조 글자) · gray-300 d1d5db (테두리) · gray-100 f3f4f6
+   셋이 같은 말을 한다: 가장 옅은 글자도 4.5:1 은 넘기고, 테두리는 1.5:1 이상. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-base-00: #ffffff;
+  --color-base-10: #fafafa;
+  --color-base-20: #f2f2f2;   /* 사이드바·머리·상태 줄 — Radix 3 · Tailwind 100 */
+  --color-base-25: #e8e8e8;
+  --color-base-30: #d0d0d0;   /* 테두리 — Primer d1d9e0 · Tailwind 300 · Radix 7 */
+  --color-base-35: #bbbbbb;   /* 테두리 hover — Radix 8 */
+  --color-base-40: #8d8d8d;   /* 초점 테두리 — Radix 9 */
+  --color-base-50: #767676;   /* 옅은 글자 — 흰 바탕 4.5:1 (AA). 연표 연도·힌트·자리표시 */
+  --color-base-60: #666666;
+  --color-base-70: #555555;   /* 보조 글자 — Primer fg-muted · Tailwind 600 */
+  --color-base-100: #1f1f1f;  /* 본문 — Primer 1f2328 · Radix 12 */
+  --accent-h: 258; --accent-s: 80%; --accent-l: 56%;   /* 흰 바탕 링크 대비 5:1 */
+  --color-accent-1: hsl(var(--accent-h) var(--accent-s) 62%);
+  --color-accent-2: hsl(var(--accent-h) var(--accent-s) 68%);
+  --color-blue: #2a6a9a;             /* 흰 바탕에서 읽히는 같은 계열 파랑 (4.9:1) */
+  --background-modifier-hover:  rgba(0, 0, 0, .06);
+  --background-modifier-subtle: rgba(0, 0, 0, .04);
+  --scrollbar-thumb:       rgba(0, 0, 0, .18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, .32);
+  --shadow-s: 0 1px 2px rgba(0,0,0,.06), 0 3.4px 6.7px rgba(0,0,0,.08), 0 15px 30px rgba(0,0,0,.12);
+  --shadow-l: 0 1.8px 7.3px rgba(0,0,0,.08), 0 6.3px 24.1px rgba(0,0,0,.12), 0 30px 90px rgba(0,0,0,.18);
+  --graph-line: var(--color-base-35);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -121,10 +163,10 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,.1); border-radius: var(--radius-l);
+  background: var(--scrollbar-thumb); border-radius: var(--radius-l);
   border: 3px solid transparent; background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
 
 button, input, select { font-family: inherit; }
 
@@ -142,11 +184,14 @@ button, input, select { font-family: inherit; }
 .clickable-icon svg { width: 16px; height: 16px; }
 
 /* --- 상단 (Obsidian 의 탭 머리 줄) --- */
+/* 세 칸 격자: 상표 | 검색 | (빈 칸). 양옆 1fr 이 같아 검색이 화면 한가운데 온다 —
+   상표 폭에 밀리지 않는다. 검색은 눈에 띄어야 해서 머리 줄도 조금 높다. */
 .top {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 640px) 1fr;
   align-items: center;
   gap: 16px;
-  height: 44px;
+  height: 52px;
   padding: 0 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
@@ -169,17 +214,21 @@ button, input, select { font-family: inherit; }
 }
 .era:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 
-.search { position: relative; flex: 1; max-width: 520px; }
+.search { position: relative; grid-column: 2; width: 100%; }
+/* 라이트/다크 단추 — 격자 셋째 칸의 오른쪽 끝. 아이콘은 '지금 누르면 되는 것'
+   (어두운 화면에서는 해, 밝은 화면에서는 달)을 그린다. */
+.theme-toggle { grid-column: 3; justify-self: end; width: 32px; height: 32px; }
+.theme-toggle svg { width: 18px; height: 18px; }
 .search input {
   width: 100%;
-  height: 30px;
-  padding: 0 10px;
+  height: 38px;
+  padding: 0 14px;
   border-radius: var(--input-radius);
   border: 1px solid var(--background-modifier-border);
   background: var(--background-modifier-form-field);
   color: var(--text-normal);
   font: inherit;
-  font-size: var(--font-ui-small);
+  font-size: var(--font-ui-medium);
 }
 .search input::placeholder { color: var(--text-faint); }
 .search input:hover { border-color: var(--background-modifier-border-hover); }
@@ -522,7 +571,7 @@ button, input, select { font-family: inherit; }
    노드'로 읽힌다. */
 .d-nodesc {
   font-size: 12.5px; line-height: 1.6; color: var(--text-muted);
-  background: rgba(255,255,255,.04); border-radius: var(--radius-s); padding: 10px 12px;
+  background: var(--background-modifier-subtle); border-radius: var(--radius-s); padding: 10px 12px;
   margin: 0; border-left: 3px solid var(--color-base-40);
 }
 .d-desc-src { font-size: var(--font-ui-smaller); color: var(--text-faint); margin: 6px 0 0; }
@@ -667,7 +716,6 @@ button, input, select { font-family: inherit; }
 }
 .foot a:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .foot-copy { margin-right: auto; }
-.counts { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 1100px) {
   .detail { width: 300px; }
