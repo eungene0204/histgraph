@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, graphPayload, graphMeta, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, graphPayload, graphMeta, boardWidth, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -14,7 +14,7 @@ import { LifeBoard, normalize, graphPayload, graphMeta, NODE_TYPE_KO, EDGE_TYPE_
 // (재위 띠·큰 사건)는 언제나 서버(/api/context)다.
 
 const STORE_KEY = 'life-json';
-const VIEW_KEY = 'life-view';   // '연표' | '그래프'
+const RAIL_KEY = 'life-rail';   // 연표를 접어 두었나 ('0' 이면 접힘)
 
 // 개인 그래프의 선 범례. 역사 그래프의 '구조화 소스/산문 추출' 대신 —
 // 실선은 본인이 말한 것, 점선은 말한 것에서 미룬 것(confidence < 1).
@@ -53,14 +53,18 @@ export default function LifeView() {
   const boardRef = useRef(null);
 
   // --- 그래프 (역사 그래프와 같은 캔버스·설정 상자) ---------------------
-  // 주소의 ?view=그래프 가 먼저, 다음이 지난번 고른 것.
-  const [view, setView] = useState(() => {
-    try {
-      const q = new URLSearchParams(location.search).get('view');
-      if (q === '그래프' || q === '연표') return q;
-      return localStorage.getItem(VIEW_KEY) === '그래프' ? '그래프' : '연표';
-    } catch { return '연표'; }
+  // **연표와 그래프는 동시에 보인다** (2026-09-07 사용자: "연표와 그래프를
+  // 동시에 보여줘"). 역사 화면과 같은 배치 — 왼쪽 연표, 가운데 그래프, 오른쪽
+  // 상세. 연표는 세 열이라 넓으니(boardWidth) 접을 수 있게만 한다.
+  const [railOpen, setRailOpen] = useState(() => {
+    try { return localStorage.getItem(RAIL_KEY) !== '0'; } catch { return true; }
   });
+  const toggleRail = () => {
+    setRailOpen((v) => {
+      try { localStorage.setItem(RAIL_KEY, v ? '0' : '1'); } catch { /* 저장 못 해도 동작한다 */ }
+      return !v;
+    });
+  };
   const [sideOpen, setSideOpen] = useState(false);
   const [settings, setSettings] = useState({
     depth: 2, limit: 120, includePeriod: false, hiddenEdges: [],
@@ -70,10 +74,6 @@ export default function LifeView() {
   });
   const viewRef = useRef(null);
   const meta = useMemo(() => (life ? graphMeta(life) : null), [life]);
-  const switchView = (v) => {
-    setView(v);
-    try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 못 해도 본다 */ }
-  };
 
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
   const adopt = useCallback(async (raw, from) => {
@@ -130,21 +130,22 @@ export default function LifeView() {
     if (typeof history !== 'undefined') history.replaceState(null, '', selected ? `#${encodeURIComponent(selected)}` : location.pathname);
   }, [selected]);
   // 그래프는 통째로 싣는다 — 수십 노드라 자를 이유가 없다. 고른 노드가 중심.
-  // 캔버스는 그래프 모드일 때만 붙어 있으므로(GraphCanvas 가 그때 마운트)
-  // 자료·모드가 바뀔 때마다 다시 싣는다. 같은 커밋에서 자식 효과가 먼저 돌아
-  // viewRef 가 채워진 뒤 이 효과가 돈다.
+  // 캔버스는 자료가 있을 때 붙어 있다(GraphCanvas 가 그때 마운트). 같은
+  // 커밋에서 자식 효과가 먼저 돌아 viewRef 가 채워진 뒤 이 효과가 돈다.
   useEffect(() => {
     const gv = viewRef.current;
-    if (!gv || !life || view !== '그래프') return;
+    if (!gv || !life) return;
     gv.setData(graphPayload(life, selected));
     if (selected) { gv.select(selected); gv.focusOn(selected); }
-  }, [life, view]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [life]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 연표에서 고르든 그래프에서 고르든 같은 노드다 — 그래프의 조명도 따라간다.
   useEffect(() => {
     const gv = viewRef.current;
-    if (!gv || view !== '그래프' || !selected || !gv.byId.has(selected)) return;
+    if (!gv || !selected || !gv.byId.has(selected)) return;
     gv.select(selected);
     gv.focusOn(selected);
-  }, [selected, view]);
+  }, [selected]);
+  // 연표를 접었다 펴면 캔버스 폭이 바뀐다 — GraphView 의 ResizeObserver 가 따라간다.
 
   const onFile = async (ev) => {
     const f = ev.target.files?.[0];
@@ -178,10 +179,8 @@ export default function LifeView() {
         </div>
         <div className="life-tools">
           {life && (
-            <span className="life-switch" role="tablist">
-              <button type="button" className={`life-btn${view === '연표' ? ' on' : ''}`} onClick={() => switchView('연표')}>연표</button>
-              <button type="button" className={`life-btn${view === '그래프' ? ' on' : ''}`} onClick={() => switchView('그래프')}>그래프</button>
-            </span>
+            <button type="button" className="life-btn" onClick={toggleRail} aria-pressed={railOpen}
+                    title="왼쪽 연표를 접거나 폅니다">{railOpen ? '연표 접기' : '연표 펴기'}</button>
           )}
           {life && <span className="life-source">{sourceText}</span>}
           <button type="button" className="life-btn" onClick={loadSample}>예시 보기</button>
@@ -195,14 +194,18 @@ export default function LifeView() {
       {pasting && <PasteBox onSubmit={onPaste} onClose={() => setPasting(false)} />}
 
       <div className="layout life-layout">
-        {/* 연표 판은 늘 붙어 있고(LifeBoard 가 DOM 을 쥔다) 그래프일 때만 감춘다. */}
-        <section className="life-board" ref={rootRef} hidden={!!life && view === '그래프'}>
+        {/* 연표 판은 늘 붙어 있다(LifeBoard 가 DOM 을 쥔다). 자료가 없으면 빈
+            안내가 이 자리를 다 쓰고, 있으면 세 열 너비로 왼쪽에 선다 — 단 화면의
+            45% 까지다. 1440px 에서 864px 를 다 주면 그래프 폭이 0 이 된다 (실측).
+            좁으면 연표 안에서 가로로 훑는다. */}
+        <section className="life-board" ref={rootRef} hidden={!!life && !railOpen}
+                 style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
             {!life && <Empty offline={offline} onSample={loadSample} />}
           </div>
         </section>
-        {life && view === '그래프' && (
+        {life && (
           <div className="stage-wrap">
             <GraphCanvas
               viewRef={viewRef}

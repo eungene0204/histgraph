@@ -752,6 +752,8 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 
 .life-layout { min-height: 0; }
 .life-board { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--background-primary); }
+/* 자료가 있으면 세 열 너비로 왼쪽에 고정되고(인라인 width), 그래프가 나머지를 쓴다. */
+.life-board[style] { flex: none; border-right: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
 .life-head {
   flex: none; display: flex; padding: 8px 0; overflow: hidden;
   border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary);
@@ -806,5 +808,4 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .life-before-row .tl-y { width: 38px; }
 .life-before-name { color: var(--color-blue); text-decoration: none; white-space: nowrap; }
 .life-before-why { color: var(--text-faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.life-switch { display: inline-flex; gap: 2px; margin-right: 8px; }
 .life-board[hidden] { display: none; }

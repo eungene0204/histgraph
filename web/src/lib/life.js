@@ -132,6 +132,10 @@ export const COLS = {
   personal: 320,  // 개인 열 (오른쪽 24px 은 인과 선의 자리)
   stage: 84,      // 인생 단계 띠
 };
+// 연표 판의 너비 — 세 열과 세로 스크롤바. 화면(LifeView)이 왼쪽 칸을 이만큼 잡는다.
+export function boardWidth() {
+  return COLS.lane + COLS.history + COLS.gutter + COLS.personal + COLS.stage + 12;
+}
 const AXIS_X = 46;   // 열 안에서 세로축이 서는 자리 (timeline.js 와 같다)
 const PAD_TOP = 18;
 const PAD_BOTTOM = 64;
