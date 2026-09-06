@@ -208,21 +208,33 @@ def select_entries(
     matched: dict[str, str],
     kinds: tuple[str, ...] = ("사건",),
     modern_only: bool = True,
+    eras: tuple[str, ...] | None = None,
 ) -> list[Entry]:
     """받을 항목: 노드에 이어진 것 전부 + 지정한 유형의 근현대 항목.
 
     근현대가 앞, 그 안에서 사건이 앞이다 — 받다 끊겨도 지금 물음(1945년
-    뒤의 역할)에 쓰이는 글부터 들어와 있게."""
+    뒤의 역할)에 쓰이는 글부터 들어와 있게.
+
+    `eras` 를 주면 근현대 대신 **그 시대**의 항목을 받는다 (사전의 '시대'
+    칸 앞머리 — '고려'는 '고려'·'고려/고려 후기' 를 다 받는다). 고려를
+    붙일 때 생긴 칸이다 (2026-09-06): 고려 사건 99·인물 2,450 항목이
+    CSV 에 있는데 노드에 이어진 것만 받고 있었다 — 정작 그래프에 없어서
+    채워야 할 것이 범위 밖이었다."""
     out: list[Entry] = []
     seen: set[str] = set()
+    def in_era(e: Entry) -> bool:
+        if eras is not None:
+            return e.era.startswith(eras)
+        return e.modern or not modern_only
     for e in entries:
-        take = e.id in matched or (
-            e.kind.split("/")[0] in kinds and (e.modern or not modern_only)
-        )
+        take = e.id in matched or (e.kind.split("/")[0] in kinds and in_era(e))
         if take and e.id not in seen:
             seen.add(e.id)
             out.append(e)
-    out.sort(key=lambda e: (not e.modern, e.kind.split("/")[0] != "사건"))
+    if eras is not None:
+        out.sort(key=lambda e: (not e.era.startswith(eras), e.kind.split("/")[0] != "사건"))
+    else:
+        out.sort(key=lambda e: (not e.modern, e.kind.split("/")[0] != "사건"))
     return out
 
 
@@ -256,6 +268,7 @@ def ingest(
     limit: int | None = None,
     refresh: bool = False,
     raw_dir: Path = RAW_DIR,
+    eras: tuple[str, ...] | None = None,
 ) -> dict[str, int]:
     """항목을 받아 말뭉치에 넣는다. 돌려주는 값은 집계."""
     from ..corpus import drop_doc, has_doc, put_doc
@@ -263,7 +276,7 @@ def ingest(
     entries = load_index(raw_dir)
     names = node_names(store, node_ids)
     matched = match_nodes(entries, names)
-    todo = select_entries(entries, matched, kinds=kinds)
+    todo = select_entries(entries, matched, kinds=kinds, eras=eras)
     log.info("민족문화대백과: 항목 %d건 · 노드에 이은 것 %d건 · 받을 것 %d건",
              len(entries), len(matched), len(todo))
     fetched = empty = skipped = passages = 0

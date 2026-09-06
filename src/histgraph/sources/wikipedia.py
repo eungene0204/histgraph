@@ -48,11 +48,31 @@ EVENT_SEEDS: dict[str, list[str]] = {
         "나당전쟁", "매소성 전투", "기벌포 전투", "비담의 난",
         "김헌창의 난", "장보고", "원종·애노의 난",
     ],
+    # 고려 474년의 사건이 14개였다. 조선(43)·일제강점기(38)와 견주면 그
+    # 시대만 명단이었다 — 무신정권 100년에 노드가 둘이고, 대몽항쟁 40년에
+    # 강화 천도도 개경 환도도 없었다.
+    #
+    # **'이자겸의 난'은 뺐다** — 문서명이 인물 '이자겸'으로 넘어가서, 사건
+    # 시드가 인물 노드를 사건으로 만들 뻔했다. 난에 따로 문서가 없다.
+    # 문서명은 전부 조회로 확인했다 (2026-09-06, 넘겨주기 포함).
     "고려": [
-        "거란의 고려 침입", "귀주 대첩", "강조의 정변", "이자겸의 난",
-        "묘청의 난", "무신정변", "만적의 난", "고려-몽골 전쟁",
-        "처인성 전투", "삼별초", "홍건적의 고려 침공", "황산대첩",
-        "진포 해전", "위화도 회군",
+        # 후삼국 통일
+        "고창 전투", "공산 동수 전투", "일리천 전투", "왕규의 난",
+        # 거란
+        "거란의 고려 침입", "제1차 고려-거란 전쟁", "제2차 고려-거란 전쟁",
+        "제3차 고려-거란 전쟁", "강조의 정변", "귀주 대첩",
+        # 문벌귀족과 무신
+        "묘청의 난", "무신정변", "김보당의 난", "조위총의 난",
+        "망이·망소이의 난", "김사미·효심의 난", "만적의 난",
+        "이비·패좌의 난",
+        # 몽골
+        "강동성 전투", "고려-몽골 전쟁", "처인성 전투", "강화 천도",
+        "삼별초", "삼별초 항쟁", "원나라의 일본 원정",
+        # 원 간섭기
+        "입성책동", "무진피화", "목호의 난",
+        # 말기 — 왜구·홍건적과 고려의 끝
+        "홍건적의 고려 침공", "황산대첩", "진포 해전", "관음포 전투",
+        "요동 정벌", "위화도 회군", "폐가입진",
     ],
     "조선": [
         # 전기
@@ -165,6 +185,22 @@ EVENT_SEEDS: dict[str, list[str]] = {
 # 일제강점기는 특히 단체의 시대다. 무장 투쟁도 외교도 개인이 아니라
 # 조직 이름으로 남아 있어서, 단체를 빼면 인물과 사건 사이가 끊긴다.
 ORG_SEEDS: dict[str, list[str]] = {
+    # 고려는 **관청의 시대**다. 무신정권은 사람 이름이 아니라 기구로 굴러갔고
+    # (교정도감·정방·도방·중방), 원 간섭기의 통치도 기구 이름으로 남았다
+    # (정동행성·동녕부·탐라총관부). 이것들이 없으면 최충헌과 최우 사이가
+    # 끊긴다. **쌍성총관부는 넣지 않았다** — 이미 장소 노드로 앉아 있고,
+    # 시드가 타입을 덮어쓰지 않으므로 경고만 남는다.
+    "고려": [
+        # 중앙 관제
+        # 국자감은 넣지 않았다 — 위키백과 문서가 수나라에서 시작해 당·베트남·
+        # 고려로 이어지는 **일반 기관**이라 고려의 국자감이 아니다. 그쪽은
+        # 국편 정본(nikh:kc_o200200)이 이미 갖고 있다.
+        "중서문하성", "도병마사", "식목도감", "어사대",
+        # 무신정권의 기구
+        "교정도감", "정방", "도방", "중방", "별무반",
+        # 원 간섭기
+        "정동행성", "동녕부", "탐라총관부", "전민변정도감",
+    ],
     "대한제국": [
         "독립협회", "신민회", "대한자강회", "황국협회", "보안회",
         # 의병 부대는 사건이 아니라 조직이다 — 서울 진공 작전을
@@ -205,6 +241,15 @@ ORG_SEEDS: dict[str, list[str]] = {
 # 하나로 적을 수 없고, '누가 참여했나'를 물을 수 없다. concept 타입이
 # 생긴 자리가 여기다 (README '개념이 사건 행세를 하고 있었다').
 CONCEPT_SEEDS: dict[str, list[str]] = {
+    # 제도와 사상. 고려를 사건만으로 적으면 '누가 누구를 쳤다'만 남고
+    # 전시과·과거제·음서가 빠진다 — 무신정변이 왜 일어났는지가 사라진다.
+    # **강동 6주·동북 9성은 넣지 않았다** — 이미 장소 노드다 (땅이다).
+    "고려": [
+        "훈요십조", "시무 28조", "노비안검법", "전시과", "음서",
+        "과거제", "사심관", "기인제", "천리장성",
+        "팔관회", "연등회", "천태종", "조계종", "성리학",
+        "권문세족", "사대부", "심왕", "다루가치", "왜구",
+    ],
     "일제강점기": [
         "무단 통치", "문화 통치", "민족말살통치",
         "창씨개명", "황국신민서사", "국가총동원법", "회사령",
@@ -218,6 +263,141 @@ CONCEPT_SEEDS: dict[str, list[str]] = {
         "금융실명제", "햇볕정책",
     ],
 }
+
+
+# 왕은 시대의 눈금이다. 연표 왼쪽에 서는 재위 띠(`server._reigns`)가 그것이고,
+# 사람은 '1170년'보다 '의종 때'로 시간을 읽는다. 조선은 32명이 서 있는데
+# 고려는 4명이었다 — 나머지는 아예 노드가 없거나(순종·숙종·헌종·충혜왕·충목왕)
+# 재위 날짜가 없었다.
+#
+# **라벨은 여기서 정한다.** 위키백과 문서명은 '숙종 (고려)' 꼴이고 우리 관례는
+# 왕조를 앞에 붙이는 '고려 숙종'이다 (2026-09-06 사용자 지적: "조선왕과 이름이
+# 겹치는 부분은 고려 숙종, 조선 숙종 나눠서"). 묘호가 겹치는 임금이 조선과
+# 고려에 열여섯 쌍 있다 — 태조·정종·문종·예종·숙종·인종·명종·고종·원종·덕종·
+# 현종·경종·성종·헌종·세조·목종.
+#
+# **정종은 고려 안에서도 둘이다** (3대 왕요·10대 왕형). 왕조 접두만으로는 안
+# 갈려서 대수를 괄호로 덧붙인다 (CLAUDE.md §1-2 의 `이름 (1875년)` 관례).
+MONARCH_SEEDS: dict[str, list[tuple[str, str]]] = {
+    "고려": [
+        ("태조 (고려)", "고려 태조"),
+        ("혜종 (고려)", "고려 혜종"),
+        ("정종 (고려 3대)", "고려 정종 (3대)"),
+        ("광종 (고려)", "고려 광종"),
+        ("경종 (고려)", "고려 경종"),
+        ("성종 (고려)", "고려 성종"),
+        ("목종 (고려)", "고려 목종"),
+        ("현종 (고려)", "고려 현종"),
+        ("덕종 (고려)", "고려 덕종"),
+        ("정종 (고려 10대)", "고려 정종 (10대)"),
+        ("문종 (고려)", "고려 문종"),
+        ("순종 (고려)", "고려 순종"),
+        ("선종 (고려)", "고려 선종"),
+        ("헌종 (고려)", "고려 헌종"),
+        ("숙종 (고려)", "고려 숙종"),
+        ("예종 (고려)", "고려 예종"),
+        ("인종 (고려)", "고려 인종"),
+        ("의종 (고려)", "고려 의종"),
+        ("명종 (고려)", "고려 명종"),
+        ("신종 (고려)", "고려 신종"),
+        ("희종 (고려)", "고려 희종"),
+        ("강종 (고려)", "고려 강종"),
+        ("고종 (고려)", "고려 고종"),
+        ("원종 (고려)", "고려 원종"),
+        ("충렬왕", "고려 충렬왕"),
+        ("충선왕", "고려 충선왕"),
+        ("충숙왕", "고려 충숙왕"),
+        ("충혜왕", "고려 충혜왕"),
+        ("충목왕", "고려 충목왕"),
+        ("충정왕", "고려 충정왕"),
+        ("공민왕", "고려 공민왕"),
+        ("우왕", "고려 우왕"),
+        ("창왕", "고려 창왕"),
+        ("공양왕", "고려 공양왕"),
+    ],
+}
+
+# 재위를 적을 자리. Wikidata 에 '고려 임금' 이라는 직위 항목이 없다 —
+# 'Q702217 고려의 역대 국왕'은 위키미디어 목록 문서지 자리가 아니다. 고려
+# 임금에게 Wikidata 자신이 붙여 둔 자리가 '왕(王)'이라 그것을 쓴다
+# (공민왕·우왕의 P39). 조선은 '조선 임금'(Q22304810)이라는 전용 항목이 있다.
+MONARCH_SEAT = "Q12087706"
+MONARCH_SEAT_LABEL = "왕(王)"
+
+
+def ingest_monarchs(
+    fetcher: Fetcher,
+    store: GraphStore,
+    seeds: dict[str, list[tuple[str, str]]] | None = None,
+) -> tuple[list[Node], list[Edge]]:
+    """왕 시드 — 인물 노드와 **재위 구간**을 함께 만든다.
+
+    재위가 왜 여기 있나. `histgraph reigns` 는 Wikidata P39 의 한정어를
+    옮겨 적는데, 고려 임금은 그 문장 자체가 거의 없다 (실측: 34명 중 재위
+    날짜가 있는 사람이 다섯). 한국어 위키백과 인포박스에는 34명 전부
+    양력으로 적혀 있어서, 왕을 이름으로 받는 김에 같이 읽는다.
+
+    복위한 임금은 구간이 여럿이다. 엣지 하나에 적어야 하므로 가장 이른
+    시작과 가장 늦은 끝으로 모은다 — `wikidata.reigns_from_rows` 와 같은
+    규칙이라, 두 소스가 한 사람을 서로 다른 모양으로 그리지 않는다."""
+    from ..ontology import Edge, Node
+    from ..resolve import PERIOD_TO_POLITY, POLITY_NODE_TYPE
+    from .infobox import fetch_wikitext, reign_spans
+
+    seeds = seeds or MONARCH_SEEDS
+    title_to = {t: (era, label) for era, rows in seeds.items() for t, label in rows}
+    log.info("왕 문서 %d건 조회 중...", len(title_to))
+    found, missing = fetch_articles(fetcher, list(title_to), full=False)
+    if missing:
+        log.warning("문서를 찾지 못함 %d건: %s", len(missing), ", ".join(missing))
+
+    seat_id = f"wd:{MONARCH_SEAT}"
+    nodes: dict[str, Node] = {
+        seat_id: Node(id=seat_id, type="role", label=MONARCH_SEAT_LABEL, source="wd")
+    }
+    edges: list[Edge] = []
+    dated = 0
+
+    for requested, info in found.items():
+        era, label = title_to[requested]
+        nid = f"wd:{info['qid']}"
+        nodes[nid] = Node(
+            id=nid,
+            type="person",
+            label=label,
+            source="wd",
+            description=info["extract"],
+            url=f"https://www.wikidata.org/entity/{info['qid']}",
+            props={
+                "kowiki_url": f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(info['title'])}",
+                "seed_era": era,
+                "polity": era,
+                "seeded": True,
+            },
+        )
+        polity_qid = PERIOD_TO_POLITY.get(era)
+        if polity_qid:
+            pid = f"wd:{polity_qid}"
+            nodes.setdefault(
+                pid,
+                Node(id=pid, type=POLITY_NODE_TYPE.get(era, "org"), label=era, source="wd"),
+            )
+            edges.append(Edge(src=nid, dst=pid, type="from_period", source="kowiki"))
+
+        spans = reign_spans(fetch_wikitext(fetcher, info["title"]))
+        starts = sorted(s for s, _ in spans if s)
+        ends = sorted(e for _, e in spans if e)
+        if starts or ends:
+            dated += 1
+        edges.append(Edge(
+            src=nid, dst=seat_id, type="held_position", source="kowiki",
+            start_date=starts[0] if starts else None,
+            end_date=ends[-1] if ends else None,
+            props={"reign": "monarch"},
+        ))
+
+    log.info("왕 노드 %d명 · 재위를 읽은 사람 %d명", len(found), dated)
+    return list(nodes.values()), edges
 
 
 def fetch_titles(

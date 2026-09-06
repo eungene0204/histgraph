@@ -366,6 +366,9 @@ def add_bare_name_aliases(store: GraphStore) -> int:
     add = []
     for r in rows:
         head, _, bare = r["label"].partition(" ")
+        # 가른 꼬리표는 이름이 아니다 — '고려 정종 (3대)' 의 별칭은
+        # '정종 (3대)' 가 아니라 '정종' 이다. 산문은 그냥 정종이라 쓴다.
+        bare = re.sub(r"\s*\([^)]*\)\s*$", "", bare).strip()
         # '조선 세종' 처럼 왕조 + 이름 꼴일 때만. '이순신 장군' 같은 건
         # 앞이 왕조가 아니므로 걸리지 않는다.
         if head in DYNASTIES and len(bare) >= 2:

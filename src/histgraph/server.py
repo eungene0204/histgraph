@@ -760,6 +760,16 @@ class GraphAPI:
 
         this_year = datetime.date.today().year
         out: list[dict] = []
+        # **한 사람이 같은 때 두 자리에 앉지는 않는다.** 엣지의 자연키에
+        # 소스가 들어 있어 같은 재위가 소스 수만큼 줄이 되고(고려 공민왕·
+        # 우왕은 Wikidata 와 위키백과 양쪽에서 왔다), 자리 이름이 자료마다
+        # 다르기도 하다(고려 광종은 '군주'와 '왕(王)'에 둘 다 걸려 있다).
+        # 그래서 겹치는 구간은 한 띠로 모은다.
+        #
+        # **잇달아 있는 것은 안 모은다** — 고종의 조선 임금(1863~1897)과
+        # 대한제국 황제(1897~1907)는 다른 자리이고, 합치면 대한제국이
+        # 언제 섰는지가 띠에서 사라진다.
+        bands: dict[str, list[dict]] = {}
         for r in rows:
             start = _year(r["r_start"])
             if start is None:
@@ -778,7 +788,18 @@ class GraphAPI:
                 else:
                     end = max(this_year, start)
                     ongoing = True
-            out.append({
+            mine = bands.setdefault(r["id"], [])
+            overlap = next(
+                (b for b in mine
+                 if b["kind"] == ("president" if r["seat"] == "president" else "monarch")
+                 and b["start"] < end and start < b["end"]),
+                None,
+            )
+            if overlap is not None:
+                overlap["start"] = min(overlap["start"], start)
+                overlap["end"] = max(overlap["end"], end)
+                continue
+            band = {
                 "id": r["id"], "label": r["label"],
                 "position": r["position"],
                 "kind": "president" if r["seat"] == "president" else "monarch",
@@ -788,7 +809,9 @@ class GraphAPI:
                 # 화면이 거꾸로 된 꼬리를 그리지 않게 여기서 뗀다.
                 "death": death if death is not None and death >= end else None,
                 "birth": _year(r["start_date"]),
-            })
+            }
+            mine.append(band)
+            out.append(band)
         self._local.reigns = out
         return out
 

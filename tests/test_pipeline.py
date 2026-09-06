@@ -2806,10 +2806,11 @@ with tempfile.TemporaryDirectory() as tmp:
     from histgraph import resolve as rs  # noqa: E402
     from histgraph import scope as sc  # noqa: E402
 
-    check("묶음은 시대 여럿으로 풀린다", sc.eras_of("korea") == ("joseon", "ilje", "daehan"))
+    check("묶음은 시대 여럿으로 풀린다",
+          sc.eras_of("korea") == ("goryeo", "joseon", "ilje", "daehan"))
     check("시대 이름은 자기 자신으로 풀린다", sc.eras_of("joseon") == ("joseon",))
     # 화면 머리말은 서버가 준다. 모르는 키에 영어를 내보내면 안 된다.
-    check("묶음 이름은 한국어다", sc.label_of("korea") == "조선~대한민국")
+    check("묶음 이름은 한국어다", sc.label_of("korea") == "고려~대한민국")
     check("모르는 시대는 빈 이름", sc.label_of("없는시대") == "")
 
     store = GraphStore(Path(tmp) / "era.sqlite")
@@ -3184,8 +3185,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("정체 태그가 대한민국인 사건은 씨앗이다", "wd:E1" in seeds)
     check("시대보다 앞선 사건은 태그가 있어도 씨앗이 아니다", "wd:E2" not in seeds)
     check("시드 표에서 온 사건은 날짜가 없어도 씨앗이다", "wd:E3" in seeds)
-    check("조선~대한민국이 한 묶음이다",
-          sc2.eras_of("korea") == ("joseon", "ilje", "daehan") and sc2.label_of("korea") == "조선~대한민국")
+    check("고려~대한민국이 한 묶음이다",
+          sc2.eras_of("korea") == ("goryeo", "joseon", "ilje", "daehan")
+          and sc2.label_of("korea") == "고려~대한민국")
     store.close()
 
 # --- 국사편찬위원회 정본 (한국사연대기 · 실록) --------------------------------

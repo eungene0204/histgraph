@@ -176,15 +176,21 @@ def cmd_events(args: argparse.Namespace) -> int:
 
     차수 상위순으로 고르는 enrich 로는 임진왜란·병자호란이 잡히지 않는다.
 
-    **세 표를 갈라 둔 이유는 타입이다.** 의열단을 사건 표에 넣으면 사건
-    노드가 되고, 창씨개명을 넣으면 개념이 사건 행세를 한다."""
+    **표를 갈라 둔 이유는 타입이다.** 의열단을 사건 표에 넣으면 사건
+    노드가 되고, 창씨개명을 넣으면 개념이 사건 행세를 한다.
+
+    `monarch` 는 인물 표인데 재위 구간까지 함께 만든다 (`ingest_monarchs`) —
+    고려 임금은 Wikidata 에 재위 문장이 거의 없어서 `reigns` 가 채우지
+    못한다. 세는 타입은 인물이다."""
     from .sources import wikipedia
 
     tables = {
         "event": ("kowiki:event", wikipedia.EVENT_SEEDS),
         "org": ("kowiki:org", wikipedia.ORG_SEEDS),
         "concept": ("kowiki:concept", wikipedia.CONCEPT_SEEDS),
+        "monarch": ("kowiki:monarch", wikipedia.MONARCH_SEEDS),
     }
+    node_type = {"monarch": "person"}
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
     with GraphStore(args.db) as store:
         before = store.stats()["by_node_type"]
@@ -194,9 +200,13 @@ def cmd_events(args: argparse.Namespace) -> int:
                 seeds = {e: t for e, t in seeds.items() if e in args.eras}
             if not seeds:
                 continue
-            nodes, edges = wikipedia.ingest_seeds(
-                fetcher, store, seeds, kind, full=not args.intro_only
-            )
+            if kind == "monarch":
+                nodes, edges = wikipedia.ingest_monarchs(fetcher, store, seeds)
+            else:
+                nodes, edges = wikipedia.ingest_seeds(
+                    fetcher, store, seeds, kind, full=not args.intro_only
+                )
+            kind = node_type.get(kind, kind)
             # **시드 표는 타입을 말하지만 upsert 는 타입을 덮어쓰지 않는다.**
             # 이미 다른 타입으로 앉아 있던 노드는 그대로 남으므로, 조용히
             # 어긋나지 않게 반드시 보고한다. 바꾸는 것은 사람이 정한다 —
@@ -217,7 +227,7 @@ def cmd_events(args: argparse.Namespace) -> int:
                     f" {NODE_TYPES[was]}으로 있음: {label} ({nid})"
                 )
         after = store.stats()["by_node_type"]
-        for kind in args.kinds:
+        for kind in dict.fromkeys(node_type.get(k, k) for k in args.kinds):
             print(f"  {NODE_TYPES[kind]} 노드: {before.get(kind, 0):,} → {after.get(kind, 0):,}")
     return 0
 
@@ -1215,15 +1225,16 @@ def cmd_corpus(args: argparse.Namespace) -> int:
         if "aks" in sources:
             from .sources import aks
             kinds = tuple(k.strip() for k in args.kinds.split(",") if k.strip())
+            eras = tuple(args.eras) if args.eras else None
             if args.dry_run:
                 entries = aks.load_index()
                 matched = aks.match_nodes(entries, aks.node_names(store))
-                todo = aks.select_entries(entries, matched, kinds=kinds)
+                todo = aks.select_entries(entries, matched, kinds=kinds, eras=eras)
                 print(f"  민족문화대백과: 항목 {len(entries):,}건 · 노드에 이은 것 {len(matched):,}건"
                       f" · 받을 것 {len(todo):,}건")
             else:
                 got = aks.ingest(fetcher, store, conn, kinds=kinds, limit=args.limit,
-                                 refresh=args.refresh)
+                                 refresh=args.refresh, eras=eras)
                 print(f"  민족문화대백과: 노드에 이은 것 {got['matched']:,}건 · 받음 {got['fetched']:,}건"
                       f" / 대상 {got['todo']:,}건 · 빈 문서 {got['empty']:,}건"
                       f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개")
@@ -2174,8 +2185,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--interval", type=float, default=1.0)
     p_ev.add_argument("--intro-only", action="store_true", help="본문 전체 대신 도입부만 (빠름, 서사 얕음)")
     p_ev.add_argument("--kinds", nargs="+", default=["event", "org", "concept"],
-                      choices=["event", "org", "concept"],
-                      help="수집할 시드 표 (기본: 셋 다)")
+                      choices=["event", "org", "concept", "monarch"],
+                      help="수집할 시드 표 (기본: 사건·단체·개념)")
     p_ev.add_argument("--eras", nargs="*", default=None,
                       help="이 시대만 (예: 일제강점기 대한제국). 기본은 전부")
     p_ev.set_defaults(func=cmd_events)
@@ -2352,7 +2363,7 @@ def main(argv: list[str] | None = None) -> int:
                       choices=["joseon", "goryeo", "silla", "goguryeo", "baekje",
                                "ilje", "korea"],
                       help="시대 여럿을 주면 한 DB 에 담는다. 'korea' 는 "
-                           "조선~일제강점기 묶음")
+                           "고려~대한민국 묶음")
     p_sc.add_argument("--out", default=None,
                       help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
@@ -2400,6 +2411,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="aks 민족문화대백과(정본) · nikh 한국사연대기(정본) · kowiki 위키백과")
     p_cp.add_argument("--kinds", default="사건",
                       help="민족문화대백과에서 노드와 무관하게도 받을 근현대 항목 유형 (쉼표)")
+    p_cp.add_argument("--eras", nargs="*", default=None,
+                      help="근현대 대신 이 시대의 항목을 받는다 (사전 '시대' 칸 앞머리, 예: 고려)")
     p_cp.set_defaults(func=cmd_corpus)
 
     p_ask = sub.add_parser("ask", help="말뭉치에서 물음에 가까운 문단을 찾는다")
@@ -2491,7 +2504,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
     p_sv.add_argument("--era", default="korea",
                       help="띄울 시대 그래프 (data/{era}.sqlite). 'korea' 는 "
-                           "조선~일제강점기 묶음")
+                           "고려~대한민국 묶음")
     p_sv.add_argument("--host", default="127.0.0.1")
     p_sv.add_argument("--port", type=int, default=8100)
     p_sv.set_defaults(func=cmd_serve)

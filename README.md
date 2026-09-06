@@ -36,7 +36,7 @@ uv run histgraph links                           # 사건끼리의 상하위·�
 uv run histgraph stats                           # 그래프 통계
 uv run histgraph spans --types event org         # 연대 없는 노드에 연대 채우기
 uv run histgraph dedupe                          # 한 사건이 두 노드로 들어와 있는지 (중복 관문)
-uv run histgraph scope korea                     # 조선~대한민국을 화면용 DB 로
+uv run histgraph scope korea                     # 고려~대한민국을 화면용 DB 로
 uv run histgraph show wd:Q37682 --depth 2        # 세종 주변 서브그래프
 uv run histgraph serve                           # 브라우저에서 탐색
 ```

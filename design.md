@@ -396,7 +396,7 @@ arrows }` · `hiddenEdgeTypes` · `forces = { center, repel, link }`. 각각
 
 ```
 ┌ .top  머리 줄 (secondary, 52px) ────────────────────────────────────┐
-│ ● histgraph  [조선~대한민국]        [검색 ─────────────]         [☾] │
+│ ● histgraph  [고려~대한민국]        [검색 ─────────────]         [☾] │
 ├───────────┬──────────────────────────────────────┬──────────────────┤
 │ .timeline │ .stage-wrap                          │ .detail          │
 │ 252px     │ [⚙]┌ 설정 ─┐  .stage 캔버스 (primary)│ 348px            │

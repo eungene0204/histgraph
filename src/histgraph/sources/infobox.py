@@ -253,6 +253,77 @@ def infobox_date(value: str) -> str | None:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
+# 왕 문서의 재위 칸. `재위N` 은 `작위N` 과 짝이다 — 같은 번호끼리 한 벌이고,
+# 번호 없는 것이 그 사람의 대표 자리다. 이 짝을 안 보면 **태자 시절이 재위로
+# 들어온다**: 혜종의 `재위2` 는 정윤(태자) 22년이라, 합치면 즉위가 943년이
+# 아니라 922년이 되어 연표의 띠가 아버지 태조와 겹친다 (실측: 34명 중 16명이
+# 그렇게 어긋났다).
+_REIGN_FIELD = re.compile(r"^\s*\|\s*(재위|작위)(\d?)\s*=\s*(.*)$", re.M)
+_REIGN_RANGE = re.compile(r"~|∼|―|—|–")
+# 작위가 이 말을 품으면 왕위다. 왕태자·왕세자·태상왕·정윤은 왕위가 아니다.
+REIGN_TITLE_WORD = "국왕"
+
+
+def _reign_point(part: str) -> str | None:
+    """'1095년 11월 12일' -> '1095-11-12'. 달까지만 알면 달까지."""
+    ym = _YEAR_IN.search(part)
+    if not ym:
+        return None
+    year = int(ym.group(1))
+    if not 1 <= year <= 2100:
+        return None
+    month = day = None
+    if md := _MONTH_DAY.search(part[ym.end():]):
+        m2, d2 = int(md.group(1)), int(md.group(2) or 0)
+        if 1 <= m2 <= 12:
+            month = m2
+            if 1 <= d2 <= 31:
+                day = d2
+    out = f"{year:04d}"
+    if month:
+        out += f"-{month:02d}"
+        if day:
+            out += f"-{day:02d}"
+    return out
+
+
+def reign_spans(wikitext: str) -> list[tuple[str | None, str | None]]:
+    """왕 문서에서 **왕위에 있던 구간**들. (시작, 끝) 목록.
+
+    복위한 임금은 구간이 둘이다 (충숙왕 1313~1330 · 1332~1339). 부르는 쪽이
+    합치든 따로 두든 정하도록 목록으로 준다.
+
+    **날짜는 양력이다.** 이 인포박스는 음력 날짜를 각주에 적고 칸에는 양력을
+    적어 둔다 (`{{font color|gray|(양력)}}`). 국편 연대기의 음력을 그대로 두면
+    같은 해 안에서 순서가 뒤집히므로(CLAUDE.md §1-5) 이쪽이 맞는 자료다."""
+    fields: dict[tuple[str, str], str] = {}
+    for m in _REIGN_FIELD.finditer(strip_comments(wikitext)):
+        value = _PIPED_LINK.sub(r"\1", m.group(3))
+        value = re.sub(r"<ref[^>]*>.*?</ref>|<ref[^>]*/>", "", value, flags=re.S)
+        value = re.sub(r"\{\{[^{}]*\}\}", "", value)
+        value = re.sub(r"<[^>]+>", " ", value).replace("[[", "").replace("]]", "")
+        fields[(m.group(1), m.group(2))] = value.strip()
+
+    out: list[tuple[str | None, str | None]] = []
+    for (kind, num), value in fields.items():
+        if kind != "재위" or not value:
+            continue
+        title = fields.get(("작위", num), "")
+        # 작위를 안 적은 문서가 있다 (광종·창왕·공양왕). 그때는 번호 없는
+        # 대표 칸만 믿는다 — 번호가 붙은 칸은 대개 태자·태상왕이다.
+        if title:
+            if REIGN_TITLE_WORD not in title:
+                continue
+        elif num:
+            continue
+        parts = _REIGN_RANGE.split(value)
+        start = _reign_point(parts[0])
+        end = _reign_point(parts[1]) if len(parts) > 1 else None
+        if start or end:
+            out.append((start, end))
+    return out
+
+
 # 별칭 값은 쉼표·가운뎃점으로 늘어놓는다: `임오옥, 사도세자사건`.
 _ALIAS_SPLIT = re.compile(r"[,·/]|<br\s*/?>")
 _MARKUP = re.compile(r"<ref[^>]*>.*?</ref>|<[^>]+>|'{2,3}|\[\[|\]\]|\{\{[^}]*\}\}")
