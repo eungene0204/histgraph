@@ -716,7 +716,6 @@ button, input, select { font-family: inherit; }
 }
 .foot a:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .foot-copy { margin-right: auto; }
-.counts { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 1100px) {
   .detail { width: 300px; }

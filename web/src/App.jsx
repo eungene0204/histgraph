@@ -319,10 +319,6 @@ export default function App() {
         <span className="foot-copy">© 2026 histgraph</span>
         <a href="/privacy.html">개인정보처리방침</a>
         <a href="/terms.html">이용약관</a>
-        {/* 노드·엣지 수는 글자 수처럼 상태 줄 오른쪽 끝에 선다 */}
-        <span className="counts">
-          {meta && `노드 ${meta.nodes_total.toLocaleString()} · 엣지 ${meta.edges_total.toLocaleString()}`}
-        </span>
       </footer>
     </>
   );
