@@ -74,6 +74,17 @@
 - 예시 `web/public/life-sample.json` (지어낸 인물, `data/life/예시.txt` 로
   `--json` 을 거친 것). 실제 모델 실행은 이 세션에서 안 했다 — MLX 35GB.
 
+- **그래프도 있다** (같은 날 사용자: "개인사도 그래프를 만들어줘. 역사 그래프랑
+  똑같이"). 머리의 `연표 | 그래프` 로 바꾼다 (`?view=그래프`, localStorage). 캔버스
+  (`GraphView`)와 설정 상자(`SidePanel`, `whole` 변형 — 펼침 깊이·최대 노드·연표
+  스위치를 감춘다)를 그대로 쓰고, 자료만 `life.graphPayload` 가 캔버스 꼴로 옮긴다.
+  지시문의 타입은 캔버스의 색 타입 여덟에 대응한다 (`GRAPH_TYPE` — 가족·친구는
+  인물 파랑, 책·영화·음악·게임은 작품 연빨강, 학교·회사는 단체 크림). 그래프는
+  통째로 싣고(수십 노드) 고른 노드가 중심이다. 실선은 본인이 말한 것, 점선은 미룬
+  것(confidence < 1). 범례·관계 필터는 자료에서 센다 (`graphMeta`).
+  헤드리스 검증은 `--screenshot` 만으로 안 되면 CDP 로 `window.__histgraphView`
+  를 읽는다 — 이번에 효과 하나가 편집에서 빠진 것을 그렇게 잡았다 (노드 0).
+
 **아직 배포하지 않는다** (같은 날 사용자: "이건 아직 배포 하면 안돼. 로컬에서
 개발하고 테스트 해야 함"). 스위치는 `web/vite.config.js` `LIFE_PAGE = !VERCEL`
 하나 — Vercel 빌드에서 `life.html`·예시·머리의 링크가 빠진다 (`life.test.mjs`

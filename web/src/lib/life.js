@@ -56,6 +56,69 @@ export const LIFE_STAGES = ['출생', '어린 시절', '초등학교', '중학�
 export const EVENT_TYPES = new Set(['PersonalEvent', 'HistoricalEvent', 'TurningPoint', 'Crisis',
   'Achievement', 'Failure', 'Decision', 'Memory']);
 
+// --- 그래프 --------------------------------------------------------------
+// 개인 그래프는 역사 그래프와 **같은 캔버스**(graph-view.js GraphView)에 선다.
+// 캔버스는 노드의 `type` 으로 색을 고르므로(TYPE_COLOR: person·org·event·
+// place·artwork·media·period·role) 지시문의 타입을 그 여덟에 대응시킨다.
+// 색이 곧 갈래다 — 가족도 친구도 파랑(인물), 책·영화·음악·게임은 연빨강
+// (작품), 학교·회사는 크림(단체). 이름표에는 원래 타입(가족·책)이 남는다.
+export const GRAPH_TYPE = {
+  Person: 'person', FamilyMember: 'person', Ancestor: 'person', Relationship: 'person',
+  Time: 'period', LifeStage: 'period', Period: 'period',
+  PersonalEvent: 'event', HistoricalEvent: 'event', TurningPoint: 'event', Crisis: 'event',
+  Achievement: 'event', Failure: 'event', Decision: 'event', Memory: 'event',
+  Location: 'place', BirthPlace: 'place', Residence: 'place', TravelLocation: 'place',
+  School: 'org', University: 'org', Company: 'org', Organization: 'org', Community: 'org',
+  Business: 'org', Project: 'org', Investment: 'org',
+  Occupation: 'role', Hobby: 'role', Skill: 'role',
+  Book: 'artwork', Movie: 'artwork', Music: 'artwork', Comic: 'artwork', Game: 'artwork',
+  Religion: 'media', Culture: 'media', Technology: 'media',
+};
+const GRAPH_GROUP = { person: 'actor', org: 'actor', event: 'event', place: 'thing', artwork: 'thing', media: 'thing', period: 'frame', role: 'frame' };
+// 범례의 묶음 이름 — 캔버스 타입 하나에 지시문 타입 여럿이 든다.
+export const GRAPH_TYPE_LABEL = {
+  person: '인물·가족', org: '학교·회사·단체', event: '사건·기억', place: '장소',
+  artwork: '책·영화·음악·게임', media: '기술·문화·종교', period: '시기', role: '직업·취미·기술',
+};
+
+// 캔버스가 받는 꼴 (server.graph 와 같다): {center, nodes:[{id,label,type,group,degree}],
+// edges:[{s,t,type,label,conf}]}. 개인 그래프는 작아서(수십 노드) 통째로 준다 —
+// 역사 그래프처럼 한 노드 주변만 잘라 줄 이유가 없다.
+export function graphPayload(life, center = null) {
+  const degree = new Map();
+  for (const e of life.edges) {
+    degree.set(e.source, (degree.get(e.source) || 0) + 1);
+    degree.set(e.target, (degree.get(e.target) || 0) + 1);
+  }
+  const nodes = life.nodes.map((n) => {
+    const type = GRAPH_TYPE[n.type] || 'event';
+    return { id: n.id, label: n.name, type, group: GRAPH_GROUP[type], degree: degree.get(n.id) || 0,
+      kind: n.type, kind_label: NODE_TYPE_KO[n.type] };
+  });
+  const edges = life.edges.map((e) => ({
+    s: e.source, t: e.target, type: e.type, label: EDGE_TYPE_KO[e.type], conf: e.confidence ?? 1,
+  }));
+  return { center: center && nodes.some((n) => n.id === center) ? center : (life.subject?.id || nodes[0]?.id), nodes, edges };
+}
+
+// 설정 상자(SidePanel)가 읽는 메타 — 범례와 관계 종류 필터. 역사 그래프는
+// 서버(/api/meta)가 주는 것을 개인 그래프는 자료에서 센다.
+export function graphMeta(life) {
+  const pay = graphPayload(life);
+  const nodeTypes = {};
+  for (const n of pay.nodes) {
+    const t = (nodeTypes[n.type] ||= { label: GRAPH_TYPE_LABEL[n.type], group: n.group, count: 0 });
+    t.count++;
+  }
+  const edgeTypes = {};
+  for (const e of pay.edges) {
+    const t = (edgeTypes[e.type] ||= { label: e.label, count: 0 });
+    t.count++;
+  }
+  const seeds = [...pay.nodes].sort((a, b) => b.degree - a.degree).slice(0, 8);
+  return { node_types: nodeTypes, edge_types: edgeTypes, seeds };
+}
+
 // --- 치수 ----------------------------------------------------------------
 // 왼쪽 띠는 시대 연표와 같은 104px (timeline.js LANE_W). 가운데·오른쪽은
 // 각각 연도 칸(38) + 축 + 라벨이다. 두 열 사이 홈(gutter)으로 역사 → 개인

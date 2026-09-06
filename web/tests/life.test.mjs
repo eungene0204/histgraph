@@ -7,8 +7,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   normalize, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
+  graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
 } from '../src/lib/life.js';
+import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
 
 let pass = 0;
 let fail = 0;
@@ -136,6 +138,34 @@ console.log('\n개인 역사 — 빈 자료');
   const life = normalize({ nodes: [{ id: 'me', type: 'Person', name: '나', confidence: 1 }], edges: [], timeline: [] });
   ok('해를 아는 사건이 없으면 배치가 없다', lifeLayout({ life, context: null }) === null);
   ok('연표가 비어도 표시 목록은 빈 배열', personalMarks(life).length === 0 && historyMarks(life, null).length === 0);
+}
+
+console.log('\n개인 역사 — 그래프 (역사 그래프와 같은 캔버스)');
+{
+  ok('지시문의 노드 타입 전부가 캔버스 색 타입에 대응된다', Object.keys(NODE_TYPE_KO).every((t) => TYPE_COLOR[GRAPH_TYPE[t]]),
+    Object.keys(NODE_TYPE_KO).filter((t) => !TYPE_COLOR[GRAPH_TYPE[t]]).join(','));
+  ok('캔버스 타입마다 범례 이름이 한글', Object.values(GRAPH_TYPE).every((t) => /[가-힣]/.test(GRAPH_TYPE_LABEL[t] || '')));
+  const life = normalize(sample);
+  const pay = graphPayload(life, 'ev_fail');
+  ok('노드·관계가 다 실린다', pay.nodes.length === life.nodes.length && pay.edges.length === life.edges.length);
+  ok('고른 노드가 중심, 없으면 주인공', pay.center === 'ev_fail' && graphPayload(life, '없음').center === 'me');
+  ok('차수를 센다 (주인공이 가장 많다)', pay.nodes.find((n) => n.id === 'me').degree >= 10);
+  ok('관계 이름표가 한글', pay.edges.every((e) => /[가-힣]/.test(e.label)));
+  ok('미룬 관계는 conf < 1', pay.edges.some((e) => e.conf < 1) && pay.edges.every((e) => e.conf <= 1));
+  const meta = graphMeta(life);
+  ok('범례가 캔버스 타입으로 세어진다', meta.node_types.person.count >= 4 && meta.node_types.artwork.count === 4 && meta.node_types.person.label === '인물·가족');
+  ok('관계 종류 필터가 한글 이름으로', Object.values(meta.edge_types).every((t) => /[가-힣]/.test(t.label)) && meta.edge_types.caused.count === 3);
+  ok('시작점은 차수 순', meta.seeds[0].id === 'me' && meta.seeds.length === 8);
+  // 캔버스가 실제로 받는다 (DOM 없이 — layout.test 와 같은 흉내)
+  const canvas = { clientWidth: 800, clientHeight: 600, getContext: () => null, addEventListener() {}, style: {} };
+  let gv = null;
+  try { gv = new GraphView(canvas, {}); } catch { gv = null; }
+  if (gv) {
+    gv.setData(pay);
+    ok('GraphView 가 개인 그래프를 싣는다', gv.nodes.length === pay.nodes.length && gv.edges.length === pay.edges.length && gv.center === 'ev_fail');
+  } else {
+    ok('GraphView 는 브라우저가 필요하다 (여기서는 건너뜀)', true);
+  }
 }
 
 console.log('\n개인 역사 — 아직 배포하지 않는다');

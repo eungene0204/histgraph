@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from './ThemeToggle.jsx';
-import { LifeBoard, normalize, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { GraphCanvas } from './GraphCanvas.jsx';
+import { SidePanel } from './SidePanel.jsx';
+import { LifeBoard, normalize, graphPayload, graphMeta, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -12,6 +14,14 @@ import { LifeBoard, normalize, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, CAUSAL_EDG
 // (재위 띠·큰 사건)는 언제나 서버(/api/context)다.
 
 const STORE_KEY = 'life-json';
+const VIEW_KEY = 'life-view';   // '연표' | '그래프'
+
+// 개인 그래프의 선 범례. 역사 그래프의 '구조화 소스/산문 추출' 대신 —
+// 실선은 본인이 말한 것, 점선은 말한 것에서 미룬 것(confidence < 1).
+const LIFE_LINES = [
+  { dash: null, label: '본인이 말한 것 (확실)' },
+  { dash: '5 4', label: '말한 것에서 미룬 것' },
+];
 
 async function getJson(path) {
   const res = await fetch(path);
@@ -41,6 +51,29 @@ export default function LifeView() {
   const [offline, setOffline] = useState(false);
   const rootRef = useRef(null);
   const boardRef = useRef(null);
+
+  // --- 그래프 (역사 그래프와 같은 캔버스·설정 상자) ---------------------
+  // 주소의 ?view=그래프 가 먼저, 다음이 지난번 고른 것.
+  const [view, setView] = useState(() => {
+    try {
+      const q = new URLSearchParams(location.search).get('view');
+      if (q === '그래프' || q === '연표') return q;
+      return localStorage.getItem(VIEW_KEY) === '그래프' ? '그래프' : '연표';
+    } catch { return '연표'; }
+  });
+  const [sideOpen, setSideOpen] = useState(false);
+  const [settings, setSettings] = useState({
+    depth: 2, limit: 120, includePeriod: false, hiddenEdges: [],
+    showLabels: true, showRail: true, arrows: true,
+    textFade: 0.3, nodeScale: 1, lineScale: 1,
+    centerForce: 1, repelForce: 1, linkDistance: 1,
+  });
+  const viewRef = useRef(null);
+  const meta = useMemo(() => (life ? graphMeta(life) : null), [life]);
+  const switchView = (v) => {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 못 해도 본다 */ }
+  };
 
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
   const adopt = useCallback(async (raw, from) => {
@@ -96,6 +129,22 @@ export default function LifeView() {
     boardRef.current?.select(selected);
     if (typeof history !== 'undefined') history.replaceState(null, '', selected ? `#${encodeURIComponent(selected)}` : location.pathname);
   }, [selected]);
+  // 그래프는 통째로 싣는다 — 수십 노드라 자를 이유가 없다. 고른 노드가 중심.
+  // 캔버스는 그래프 모드일 때만 붙어 있으므로(GraphCanvas 가 그때 마운트)
+  // 자료·모드가 바뀔 때마다 다시 싣는다. 같은 커밋에서 자식 효과가 먼저 돌아
+  // viewRef 가 채워진 뒤 이 효과가 돈다.
+  useEffect(() => {
+    const gv = viewRef.current;
+    if (!gv || !life || view !== '그래프') return;
+    gv.setData(graphPayload(life, selected));
+    if (selected) { gv.select(selected); gv.focusOn(selected); }
+  }, [life, view]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const gv = viewRef.current;
+    if (!gv || view !== '그래프' || !selected || !gv.byId.has(selected)) return;
+    gv.select(selected);
+    gv.focusOn(selected);
+  }, [selected, view]);
 
   const onFile = async (ev) => {
     const f = ev.target.files?.[0];
@@ -128,6 +177,12 @@ export default function LifeView() {
           <span className="era life-here">내 역사</span>
         </div>
         <div className="life-tools">
+          {life && (
+            <span className="life-switch" role="tablist">
+              <button type="button" className={`life-btn${view === '연표' ? ' on' : ''}`} onClick={() => switchView('연표')}>연표</button>
+              <button type="button" className={`life-btn${view === '그래프' ? ' on' : ''}`} onClick={() => switchView('그래프')}>그래프</button>
+            </span>
+          )}
           {life && <span className="life-source">{sourceText}</span>}
           <button type="button" className="life-btn" onClick={loadSample}>예시 보기</button>
           <label className="life-btn">JSON 파일 열기<input type="file" accept=".json,application/json" onChange={onFile} hidden /></label>
@@ -140,12 +195,37 @@ export default function LifeView() {
       {pasting && <PasteBox onSubmit={onPaste} onClose={() => setPasting(false)} />}
 
       <div className="layout life-layout">
-        <section className="life-board" ref={rootRef}>
+        {/* 연표 판은 늘 붙어 있고(LifeBoard 가 DOM 을 쥔다) 그래프일 때만 감춘다. */}
+        <section className="life-board" ref={rootRef} hidden={!!life && view === '그래프'}>
           <div className="life-head" />
           <div className="life-body">
             {!life && <Empty offline={offline} onSample={loadSample} />}
           </div>
         </section>
+        {life && view === '그래프' && (
+          <div className="stage-wrap">
+            <GraphCanvas
+              viewRef={viewRef}
+              settings={settings}
+              note={<>{name}의 관계망 · 노드 {life.nodes.length} · 관계 {life.edges.length}</>}
+              empty={false}
+              offline={false}
+              onSelect={(node) => { setSelected(node.id); setTab('event'); }}
+              onExpand={(node) => { setSelected(node.id); setTab('event'); }}
+            />
+            <SidePanel
+              open={sideOpen}
+              onToggle={() => setSideOpen((v) => !v)}
+              meta={meta}
+              seeds={meta.seeds}
+              settings={settings}
+              onSettings={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
+              onPick={(id) => { setSelected(id); setTab('event'); }}
+              lines={LIFE_LINES}
+              whole
+            />
+          </div>
+        )}
         {life && (
           <aside className="detail life-detail">
             <div className="life-tabs">
