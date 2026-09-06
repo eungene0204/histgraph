@@ -4107,7 +4107,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("괄호는 떼고 보며 구 자체는 후보가 아니다", hs[-1] == "후금" and "후금(청)의 재차 침입 결심" not in hs, str(hs))
     check("근거가 원문에 없으면 버린다", why.get("근거 없음") == 1, str(why))
     check("자기 자신은 잇지 않는다", why.get("자기 자신") == 1, str(why))
-    check("인물은 결과가 될 수 없다", why.get("타입 안 맞음") == 1, str(why))
+    # 모델이 결과 자리에 사람을 적을 때 하는 말은 '그 사건이 그 사람에게
+    # 무슨 일을 했나'다 (실측 39건 전부 '영향'). 인과가 아니라 참여이므로
+    # 버리지 않고 방향을 돌려 `roles` 에게 넘긴다 (2026-09-06 사용자 결정).
+    check("인물은 결과가 아니라 참여로 돌아간다", why.get("참여로 돌림") == 1, str(why))
+    _join = [e for e in edges if e.type == "participated_in"]
+    check("참여는 사람 → 사건 방향이다",
+          len(_join) == 1 and _join[0].src == "wd:P" and _join[0].dst == "wd:BJ",
+          str([(e.src, e.dst) for e in _join]))
+    check("참여에 근거가 남아 roles 가 판정할 수 있다",
+          _join[0].props.get("evidence", "").startswith("인조는 남한산성")
+          and _join[0].props.get("from_causes") is True, str(_join[0].props))
+    check("돌린 참여에는 역할이 아직 없다", "role" not in _join[0].props)
     check("근거는 문장 단위로 되살린다",
           next(e for e in edges if e.src == "wd:IMJIN").props["evidence"].endswith("성장하였다."),
           next(e for e in edges if e.src == "wd:IMJIN").props["evidence"])
@@ -4118,7 +4129,7 @@ with tempfile.TemporaryDirectory() as tmp:
           causes_mod.accept(store, doc, [dict(answers[0], kind="이유")], passages, "m")[1] == {"종류 밖": 1})
 
     n = causes_mod.write(store, edges)
-    check("엣지를 적는다", n == 3)
+    check("엣지를 적는다 (인과 3 · 참여 1)", n == 4, str(n))
     weaker = [Edge(src="wd:JIN", dst="wd:BJ", type="caused", source="causes", label="원인", confidence=0.5,
                    props={"how": "다른 문서의 약한 말"})]
     causes_mod.write(store, weaker)

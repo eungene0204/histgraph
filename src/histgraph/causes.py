@@ -617,6 +617,8 @@ def accept(
     counts: dict[str, int] = {}
     unresolved: list[str] = []
     edges: dict[tuple[str, str], Edge] = {}
+    # 인과가 아니라 **참여**로 돌린 것들 (아래 '결과가 사람이면' 주석 참고).
+    joined: list[Edge] = []
 
     def drop(why: str) -> None:
         counts[why] = counts.get(why, 0) + 1
@@ -641,6 +643,29 @@ def accept(
         (cid, ctype, cname), (eid, etype, ename) = cause, effect
         if cid == eid:
             drop("자기 자신")
+            continue
+        # **결과가 사람이면 인과가 아니라 참여다.** 모델이 결과 자리에
+        # 사람을 적을 때 하는 말은 언제나 '그 사건이 그 사람에게 무슨 일을
+        # 했나'다 — 실측 7,398건 중 39건이 그랬고 39건 전부 '영향'이었다
+        # (안악 사건 → 김구 "김구가 잡혔다", 강상인의 옥 → 심온 "사사됐다",
+        # 해유령 전투 → 신각 "처형됐다"). '이 사건이 이 사람을 낳았다'는
+        # 답은 한 건도 없다.
+        #
+        # 그래서 온톨로지가 사람을 결과로 막아 둔 것은 옳다. 다만 여기서
+        # 통째로 버리면 참인 사실이 사라진다 — 김구와 안악 사건 사이에
+        # 엣지가 하나도 없었다. 사람 → 사건의 **참여**로 돌려 두면
+        # `roles` 가 무엇을 했는지(피해·표적·수습…) 판정한다
+        # (2026-09-06 사용자 결정: "1번으로 가자").
+        if etype == "person" and ctype == "event" and kind == "영향":
+            how_p = " ".join(str(a.get("how", "")).split())
+            joined.append(Edge(
+                src=eid, dst=cid, type="participated_in", source=SOURCE_MARK,
+                confidence=CONFIDENCE.get(str(a.get("confidence")), 0.5),
+                props={"evidence": evidence, "doc": doc["id"], "model": model,
+                       "from_causes": True,
+                       **({"how": how_p} if has_hangul(how_p) and len(how_p) <= HOW_MAX else {})},
+            ))
+            drop("참여로 돌림")
             continue
         if ctype not in CAUSE_TYPES or etype not in EFFECT_TYPES:
             drop("타입 안 맞음")
@@ -682,7 +707,13 @@ def accept(
         edges[(cid, eid)] = Edge(
             src=cid, dst=eid, type=EDGE_TYPE, source=SOURCE_MARK, label=kind, confidence=conf, props=props,
         )
-    return list(edges.values()), counts, unresolved
+    # 같은 문서가 한 사람을 여러 번 말하면 참여도 여러 번 나온다. 짝으로 접는다.
+    joined_once: dict[tuple[str, str], Edge] = {}
+    for e in joined:
+        prev = joined_once.get((e.src, e.dst))
+        if prev is None or e.confidence > prev.confidence:
+            joined_once[(e.src, e.dst)] = e
+    return list(edges.values()) + list(joined_once.values()), counts, unresolved
 
 
 def write(store: GraphStore, edges: list[Edge]) -> int:
