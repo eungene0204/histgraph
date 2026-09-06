@@ -5180,5 +5180,81 @@ with tempfile.TemporaryDirectory() as tmp:
     check("'영향'은 '원인' 뒤라 먼저 잘린다", "wd:Q10" not in top, str(top))
     store.close()
 
+# --- 제도·시설이 선 날을 사건으로 (2026-09-06 "이 시기 왕들때는 아무런 일이 없었어?") ---
+print("\n[민백 표제 + 고려사 날짜 — 선 날의 사건]")
+_spots, _founded = aks_mod2._spots, aks_mod2._founded_by
+check("조사가 붙어도 낱말이다 — '국자감시를'",
+      _spots("국자감시를 설치하다", "국자감시") == [4])
+check("조사가 아닌 한글이 이어지면 더 긴 이름이다 — '국자감' + '시를'",
+      _spots("국자감시를 설치하다", "국자감") == [])
+check("앞에 한글이 붙어 있어도 낱말이 아니다",
+      _spots("탐라만호부를 두다", "만호부") == [])
+check("표제 바로 뒤의 술어라야 그 표제가 선 것이다",
+      _founded("국자감시를 설치하다", "국자감시", "제도") == "설치"
+      and _founded("국자감에 서적포를 설치하게 하다", "서적포", "제도") == "설치"
+      and _founded("국자감에 서적포를 설치하게 하다", "국자감", "제도/관청") is None)
+check("접속조사로 묶인 것은 술어를 나눠 가진다",
+      _founded("전함병량도감과 전함조성도감을 설치하다", "전함병량도감", "제도") == "설치")
+check("술어는 유형에 맞아야 한다 — 비서성(제도)이 '간행'한 것은 책이다",
+      _founded("비서성에서 간행한 서적을 올리다", "비서성", "제도") is None
+      and _founded("『해동비록』이 편찬되다", "해동비록", "문헌/고서") == "편찬")
+check("바치고 올린 것은 선 것이 아니다",
+      _founded("탁라의 유격장군이 방물을 바치다", "유격장군", "제도/관직") is None)
+check("청하고 건의한 것은 선 것이 아니다 — 날짜가 어긋난다",
+      _founded("안향이 섬학전 설치를 건의하다", "섬학전", "제도") is None
+      and _founded("탐라총관부를 없애고 만호부 설치를 청하다", "만호부", "제도/관청") is None)
+
+with tempfile.TemporaryDirectory() as tmp:
+    raw = Path(tmp) / "raw"
+    raw.mkdir()
+    head = "항목 아이디,항목 고유 웹주소,대표 미디어 아이디,항목명,원어,항목 분야,항목 유형,시대,항목 정의,집필자 정보"
+    rows = [("E1", "국자감시", "제도", "고려", "국자감에서 치러진 예부시의 예비시험."),
+            ("E2", "국자감", "제도/관청", "고려", "고려시대 개경에 설치한 최고 교육기관."),
+            ("E3", "묘법연화경", "문헌/고서", "고려", "1286년에 간행한 불교경전."),
+            ("E4", "유격장군", "제도/관직", "고려", "고려시대 무산계 산직의 하나.")]
+    body = "\n".join(f"{i},https://encykorea.aks.ac.kr/Article/{i},x,{label},,,{kind},{era},{d},글쓴이"
+                     for i, label, kind, era, d in rows)
+    (raw / aks_mod2.INDEX_CSV).write_text("\ufeff" + head + "\n" + body + "\n", encoding="utf-8")
+
+    idx_path = Path(tmp) / "index.sqlite"
+    conn = sqlite3.connect(idx_path)
+    conn.executescript(
+        """CREATE TABLE articles (
+             id TEXT PRIMARY KEY, king TEXT, date TEXT, title TEXT,
+             classes TEXT, refs TEXT, names TEXT, text TEXT,
+             book TEXT NOT NULL DEFAULT '실록', calendar TEXT NOT NULL DEFAULT 'lunar');
+           CREATE VIRTUAL TABLE title_fts USING fts5(id UNINDEXED, title, tokenize='trigram');""")
+    arts = [("a1", "1031-11-22", "국자감시를 설치하다", "고려사", "gregorian"),
+            ("a2", "", "국자감시를 처음 실시하다", "고려사", ""),
+            ("a3", "1101-05-17", "금글자로 쓴 묘법연화경의 완성을 경축하고 시를 짓다", "고려사", "gregorian"),
+            ("a4", "1086-02-23", "탁라의 유격장군이 방물을 바치다", "고려사", "gregorian")]
+    for aid, date, title, book, cal in arts:
+        conn.execute("INSERT INTO articles (id,king,date,title,classes,refs,names,text,book,calendar)"
+                     " VALUES (?,'',?,?,'','','','',?,?)", (aid, date, title, book, cal))
+        conn.execute("INSERT INTO title_fts (id, title) VALUES (?,?)", (aid, title))
+    conn.commit()
+    conn.close()
+
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    store.upsert_nodes([Node(id="wd:Q28208", type="org", label="고려", source="wd", start_date="0918")])
+    rep = aks_mod2.founding_events(store, nikh.SillokIndex(idx_path), raw_dir=raw)
+    made = {m[1]: m[0] for m in rep["made"]}
+    check("정본 둘을 겹쳐 세운다 — 이름은 민백 표제, 날짜는 고려사 기사",
+          made == {"국자감시": "1031-11-22"}, str(made))
+    got = store.conn.execute("SELECT type, label, description FROM nodes WHERE id='aks:E1'").fetchone()
+    check("설명은 민백의 정의 한 문장이다 — 기사 제목을 세우지 않는다 (§1-3)",
+          tuple(got) == ("event", "국자감시", "국자감에서 치러진 예부시의 예비시험."), str(tuple(got)))
+    check("그 시대에 잇는다",
+          store.conn.execute("SELECT COUNT(*) FROM edges WHERE src='aks:E1' AND dst='wd:Q28208'"
+                             " AND type='from_period'").fetchone()[0] == 1)
+    check("고친 값은 편집 계층에 남는다 — 다음 수집이 덮어써도 돌아온다",
+          store.conn.execute("SELECT COUNT(*) FROM overrides WHERE key='aks:E1'").fetchone()[0] >= 3)
+    check("기사의 해가 항목 연대와 어긋나면 세우지 않는다 — 1286년 경전에 1101년 기사",
+          [m[0] for m in rep["mismatched"]] == ["묘법연화경"], str(rep["mismatched"]))
+    rep2 = aks_mod2.founding_events(store, nikh.SillokIndex(idx_path), raw_dir=raw)
+    check("두 번 돌려도 같은 노드다 — 이름이 이미 있으면 세지 않고 넘긴다",
+          rep2["made"] == [] and [c[0] for c in rep2["collided"]] == ["국자감시"], str(rep2["collided"]))
+    store.close()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

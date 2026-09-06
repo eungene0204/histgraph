@@ -660,3 +660,198 @@ def audit_bindings(store, conn, raw_dir: Path = RAW_DIR, dry_run: bool = False) 
     if not dry_run:
         store.conn.commit()
     return {"checked": len(docs), "rebound": rebound, "dropped": dropped, "cleared": cleared}
+
+
+# --- 제도·시설이 선 날을 사건으로 -------------------------------------------
+#
+# 2026-09-06 지적: 덕종~헌종(1031~1095)의 연표가 비어 있었다. "이 시기
+# 왕들때는 아무런 일이 없었어? 그럴리가 없잖아."
+#
+# 전쟁이 없던 것은 사실이다 — 거란 3차 침입이 1019년에 끝나고 무신정변이
+# 1170년이라, **민백의 고려 '사건' 항목 95건 중 1019~1135 사이가 0건**이다.
+# 그 시기의 역사는 사건이 아니라 **제도와 문화**로 적혀 있다: 국자감시
+# 설치(1031) · 천리장성 축조(1033~1044) · 구재학당(1055) · 경정전시과(1076) ·
+# 초조대장경 완성(1087). 위키백과에는 그 시기 사건 문서가 아예 없어서
+# (`wikipedia.EVENT_SEEDS` 의 고려 목록 37개가 전부 난·전쟁이다) 시드로는
+# 못 채운다.
+#
+# 그래서 **정본 둘을 겹쳐 세운다** (2026-09-06 사용자 결정): 이름과 설명은
+# 민백 항목(표제 + 정의 한 문장), 날짜는 《고려사》·《고려사절요》 기사.
+# 화면에 서는 것은 '국자감시'이지 '국자감시를 설치하다'가 아니다 — 기사
+# 제목을 그대로 세우면 §1-3 에 걸린다 (실록 기사 제목이 설명 없이 연표에
+# 섰던 2026-09-04 지적).
+#
+# 관문이 다섯이다. 하나라도 못 넘으면 세우지 않는다:
+#
+#   1. 표제가 기사 제목에 **낱말로 통째로** 있다. 좌우 경계를 다 본다 —
+#      안 보면 '국자감시를 설치하다'(1031)가 국자감(992년 창설)의 날짜가
+#      된다.
+#   2. 표제 **바로 뒤**에 그 유형에 맞는 '선' 술어가 온다. 술어를 유형별로
+#      가르는 이유: '비서성에서 간행한 서적을 올리다'의 간행은 책이 나온
+#      것이지 비서성이 선 것이 아니다.
+#   3. 날짜가 있고 **양력**이다. 음력을 섞으면 같은 해 안에서 순서가
+#      뒤집힌다 (CLAUDE.md §1-5).
+#   4. 걸린 기사가 다섯 건 이하다 (`nikh.date_from_sillok` 과 같은 규약).
+#      흔한 이름은 아무 기사에나 걸린다.
+#   5. 기사의 해가 항목의 연대와 맞는다 (`consistent`). 이것이 없으면
+#      1286년 간행된 「묘법연화경」이 1101년 기사를 받는다.
+#
+# 이름이 같은 노드가 이미 있으면 **세우지 않고 센다.** 중복을 만드는 것이
+# 빈 칸보다 나쁘다 — 합치는 규칙은 `dedupe` 쪽이다.
+FOUNDABLE_KINDS = ("제도", "유적", "유물", "문헌", "개념")
+# 유형별 '선' 술어. 표제 뒤 `FOUNDED_GAP` 글자 안에 있어야 한다.
+FOUNDED_BY_KIND: dict[str, tuple[str, ...]] = {
+    "제도": ("설치", "설립", "창설", "제정", "반포", "실시", "시행"),
+    "개념": ("설치", "설립", "창설", "제정", "반포", "실시", "시행"),
+    "유적": ("창건", "건립", "완공", "완성", "중건", "축조", "쌓"),
+    "유물": ("주조", "제작", "완성", "만들"),
+    "문헌": ("편찬", "간행", "완성", "찬술", "인출", "지어", "저술"),
+}
+# 표제 뒤에 붙는 조사. 한국어는 이름 뒤에 조사가 바로 붙어서 '국자감시를'
+# 처럼 붙어 나온다 — 오른쪽 경계를 한글 아님으로만 재면 아무것도 안 남는다.
+# 조사가 아닌 한글이 이어지면 더 긴 이름이다 ('국자감' + '시를').
+PARTICLE_HEADS = frozenset("을를이가은는에의와과도로으만부까써서라및")
+# 술어가 표제에서 이만큼 안에 있어야 그 표제가 선 것이다. '국자감에 서적포를
+# 설치하게 하다'에서 선 것은 서적포이지 국자감이 아니다.
+NEAR_GAP = 4
+# 다만 '전함병량도감과 전함조성도감을 설치하다'처럼 **접속조사로 묶인** 것은
+# 술어를 나눠 가진다. 그때만 벌린다.
+CONJ_GAP = 12
+# 청한 것은 선 것이 아니다. '섬학전 설치를 건의하다'·'만호부 설치를 청하다'
+# 는 그날 그것이 섰다고 말하지 않는다 — 날짜가 틀리면 인과의 앞뒤가 뒤집힌다
+# (CLAUDE.md §1-5).
+PROPOSED = ("건의", "청하", "요청", "논의", "주장", "상소")
+GORYEO_BOOKS = ("고려사", "고려사절요")
+MIN_LABEL = 3       # 두 글자 표제('경'·'부'·'진')는 아무 제목에나 걸린다
+MAX_HITS = 5
+
+
+def _spots(title: str, term: str) -> list[int]:
+    """제목에서 표제가 **낱말로** 선 자리들 (표제가 끝나는 위치).
+
+    `nikh._has_term` 은 앞만 본다. 그것만으로는 '국자감시를 설치하다'가
+    '국자감'에 걸려 992년에 선 국자감이 1031년 날짜를 받는다. 뒤도 봐야
+    하는데, 한글은 조사가 이름에 붙어 나오므로 '한글 아님'으로 재면 아무것도
+    안 남는다 — 조사면 끝난 것이고 조사가 아닌 한글이면 더 긴 이름이다."""
+    out: list[int] = []
+    for m in re.finditer(re.escape(term), title):
+        if m.start() and re.match(r"[가-힣0-9]", title[m.start() - 1]):
+            continue
+        nxt = title[m.end(): m.end() + 1]
+        if nxt and re.match(r"[가-힣]", nxt) and nxt not in PARTICLE_HEADS:
+            continue
+        out.append(m.end())
+    return out
+
+
+def _founded_by(title: str, term: str, kind: str) -> str | None:
+    """표제 바로 뒤에 오는 '선' 술어. 없으면 None."""
+    verbs = FOUNDED_BY_KIND.get(kind.split("/")[0])
+    if not verbs:
+        return None
+    for end in _spots(title, term):
+        conj = title[end: end + 1] in ("과", "와")
+        tail = title[end: end + (CONJ_GAP if conj else NEAR_GAP) + 2]
+        for v in verbs:
+            if v not in tail:
+                continue
+            if any(w in title[end:] for w in PROPOSED):
+                continue
+            return v
+    return None
+
+
+def founding_events(
+    store, index, raw_dir: Path = RAW_DIR, eras: tuple[str, ...] = ("고려",),
+    books: tuple[str, ...] = GORYEO_BOOKS, dry_run: bool = False,
+) -> dict[str, object]:
+    """민백의 제도·시설 항목을 **선 날의 사건**으로 세운다.
+
+    `index` 는 `nikh.SillokIndex`. 세우는 노드는 `aks:E00…` 이고 이름은
+    민백 표제, 설명은 정의 한 문장, 날짜는 정본 기사다. 정의는 Node 를
+    거치므로 한국어 관문(`ontology.Node.__post_init__`)을 지난다."""
+    from .. import overrides
+    from ..ontology import Edge, Node
+    from ..sources import nikh
+
+    entries = [
+        e for e in load_index(raw_dir)
+        if e.era.startswith(eras) and e.kind.split("/")[0] in FOUNDABLE_KINDS
+        and len(e.label) >= MIN_LABEL and e.definition
+    ]
+    # 같은 표제가 둘이면 어느 쪽인지 못 가른다 (`match_nodes` 와 같은 규칙).
+    by_label: dict[str, list[Entry]] = defaultdict(list)
+    for e in entries:
+        by_label[norm_name(e.label)].append(e)
+
+    taken: set[str] = {
+        norm_name(r[0]) for r in store.conn.execute("SELECT label FROM nodes")
+    } | {norm_name(r[0]) for r in store.conn.execute("SELECT alias FROM aliases")}
+
+    made: list[tuple[str, str, str, str]] = []   # (날짜, 표제, 기사 제목, 술어)
+    collided: list[tuple[str, str]] = []
+    mismatched: list[tuple[str, str, int]] = []
+    ambiguous = 0
+    nodes: list[Node] = []
+    edges: list[Edge] = []
+    for name, found in sorted(by_label.items()):
+        if len(found) > 1:
+            ambiguous += 1
+            continue
+        e = found[0]
+        hits = [
+            (r, term) for r, term in nikh._hits(index, e.label, books)
+            if r["date"] and r["calendar"] == "gregorian"
+            and _spots(r["title"], e.label)
+        ]
+        if not hits or len(hits) > MAX_HITS:
+            continue
+        pick = next(
+            ((r, v) for r, _ in hits
+             if (v := _founded_by(r["title"], e.label, e.kind))),
+            None,
+        )
+        if pick is None:
+            continue
+        art, verb = pick
+        year = int(art["date"][:4])
+        if not consistent(e, (year, year)):
+            mismatched.append((e.label, art["title"], year))
+            continue
+        if name in taken:
+            collided.append((e.label, art["date"]))
+            continue
+        taken.add(name)
+        nid = f"{SOURCE}:{e.id}"
+        nodes.append(Node(
+            id=nid, type="event", label=e.label, source=SOURCE,
+            start_date=art["date"], description=e.definition, url=e.url,
+            props={
+                "canon": SOURCE, "aks_id": e.id, "hanja": e.hanja,
+                "kind": e.kind, "seed_era": "고려",
+                "desc_source": SOURCE, "desc_url": e.url,
+                "date_basis": f"{art['book']} 기사", "calendar": "gregorian",
+                "sillok_id": art["id"], "sillok_book": art["book"],
+                "sillok_title": art["title"], "founded_verb": verb,
+            },
+        ))
+        edges.append(Edge(src=nid, dst="wd:Q28208", type="from_period", source=SOURCE))
+        made.append((art["date"], e.label, art["title"], verb))
+
+    if not dry_run and nodes:
+        store.upsert_nodes(nodes)
+        store.upsert_edges(edges)
+        # 정본으로 세운 이름·설명·날짜는 편집 계층에 남는다 — 다음 수집이
+        # 덮어써도 저장소가 되돌린다 (CLAUDE.md §2).
+        for n in nodes:
+            overrides.record(store.conn, "node", n.id, "label", n.label, "aks", "민백 표제")
+            overrides.record(store.conn, "node", n.id, "description", n.description or "",
+                             "aks", "민백 정의")
+            overrides.record(store.conn, "node", n.id, "start_date", n.start_date or "",
+                             "aks", n.props["date_basis"])
+        store.conn.commit()
+    made.sort()
+    return {
+        "candidates": len(by_label), "made": made, "collided": collided,
+        "mismatched": mismatched, "ambiguous": ambiguous,
+    }

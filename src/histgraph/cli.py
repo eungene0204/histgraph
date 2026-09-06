@@ -1990,6 +1990,55 @@ def cmd_describe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_founding(args: argparse.Namespace) -> int:
+    """민백의 제도·시설 항목을 **선 날의 사건**으로 세운다 (정본 둘을 겹쳐서).
+
+    2026-09-06 지적 — 덕종~헌종(1031~1095)의 연표가 비어 있었다. 전쟁이
+    없던 것은 사실이다: 민백의 고려 '사건' 항목 95건 중 1019~1135 사이가
+    0건이다. 그 시기의 역사는 사건이 아니라 제도와 문화로 적혀 있고,
+    위키백과에는 그 시기 사건 문서가 아예 없어 시드로는 못 채운다.
+
+    이름과 설명은 민백(표제 + 정의 한 문장), 날짜는 《고려사》·《고려사절요》
+    기사에서 받는다. 화면에 서는 것은 '국자감시'이지 '국자감시를 설치하다'가
+    아니다 (§1-3). 관문 다섯은 `aks.founding_events` 에 적었다.
+
+    수집 뒤에 다시 돌린다 — `upsert_nodes` 는 id 로 세우므로 두 번 돌려도
+    같은 노드다. 원본과 파생본에 한 번씩:
+
+        uv run histgraph founding
+        uv run histgraph --db data/korea.sqlite founding
+    """
+    from .sources import aks, nikh
+
+    index_path = nikh.RAW_DIR / nikh.SILLOK_INDEX
+    if not index_path.exists():
+        print(f"  국편 색인이 없습니다: {index_path}")
+        print("  uv run histgraph nikh --build-index 로 먼저 만듭니다")
+        return 1
+    index = nikh.SillokIndex(index_path)
+    with GraphStore(args.db) as store:
+        rep = aks.founding_events(store, index, dry_run=args.dry_run)
+        head = "세울 사건" if args.dry_run else "세운 사건"
+        print(f"  민백 후보 표제 {rep['candidates']:,}개 · {head} {len(rep['made'])}건")
+        for date, label, title, verb in rep["made"]:
+            print(f"    {date:11s}  {label:14s} [{verb}]  {title[:44]}")
+        # 안 세운 것도 센다 — '자료에 없어서'와 '규칙에 걸려서'는 다르다.
+        if rep["ambiguous"]:
+            print(f"  · 같은 표제가 둘이라 안 세운 항목 {rep['ambiguous']}개")
+        if rep["mismatched"]:
+            print(f"  · 기사의 해가 항목 연대와 어긋나 버린 것 {len(rep['mismatched'])}건")
+            for label, title, year in rep["mismatched"][:5]:
+                print(f"    {year}  {label:14s}  {title[:44]}")
+        if rep["collided"]:
+            print(f"  · 이름이 이미 있어 안 세운 것 {len(rep['collided'])}건"
+                  f" (합치는 것은 dedupe 쪽)")
+            for label, date in rep["collided"][:5]:
+                print(f"    {date:11s}  {label}")
+        if args.dry_run:
+            print("\n  (미리보기라 아직 아무것도 바꾸지 않았습니다)")
+    return 0
+
+
 def cmd_paraphrase(args: argparse.Namespace) -> int:
     """정본이 아닌 설명(위키백과·나무위키·출처 모름)을 우리 말로 새로 쓴다
     (`summaries` 모듈 머리글). 정본(국편·민백·국가유산청)은 손대지 않는다.
@@ -2379,6 +2428,12 @@ def main(argv: list[str] | None = None) -> int:
                           help="빈 설명을 민족문화대백과의 정의 한 문장으로 (수집 뒤마다)")
     p_ds.add_argument("--dry-run", action="store_true", help="채우지 않고 미리보기")
     p_ds.set_defaults(func=cmd_describe)
+
+    p_fd = sub.add_parser(
+        "founding",
+        help="민백의 제도·시설 항목을 정본 기사의 날짜로 사건으로 세운다 (고려)")
+    p_fd.add_argument("--dry-run", action="store_true", help="세우지 않고 미리보기")
+    p_fd.set_defaults(func=cmd_founding)
 
     p_pp = sub.add_parser("paraphrase",
                           help="정본이 아닌 설명(위키백과·나무위키)을 우리 말로 새로 쓴다 (MLX)")
