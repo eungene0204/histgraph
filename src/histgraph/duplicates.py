@@ -673,6 +673,13 @@ def _resolve_chains(
     return out
 
 
+# 설명이 어디서 왔는지 말하는 칸들 (`provenance.desc_origin` 이 읽는다).
+# 설명과 함께 움직여야 한다 — 따로 옮기면 출처가 글을 잘못 가리킨다.
+DESC_PROVENANCE = frozenset({
+    "desc_source", "canon", "desc_url", "namu_url", "desc_via",
+})
+
+
 def _carry_content(conn: sqlite3.Connection, keep: str, drop: str) -> str | None:
     """없앨 쪽에만 있는 것을 남길 쪽으로 옮긴다. 연대가 어긋나면 알린다.
 
@@ -701,8 +708,20 @@ def _carry_content(conn: sqlite3.Connection, keep: str, drop: str) -> str | None
     props = json.loads(k["props"] or "{}")
     # 없앨 쪽 props 에만 있는 칸도 가져온다 — 국가유산청 노드는 소재지·
     # 지정 종목이 거기 들어 있어서, 빈 줄을 남기면 그게 통째로 사라진다.
+    #
+    # **설명을 안 옮겼으면 설명의 출처도 안 옮긴다.** 이 칸들은 화면의
+    # '설명 아래 한 줄'이 읽는 것이라(`provenance.desc_origin`), 남길 쪽이
+    # 제 설명을 그대로 두는데 없앨 쪽의 출처만 따라가면 **위키백과 글에
+    # 국편 딱지가 붙는다** — 라이선스 표기가 틀리는 자리다 (실측: 고려
+    # 정종 두 노드, 2026-09-06). 지워질 글은 `props.merged_desc` 에 남으므로
+    # 되짚을 길은 없어지지 않는다.
+    carried_desc = "description" in fill
     for key, val in json.loads(d["props"] or "{}").items():
-        if key not in ("merged_from", "merged_desc") and not props.get(key):
+        if key in ("merged_from", "merged_desc"):
+            continue
+        if not carried_desc and key in DESC_PROVENANCE:
+            continue
+        if not props.get(key):
             props[key] = val
     if (d["description"] or "").strip() and "description" not in fill:
         props.setdefault("merged_desc", d["description"])

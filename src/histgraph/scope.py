@@ -97,6 +97,10 @@ class Era:
 ERAS: dict[str, Era] = {
     "joseon": Era("조선", "Q28179", "조선", ["조선"], successor_events=["대한제국"],
                   successor_states=["Q28233"]),
+    # 고려는 조선 앞에 선다 — 묶음의 **맨 앞 시대**가 화면의 중심이고
+    # 연표의 바닥이다 (`server.root`·`_polities`). 조선만 있을 때는 위화도
+    # 회군(1388)·삼사(1100) 같은 고려 사건이 맥락으로만 남아 축을 늘여
+    # 놓았는데, 이제 그것들이 자기 시대에 선다 (2026-09-06 사용자 요청).
     "goryeo": Era("고려", "Q28208", "고려", ["고려"]),
     "silla": Era("신라", "Q28456", "신라", ["신라", "통일신라"]),
     "goguryeo": Era("고구려", "Q28370", "고구려", ["고구려"]),
@@ -126,12 +130,12 @@ ERAS: dict[str, Era] = {
 # 어디에도 없다. 사람도 이어진다: 대한제국에서 벼슬한 사람이 일제강점기에
 # 의병이 되고, 조선의 마지막 왕이 일제강점기의 이왕(李王)이다.
 BUNDLES: dict[str, tuple[str, ...]] = {
-    "korea": ("joseon", "ilje", "daehan"),
+    "korea": ("goryeo", "joseon", "ilje", "daehan"),
 }
 
 # 묶음의 이름. 화면 머리에 뜨는 글자라 한국어여야 한다.
 BUNDLE_LABEL: dict[str, str] = {
-    "korea": "조선~대한민국",
+    "korea": "고려~대한민국",
 }
 
 

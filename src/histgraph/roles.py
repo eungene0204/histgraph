@@ -131,12 +131,15 @@ def candidates(
     since: int | None = None,
     redo: bool = False,
     only_roles: frozenset[str] | set[str] | None = None,
+    sources: frozenset[str] | set[str] | None = None,
 ) -> list[dict]:
     """판정할 엣지 — 사건으로 들어가는 인물의 participated_in.
 
     말뭉치에 그 사건 문서가 있는 것만. 없는 사건은 물을 글이 없다.
     `only_roles` 는 다시 물을 때 그 역할로 판정됐던 엣지만 고른다 —
-    프롬프트를 고친 뒤 틀린 갈래('주도')만 다시 묻는 데 쓴다."""
+    프롬프트를 고친 뒤 틀린 갈래('주도')만 다시 묻는 데 쓴다.
+    `sources` 는 그 소스가 만든 엣지만 고른다 — 판정 안 된 참여가 3,665건
+    이라 한 번에 다 물으면 며칠이 걸린다. 새로 들어온 것부터 묻는 칸이다."""
     from .corpus import has_doc
     from .timeline import _year_of
 
@@ -154,6 +157,8 @@ def candidates(
             year = _year_of(r["start_date"])
             if year is None or year < since:
                 continue
+        if sources is not None and r["source"] not in sources:
+            continue
         props = json.loads(r["props"] or "{}")
         if not redo and props.get("role"):
             continue
@@ -265,10 +270,12 @@ def run(
     dry_run: bool = False,
     redo: bool = False,
     only_roles: frozenset[str] | set[str] | None = None,
+    sources: frozenset[str] | set[str] | None = None,
 ) -> dict[str, Any]:
     """후보를 돌며 판정한다. `backend` 가 None 이거나 dry_run 이면 묻지 않고
     근거 문단이 있는지만 센다 — 말뭉치가 얼마나 답할 수 있는지 먼저 본다."""
-    todo = candidates(store, corpus, since=since, redo=redo or bool(only_roles), only_roles=only_roles)
+    todo = candidates(store, corpus, since=since, redo=redo or bool(only_roles),
+                      only_roles=only_roles, sources=sources)
     if limit:
         todo = todo[:limit]
     counts: dict[str, int] = {"후보": len(todo), "문단 있음": 0, "문단 없음": 0}

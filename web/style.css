@@ -70,7 +70,7 @@
   --font-ui-small:   13px;
   --font-ui-medium:  15px;
   --font-ui-larger:  20px;
-  --font-text-size:  14px;
+  --font-text-size:  15.5px;   /* 상세 본문(설명)만 쓴다 — 읽는 글이라 UI 글자보다 크다 */
   --line-height-normal: 1.5;
   --line-height-tight: 1.3;
 

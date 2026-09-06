@@ -215,11 +215,14 @@ let detailHtml = '';
              'wd:EU': { id: 'wd:EU', label: '을미사변', type: 'event', group: 'event' } } };
   const personChain = plain(renderToString(h(ChainTree, { data: personTree, onVisit: () => {} })));
   ok('인물 사슬의 머리는 사람을 사건처럼 부르지 않는다',
-     personChain.includes('이 인물 관련') && !personChain.includes('이 일이 부른 것'), personChain.slice(0, 160));
+     personChain.includes('이 인물에서 비롯된 일') && !personChain.includes('이 일이 부른 것'), personChain.slice(0, 160));
+  // '관련'은 방향을 말하지 않는다 (2026-09-06 지적). 이 나무는 이 노드에서
+  // 뻗어 나간 쪽이므로 머리도 그 방향이어야 한다.
+  ok('결과 쪽 머리는 방향을 말한다', !personChain.includes('이 인물 관련'), personChain.slice(0, 160));
   const placeTree = { ...personTree, center: 'wd:SEOUL',
     nodes: { ...personTree.nodes, 'wd:SEOUL': { id: 'wd:SEOUL', label: '서울', type: 'place', group: 'thing' } } };
   ok('장소 사슬의 머리는 장소로 부른다',
-     plain(renderToString(h(ChainTree, { data: placeTree, onVisit: () => {} }))).includes('이 장소 관련'));
+     plain(renderToString(h(ChainTree, { data: placeTree, onVisit: () => {} }))).includes('이 장소에서 비롯된 일'));
 
   ok('비어 있으면 사슬을 그리지 않는다', renderToString(h(ChainTree, { data: { causes: [], effects: [], nodes: {} }, onVisit: () => {} })) === '');
   const pathHtml = plain(renderToString(h(PathView, { data: {

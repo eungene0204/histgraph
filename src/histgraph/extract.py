@@ -349,16 +349,28 @@ def collect_batch(client, batch_id: str, docs: list[Document]) -> dict[str, list
 EVIDENCE_PROBE = 25
 
 
+# 한자 괄호 — `훈민정음(訓民正音)`·`이방원(李芳遠, 1367~1422)`. 정본(국편·민백)
+# 산문은 이름마다 이렇게 달고, 모델은 인용할 때 이것을 뺀다. 대조는 양쪽에서
+# 다 빼고 한다 — 실측(2026-09-06): 정본 문서 60건의 답 333개 중 근거를 못 찾은
+# 26개의 절반(12개)이 이것이었고, 세종 문서는 12개 중 9개가 여기서 샜다
+# (`세종 → 훈민정음` 이 다섯 번 답으로 나오고도 엣지가 안 됐다).
+_HANJA_PAREN = re.compile(r"[(（][^()（）]*[\u3400-\u4dbf\u4e00-\u9fff][^()（）]*[)）]")
+
+
 @lru_cache(maxsize=8)
 def _compact_index(text: str) -> tuple[str, tuple[int, ...]]:
-    """공백을 걷어낸 사본과, 그 글자들이 원문 어디에 있었는지.
+    """공백과 한자 괄호를 걷어낸 사본과, 그 글자들이 원문 어디에 있었는지.
 
     모델의 인용은 원문과 공백·줄바꿈이 다르다. 비교는 공백 없는 사본에서
     하고, 찾은 자리는 원문 좌표로 되돌려야 문장 경계를 볼 수 있다."""
+    skip = [False] * len(text)
+    for m in _HANJA_PAREN.finditer(text):
+        for i in range(m.start(), m.end()):
+            skip[i] = True
     chars: list[str] = []
     index: list[int] = []
     for i, ch in enumerate(text):
-        if not ch.isspace():
+        if not ch.isspace() and not skip[i]:
             chars.append(ch)
             index.append(i)
     return "".join(chars), tuple(index)
@@ -371,7 +383,7 @@ def locate_evidence(evidence: str, text: str) -> tuple[int, int] | None:
     쓰면 안 된다 — 실측: `영조 50년(1774년)에 세워진 《이지란신도비》에는`
     으로 시작하는 문장이 한 문서에 둘 있었고, 앞의 것을 집어 엉뚱한
     문장(선대 가계)을 근거로 붙였다. 길잡이는 같아도 그 뒤가 갈린다."""
-    ev = "".join((evidence or "").split())
+    ev = "".join(_HANJA_PAREN.sub("", evidence or "").split())
     if len(ev) < 8:  # 너무 짧으면 우연히 일치한다
         return None
     compact, index = _compact_index(text)

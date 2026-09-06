@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / "data" / "histgraph.sqlite"
 DEFAULT_CACHE = ROOT / "data" / "cache"
 DEFAULT_LABELS = ROOT / "data" / "ko_labels.tsv"
+DEFAULT_ALIASES = ROOT / "data" / "aliases.tsv"
 DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
 DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
@@ -176,15 +177,21 @@ def cmd_events(args: argparse.Namespace) -> int:
 
     차수 상위순으로 고르는 enrich 로는 임진왜란·병자호란이 잡히지 않는다.
 
-    **세 표를 갈라 둔 이유는 타입이다.** 의열단을 사건 표에 넣으면 사건
-    노드가 되고, 창씨개명을 넣으면 개념이 사건 행세를 한다."""
+    **표를 갈라 둔 이유는 타입이다.** 의열단을 사건 표에 넣으면 사건
+    노드가 되고, 창씨개명을 넣으면 개념이 사건 행세를 한다.
+
+    `monarch` 는 인물 표인데 재위 구간까지 함께 만든다 (`ingest_monarchs`) —
+    고려 임금은 Wikidata 에 재위 문장이 거의 없어서 `reigns` 가 채우지
+    못한다. 세는 타입은 인물이다."""
     from .sources import wikipedia
 
     tables = {
         "event": ("kowiki:event", wikipedia.EVENT_SEEDS),
         "org": ("kowiki:org", wikipedia.ORG_SEEDS),
         "concept": ("kowiki:concept", wikipedia.CONCEPT_SEEDS),
+        "monarch": ("kowiki:monarch", wikipedia.MONARCH_SEEDS),
     }
+    node_type = {"monarch": "person"}
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
     with GraphStore(args.db) as store:
         before = store.stats()["by_node_type"]
@@ -194,9 +201,13 @@ def cmd_events(args: argparse.Namespace) -> int:
                 seeds = {e: t for e, t in seeds.items() if e in args.eras}
             if not seeds:
                 continue
-            nodes, edges = wikipedia.ingest_seeds(
-                fetcher, store, seeds, kind, full=not args.intro_only
-            )
+            if kind == "monarch":
+                nodes, edges = wikipedia.ingest_monarchs(fetcher, store, seeds)
+            else:
+                nodes, edges = wikipedia.ingest_seeds(
+                    fetcher, store, seeds, kind, full=not args.intro_only
+                )
+            kind = node_type.get(kind, kind)
             # **시드 표는 타입을 말하지만 upsert 는 타입을 덮어쓰지 않는다.**
             # 이미 다른 타입으로 앉아 있던 노드는 그대로 남으므로, 조용히
             # 어긋나지 않게 반드시 보고한다. 바꾸는 것은 사람이 정한다 —
@@ -217,7 +228,7 @@ def cmd_events(args: argparse.Namespace) -> int:
                     f" {NODE_TYPES[was]}으로 있음: {label} ({nid})"
                 )
         after = store.stats()["by_node_type"]
-        for kind in args.kinds:
+        for kind in dict.fromkeys(node_type.get(k, k) for k in args.kinds):
             print(f"  {NODE_TYPES[kind]} 노드: {before.get(kind, 0):,} → {after.get(kind, 0):,}")
     return 0
 
@@ -1203,6 +1214,22 @@ def cmd_corpus(args: argparse.Namespace) -> int:
     from . import corpus as corpus_mod
 
     sources = ["aks", "nikh", "kowiki"] if args.source == "all" else [args.source]
+    if args.audit:
+        # 연대 검사가 없던 때 이어진 민백 문서·설명을 되돌아본다 (네트워크 없음).
+        # 원본과 파생본에 한 번씩 — 말뭉치는 하나라 두 번째는 설명만 본다.
+        from .sources import aks
+        with GraphStore(args.db) as store:
+            conn = corpus_mod.open_corpus(args.corpus)
+            got = aks.audit_bindings(store, conn, dry_run=args.dry_run)
+            verb = "옮길" if args.dry_run else "옮긴"
+            print(f"  민족문화대백과 문서 {got['checked']:,}건 검사 · 연대가 어긋나 고아로 {verb} 것"
+                  f" {len(got['rebound']):,}건 · 고아 글이 이미 있어 지운 것 {len(got['dropped']):,}건"
+                  f" · 비운 설명 {len(got['cleared']):,}건")
+            for nid, eid, title in got["rebound"][:12]:
+                print(f"    {nid:>18}  {title} ({eid})")
+            if len(got["rebound"]) > 12:
+                print(f"    … 그 밖 {len(got['rebound']) - 12:,}건")
+        return 0
     fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
     with GraphStore(args.db) as store:
         conn = corpus_mod.open_corpus(args.corpus)
@@ -1215,18 +1242,20 @@ def cmd_corpus(args: argparse.Namespace) -> int:
         if "aks" in sources:
             from .sources import aks
             kinds = tuple(k.strip() for k in args.kinds.split(",") if k.strip())
+            eras = tuple(args.eras) if args.eras else None
             if args.dry_run:
                 entries = aks.load_index()
                 matched = aks.match_nodes(entries, aks.node_names(store))
-                todo = aks.select_entries(entries, matched, kinds=kinds)
+                todo = aks.select_entries(entries, matched, kinds=kinds, eras=eras)
                 print(f"  민족문화대백과: 항목 {len(entries):,}건 · 노드에 이은 것 {len(matched):,}건"
                       f" · 받을 것 {len(todo):,}건")
             else:
                 got = aks.ingest(fetcher, store, conn, kinds=kinds, limit=args.limit,
-                                 refresh=args.refresh)
+                                 refresh=args.refresh, eras=eras)
                 print(f"  민족문화대백과: 노드에 이은 것 {got['matched']:,}건 · 받음 {got['fetched']:,}건"
                       f" / 대상 {got['todo']:,}건 · 빈 문서 {got['empty']:,}건"
-                      f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개")
+                      f" · 이미 있음 {got['skipped']:,}건 · 새 문단 {got['passages']:,}개"
+                      f" · 본문 연대가 어긋나 고아로 둔 것 {got['mismatched']:,}건")
         if "nikh" in sources and not args.dry_run:
             got = corpus_mod.build_nikh(store, conn, refresh=args.refresh)
             print(f"  한국사연대기: 항목 {got['entries']:,}건 · 노드에 이은 것 {got['linked']:,}건"
@@ -1274,8 +1303,10 @@ def cmd_roles(args: argparse.Namespace) -> int:
     conn = corpus_mod.open_corpus(args.corpus)
     with GraphStore(args.db) as store:
         only = frozenset(r.strip() for r in args.redo_roles.split(",") if r.strip()) if args.redo_roles else None
+        srcs = frozenset(x.strip() for x in args.sources.split(",") if x.strip()) if args.sources else None
         got = roles_mod.run(store, conn, backend, since=args.since, limit=args.limit,
-                            dry_run=args.dry_run, redo=args.redo, only_roles=only)
+                            dry_run=args.dry_run, redo=args.redo, only_roles=only,
+                            sources=srcs)
     c = got["counts"]
     print(f"  후보 {c['후보']:,}건 · 근거 문단 있음 {c['문단 있음']:,} · 없음 {c['문단 없음']:,}")
     if got["by_role"]:
@@ -1701,6 +1732,14 @@ def cmd_relabel(args: argparse.Namespace) -> int:
         print(f"  표를 읽지 못했습니다: {err}", file=sys.stderr)
         return 1
 
+    alias_table: list = []
+    if args.aliases.exists():
+        try:
+            alias_table = labels_mod.load_alias_table(args.aliases)
+        except (OSError, labels_mod.LabelTableError) as err:
+            print(f"  별칭 표를 읽지 못했습니다: {err}", file=sys.stderr)
+            return 1
+
     with GraphStore(args.db) as store:
         report = labels_mod.apply_overrides(
             store.conn, table, dry_run=args.dry_run
@@ -1708,6 +1747,13 @@ def cmd_relabel(args: argparse.Namespace) -> int:
         head = "바꿀 이름" if args.dry_run else "바꾼 이름"
         print(f"  표 {len(table):,}개 · {head} {len(report.applied):,}개"
               f" · 이미 한국어 {report.already:,}개")
+        if alias_table:
+            arep = labels_mod.apply_aliases(store.conn, alias_table, dry_run=args.dry_run)
+            print(f"  별칭 표 {len(alias_table):,}줄 · {'더할' if args.dry_run else '더한'} 별칭"
+                  f" {len(arep.added):,}개 · 이미 있음 {arep.already:,}개"
+                  + (f" · 그래프에 없는 노드 {len(arep.absent):,}개" if arep.absent else ""))
+            for nid, alias in arep.added[:12]:
+                print(f"    {nid:>16}  + {alias}")
         for node_id, old, new in report.applied[:12]:
             print(f"    {node_id:>16}  {old} → {new}")
         if len(report.applied) > 12:
@@ -2094,7 +2140,8 @@ def cmd_chronology(args: argparse.Namespace) -> int:
             print(f"  이 그래프에 없는 대상 {len(applied.absent):,}줄"
                   f" (예: {', '.join(r.a for r in applied.absent[:3])})")
     print(f"  결과의 거친 날짜가 원인을 품는 것 {len(rep.within):,}건"
-          f" (연표가 원인 뒤에 세운다) · 연대를 모르는 것 {rep.unknown:,}건")
+          f" (연표가 원인 뒤에 세운다) · 결과가 존속하는 동안의 원인 {rep.lifetime:,}건"
+          f" · 연대를 모르는 것 {rep.unknown:,}건")
     if args.show and rep.within:
         for s in rep.within[:args.show]:
             print(f"    {s.cause}({s.cause_date}) → {s.effect}({s.effect_date})")
@@ -2174,8 +2221,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ev.add_argument("--interval", type=float, default=1.0)
     p_ev.add_argument("--intro-only", action="store_true", help="본문 전체 대신 도입부만 (빠름, 서사 얕음)")
     p_ev.add_argument("--kinds", nargs="+", default=["event", "org", "concept"],
-                      choices=["event", "org", "concept"],
-                      help="수집할 시드 표 (기본: 셋 다)")
+                      choices=["event", "org", "concept", "monarch"],
+                      help="수집할 시드 표 (기본: 사건·단체·개념)")
     p_ev.add_argument("--eras", nargs="*", default=None,
                       help="이 시대만 (예: 일제강점기 대한제국). 기본은 전부")
     p_ev.set_defaults(func=cmd_events)
@@ -2352,7 +2399,7 @@ def main(argv: list[str] | None = None) -> int:
                       choices=["joseon", "goryeo", "silla", "goguryeo", "baekje",
                                "ilje", "korea"],
                       help="시대 여럿을 주면 한 DB 에 담는다. 'korea' 는 "
-                           "조선~일제강점기 묶음")
+                           "고려~대한민국 묶음")
     p_sc.add_argument("--out", default=None,
                       help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")
@@ -2400,6 +2447,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="aks 민족문화대백과(정본) · nikh 한국사연대기(정본) · kowiki 위키백과")
     p_cp.add_argument("--kinds", default="사건",
                       help="민족문화대백과에서 노드와 무관하게도 받을 근현대 항목 유형 (쉼표)")
+    p_cp.add_argument("--eras", nargs="*", default=None,
+                      help="근현대 대신 이 시대의 항목을 받는다 (사전 '시대' 칸 앞머리, 예: 고려)")
+    p_cp.add_argument("--audit", action="store_true",
+                      help="이미 이어진 민백 문서·설명을 연대로 다시 검사해 어긋난 것을 뗀다 (네트워크 없음)")
     p_cp.set_defaults(func=cmd_corpus)
 
     p_ask = sub.add_parser("ask", help="말뭉치에서 물음에 가까운 문단을 찾는다")
@@ -2416,6 +2467,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ro.add_argument("--model", default=None)
     p_ro.add_argument("--dry-run", action="store_true", help="모델 없이 근거 문단 유무만 센다")
     p_ro.add_argument("--redo", action="store_true", help="이미 판정한 엣지도 다시")
+    p_ro.add_argument("--sources", default=None,
+                      help="이 소스가 만든 참여만 판정 (쉼표, 예: causes)")
     p_ro.add_argument("--redo-roles", default=None,
                       help="이 역할로 판정됐던 엣지만 다시 묻는다 (쉼표, 예: 주도)")
     p_ro.set_defaults(func=cmd_roles)
@@ -2483,6 +2536,8 @@ def main(argv: list[str] | None = None) -> int:
     p_rl = sub.add_parser("relabel", help="영어로 들어온 노드 이름을 한국어로 (수집 뒤마다)")
     p_rl.add_argument("--table", type=Path, default=DEFAULT_LABELS,
                       help=f"한국어 라벨 표 (기본 {DEFAULT_LABELS.name})")
+    p_rl.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES,
+                      help=f"별칭 표 `노드 id<TAB>별칭<TAB>근거` (기본 {DEFAULT_ALIASES.name}, 없으면 건너뜀)")
     p_rl.add_argument("--dry-run", action="store_true", help="바꾸지 않고 계획만 출력")
     p_rl.add_argument("--list-remaining", action="store_true",
                       help="아직 영문인 노드를 전부 나열 (표에 더 적을 때)")
@@ -2491,7 +2546,7 @@ def main(argv: list[str] | None = None) -> int:
     p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
     p_sv.add_argument("--era", default="korea",
                       help="띄울 시대 그래프 (data/{era}.sqlite). 'korea' 는 "
-                           "조선~일제강점기 묶음")
+                           "고려~대한민국 묶음")
     p_sv.add_argument("--host", default="127.0.0.1")
     p_sv.add_argument("--port", type=int, default=8100)
     p_sv.set_defaults(func=cmd_serve)

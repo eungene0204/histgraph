@@ -91,6 +91,27 @@ RAW_DIR = Path(__file__).resolve().parents[3] / "data" / "raw" / "nikh"
 YEONDAEGI = "yeondaegi.xlsx"
 SILLOK_DIRS = ("sillok", "sillok_gojong")
 SILLOK_INDEX = "sillok.sqlite"
+# 고려의 정본. 조선에 실록이 있듯 고려에는 《고려사》(기전체)와 《고려사절요》
+# (편년체)가 있다 (2026-09-06 사용자가 공공데이터포털에서 받아 주었다).
+# 실록과 다른 점이 둘이다:
+#   - 기사가 `level5` 가 아니라 **더 깊은 단위가 없는 층**이다. 고려사는
+#     대개 level4, 절요는 level4·level5 가 섞여 있다.
+#   - 날짜가 음력과 **양력** 두 벌이다 (`type="음"`·`type="양"`). 실록은
+#     음력뿐이라 `calendar: lunar` 로 적어 왔는데, 여기서는 양력을 골라
+#     쓸 수 있다 — 같은 해 안에서 순서가 뒤집히지 않는다 (CLAUDE.md §1-5).
+# 실측: 고려사 기사 31,204(양력 22,602) · 절요 11,222(양력 784).
+GORYEO_DIRS = ("goryeosa", "goryeosa_jeolyo")
+BOOK_OF_DIR: dict[str, str] = {
+    "sillok": "실록", "sillok_gojong": "실록",
+    "goryeosa": "고려사", "goryeosa_jeolyo": "고려사절요",
+}
+# 시대 자릿수 -> 그 시대를 적은 책. 왕의 묘호가 겹치므로(고려 정종과 조선
+# 정종) 책을 안 가르면 조선 기사가 고려 사건의 날짜가 된다.
+BOOKS_BY_ERA_DIGIT: dict[str, tuple[str, ...]] = {
+    "2": ("고려사", "고려사절요"),
+    "3": ("실록",),
+    "4": ("실록",),
+}
 PERSONS_CSV = "persons"
 
 # 연대기 유형 -> 온톨로지 타입
@@ -239,6 +260,49 @@ def group_entities(rows: Iterable[list[str]]) -> list[Entity]:
     return list(by_id.values())
 
 
+# '제3대 국왕'·'고려 10대 왕' 처럼 몇 번째 임금인지 적은 자리.
+_ORDINAL = re.compile(r"제?\s*(\d{1,2})\s*대\s*(?:국왕|왕|임금)")
+# 대수 **바로 뒤에 이름이 붙은** 자리 — '10대 국왕인 정종(靖宗)은'.
+_ORDINAL_OF = re.compile(
+    r"제?\s*(\d{1,2})\s*대\s*(?:국왕|왕|임금)(?:은|는|인|이었던|이던|이다)?\s*([가-힣]{2,5})"
+)
+_BRACKET = re.compile(r"\s*[\[(][^\])]*[\])]\s*$")
+
+
+def _ordinals(text: str) -> set[int]:
+    return {int(m.group(1)) for m in _ORDINAL.finditer(text or "")}
+
+
+def _ordinals_of(text: str, name: str) -> set[int]:
+    """그 **이름에 붙은** 대수들. '25대 임금인 철종' 은 고종의 대수가 아니다."""
+    return {
+        int(m.group(1)) for m in _ORDINAL_OF.finditer(text or "")
+        if m.group(2).startswith(name)
+    }
+
+
+def overview_is_alien(ent: Entity) -> bool:
+    """'내용' 칸이 이 항목이 아니라 **딴 사람**을 말하고 있는가.
+
+    실측: 연대기의 두 정종(kc_n204400 定宗 3대 · kc_n204500 靖宗 10대)은
+    설명과 한자가 서로 맞는데 **본문만 맞바뀌어 실려 있다** — 3대 항목의
+    머리말이 '고려 10대 국왕인 정종(靖宗)은…'으로 시작한다. 국편 파일
+    자체의 오류다 (우리 판독이 아니라 원본 행이 그렇다).
+
+    합치고 나면 이 본문이 진짜 노드의 설명이 되므로 버린다. 재는 것은
+    **주인공 이름에 붙은 대수**뿐이다 — 본문이 앞 임금을 말하는 것은
+    당연하다 (고종 본문의 '조선의 25대 임금인 철종이 승하하자'를 대수
+    불일치로 읽으면 멀쩡한 본문이 통째로 날아간다). 인물만 본다."""
+    if ent.node_type != "person":
+        return False
+    name = _BRACKET.sub("", ent.label)
+    said = _ordinals(ent.summary)
+    if not said or not name:
+        return False
+    body = _ordinals_of(ent.overview, name)
+    return bool(body) and not (said & body)
+
+
 def load_entities(raw_dir: Path = RAW_DIR) -> list[Entity]:
     ents = group_entities(read_xlsx_rows(raw_dir / YEONDAEGI))
     for ent in ents:
@@ -246,6 +310,11 @@ def load_entities(raw_dir: Path = RAW_DIR) -> list[Entity]:
             log.warning("설명 칸이 딴 항목의 것이라 버린다: %s %s (%s)",
                         ent.kc_id, ent.label, ent.summary[:40])
             ent.summary = ""
+        if overview_is_alien(ent):
+            log.warning("본문이 딴 사람의 것이라 버린다: %s %s (설명 %s대 · 본문 %s대)",
+                        ent.kc_id, ent.label,
+                        sorted(_ordinals(ent.summary)), sorted(_ordinals(ent.overview)))
+            ent.sections = []
     return ents
 
 
@@ -433,29 +502,90 @@ def _iter_articles(path: Path):
         }
 
 
+def _iter_chronicle_articles(path: Path, book: str):
+    """《고려사》·《고려사절요》의 기사. 실록과 달리 층이 고르지 않다.
+
+    기사는 **더 깊은 층이 없는 단위**다 — 고려사는 대개 level4, 절요는
+    level4 와 level5 가 섞여 있다. 층 이름을 박으면 절요의 3분의 1이
+    빠지거나 달 표제('2월')가 기사로 들어온다.
+
+    날짜는 양력을 먼저 쓴다. 없으면 음력을 쓰고 그렇게 밝힌다."""
+    tree = ET.parse(path)
+    for lv in tree.iter():
+        if not lv.tag.startswith("level") or lv.tag == "level1":
+            continue
+        if any(child.tag.startswith("level") for child in lv):
+            continue
+        bib = lv.find("./front/biblioData")
+        if bib is None:
+            continue
+        t = bib.find("./title/mainTitle")
+        title = (t.text or "").strip() if t is not None else ""
+        by_type = {
+            d.get("type"): d.get("date", "")
+            for d in bib.findall("./date/dateOccured")
+            if d.get("date")
+        }
+        date = by_type.get("양", "")
+        calendar = "gregorian"
+        if not date:
+            date = lunar_iso(by_type.get("음", ""))
+            calendar = "lunar" if date else ""
+        # '0931-99-99' 는 '달·날 미상'이다. 자릿수를 줄여 아는 만큼만 남긴다.
+        date = re.sub(r"-99-99$", "", date)
+        date = re.sub(r"-99$", "", date)
+        names = sorted({
+            (ix.text or "").strip() for ix in lv.iter("index")
+            if ix.get("type") == "이름" and ix.text
+        })
+        refs = sorted({
+            ix.get("ref") for ix in lv.iter("index")
+            if ix.get("type") == "이름" and ix.get("ref")
+        })
+        text = " ".join("".join(p.itertext()).strip() for p in lv.iter("paragraph"))
+        yield {
+            "id": lv.get("id", ""), "king": "", "date": date, "title": title,
+            "classes": "", "refs": "|".join(refs), "names": "|".join(names),
+            "text": re.sub(r"\s+", " ", text), "book": book, "calendar": calendar,
+        }
+
+
 def build_sillok_index(raw_dir: Path = RAW_DIR, out: Path | None = None) -> int:
-    """실록 XML -> `sillok.sqlite` (제목 트라이그램 FTS + 본문).
-    RAG 저장소이자 연대기 사건의 날짜 근거다."""
+    """국편 원문 XML -> `sillok.sqlite` (제목 트라이그램 FTS + 본문).
+    RAG 저장소이자 연대기 사건의 날짜 근거다.
+
+    실록만이 아니라 《고려사》·《고려사절요》도 같은 표에 담고 `book` 으로
+    가른다. 한 표에 두는 이유는 찾는 방법이 같아서이고, 가르는 이유는 왕의
+    묘호가 겹쳐서다 — 책을 안 가르면 조선 정종의 기사가 고려 사건의
+    날짜가 된다."""
     out = out or raw_dir / SILLOK_INDEX
-    files = [p for d in SILLOK_DIRS for p in sorted((raw_dir / d).glob("*.xml"))]
-    if not files:
-        raise FileNotFoundError(f"실록 XML 이 없다: {raw_dir}")
+    sillok = [(p, BOOK_OF_DIR[d]) for d in SILLOK_DIRS for p in sorted((raw_dir / d).glob("*.xml"))]
+    goryeo = [(p, BOOK_OF_DIR[d]) for d in GORYEO_DIRS for p in sorted((raw_dir / d).glob("*.xml"))]
+    if not sillok and not goryeo:
+        raise FileNotFoundError(f"국편 원문 XML 이 없다: {raw_dir}")
     if out.exists():
         out.unlink()
     conn = sqlite3.connect(out)
     conn.executescript(
         """CREATE TABLE articles (
              id TEXT PRIMARY KEY, king TEXT, date TEXT, title TEXT,
-             classes TEXT, refs TEXT, names TEXT, text TEXT);
+             classes TEXT, refs TEXT, names TEXT, text TEXT,
+             book TEXT NOT NULL DEFAULT '실록', calendar TEXT NOT NULL DEFAULT 'lunar');
            CREATE VIRTUAL TABLE title_fts USING fts5(
              id UNINDEXED, title, tokenize='trigram');
-           CREATE INDEX idx_articles_date ON articles(date);"""
+           CREATE INDEX idx_articles_date ON articles(date);
+           CREATE INDEX idx_articles_book ON articles(book);"""
     )
     n = 0
-    for i, path in enumerate(files, 1):
-        rows = list(_iter_articles(path))
+    files = [(p, b, False) for p, b in sillok] + [(p, b, True) for p, b in goryeo]
+    for i, (path, book, chronicle) in enumerate(files, 1):
+        rows = list(
+            _iter_chronicle_articles(path, book) if chronicle
+            else ({**r, "book": book, "calendar": "lunar"} for r in _iter_articles(path))
+        )
         conn.executemany(
-            "INSERT OR REPLACE INTO articles VALUES (:id,:king,:date,:title,:classes,:refs,:names,:text)",
+            "INSERT OR REPLACE INTO articles VALUES"
+            " (:id,:king,:date,:title,:classes,:refs,:names,:text,:book,:calendar)",
             rows,
         )
         conn.executemany(
@@ -464,7 +594,7 @@ def build_sillok_index(raw_dir: Path = RAW_DIR, out: Path | None = None) -> int:
         n += len(rows)
         if i % 50 == 0:
             conn.commit()
-            log.info("실록 색인 %d/%d 파일 · 기사 %s", i, len(files), f"{n:,}")
+            log.info("국편 색인 %d/%d 파일 · 기사 %s", i, len(files), f"{n:,}")
     conn.commit()
     conn.close()
     return n
@@ -484,20 +614,33 @@ class SillokIndex:
             return frozenset(), ""
         return frozenset(n for n in (r["names"] or "").split("|") if n), r["text"] or ""
 
-    def search_titles(self, term: str, limit: int = 300) -> list[sqlite3.Row]:
+    def search_titles(
+        self, term: str, limit: int = 300, books: tuple[str, ...] | None = None
+    ) -> list[sqlite3.Row]:
+        """제목에 `term` 이 든 기사. `books` 를 주면 그 책 안에서만 찾는다.
+
+        책을 가르는 이유는 이름이 겹쳐서다 — 고려와 조선에 정종·문종·
+        예종·숙종이 다 있어서, 책을 안 가르면 조선 실록의 기사가 고려
+        사건의 날짜가 된다 (2026-09-06 사용자 지적)."""
+        where = ""
+        params: list = []
+        if books:
+            where = f" AND a.book IN ({','.join('?' * len(books))})"
+            params = list(books)
         # 트라이그램은 세 글자 미만을 못 찾는다 ('4군'·'6진'). 그건 LIKE 로.
         if len(term) < 3:
             return self.conn.execute(
-                """SELECT id, date, title, king FROM articles
-                    WHERE title LIKE ? ORDER BY date LIMIT ?""",
-                (f"%{term}%", limit),
+                f"""SELECT a.id, a.date, a.title, a.king, a.book, a.calendar
+                      FROM articles a
+                     WHERE a.title LIKE ?{where} ORDER BY a.date LIMIT ?""",
+                (f"%{term}%", *params, limit),
             ).fetchall()
         q = '"' + term.replace('"', '""') + '"'
         return self.conn.execute(
-            """SELECT a.id, a.date, a.title, a.king FROM title_fts f
-               JOIN articles a ON a.id = f.id
-              WHERE title_fts MATCH ? ORDER BY a.date LIMIT ?""",
-            (q, limit),
+            f"""SELECT a.id, a.date, a.title, a.king, a.book, a.calendar
+                  FROM title_fts f JOIN articles a ON a.id = f.id
+                 WHERE title_fts MATCH ?{where} ORDER BY a.date LIMIT ?""",
+            (q, *params, limit),
         ).fetchall()
 
 
@@ -536,12 +679,14 @@ FOUNDING = re.compile(
 )
 
 
-def _hits(index: SillokIndex, label: str) -> list[tuple[dict, str]]:
+def _hits(
+    index: SillokIndex, label: str, books: tuple[str, ...] | None = None
+) -> list[tuple[dict, str]]:
     """제목이 맞는 기사들 (날짜순), 어느 검색어로 걸렸는지 함께."""
     found: list[tuple[dict, str]] = []
     seen: set[str] = set()
     for term, must in _search_terms(label):
-        for r in index.search_titles(term):
+        for r in index.search_titles(term, books=books):
             if r["id"] in seen:
                 continue
             if not _has_term(r["title"], term):
@@ -556,12 +701,13 @@ def _hits(index: SillokIndex, label: str) -> list[tuple[dict, str]]:
 
 def date_from_sillok(
     index: SillokIndex, label: str, years: Iterable[int] | None,
-    founding: bool = False,
+    founding: bool = False, books: tuple[str, ...] | None = None,
 ) -> dict | None:
-    """실록 제목으로 그 일의 날짜. 후보 연도 중 **같은 해** 기사가 있는
+    """정본 기사 제목으로 그 일의 날짜. 후보 연도 중 **같은 해** 기사가 있는
     첫 후보의 가장 이른 기사. 연도를 모르면 기사가 몇 건 안 될 때만.
-    `founding` 이면 세우고·만든 기사만 받는다 (유물·단체)."""
-    hits = _hits(index, label)
+    `founding` 이면 세우고·만든 기사만 받는다 (유물·단체).
+    `books` 를 주면 그 책 안에서만 찾는다 (`SillokIndex.search_titles`)."""
+    hits = _hits(index, label, books)
     if founding:
         hits = [h for h in hits if FOUNDING.search(h[0]["title"])]
     if not hits:
@@ -572,17 +718,43 @@ def date_from_sillok(
             same = [h for h in hits if h[0]["date"][:4].isdigit() and int(h[0]["date"][:4]) == y]
             if same:
                 r, term = same[0]
-                return {"id": r["id"], "date": r["date"], "title": r["title"], "term": term, "year": y}
+                return _hit(r, term, y)
         return None
     if len(hits) <= 5:
         r, term = hits[0]
         y = int(r["date"][:4]) if r["date"][:4].isdigit() else None
-        return {"id": r["id"], "date": r["date"], "title": r["title"], "term": term, "year": y}
+        return _hit(r, term, y)
     return None
 
 
+def _hit(r: dict, term: str, year: int | None) -> dict:
+    return {
+        "id": r["id"], "date": r["date"], "title": r["title"], "term": term,
+        "year": year, "book": r.get("book", "실록"),
+        "calendar": r.get("calendar", "lunar"),
+    }
+
+
+# 기사 노드의 아이디와 주소. 책마다 서비스가 달라서 한 규칙으로는 안 된다 —
+# 실록은 sillok.history.go.kr 이고 고려사·절요는 한국사데이터베이스다.
+ARTICLE_PREFIX: dict[str, str] = {
+    "실록": "sillok:", "고려사": "goryeosa:", "고려사절요": "goryeosa:",
+}
+
+
+def article_url(book: str, art_id: str) -> str:
+    if book == "실록":
+        return f"https://sillok.history.go.kr/id/{art_id.replace('w', 'k', 1)}"
+    return f"https://db.history.go.kr/id/{art_id}"
+
+
+def article_node_id(book: str, art_id: str) -> str:
+    return f"{ARTICLE_PREFIX.get(book, 'sillok:')}{art_id}"
+
+
 def sillok_events_for(
-    index: SillokIndex, ent: Entity, years: Iterable[int], limit: int = 2
+    index: SillokIndex, ent: Entity, years: Iterable[int], limit: int = 2,
+    books: tuple[str, ...] | None = None,
 ) -> list[dict]:
     """유물·단체 항목이 닿는 '세운·만든' 기사들 — 서로 다른 해로 최대 `limit`.
     훈민정음은 1443 창제와 1446 완성이 둘 다 사건이다."""
@@ -591,7 +763,7 @@ def sillok_events_for(
     for y in years:
         if y in seen_years:
             continue
-        hit = date_from_sillok(index, ent.label, [y], founding=True)
+        hit = date_from_sillok(index, ent.label, [y], founding=True, books=books)
         if hit and len(hit["title"]) <= MAX_EVENT_TITLE and hit["id"] not in {h["id"] for h in out}:
             out.append(hit)
             seen_years.add(y)
@@ -614,25 +786,87 @@ def lunar_iso(date: str) -> str:
 
 # --- 실록 인물 CSV -------------------------------------------------------------
 
-def load_persons_csv(raw_dir: Path = RAW_DIR) -> dict[tuple[str, str], tuple[str, str]]:
-    """(한글명, 한자명) -> (생년, 몰년).
+# 한국학중앙연구원 역대인명정보 (2026-09-06 사용자가 받아 주었다). 실록 인물
+# CSV 는 조선 사람만 담아서 고려 인물의 생몰년을 물을 데가 없었다 — 실측:
+# 고려 인물 노드 848명 중 490명이 생몰년이 비어 있었다. 이 파일은 27,035명을
+# 시대 구분 없이 담는다.
+PERSONS_XML = "한국학중앙연구원_한국역대인명정보_20200923.xml"
+_TITLE_HANJA = re.compile(r"^\s*([^()]+?)\s*\(([^()]+)\)\s*$")
+
+
+def load_persons_xml(path: Path | None = None) -> dict[tuple[str, str], tuple[str, str]]:
+    """역대인명정보 XML -> (한글명, 한자명) -> (생년, 몰년).
+
+    `TITLENAME` 이 '이헌(李櫶)' 꼴이라 이름과 한자를 갈라 쓴다. 같은 이름·
+    한자가 둘 이상 연대를 가지면 동명이인이므로 버린다 — `load_persons_csv`
+    와 같은 규칙이다."""
+    path = path or Path(__file__).resolve().parents[3] / "data" / "raw" / PERSONS_XML
+    if not path.exists():
+        return {}
+    dated: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    for person in ET.parse(path).getroot().iter("인물"):
+        title = (person.findtext("TITLENAME") or "").strip()
+        m = _TITLE_HANJA.match(title)
+        if not m:
+            continue
+        key = (m.group(1).strip(), m.group(2).strip())
+        val = ((person.findtext("LIVE_YEAR") or "").strip(),
+               (person.findtext("DIE_YEAR") or "").strip())
+        if val[0] or val[1]:
+            dated[key].append(val)
+    return {k: v[0] for k, v in dated.items() if len(v) == 1}
+
+
+def load_persons_csv(raw_dir: Path = RAW_DIR) -> dict[tuple[str, str], tuple[str, str, str]]:
+    """(한글명, 한자명) -> (생년, 몰년, 어느 자료). 실록 인물 CSV + 역대인명정보 XML.
 
     같은 이름·한자가 여럿이면 **생몰년이 있는 것이 하나뿐일 때만** 그것을
     믿는다 — 이황(李滉)이 세 줄인데 둘은 빈 줄이다. 둘 이상이 연대를
-    가지면 동명이인이므로 버린다."""
-    files = list((raw_dir / PERSONS_CSV).glob("*인물.csv"))
-    if not files:
-        return {}
+    가지면 동명이인이므로 버린다.
+
+    두 자료가 같은 이름을 다르게 말하면 **실록 쪽을 남긴다** — 실록 인물은
+    그 사람이 실록에 나온다는 뜻이라 조선 인물에 대해 더 좁다. 어느 쪽이든
+    시대 창을 못 넘는다 (`person_years`)."""
     dated: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
-    with open(files[0], encoding="utf-8-sig", newline="") as f:
-        for row in csv.DictReader(f):
-            key = (row.get("한글_명", "").strip(), row.get("한자_명", "").strip())
-            if not key[0] or not key[1]:
-                continue
-            val = (row.get("생년", "").strip(), row.get("몰년", "").strip())
-            if val[0] or val[1]:
-                dated[key].append(val)
-    return {k: v[0] for k, v in dated.items() if len(v) == 1}
+    files = list((raw_dir / PERSONS_CSV).glob("*인물.csv"))
+    if files:
+        with open(files[0], encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                key = (row.get("한글_명", "").strip(), row.get("한자_명", "").strip())
+                if not key[0] or not key[1]:
+                    continue
+                val = (row.get("생년", "").strip(), row.get("몰년", "").strip())
+                if val[0] or val[1]:
+                    dated[key].append(val)
+    out: dict[tuple[str, str], tuple[str, str, str]] = {
+        k: (*v[0], "실록 인물") for k, v in dated.items() if len(v) == 1
+    }
+    for key, val in load_persons_xml().items():
+        out.setdefault(key, (*val, "역대인명정보"))
+    return out
+
+
+def person_years(
+    table: dict[tuple[str, str], tuple[str, str, str]], ent: Entity
+) -> tuple[str, str, str] | None:
+    """이 항목의 사람에게 줄 수 있는 (생년, 몰년, 자료). 시대 밖이면 주지 않는다.
+
+    **이 검사가 없어서 고려 원종(24대, 1219~1274)이 조선 원종(정원군,
+    1580~1619)의 생몰년을 달고 있었다** (2026-09-06 발견). 실록 인물 CSV 는
+    조선 사람만 담는데 묘호가 겹쳐서, 이름과 한자가 같다는 이유로 400년
+    뒤 사람의 연대가 씌워졌다. 화면에서는 '고려 원종이 1270년 삼별초
+    항쟁에 참여했다'가 310년 어긋난 것으로 떴다."""
+    if not ent.hanja:
+        return None
+    got = table.get((ent.label, ent.hanja))
+    if not got:
+        return None
+    lo, hi = era_window(ent)
+    for value in got[:2]:
+        year = _year_of(value)
+        if year is not None and not (lo <= year <= hi):
+            return None
+    return got
 
 
 # --- 기존 노드와 맞추기 ----------------------------------------------------------
@@ -822,14 +1056,21 @@ def resolve_date(
         # 유물·단체는 세운 해가 곧 그 해다. 후보 순서가 아니라 **가장 이른
         # 해**부터 — 집현전 항목은 폐지(1456)를 설치(1420)보다 먼저 말한다.
         order = sorted(order)
+    # 찾을 책은 시대가 정한다 (`BOOKS_BY_ERA_DIGIT`). 고려 항목을 실록에서
+    # 찾으면 묘호가 겹치는 조선 왕의 기사가 답으로 온다.
     hit = (
-        date_from_sillok(index, ent.label, order or None, founding=ent.node_type != "event")
+        date_from_sillok(
+            index, ent.label, order or None,
+            founding=ent.node_type != "event",
+            books=BOOKS_BY_ERA_DIGIT.get(ent.era_digit),
+        )
         if index is not None else None
     )
     if hit:
-        return lunar_iso(hit["date"]), "실록 기사", {
-            "calendar": "lunar", "sillok_id": hit["id"],
+        return lunar_iso(hit["date"]), f"{hit['book']} 기사", {
+            "calendar": hit["calendar"] or "lunar", "sillok_id": hit["id"],
             "sillok_title": hit["title"], "sillok_term": hit["term"],
+            "sillok_book": hit["book"],
         }
     if agreed is not None:
         date, props = dated(ent, agreed)
@@ -870,7 +1111,7 @@ def ingest(
         birth = None
         if ent.node_type == "person":
             cy = candidate_years(ent) if not ent.hanja else []
-            csv_dates = persons_csv.get((ent.label, ent.hanja)) if ent.hanja else None
+            csv_dates = person_years(persons_csv, ent)
             if csv_dates and csv_dates[0].isdigit():
                 birth = int(csv_dates[0])
             years[ent.kc_id] = cy
@@ -898,9 +1139,9 @@ def ingest(
     person_life: dict[str, tuple[int | None, int | None]] = {}
     for ent in entities:
         if ent.node_type == "person" and ent.hanja:
-            d = persons_csv.get((ent.label, ent.hanja))
+            d = person_years(persons_csv, ent)
             if d:
-                b, dd = d
+                b, dd, _ = d
                 person_life[target[ent.kc_id]] = (
                     int(b) if b.isdigit() else None, int(dd) if dd.isdigit() else None
                 )
@@ -929,16 +1170,16 @@ def ingest(
         hit_props: dict = {}
 
         if ent.node_type == "person":
-            csv_dates = persons_csv.get((ent.label, ent.hanja)) if ent.hanja else None
+            csv_dates = person_years(persons_csv, ent)
             if csv_dates:
-                b, d = csv_dates
+                b, d, basis = csv_dates
                 # 해가 같으면 이미 있는 (더 정밀한) 날짜를 둔다
                 if b.isdigit() and int(b) != old_start:
                     start = b
                 if d.isdigit() and int(d) != old_end:
                     end = d
                 if start or end:
-                    props["date_basis"] = "실록 인물"
+                    props["date_basis"] = basis
                     rep.person_dates += 1
                 year = int(b) if b.isdigit() else None
             era = era_of(ent, year)
@@ -947,7 +1188,7 @@ def ingest(
         else:
             date, basis, hit_props = resolve_date(ent, index, old_start)
             year = _year_of(date)
-            if basis == "실록 기사":
+            if basis and basis.endswith("기사"):   # 실록·고려사·고려사절요
                 start = date
                 rep.dated_sillok += 1
             elif basis == "연대기·기존 일치":
@@ -1006,17 +1247,22 @@ def ingest(
                 order.append(old_start)
             # 책은 창제·완성·반포가 다 사건이라 둘까지, 단체는 세운 해 하나.
             limit = 2 if ent.node_type == "heritage" else 1
-            for hit in sillok_events_for(index, ent, sorted(order), limit=limit):
-                eid = f"sillok:{hit['id']}"
+            for hit in sillok_events_for(
+                index, ent, sorted(order), limit=limit,
+                books=BOOKS_BY_ERA_DIGIT.get(ent.era_digit),
+            ):
+                eid = article_node_id(hit["book"], hit["id"])
                 e_start = lunar_iso(hit["date"])
                 nodes[eid] = Node(
                     id=eid, type="event", label=hit["title"], source=SOURCE,
                     start_date=e_start, description=ent.summary or None,
-                    url=f"https://sillok.history.go.kr/id/{hit['id'].replace('w', 'k', 1)}",
+                    url=article_url(hit["book"], hit["id"]),
                     props={
                         "canon": SOURCE, "nikh_id": ent.kc_id, "seed_era": era,
-                        "date_basis": "실록 기사", "calendar": "lunar",
-                        "sillok_id": hit["id"], "about": nid,
+                        "date_basis": f"{hit['book']} 기사",
+                        "calendar": hit["calendar"] or "lunar",
+                        "sillok_id": hit["id"], "sillok_book": hit["book"],
+                        "about": nid,
                     },
                 )
                 edges.append(Edge(src=eid, dst=nid, type="related_to", source=SOURCE,
@@ -1124,7 +1370,8 @@ def drop_sillok_participation(store: GraphStore) -> int:
     전부 다시 만드는 것이라, 지우지 않으면 관문이 걸러낸 것이 남는다."""
     cur = store.conn.execute(
         """DELETE FROM edges
-            WHERE source = ? AND type = 'participated_in' AND dst LIKE 'sillok:%'""",
+            WHERE source = ? AND type = 'participated_in'
+              AND (dst LIKE 'sillok:%' OR dst LIKE 'goryeosa:%')""",
         (SOURCE,),
     )
     store.conn.commit()

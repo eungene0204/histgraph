@@ -192,3 +192,72 @@ def foreign_text(conn: sqlite3.Connection) -> list[tuple[str, str, str, str]]:
         if desc and desc.strip() and not HANGUL.search(desc):
             found.append((nid, ntype, "description", desc))
     return found
+
+
+# --- 별칭 표 -------------------------------------------------------------------
+#
+# 이름이 아예 다른 두 표기는 어떤 코드도 못 잇는다 — '훈민정음'과 '한글'.
+# 인과 추출이 세종 문서에서 `세종 → 훈민정음` 을 다섯 번 답했는데 그 이름의
+# 노드가 국보 해례본(유물)뿐이라 버려졌다 (2026-09-06). 그래서 사람이 적는
+# 표를 하나 더 둔다: `노드 id<TAB>별칭<TAB>근거`. 라벨 표와 달리 id 를
+# 통째로 적는다 — 국편·국가유산 노드에도 별칭이 필요하다. 편집 계층에
+# `alias:<별칭>` 칸으로 남아 수집 뒤에도 되살아난다.
+ID_RE = re.compile(r"^[a-z]+:.+$")
+
+
+@dataclass
+class AliasRow:
+    node_id: str
+    alias: str
+    note: str = ""
+
+
+@dataclass
+class AliasReport:
+    added: list[tuple[str, str]] = field(default_factory=list)
+    already: int = 0
+    absent: list[str] = field(default_factory=list)
+
+
+def load_alias_table(path: Path) -> list[AliasRow]:
+    rows: list[AliasRow] = []
+    seen: set[tuple[str, str]] = set()
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        parts = raw.rstrip("\n").split("\t")
+        if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+            raise LabelTableError(f"{path}:{lineno} 탭으로 나뉜 두 칸이 필요합니다: {raw!r}")
+        node_id, alias = parts[0].strip(), parts[1].strip()
+        note = parts[2].strip() if len(parts) > 2 else ""
+        if not ID_RE.match(node_id):
+            raise LabelTableError(f"{path}:{lineno} 노드 id 형식이 아닙니다: {node_id!r}")
+        if (node_id, alias) in seen:
+            raise LabelTableError(f"{path}:{lineno} 같은 줄이 두 번: {node_id} {alias}")
+        seen.add((node_id, alias))
+        rows.append(AliasRow(node_id, alias, note))
+    return rows
+
+
+def apply_aliases(conn: sqlite3.Connection, table: list[AliasRow], *, dry_run: bool = False) -> AliasReport:
+    """별칭 표를 그래프에 적용한다. 여러 번 돌려도 결과가 같다."""
+    report = AliasReport()
+    for row in table:
+        if conn.execute("SELECT 1 FROM nodes WHERE id = ?", (row.node_id,)).fetchone() is None:
+            report.absent.append(row.node_id)
+            continue
+        have = conn.execute(
+            "SELECT 1 FROM aliases WHERE node_id = ? AND alias = ?", (row.node_id, row.alias)
+        ).fetchone() is not None
+        if have:
+            report.already += 1
+        else:
+            report.added.append((row.node_id, row.alias))
+        if dry_run:
+            continue
+        conn.execute("INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?, ?)", (row.node_id, row.alias))
+        # 이미 있어도 표에 적는다 — 수집이 별칭 표를 다시 세우면 이 줄이 되살린다.
+        overrides.record(conn, "node", row.node_id, f"alias:{row.alias}", row.alias, "relabel", row.note)
+    if not dry_run:
+        conn.commit()
+    return report

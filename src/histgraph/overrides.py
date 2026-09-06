@@ -73,7 +73,8 @@ def edge_key(src: str, dst: str, etype: str) -> str:
 
 def _check_field(target: str, field_name: str) -> None:
     if target == "node":
-        ok = field_name in NODE_COLUMNS or field_name.startswith("props.") or field_name == "merged_into"
+        ok = (field_name in NODE_COLUMNS or field_name.startswith("props.")
+              or field_name.startswith("alias:") or field_name == "merged_into")
     elif target == "edge":
         ok = field_name in EDGE_COLUMNS or field_name.startswith("props.") or field_name == "deleted"
     else:
@@ -295,6 +296,14 @@ def _apply_node(conn, node_id: str, fld: str, value, when: str, rep: ReapplyRepo
         return 1
     if fld.startswith("props."):
         return _apply_props(conn, "nodes", "id = ?", (node_id,), fld[len("props."):], value, when, rep)
+    if fld.startswith("alias:"):
+        # 손으로 적은 별칭(`data/aliases.tsv`). 칸 이름에 별칭을 넣어 한 노드에
+        # 여럿을 둔다. 수집이 노드를 다시 세워도 여기서 되살아난다.
+        alias = fld[len("alias:"):]
+        if not alias or conn.execute("SELECT 1 FROM nodes WHERE id = ?", (node_id,)).fetchone() is None:
+            return 0
+        cur = conn.execute("INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?,?)", (node_id, alias))
+        return cur.rowcount
     return 0
 
 

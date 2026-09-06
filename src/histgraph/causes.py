@@ -406,7 +406,10 @@ def _rows(store: GraphStore, ids: list[str], node_type: str | None) -> list:
     ).fetchall()
 
 
-def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[str, str, str] | None:
+def resolve(
+    store: GraphStore, name: str, node_type: str, doc: dict,
+    allowed: tuple[str, ...] | None = None,
+) -> tuple[str, str, str] | None:
     """이름 -> (노드 id, 타입, 실제로 맞춘 표기). 없으면 None — 노드를 만들지 않는다.
 
     타입이 맞는 후보를 먼저, 없으면 타입을 무시하고 한 번 더 (모델이
@@ -417,7 +420,12 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
 
     그래도 없으면 **표기 차이**로 보고 느슨한 열쇠(`LooseIndex`)로 한 번
     더 — 정확한 표기가 먼저고 느슨한 것은 그 뒤다. 자국 왕조는 어느
-    길로도 풀지 않는다."""
+    길로도 풀지 않는다.
+
+    `allowed` 는 이 자리에 설 수 있는 타입이다. 타입을 무시하고 찾을 때도
+    **그 자리에 못 서는 타입은 고르지 않는다** — '훈민정음'이 국보
+    해례본(유물)으로 풀려 "세종이 국보를 일으켰다"가 되고 '타입 안 맞음'으로
+    버려졌다 (2026-09-06). 유물을 건너뛰어야 별칭·느슨한 열쇠까지 간다."""
     from .promote import life_span
 
     name = normalize_name(name)
@@ -425,14 +433,17 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
         return None
     doc_span = life_span(doc.get("start_date"), doc.get("end_date"))
     candidates = [name, *heads(name)]
+
+    def pick(rows):
+        if allowed is not None:
+            rows = [r for r in rows if r["type"] in allowed]
+        return pick_candidate(rows, doc_span, doc["id"])
+
     for candidate in candidates:
         if candidate in HOME_POLITIES:
             return None
         for clause, args in (("AND n.type = ?2", (candidate, node_type)), ("", (candidate,))):
-            row = pick_candidate(
-                store.conn.execute(CANDIDATES.format(type_clause=clause), args).fetchall(),
-                doc_span, doc["id"],
-            )
+            row = pick(store.conn.execute(CANDIDATES.format(type_clause=clause), args).fetchall())
             if row:
                 return row["id"], row["type"], candidate
     idx = loose_index(store)
@@ -442,7 +453,7 @@ def resolve(store: GraphStore, name: str, node_type: str, doc: dict) -> tuple[st
             return None
         ids = idx.lookup(candidate, node_type)
         for typed in (node_type, None):
-            row = pick_candidate(_rows(store, ids, typed), doc_span, doc["id"])
+            row = pick(_rows(store, ids, typed))
             if row:
                 return row["id"], row["type"], candidate
     return None
@@ -606,6 +617,30 @@ def fact_check(
     return None, kind, cap
 
 
+def alive_at(store: GraphStore, person_id: str, event_id: str) -> bool:
+    """그 사람이 그 사건 때 살아 있었나. 한쪽이라도 연대를 모르면 True.
+
+    모르는 것을 아니라고 하지 않는다 — 생몰이 빈 인물이 절반을 넘는다."""
+    row = store.conn.execute(
+        "SELECT id, start_date, end_date FROM nodes WHERE id IN (?,?)", (person_id, event_id)
+    ).fetchall()
+    got = {r["id"]: r for r in row}
+    person, event = got.get(person_id), got.get(event_id)
+    if person is None or event is None:
+        return True
+    from .timeline import _year_of
+
+    year = _year_of(event["start_date"])
+    if year is None:
+        return True
+    born, died = _year_of(person["start_date"]), _year_of(person["end_date"])
+    if born is not None and year < born:
+        return False
+    if died is not None and year > died:
+        return False
+    return True
+
+
 def accept(
     store: GraphStore, doc: dict, answers: list[dict], passages: list[dict], model: str,
 ) -> tuple[list[Edge], dict[str, int], list[str]]:
@@ -617,6 +652,8 @@ def accept(
     counts: dict[str, int] = {}
     unresolved: list[str] = []
     edges: dict[tuple[str, str], Edge] = {}
+    # 인과가 아니라 **참여**로 돌린 것들 (아래 '결과가 사람이면' 주석 참고).
+    joined: list[Edge] = []
 
     def drop(why: str) -> None:
         counts[why] = counts.get(why, 0) + 1
@@ -630,8 +667,11 @@ def accept(
         if not evidence:
             drop("근거 없음")
             continue
-        cause = resolve(store, str(a.get("cause", "")), str(a.get("cause_type", "event")), doc)
-        effect = resolve(store, str(a.get("effect", "")), str(a.get("effect_type", "event")), doc)
+        cause = resolve(store, str(a.get("cause", "")), str(a.get("cause_type", "event")), doc,
+                        allowed=CAUSE_TYPES)
+        # 결과 자리에 사람은 못 서지만 여기서는 받는다 — 아래에서 참여로 돌린다.
+        effect = resolve(store, str(a.get("effect", "")), str(a.get("effect_type", "event")), doc,
+                         allowed=(*EFFECT_TYPES, "person"))
         if cause is None or effect is None:
             for got, name in ((cause, a.get("cause")), (effect, a.get("effect"))):
                 if got is None and name:
@@ -641,6 +681,38 @@ def accept(
         (cid, ctype, cname), (eid, etype, ename) = cause, effect
         if cid == eid:
             drop("자기 자신")
+            continue
+        # **결과가 사람이면 인과가 아니라 참여다.** 모델이 결과 자리에
+        # 사람을 적을 때 하는 말은 언제나 '그 사건이 그 사람에게 무슨 일을
+        # 했나'다 — 실측 7,398건 중 39건이 그랬고 39건 전부 '영향'이었다
+        # (안악 사건 → 김구 "김구가 잡혔다", 강상인의 옥 → 심온 "사사됐다",
+        # 해유령 전투 → 신각 "처형됐다"). '이 사건이 이 사람을 낳았다'는
+        # 답은 한 건도 없다.
+        #
+        # 그래서 온톨로지가 사람을 결과로 막아 둔 것은 옳다. 다만 여기서
+        # 통째로 버리면 참인 사실이 사라진다 — 김구와 안악 사건 사이에
+        # 엣지가 하나도 없었다. 사람 → 사건의 **참여**로 돌려 두면
+        # `roles` 가 무엇을 했는지(피해·표적·수습…) 판정한다
+        # (2026-09-06 사용자 결정: "1번으로 가자").
+        if etype == "person" and ctype == "event" and kind == "영향":
+            # **죽은 뒤의 일에는 참여할 수 없다.** 김종직(1431~1492)이
+            # 무오사화(1498)를 '주도'한 것으로 판정된 적이 있다 — 연산군이
+            # 사화의 명분으로 그를 지목했을 뿐이고 그는 부관참시된 쪽이다.
+            # 사명대사(1543~1610)도 심하전투(1619)에 붙었다. 부관참시·추숭
+            # 처럼 사람이 죽은 뒤 이름이 오르내리는 일은 참여가 아니므로,
+            # 참인 것을 억지로 세우지 않고 여기서 놓는다 (CLAUDE.md §1-2).
+            if not alive_at(store, eid, cid):
+                drop("죽은 뒤의 일")
+                continue
+            how_p = " ".join(str(a.get("how", "")).split())
+            joined.append(Edge(
+                src=eid, dst=cid, type="participated_in", source=SOURCE_MARK,
+                confidence=CONFIDENCE.get(str(a.get("confidence")), 0.5),
+                props={"evidence": evidence, "doc": doc["id"], "model": model,
+                       "from_causes": True,
+                       **({"how": how_p} if has_hangul(how_p) and len(how_p) <= HOW_MAX else {})},
+            ))
+            drop("참여로 돌림")
             continue
         if ctype not in CAUSE_TYPES or etype not in EFFECT_TYPES:
             drop("타입 안 맞음")
@@ -682,7 +754,13 @@ def accept(
         edges[(cid, eid)] = Edge(
             src=cid, dst=eid, type=EDGE_TYPE, source=SOURCE_MARK, label=kind, confidence=conf, props=props,
         )
-    return list(edges.values()), counts, unresolved
+    # 같은 문서가 한 사람을 여러 번 말하면 참여도 여러 번 나온다. 짝으로 접는다.
+    joined_once: dict[tuple[str, str], Edge] = {}
+    for e in joined:
+        prev = joined_once.get((e.src, e.dst))
+        if prev is None or e.confidence > prev.confidence:
+            joined_once[(e.src, e.dst)] = e
+    return list(edges.values()) + list(joined_once.values()), counts, unresolved
 
 
 def write(store: GraphStore, edges: list[Edge]) -> int:
@@ -913,7 +991,12 @@ def sync(store: GraphStore, target: GraphStore) -> int:
 
 
 # --- 사슬 읽기 ---------------------------------------------------------------
-FANOUT = 6      # 한 노드에서 따라갈 원인·결과 수 (확신도 순)
+FANOUT = 6      # 한 노드에서 따라갈 원인·결과 수 (`_links` 의 순서대로)
+# 잘릴 때 무엇이 남는가. 종류가 먼저다 — 직접 원인이 '영향'보다 앞이다. 그
+# 다음 소스 수·확신도, 그 다음은 **상대 노드의 관계 수**다. 아이디로 가르면
+# 세종의 결과 8건에서 한글(`wd:Q8222`)이 공녀·경연 뒤로 밀려 잘렸다
+# (2026-09-06). 관계가 많은 노드가 그래프에서 더 중심이다.
+KIND_RANK = {"원인": 0, "계기": 1, "배경": 2, "영향": 3}
 TREE_BUDGET = 60
 
 
@@ -954,7 +1037,15 @@ def _links(store: GraphStore, node_id: str, direction: str) -> list[dict]:
             row["evidence"].append(props["evidence"])
         if r["source"] not in row["sources"]:
             row["sources"].append(r["source"])
-    return sorted(merged.values(), key=lambda x: (-len(x["sources"]), -x["confidence"], x["id"]))
+    degree: dict[str, int] = {}
+    if merged:
+        ids = list(merged)
+        marks = ",".join("?" * len(ids))
+        degree = dict(store.conn.execute(
+            f"""SELECT n.id, (SELECT COUNT(*) FROM edges e WHERE e.src = n.id OR e.dst = n.id)
+                  FROM nodes n WHERE n.id IN ({marks})""", ids).fetchall())
+    return sorted(merged.values(), key=lambda x: (
+        KIND_RANK.get(x["kind"], 9), -len(x["sources"]), -x["confidence"], -degree.get(x["id"], 0), x["id"]))
 
 
 def _tree(store: GraphStore, root: str, direction: str, depth: int, budget: list[int]) -> list[dict]:
