@@ -2140,7 +2140,8 @@ def cmd_chronology(args: argparse.Namespace) -> int:
             print(f"  이 그래프에 없는 대상 {len(applied.absent):,}줄"
                   f" (예: {', '.join(r.a for r in applied.absent[:3])})")
     print(f"  결과의 거친 날짜가 원인을 품는 것 {len(rep.within):,}건"
-          f" (연표가 원인 뒤에 세운다) · 연대를 모르는 것 {rep.unknown:,}건")
+          f" (연표가 원인 뒤에 세운다) · 결과가 존속하는 동안의 원인 {rep.lifetime:,}건"
+          f" · 연대를 모르는 것 {rep.unknown:,}건")
     if args.show and rep.within:
         for s in rep.within[:args.show]:
             print(f"    {s.cause}({s.cause_date}) → {s.effect}({s.effect_date})")

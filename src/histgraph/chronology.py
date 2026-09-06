@@ -34,6 +34,14 @@
 고친 값은 편집 계층(`overrides`)에 남는다 — 수집이 날짜를 되돌리거나
 `causes` 가 같은 문서에서 지운 엣지를 다시 뽑아 와도 다시 씌워진다.
 
+2026-09-06 지적("전수 조사해서 원인과 결과가 뒤바뀐 경우를 모두 고쳐"):
+관문이 **결과가 사건인 엣지만** 재고 있었다 — 결과가 나라·단체·개념인
+931건(전체 2,376건의 39%)은 아예 안 재졌다. 이제 전부 잰다. 재는 자리만
+결과에 따라 다르다: 사건은 **시작** 전에, 나라·단체·개념은 **끝나기**
+전에 원인이 있어야 한다 ('임진왜란 → 명나라의 쇠퇴'에서 명의 건국은
+임진왜란보다 앞서지만 인과는 참이다). 끝을 모르면 언제든 영향을 받을 수
+있으므로 재지 않고 센다(`lifetime`). 넓히고 나온 것은 3건이었다.
+
 남는 것: 결과의 날짜가 원인보다 **거칠어서** 원인을 품는 경우(만주사변
 1931-09-18 → 신사참배 1931)는 데이터로는 못 가른다. 그것은 화면이
 맡는다 — 연표는 원인을 품는 거친 날짜를 원인 바로 뒤에 세운다
@@ -83,6 +91,7 @@ class Suspect:
 class Report:
     backwards: list[Suspect] = field(default_factory=list)   # 원인이 결과보다 뒤
     within: list[Suspect] = field(default_factory=list)      # 결과의 거친 날짜가 원인을 품는다
+    lifetime: int = 0                                         # 결과가 존속하는 동안의 원인 (나라·단체·개념)
     unknown: int = 0                                          # 어느 쪽인가 연대를 모른다
     dated: int = 0
     dropped: int = 0
@@ -173,28 +182,50 @@ def order(cause: str | None, effect: str | None) -> str:
 
 
 def find(conn: sqlite3.Connection) -> Report:
-    """사건이 결과인 인과 엣지 중 원인이 결과보다 뒤인 것. 사건만 보는
-    이유: 나라·단체·개념은 '시작'이 건국·창립이라 그 전의 원인이 참일 수
-    있다 (임진왜란 → 명나라의 쇠퇴). `causes.backwards` 와 같은 구분."""
+    """인과 엣지를 **전부** 재서 원인이 결과보다 뒤인 것을 찾는다.
+
+    결과가 무엇인가에 따라 재는 자리가 다르다 (`causes.backwards` 와 같은
+    구분, 다만 여기는 1년 여유를 두지 않는다):
+
+    - **사건**이 결과면 그 **시작** 전에 원인이 있어야 한다.
+    - **나라·단체·개념·자리**가 결과면 그것이 **끝나기** 전이면 된다.
+      '임진왜란 → 명나라(의 쇠퇴)'에서 명의 건국(1368)은 임진왜란보다
+      앞서지만 인과는 참이다. 결과가 아직 존속하거나 끝을 모르면 언제든
+      영향을 받을 수 있으므로 재지 않는다 (`lifetime` 으로 센다).
+
+    2026-09-06 지적("전수 조사해서 원인과 결과가 뒤바뀐 경우를 모두 고쳐"):
+    전에는 `d.type = 'event'` 로 걸러 결과가 단체·개념인 엣지 931건(전체의
+    39%)이 아예 안 재졌다. 재 보니 결과가 사라진 뒤의 원인이 3건 있었다
+    (3당 합당 → 통일민주당, 만주사변 → 위안부, 한일병합 → 국민회)."""
     rep = Report()
     rows = conn.execute(
-        """SELECT e.src, e.dst, s.label AS cause, d.label AS effect,
-                  s.start_date AS cs, d.start_date AS es
+        """SELECT e.src, e.dst, s.label AS cause, d.label AS effect, d.type AS effect_type,
+                  s.start_date AS cs, d.start_date AS es, d.end_date AS ee
              FROM edges e
              JOIN nodes s ON s.id = e.src
              JOIN nodes d ON d.id = e.dst
-            WHERE e.type = ? AND d.type = 'event'
+            WHERE e.type = ?
             ORDER BY s.start_date, s.label""",
         (EDGE_TYPE,),
     ).fetchall()
     for r in rows:
-        verdict = order(r["cs"], r["es"])
+        if r["effect_type"] == "event":
+            mark = r["es"]
+        elif not r["ee"]:
+            # 아직 존속하는(또는 끝을 모르는) 결과는 언제든 영향을 받을 수 있다.
+            rep.lifetime += 1
+            continue
+        else:
+            mark = r["ee"]
+        verdict = order(r["cs"], mark)
         if verdict == "unknown":
             rep.unknown += 1
             continue
         if verdict == "ok":
+            if r["effect_type"] != "event" and order(r["cs"], r["es"]) != "ok":
+                rep.lifetime += 1   # 창립 뒤·소멸 전 — 재는 자리 안이다
             continue
-        sus = Suspect(r["src"], r["dst"], r["cause"], r["effect"], r["cs"] or "", r["es"] or "", verdict)
+        sus = Suspect(r["src"], r["dst"], r["cause"], r["effect"], r["cs"] or "", mark or "", verdict)
         (rep.backwards if verdict == "after" else rep.within).append(sus)
     return rep
 

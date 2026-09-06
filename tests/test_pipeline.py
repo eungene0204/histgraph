@@ -4944,6 +4944,41 @@ with tempfile.TemporaryDirectory() as _d:
     store.close()
 
 
+print("\n[연대 — 결과가 나라·단체면 끝나기 전이면 된다]")
+with tempfile.TemporaryDirectory() as _d:
+    from histgraph import chronology as _ch2
+
+    store = GraphStore(Path(_d) / "ch2.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:IM", type="event", label="임진왜란", source="wd", description="설명",
+             start_date="1592-05-23", end_date="1598-12-16"),
+        # 결과가 사라진 뒤의 원인 — 불가능하다
+        Node(id="wd:P", type="org", label="통일민주당", source="wd", description="설명",
+             start_date="1987", end_date="1990-01-01"),
+        Node(id="wd:MG", type="event", label="3당 합당", source="wd", description="설명",
+             start_date="1990-01-22"),
+        # 창립 뒤·소멸 전 — '명나라의 쇠퇴' 꼴이라 세기만 한다
+        Node(id="wd:MI", type="org", label="명나라", source="wd", description="설명",
+             start_date="1368", end_date="1644"),
+        # 끝을 모르는 결과는 언제든 영향을 받을 수 있다
+        Node(id="wd:C", type="concept", label="한글", source="wd", description="설명",
+             start_date="1443"),
+        Node(id="wd:J", type="event", label="조선어학회 사건", source="wd", description="설명",
+             start_date="1942-10-01"),
+    ])
+    _c2 = lambda a, b: Edge(src=a, dst=b, type="caused", source="causes", label="원인",
+                            confidence=0.8, props={"evidence": "…", "doc": a})
+    store.upsert_edges([_c2("wd:MG", "wd:P"), _c2("wd:IM", "wd:MI"), _c2("wd:J", "wd:C")])
+    rep2 = _ch2.find(store.conn)
+    check("결과가 사라진 뒤의 원인은 걸린다", [s.effect for s in rep2.backwards] == ["통일민주당"],
+          str([s.effect for s in rep2.backwards]))
+    check("존속하는 동안의 원인은 세기만 한다 (명나라의 쇠퇴)", rep2.lifetime == 2 and rep2.within == [],
+          f"{rep2.lifetime} {[s.effect for s in rep2.within]}")
+    check("결과가 사건이 아니어도 전수로 잰다",
+          len(rep2.backwards) + len(rep2.within) + rep2.lifetime + rep2.unknown == 3)
+    store.close()
+
+
 print("\n[서술구 사건 — 표지도 숫자도 없는 이름은 사건 노드가 아니다]")
 from histgraph.extract import is_abstract_event as _abs
 check("개념·서술구는 사건이 아니다", all(_abs(x) for x in
