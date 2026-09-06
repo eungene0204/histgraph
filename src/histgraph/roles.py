@@ -370,7 +370,12 @@ def run(
 # 참여가 아니면 거기에 `deleted` 를 더해 재수집이 되살린 participated_in 을
 # 다시 지운다 — 옮겨 둔 related_to 는 수집이 덮어쓰지 않으므로 그대로 산다.
 
-TABLE_ROLES = frozenset(ROLES) | {"삭제"}
+# 판정 하나 더: `단체`. 추출이 **단체·나라를 인물로** 세운 노드다 ('적군'·
+# '영국 정부'·'사할린의용대'). 2026-09-07 전수 조사: 이런 노드의 참여를 지웠더니
+# 영국이 거문도를 점령한 일, 자유시 참변의 부대들이 통째로 사라졌다. 관계는
+# 참이고 틀린 것은 노드의 타입이다 — 타입을 고치고 참여를 그대로 세운다.
+ORG_VERDICT = "단체"
+TABLE_ROLES = frozenset(ROLES) | {"삭제", ORG_VERDICT}
 
 
 class RolesTableError(ValueError):
@@ -437,6 +442,23 @@ def apply_table(store: GraphStore, table: list[TableRow]) -> TableReport:
         k_rel = ov.edge_key(row.person, row.event, "related_to")
         edges = _pair_edges(c, row.person, row.event)
 
+        if row.role == ORG_VERDICT:
+            # 노드를 단체로 고치고(편집 계층) 참여를 그대로 세운다.
+            ov.record(c, "node", row.person, "type", "org", TABLE_ORIGIN, row.note)
+            c.execute("UPDATE nodes SET type = 'org' WHERE id = ?", (row.person,))
+            for k in (k_part, k_rel):
+                ov.forget(c, "edge", k, "deleted")
+            ov.record(c, "edge", k_rel, "deleted", True, TABLE_ORIGIN, row.note)
+            if not edges:
+                _assert_edge(c, row, "participated_in", label=None)
+            else:
+                for e in edges:
+                    if e["type"] == "related_to":
+                        c.execute("DELETE FROM edges WHERE rowid = ?", (e["rowid"],))
+                        rep.moved += 1
+            rep.applied += 1
+            continue
+
         if row.role == "삭제":
             for k in (k_part, k_rel):
                 ov.record(c, "edge", k, "deleted", True, TABLE_ORIGIN, row.note)
@@ -461,6 +483,17 @@ def apply_table(store: GraphStore, table: list[TableRow]) -> TableReport:
         if not participant:
             # 재수집이 participated_in 을 다시 세우면 지운다. related_to 는 남는다.
             ov.record(c, "edge", k_part, "deleted", True, TABLE_ORIGIN, row.note)
+
+        if not edges:
+            # **표가 지웠던 관계를 되살릴 수 있어야 한다.** 2026-09-07 지적:
+            # 정도전을 지운 줄 알았던 일에서 시작해 전수 조사를 했더니, 내가
+            # '삭제'로 적어 정말 끊어 놓은 쌍이 114 였고 그중 43 은 관계가
+            # 참인데 '참여'가 아니었을 뿐이었다 (난 문서가 배경으로 부른 왕들,
+            # 부관참시된 김종직). 판정을 '언급'으로 낮추면 표가 그 관계를
+            # 다시 세운다 — 근거는 표에 적은 그 줄이다.
+            _assert_edge(c, row, target_type, label=row.role)
+            rep.applied += 1
+            continue
 
         for e in edges:
             props = json.loads(e["props"] or "{}")
@@ -493,6 +526,22 @@ def apply_table(store: GraphStore, table: list[TableRow]) -> TableReport:
         rep.applied += 1
     c.commit()
     return rep
+
+
+def _assert_edge(c, row: "TableRow", etype: str, label: str | None) -> None:
+    """표가 세우는 관계. 근거는 표의 근거 칸이다 — 사람이 정본을 읽고 적은 줄."""
+    props = {"role_origin": TABLE_ORIGIN, "evidence": row.note}
+    if label:
+        props["role"] = label
+        props["role_evidence"] = row.note
+    c.execute(
+        """INSERT INTO edges (src, dst, type, source, label, confidence, props)
+           VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(src, dst, type, source) DO UPDATE SET
+             label = excluded.label, props = excluded.props""",
+        (row.person, row.event, etype, SOURCE_MARK, label, 0.8,
+         json.dumps(props, ensure_ascii=False)),
+    )
 
 
 def unjudged(store: GraphStore) -> list[tuple[str, str, str, str]]:

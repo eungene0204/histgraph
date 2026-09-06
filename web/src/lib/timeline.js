@@ -569,7 +569,11 @@ const DIR_HEAD = {
   caused: { out: '결과', in: '원인' },
 };
 
+// 라벨이 타입 이름보다 정확하면 서버가 `specific` 을 달아 보낸다
+// ('피해'·'다음 일'). 그때는 방향으로 다시 부르지 않는다 — 이름이 이미
+// 방향을 말한다. 2026-09-07 전수 조사: 연표의 딱지가 전부 '관련'이었다.
 function relHead(rel) {
+  if (rel.specific) return rel.label;
   return DIR_HEAD[rel.type]?.[rel.dir] || rel.label;
 }
 

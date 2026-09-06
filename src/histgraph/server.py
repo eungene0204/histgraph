@@ -134,6 +134,26 @@ MAX_SPAN = {"person": 110, "event": 60}
 # 그래프의 선과 상세의 묶음이 '관련' 대신 '피해'·'주도'라고 말한다 —
 # 2026-09-07 지적: 피해로 옮긴 정도전이 사건 상세에서 사라진 것처럼 보였다.
 ROLE_HEADS = frozenset({"주도", "가담", "대항", "피해", "표적", "수습", "지휘관", "주요 인물", "교전", "가해"})
+# 라벨이 타입 이름보다 정확한 관계 전부 (`relations.js` LABEL_HEADS 와 같은 표).
+# 그래프의 선과 연표의 딱지가 '관련' 대신 이 이름으로 말한다.
+LABEL_HEADS = ROLE_HEADS | frozenset({"다음", "이 기사의 대상", "소속", "직위"})
+# 방향으로 갈라 부르는 라벨 (`relations.js` LABEL_DIR_HEAD 와 같은 표)
+LABEL_DIR_HEAD = {
+    "다음": {"out": "다음 일", "in": "앞선 일"},
+    "이 기사의 대상": {"out": "이 기록이 다루는 것", "in": "이것을 다룬 기록"},
+}
+
+
+def _rel_name(etype: str, direction: str, label: str | None) -> dict:
+    """연표·화면이 부를 관계 이름. 라벨이 타입보다 정확하면 그것을 쓰고
+    `specific` 을 달아 화면이 방향으로 다시 부르지 않게 한다."""
+    if etype in ("participated_in", "related_to") and label:
+        if label in LABEL_DIR_HEAD:
+            return {"type": etype, "dir": direction,
+                    "label": LABEL_DIR_HEAD[label][direction], "specific": True}
+        if label in LABEL_HEADS:
+            return {"type": etype, "dir": direction, "label": label, "specific": True}
+    return {"type": etype, "dir": direction, "label": EDGE_TYPES[etype][0]}
 
 RELATION_ORDER = [
     "caused", "participated_in", "held_position", "member_of", "created",
@@ -415,7 +435,7 @@ class GraphAPI:
                 label = EDGE_TYPES[e["type"]][0]
                 if e["type"] == "caused" and e["label"]:
                     label = e["label"]
-                if e["type"] in ("participated_in", "related_to") and e["label"] in ROLE_HEADS:
+                if e["type"] in ("participated_in", "related_to") and e["label"] in LABEL_HEADS:
                     label = e["label"]
                 merged[key] = {
                     "s": e["src"], "t": e["dst"], "type": e["type"],
@@ -427,7 +447,7 @@ class GraphAPI:
                 row["conf"] = max(row["conf"], e["confidence"])
                 if e["source"] not in row["sources"]:
                     row["sources"].append(e["source"])
-                if e["type"] in ("participated_in", "related_to") and e["label"] in ROLE_HEADS:
+                if e["type"] in ("participated_in", "related_to") and e["label"] in LABEL_HEADS:
                     row["label"] = e["label"]
         edges = list(merged.values())
         return {
@@ -882,7 +902,8 @@ class GraphAPI:
         # 읽게 된다.
         kinds = ",".join(f"'{t}'" for t in POINT_TYPES)   # 코드 안의 고정 목록이다
         rows = self.store.conn.execute(
-            f"""SELECT e.type AS rel, CASE WHEN e.src = ?1 THEN 'out' ELSE 'in' END AS dir,
+            f"""SELECT e.type AS rel, e.label AS rel_label,
+                       CASE WHEN e.src = ?1 THEN 'out' ELSE 'in' END AS dir,
                        n.id, n.type, n.label, n.start_date, n.end_date
                   FROM edges e
                   JOIN nodes n
@@ -903,7 +924,8 @@ class GraphAPI:
             cur = picked.get(r["id"])
             if cur is not None and (cur["rel"] != "related_to" or r["rel"] == "related_to"):
                 continue
-            picked[r["id"]] = {"row": r, "rel": r["rel"], "dir": r["dir"]}
+            picked[r["id"]] = {"row": r, "rel": r["rel"], "dir": r["dir"],
+                               "rel_label": r["rel_label"]}
 
         undated = {k for k, v in picked.items() if _span(v["row"])[0] is None}
         linked = self._linked_years(undated) if undated else {}
@@ -920,8 +942,10 @@ class GraphAPI:
                 "year": y, "end": y_end, "kind": "near",
                 "date": v["row"]["start_date"] or "",
                 # 화면이 관계 이름을 붙여 부를 수 있게 그대로 넘긴다
-                "rel": {"type": v["rel"], "dir": v["dir"],
-                        "label": EDGE_TYPES[v["rel"]][0]},
+                # 라벨이 타입보다 정확하면 그 이름으로 부른다 — 연표의 딱지가
+                # '관련'이 아니라 '피해'·'다음 일'이라고 말한다. `specific` 은
+                # 화면이 방향으로 다시 부르지 말라는 표식이다.
+                "rel": _rel_name(v["rel"], v["dir"], v["rel_label"]),
             })
         # 노드 자신의 연도에서 가까운 것부터 남긴다. 연도를 모르면 그냥
         # 이른 순 — 아무 기준 없이 자르는 것보다 낫다.

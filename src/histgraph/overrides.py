@@ -16,7 +16,7 @@ CI)은 잊었는지를 묻지만, 잊을 수 있는 구조 자체는 그대로�
 
     target  node | edge
     key     노드 id · 엣지는 'src\\tdst\\ttype' (모든 소스에 같이 건다)
-    field   label · description · start_date · end_date · props.<키> · merged_into
+    field   label · description · start_date · end_date · type · props.<키> · merged_into
             엣지는 여기에 deleted 가 더 있다 — '이 엣지는 없다' (연대 판정이 지운 인과)
     value   JSON. NULL 은 '비운다'
     origin  relabel · redescribe · describe · precision · reigns · dedupe · nikh …
@@ -57,7 +57,10 @@ CREATE TABLE IF NOT EXISTS overrides (
 );
 """
 
-NODE_COLUMNS = ("label", "description", "start_date", "end_date")
+# `type` 이 여기 있는 이유: `reclassify` 가 SQL 로 직접 고쳐서 수집이 되돌리고
+# 있었다 (사건 → 개념). 2026-09-07 전수 조사에서 같은 자리를 또 찾았다 —
+# 추출이 단체·나라를 인물로 세운 노드('적군'·'영국 정부')다.
+NODE_COLUMNS = ("label", "description", "start_date", "end_date", "type")
 EDGE_COLUMNS = ("label", "start_date", "end_date", "confidence")
 WHEN = ("always", "foreign", "empty")
 EDGE_SEP = "\t"

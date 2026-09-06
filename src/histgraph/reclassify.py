@@ -34,9 +34,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from . import overrides as ov
 from .store import GraphStore
 
 log = logging.getLogger(__name__)
+
+ORIGIN = "reclassify"
 
 # 계층을 걸어 올라가 닿으면 그 타입이라고 보는 뿌리.
 # **사건 하나뿐이다.** 조직(Q43229)도 뿌리로 써 보았지만 못 쓴다 —
@@ -401,6 +404,12 @@ def apply_plan(store: GraphStore, plan: Plan) -> dict[str, int]:
         "UPDATE nodes SET type = ?, updated_at = datetime('now') WHERE id = ?",
         [(after, node_id) for node_id, (_, after) in plan.changes.items()],
     )
+    # 편집 계층에도 적는다 — 안 적으면 다음 수집이 타입을 되돌린다
+    # (CLAUDE.md §2: SQL 로 직접 고치는 경로는 `overrides.record` 를 한 번 더 건다).
+    ov.record_many(conn, [
+        ("node", node_id, "type", after, ORIGIN, f"{before} → {after} (Wikidata 클래스 계층)")
+        for node_id, (before, after) in plan.changes.items()
+    ])
 
     def _retype_edges(node_ids: list[str], frm: str, to: str) -> int:
         moved = 0

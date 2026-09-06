@@ -116,6 +116,11 @@ export const SENTENCE = {
   spouse_of: (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 부부다`,
   taught: (a, b) => `${a}${pt(a, '이', '가')} ${b}${pt(b, '을', '를')} 가르쳤다`,
   member_of: (a, b) => `${a}${pt(a, '은', '는')} ${b} 소속이다`,
+  // 문장 규칙이 없으면 "성균관 스캔들 → 제도 · 주제" 라는 화살표가 화면에
+  // 선다 (2026-09-07 전수 조사: set_in 105 · adapted_from 5 · about 1).
+  about: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 주제로 한다`,
+  set_in: (a, b) => `${a}의 배경은 ${b}${pt(b, '이다', '다')}`,
+  adapted_from: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 원작으로 한다`,
   held_position: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지냈다`,
   part_of: (a, b) => `${a}${pt(a, '은', '는')} ${b}의 일부다`,
   caused: (a, b, o = {}) => (KIND_SENTENCE[o.label] || KIND_SENTENCE['원인'])(a, b),
@@ -126,6 +131,12 @@ export const SENTENCE = {
     ? `${a} 다음에 ${b}${pt(b, '이', '가')} 일어났다`
     : o.label === '원인'
     ? `${a}${pt(a, '은', '는')} ${b}의 원인이 되었다`
+    // 실록·연대기의 기사 사건은 그 기사가 무엇을 다루는지가 관계다
+    : o.label === '이 기사의 대상'
+    ? `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 다룬 기록이다`
+    // 스키마가 안 맞아 '관련'으로 낮춰진 것 — 라벨이 원래 뜻을 들고 있다
+    : o.label === '소속' ? SENTENCE.member_of(a, b)
+    : o.label === '직위' ? SENTENCE.held_position(a, b)
     : ROLE_SENTENCE[o.label]
     ? roleSentence(o.label, a, b, o)
     : `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다`),
@@ -173,9 +184,22 @@ export function mergeEvidence(card, r) {
 // 인물은 사건의 얼굴이지 부록이 아니다. '언급'·'근거 없음'만 관련에 남는다.
 export const ROLE_HEADS = new Set(Object.keys(ROLE_SENTENCE).filter((k) => k !== '언급' && k !== '근거 없음'));
 
+// 라벨이 타입 이름보다 정확한 관계들. 2026-09-07 전수 조사에서 나온 것:
+// 사건의 앞뒤(`다음` 27건), 실록 기사가 다루는 대상(36건), 스키마가 안 맞아
+// `related_to` 로 낮춰졌지만 라벨은 남은 것(`소속` 4 · `직위` 1). 전부
+// '관련'이라는 한 더미에 묻혀 있었다 — 정도전이 묻힌 것과 같은 자리다.
+export const LABEL_DIR_HEAD = {
+  '다음': { out: '다음 일', in: '앞선 일' },
+  '이 기사의 대상': { out: '이 기록이 다루는 것', in: '이것을 다룬 기록' },
+};
+export const LABEL_HEADS = new Set([...ROLE_HEADS, ...Object.keys(LABEL_DIR_HEAD), '소속', '직위']);
+
 export function relHead(r) {
   if (TIME_TYPES.has(r.type)) return r.dir === 'out' ? '시기' : '이 시기의 개체';
-  if ((r.type === 'participated_in' || r.type === 'related_to') && ROLE_HEADS.has(r.edge_label)) return r.edge_label;
+  if (r.type === 'participated_in' || r.type === 'related_to') {
+    if (LABEL_DIR_HEAD[r.edge_label]) return LABEL_DIR_HEAD[r.edge_label][r.dir];
+    if (LABEL_HEADS.has(r.edge_label)) return r.edge_label;
+  }
   return DIR_HEAD[r.type]?.[r.dir] || r.label;
 }
 

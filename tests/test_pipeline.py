@@ -4674,11 +4674,16 @@ with tempfile.TemporaryDirectory() as _d:
     row = store.conn.execute("SELECT description, start_date, props FROM nodes WHERE id='wd:Q3'").fetchone()
     check("되짚은 정본이 다음 수집을 이긴다",
           row[0] == "국편 글" and row[1] == "1592" and '"canon": "nikh"' in row[2], tuple(row))
+    # 타입은 2026-09-07 부터 편집 계층이 지킨다 — `reclassify` 가 SQL 로만
+    # 고쳐서 수집이 되돌리고 있었고, 추출이 단체를 인물로 세운 노드도 같은 자리다.
+    _ov.record(store.conn, "node", "x:1", "type", "concept", "reclassify")
+    check("노드 타입도 편집 계층이 지킨다", _ov.reapply(store, node_ids=["x:1"]).nodes >= 0
+          and store.conn.execute("SELECT 1 FROM overrides WHERE key='x:1' AND field='type'").fetchone() is not None)
     try:
-        _ov.record(store.conn, "node", "x:1", "type", "event", "t")
-        check("노드 타입은 편집 계층으로 못 바꾼다", False)
+        _ov.record(store.conn, "node", "x:1", "source", "wd", "t")
+        check("표에 없는 칸은 거부한다", False)
     except _ov.OverrideError:
-        check("노드 타입은 편집 계층으로 못 바꾼다", True)
+        check("표에 없는 칸은 거부한다", True)
     store.close()
 
 
@@ -5264,6 +5269,8 @@ print("\n[역할 표 — 정변·난·사화의 편은 역할이 아니다]")
 if True:
     import json as _json
     import tempfile as _tf
+
+    from histgraph import overrides as ov_mod
     from histgraph.sources import infobox as _ib
 
     # 인포박스 표식·편 이름
@@ -5335,6 +5342,32 @@ if True:
     check("정적 페이지의 묶음 머리도 역할이다", [h for h, _ in _pg._groups(ev["relations"])][:2] == ["주도", "피해"])
     g = api.graph("wd:COUP")
     labels = {(e["s"], e["t"]): e["label"] for e in g["edges"]}
+    # 2026-09-07 전수 조사: '삭제'로 적어 정말 끊어 놓은 쌍이 114 였고 그중
+    # 43 은 관계가 참인데 '참여'가 아니었을 뿐이었다. 판정을 낮추면 표가 되살린다.
+    tbl2 = Path(path.parent / "t2.tsv")
+    tbl2.write_text("wd:KY\twd:COUP\t언급\t난 문서가 배경으로 부른 이름이다\n", encoding="utf-8")
+    roles_mod.apply_table(store, roles_mod.load_table(tbl2))
+    check("판정을 낮추면 지웠던 관계가 되살아난다",
+          rows("wd:KY", "wd:COUP") == [("related_to", "roles", "언급", "언급", None)], str(rows("wd:KY", "wd:COUP")))
+    check("되살린 관계의 근거는 표의 근거 칸이다",
+          _json.loads(store.conn.execute("SELECT props FROM edges WHERE src='wd:KY'").fetchone()["props"])["evidence"]
+          == "난 문서가 배경으로 부른 이름이다")
+    # '단체' — 추출이 단체를 인물로 세운 노드. 관계는 참이고 타입이 틀렸다.
+    store.upsert_nodes([Node(id="ex:person:적군", type="person", label="적군", source="extract")])
+    tbl3 = Path(path.parent / "t3.tsv")
+    tbl3.write_text("ex:person:적군\twd:COUP\t단체\t추출이 단체를 인물로 세웠다\n", encoding="utf-8")
+    roles_mod.apply_table(store, roles_mod.load_table(tbl3))
+    check("단체 판정은 타입을 고치고 참여를 세운다",
+          store.conn.execute("SELECT type FROM nodes WHERE id='ex:person:적군'").fetchone()[0] == "org"
+          and rows("ex:person:적군", "wd:COUP") == [("participated_in", "roles", None, None, None)],
+          str(rows("ex:person:적군", "wd:COUP")))
+    check("고친 타입은 편집 계층에 남는다",
+          store.conn.execute("SELECT value FROM overrides WHERE target='node' AND key='ex:person:적군' AND field='type'").fetchone()[0] == '"org"')
+    store.upsert_nodes([Node(id="ex:person:적군", type="person", label="적군", source="extract")])
+    ov_mod.reapply(store, node_ids=["ex:person:적군"])
+    check("수집이 인물로 되돌려도 편집 계층이 다시 단체로 세운다",
+          store.conn.execute("SELECT type FROM nodes WHERE id='ex:person:적군'").fetchone()[0] == "org")
+    tbl2.unlink(); tbl3.unlink()
     check("그래프의 선 이름이 '관련'이 아니라 '피해'다", labels.get(("wd:JD", "wd:COUP")) == "피해" and labels.get(("wd:TJ", "wd:COUP")) == "주도", str(labels))
     bad = Path(path.parent / "bad.tsv"); bad.write_text("wd:JD\twd:COUP\t영웅\t근거\n", encoding="utf-8")
     try:
@@ -5343,6 +5376,26 @@ if True:
         check("모르는 역할은 거부한다", True)
     path.unlink(); bad.unlink()
     store.close()
+
+# 2026-09-07 전수 조사: `set_in`·`adapted_from`·`about` 에 문장 규칙이 없어
+# 화면이 "성균관 스캔들 → 제도 · 주제" 라는 화살표를 그리고 있었다. 관문을
+# 걸어 둔다 — 새 엣지 타입은 사람이 읽는 말도 같이 들고 와야 한다.
+print("\n[관문: 모든 엣지 타입에 문장 규칙이 있다]")
+if True:
+    import re as _re
+
+    from histgraph.ontology import EDGE_TYPES as _ET
+
+    _js = Path("web/src/lib/relations.js").read_text(encoding="utf-8")
+    _body = _js[_js.index("export const SENTENCE = {"):]
+    _known = set(_re.findall(r"^  (\w+):", _body, _re.M))
+    _missing = [t for t in _ET if t not in _known]
+    check("EDGE_TYPES 전부에 SENTENCE 규칙이 있다", not _missing, f"빠진 것: {_missing}")
+    # 화면과 정적 페이지가 같은 이름을 쓴다
+    from histgraph import pages as _pgs
+    from histgraph.server import LABEL_HEADS as _LH
+    _js_heads = set(_re.findall(r"'([^']+)'", _js[_js.index("export const LABEL_HEADS"):_js.index("export function relHead")]))
+    check("라벨 머리 표가 서버·화면·정적 페이지에서 같다", _LH == _pgs.LABEL_HEADS, f"{sorted(_LH ^ _pgs.LABEL_HEADS)}")
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

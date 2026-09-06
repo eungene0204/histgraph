@@ -231,6 +231,38 @@ console.log('\n역할 — 표식과 편 이름');
   eq('피해와 관련은 다른 묶음', g.groups.map((x) => x.head).join(','), '피해,관련');
 }
 
+// 2026-09-07 전수 조사: 라벨이 뜻을 말하는데 '관련' 한 더미에 묻힌 것들과,
+// 문장 규칙이 아예 없어 "A → B · 배경" 화살표로 서던 타입 셋.
+console.log('\n라벨이 타입보다 정확한 관계');
+{
+  const me = { id: 'a', label: '임진왜란', type: 'event' };
+  const nxt = other('b', '정유재란', 'event', 'event');
+  const seq = (dir) => rel({ type: 'related_to', dir, other: nxt, edge_label: '다음', label: '관련' });
+  eq('다음 일은 관련이 아니다', relHead(seq('out')), '다음 일');
+  eq('들어오는 쪽은 앞선 일', relHead(seq('in')), '앞선 일');
+  eq('다음 문장', sentence(seq('out'), me), '임진왜란 다음에 정유재란이 일어났다');
+
+  const rec = { id: 'r', label: '현화사를 창건하다', type: 'event' };
+  const her = other('h', '현화사', 'heritage', 'thing');
+  const art = rel({ type: 'related_to', dir: 'out', other: her, edge_label: '이 기사의 대상', label: '관련' });
+  eq('기사의 대상', relHead(art), '이 기록이 다루는 것');
+  eq('기사 문장', sentence(art, rec), '현화사를 창건하다는 현화사를 다룬 기록이다');
+
+  const fr = { id: 'f', label: '프랑스', type: 'org' };
+  const eu = other('e', '유럽 연합', 'org', 'org');
+  const rel1 = rel({ type: 'related_to', dir: 'out', other: eu, edge_label: '소속', label: '관련' });
+  eq('완화된 소속은 소속이다', relHead(rel1), '소속');
+  eq('소속 문장', sentence(rel1, fr), '프랑스는 유럽 연합 소속이다');
+
+  const drama = { id: 'd', label: '불멸의 이순신', type: 'media' };
+  eq('원작', sentence(rel({ type: 'adapted_from', dir: 'out', other: other('n', '칼의 노래', 'artwork', 'thing') }), drama),
+     '불멸의 이순신은 칼의 노래를 원작으로 한다');
+  eq('배경', sentence(rel({ type: 'set_in', dir: 'out', other: other('j', '조선', 'org', 'org') }), drama),
+     '불멸의 이순신의 배경은 조선이다');
+  eq('주제', sentence(rel({ type: 'about', dir: 'out', other: other('c', '제도', 'concept', 'thing') }), drama),
+     '불멸의 이순신은 제도를 주제로 한다');
+}
+
 // --- 인과 -----------------------------------------------------------------
 // "온톨로지 그래프이므로 인과관계를 보여줘야 한다 — 임진왜란 → 명의 쇠퇴 →
 // 여진족의 성장 → 병자호란" (2026-09-04). 엣지는 원인 → 결과, 라벨이 종류다.
