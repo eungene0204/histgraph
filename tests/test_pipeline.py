@@ -3617,6 +3617,51 @@ check("인물의 설명 칸은 시대보다 앞서도 된다",
       not nikh.summary_is_alien(
           nikh.Entity("kc_n403710", "인물", "이승훈", "", "1783년에 세례를 받았다.")))
 
+# 국편 파일이 두 정종(3대 定宗 · 10대 靖宗)의 본문을 맞바꿔 담았다
+# (2026-09-06). 합치고 나면 이 본문이 진짜 노드의 설명이 되므로 버린다.
+_jeong3 = nikh.Entity("kc_n204400", "인물", "정종[고려]", "定宗",
+                      "고려의 제3대 왕으로 이름은 요(堯).")
+_jeong3.sections = [("머리말", "고려 10대 국왕인 정종(靖宗)은 현종의 둘째로 태어났다.")]
+check("주인공 이름에 붙은 대수가 설명과 다르면 본문을 버린다",
+      nikh.overview_is_alien(_jeong3))
+# 고종 본문의 '조선의 25대 임금인 철종이 승하하자' 는 앞 임금 이야기다.
+_gojong = nikh.Entity("kc_n400200", "인물", "고종[조선]", "高宗",
+                      "조선의 제26대 국왕.")
+_gojong.sections = [("머리말", "조선의 25대 임금인 철종이 승하하자 뒤를 이어 즉위하였다.")]
+check("앞 임금의 대수를 말하는 본문은 버리지 않는다",
+      not nikh.overview_is_alien(_gojong))
+_evt = nikh.Entity("kc_i201300", "사건", "이자겸의 난", "", "1126년의 난.")
+_evt.sections = [("머리말", "고려 17대 국왕인 인종 때의 일이다.")]
+check("사건 본문에는 여러 임금의 대수가 섞여도 된다",
+      not nikh.overview_is_alien(_evt))
+
+# 합칠 때 설명은 안 옮기면서 출처만 옮기면 화면이 위키백과 글에 국편
+# 딱지를 단다 — 라이선스 표기가 틀리는 자리다 (2026-09-06).
+import json as _json  # noqa: E402
+_dupdir = tempfile.TemporaryDirectory()
+_dupdb = GraphStore(Path(_dupdir.name) / "dup.sqlite")
+_dupdb.conn.executemany(
+    "INSERT INTO nodes (id, type, label, source, description, props)"
+    " VALUES (?,?,?,?,?,?)",
+    [("wd:K1", "person", "고려 정종 (3대)", "wd", "위키백과에서 온 글이다.", "{}"),
+     ("nikh:K1", "person", "정종[고려]", "nikh", "국편에서 온 글이다.",
+      '{"canon":"nikh","desc_source":"nikh","nikh_id":"kc_x","hanja":"定宗"}')],
+)
+_dupdb.conn.commit()
+import histgraph.duplicates as _dup
+_dup._carry_content(_dupdb.conn, "wd:K1", "nikh:K1")
+_kept = _dupdb.conn.execute("SELECT description, props FROM nodes WHERE id='wd:K1'").fetchone()
+_kprops = _json.loads(_kept["props"])
+check("남길 쪽 설명이 그대로면 국편 출처 딱지는 따라오지 않는다",
+      _kept["description"] == "위키백과에서 온 글이다."
+      and "canon" not in _kprops and "desc_source" not in _kprops,
+      str(_kprops))
+check("출처가 아닌 칸은 그래도 옮긴다", _kprops.get("hanja") == "定宗")
+check("지워질 글은 되짚을 수 있게 남는다",
+      _kprops.get("merged_desc") == "국편에서 온 글이다.")
+_dupdb.close()
+_dupdir.cleanup()
+
 # --- 연대기가 적어 둔 달 --------------------------------------------------
 # "황산대첩은 1380년 9월 …이라고 한다. 9월이라고 표시해줘" (2026-09-04).
 # 연표는 몰린 해 안의 차례를 달로 읽는데, 해만 알면 같은 해의 이웃 뒤에서

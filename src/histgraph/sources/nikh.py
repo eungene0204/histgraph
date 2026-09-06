@@ -260,6 +260,49 @@ def group_entities(rows: Iterable[list[str]]) -> list[Entity]:
     return list(by_id.values())
 
 
+# '제3대 국왕'·'고려 10대 왕' 처럼 몇 번째 임금인지 적은 자리.
+_ORDINAL = re.compile(r"제?\s*(\d{1,2})\s*대\s*(?:국왕|왕|임금)")
+# 대수 **바로 뒤에 이름이 붙은** 자리 — '10대 국왕인 정종(靖宗)은'.
+_ORDINAL_OF = re.compile(
+    r"제?\s*(\d{1,2})\s*대\s*(?:국왕|왕|임금)(?:은|는|인|이었던|이던|이다)?\s*([가-힣]{2,5})"
+)
+_BRACKET = re.compile(r"\s*[\[(][^\])]*[\])]\s*$")
+
+
+def _ordinals(text: str) -> set[int]:
+    return {int(m.group(1)) for m in _ORDINAL.finditer(text or "")}
+
+
+def _ordinals_of(text: str, name: str) -> set[int]:
+    """그 **이름에 붙은** 대수들. '25대 임금인 철종' 은 고종의 대수가 아니다."""
+    return {
+        int(m.group(1)) for m in _ORDINAL_OF.finditer(text or "")
+        if m.group(2).startswith(name)
+    }
+
+
+def overview_is_alien(ent: Entity) -> bool:
+    """'내용' 칸이 이 항목이 아니라 **딴 사람**을 말하고 있는가.
+
+    실측: 연대기의 두 정종(kc_n204400 定宗 3대 · kc_n204500 靖宗 10대)은
+    설명과 한자가 서로 맞는데 **본문만 맞바뀌어 실려 있다** — 3대 항목의
+    머리말이 '고려 10대 국왕인 정종(靖宗)은…'으로 시작한다. 국편 파일
+    자체의 오류다 (우리 판독이 아니라 원본 행이 그렇다).
+
+    합치고 나면 이 본문이 진짜 노드의 설명이 되므로 버린다. 재는 것은
+    **주인공 이름에 붙은 대수**뿐이다 — 본문이 앞 임금을 말하는 것은
+    당연하다 (고종 본문의 '조선의 25대 임금인 철종이 승하하자'를 대수
+    불일치로 읽으면 멀쩡한 본문이 통째로 날아간다). 인물만 본다."""
+    if ent.node_type != "person":
+        return False
+    name = _BRACKET.sub("", ent.label)
+    said = _ordinals(ent.summary)
+    if not said or not name:
+        return False
+    body = _ordinals_of(ent.overview, name)
+    return bool(body) and not (said & body)
+
+
 def load_entities(raw_dir: Path = RAW_DIR) -> list[Entity]:
     ents = group_entities(read_xlsx_rows(raw_dir / YEONDAEGI))
     for ent in ents:
@@ -267,6 +310,11 @@ def load_entities(raw_dir: Path = RAW_DIR) -> list[Entity]:
             log.warning("설명 칸이 딴 항목의 것이라 버린다: %s %s (%s)",
                         ent.kc_id, ent.label, ent.summary[:40])
             ent.summary = ""
+        if overview_is_alien(ent):
+            log.warning("본문이 딴 사람의 것이라 버린다: %s %s (설명 %s대 · 본문 %s대)",
+                        ent.kc_id, ent.label,
+                        sorted(_ordinals(ent.summary)), sorted(_ordinals(ent.overview)))
+            ent.sections = []
     return ents
 
 
