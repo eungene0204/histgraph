@@ -252,6 +252,48 @@ with tempfile.TemporaryDirectory() as tmp:
           all(e["src"] != e["dst"] for e in store.neighbors("wd:Q0")["edges"]))
     store.close()
 
+print("\n[회귀: 두 걸음 예산을 허브가 다 먹지 않는다]")
+# 명성황후를 검색했더니 화면이 조선의 그래프가 됐다 (2026-09-06 지적).
+# 두 걸음째 새 노드 91개 중 68개가 조선의 이웃이라 조선이 엣지 131개를
+# 달고 섰고, 정작 중심인 명성황후는 34개였다.
+with tempfile.TemporaryDirectory() as tmp:
+    store = GraphStore(Path(tmp) / "hub.sqlite")
+    nodes = [Node(id="wd:C", type="person", label="중심", source="wd"),
+             Node(id="wd:HUB", type="org", label="허브", source="wd")]
+    # 중심의 이웃 다섯. 하나는 허브(이웃 200), 넷은 각자 이웃 다섯.
+    for i in range(4):
+        nodes.append(Node(id=f"wd:N{i}", type="event", label=f"이웃{i}", source="wd"))
+        nodes += [Node(id=f"wd:N{i}x{j}", type="event", label=f"이웃{i}의{j}", source="wd")
+                  for j in range(5)]
+    nodes += [Node(id=f"wd:H{j}", type="event", label=f"허브의{j}", source="wd")
+              for j in range(200)]
+    store.upsert_nodes(nodes)
+    edges = [Edge(src="wd:C", dst="wd:HUB", type="member_of", source="wd")]
+    for i in range(4):
+        edges.append(Edge(src="wd:C", dst=f"wd:N{i}", type="participated_in", source="wd"))
+        edges += [Edge(src=f"wd:N{i}", dst=f"wd:N{i}x{j}", type="related_to", source="wd")
+                  for j in range(5)]
+    # 허브의 이웃은 저마다 엣지를 더 달아 차수가 높다 — 차수로 자르면 이들이 이긴다
+    for j in range(200):
+        edges.append(Edge(src="wd:HUB", dst=f"wd:H{j}", type="from_period", source="wd"))
+        edges.append(Edge(src=f"wd:H{j}", dst="wd:HUB", type="related_to", source="wd"))
+    store.upsert_edges(edges)
+
+    sub = store.neighbors("wd:C", depth=2, max_nodes=25)
+    got = {n["id"] for n in sub["nodes"]}
+    check("상한에 걸렸다", sub["truncated"])
+    check("중심의 이웃은 다섯 다 남는다",
+          all(i in got for i in ["wd:HUB", "wd:N0", "wd:N1", "wd:N2", "wd:N3"]))
+    mine = sum(1 for i in got if "x" in i)
+    hubs = sum(1 for i in got if i.startswith("wd:H") and i != "wd:HUB")
+    check("허브가 예산을 다 먹지 않는다", hubs <= 6, f"허브 {hubs} · 이웃의 이웃 {mine}")
+    check("이웃의 이웃도 들어온다", mine >= 12, f"허브 {hubs} · 이웃의 이웃 {mine}")
+
+    # 걸음이 하나뿐이면 나눌 상대가 없다 — 예전처럼 차수 순서로 남는다
+    one = store.neighbors("wd:HUB", depth=1, max_nodes=20)
+    check("한 걸음은 차수 순서 그대로", one["truncated"] and len(one["nodes"]) == 20)
+    store.close()
+
 print("\n[회귀: 탐색이 same_as 를 따라간다]")
 # same_as 테이블에만 링크가 있고 탐색이 따라가지 않으면 두 소스는
 # 실제로는 여전히 끊겨 있다.

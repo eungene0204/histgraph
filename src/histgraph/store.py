@@ -259,6 +259,62 @@ class GraphStore:
         )
         return {r["id"]: r["d"] for r in rows}
 
+    def _share_budget(
+        self,
+        rows: list[sqlite3.Row],
+        alias_rows: list[sqlite3.Row],
+        frontier: set[str],
+        candidates: set[str],
+        budget: int,
+    ) -> set[str]:
+        """상한에 걸렸을 때 **프론티어가 예산을 나눠 갖는다.**
+
+        차수로만 자르면 허브 하나가 예산을 통째로 먹는다 — 실측: 명성황후에서
+        두 걸음을 펴면 새 노드 91개 중 68개가 '조선'의 이웃이라, 화면이
+        명성황후가 아니라 조선의 그래프가 됐다 (2026-09-06 지적). 조선이
+        중요해서 이긴 것이 아니라 엣지가 많아서 이긴 것이다.
+
+        그래서 프론티어 노드마다 하나씩 돌아가며 담는다. 제 몫 안에서는 차수가
+        높은 이웃이 먼저고, 이웃이 적은 노드가 남긴 자리는 많은 쪽이 이어 쓴다.
+        걸음이 하나뿐이면(프론티어 = 중심 하나) 예전처럼 차수 순서가 된다 —
+        나눌 상대가 없다.
+        """
+        if budget <= 0:
+            return set()
+        kids: dict[str, set[str]] = {}
+        pairs = [(r["src"], r["dst"]) for r in rows]
+        pairs += [(r["a"], r["b"]) for r in alias_rows]
+        for a, b in pairs:
+            for parent, kid in ((a, b), (b, a)):
+                if parent in frontier and kid in candidates:
+                    kids.setdefault(parent, set()).add(kid)
+        rank = self.degrees(candidates)
+        order = {
+            p: sorted(ids, key=lambda i: (-rank.get(i, 0), i)) for p, ids in kids.items()
+        }
+        # 이웃이 적은 노드부터 돈다 — 몇 개 없는 쪽이 먼저 제 몫을 채우고
+        # 빠져야, 남은 자리를 허브가 이어 쓰는 순서가 된다.
+        parents = sorted(order, key=lambda p: (len(order[p]), p))
+        at = dict.fromkeys(parents, 0)
+        picked: set[str] = set()
+        while len(picked) < budget:
+            moved = False
+            for p in parents:
+                i, mine = at[p], order[p]
+                while i < len(mine) and mine[i] in picked:
+                    i += 1
+                at[p] = i
+                if i >= len(mine):
+                    continue
+                picked.add(mine[i])
+                at[p] = i + 1
+                moved = True
+                if len(picked) >= budget:
+                    break
+            if not moved:
+                break
+        return picked
+
     def neighbors(
         self,
         node_id: str,
@@ -312,6 +368,7 @@ class GraphStore:
             # same_as 를 따라가지 않으면 엔티티 해소가 테이블에만 존재하고
             # 실제 탐색에서는 두 소스가 여전히 끊겨 있다. 동일 실체는
             # 한 노드처럼 취급해 프론티어를 확장한다.
+            alias_rows: list[sqlite3.Row] = []
             if follow_same_as:
                 alias_rows = self._query_chunked(
                     "SELECT a, b, method, score FROM same_as "
@@ -326,9 +383,9 @@ class GraphStore:
                 )
                 aliases.extend(alias_rows)
             if len(seen) + len(nxt) > max_nodes:
-                rank = self.degrees(nxt)
-                ordered = sorted(nxt, key=lambda i: (-rank.get(i, 0), i))
-                nxt = set(ordered[: max(max_nodes - len(seen), 0)])
+                nxt = self._share_budget(
+                    rows, alias_rows, frontier, nxt, max(max_nodes - len(seen), 0)
+                )
                 truncated = True
             frontier = nxt
             seen |= nxt
