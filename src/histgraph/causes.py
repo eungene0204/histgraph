@@ -617,6 +617,30 @@ def fact_check(
     return None, kind, cap
 
 
+def alive_at(store: GraphStore, person_id: str, event_id: str) -> bool:
+    """그 사람이 그 사건 때 살아 있었나. 한쪽이라도 연대를 모르면 True.
+
+    모르는 것을 아니라고 하지 않는다 — 생몰이 빈 인물이 절반을 넘는다."""
+    row = store.conn.execute(
+        "SELECT id, start_date, end_date FROM nodes WHERE id IN (?,?)", (person_id, event_id)
+    ).fetchall()
+    got = {r["id"]: r for r in row}
+    person, event = got.get(person_id), got.get(event_id)
+    if person is None or event is None:
+        return True
+    from .timeline import _year_of
+
+    year = _year_of(event["start_date"])
+    if year is None:
+        return True
+    born, died = _year_of(person["start_date"]), _year_of(person["end_date"])
+    if born is not None and year < born:
+        return False
+    if died is not None and year > died:
+        return False
+    return True
+
+
 def accept(
     store: GraphStore, doc: dict, answers: list[dict], passages: list[dict], model: str,
 ) -> tuple[list[Edge], dict[str, int], list[str]]:
@@ -671,6 +695,15 @@ def accept(
         # `roles` 가 무엇을 했는지(피해·표적·수습…) 판정한다
         # (2026-09-06 사용자 결정: "1번으로 가자").
         if etype == "person" and ctype == "event" and kind == "영향":
+            # **죽은 뒤의 일에는 참여할 수 없다.** 김종직(1431~1492)이
+            # 무오사화(1498)를 '주도'한 것으로 판정된 적이 있다 — 연산군이
+            # 사화의 명분으로 그를 지목했을 뿐이고 그는 부관참시된 쪽이다.
+            # 사명대사(1543~1610)도 심하전투(1619)에 붙었다. 부관참시·추숭
+            # 처럼 사람이 죽은 뒤 이름이 오르내리는 일은 참여가 아니므로,
+            # 참인 것을 억지로 세우지 않고 여기서 놓는다 (CLAUDE.md §1-2).
+            if not alive_at(store, eid, cid):
+                drop("죽은 뒤의 일")
+                continue
             how_p = " ".join(str(a.get("how", "")).split())
             joined.append(Edge(
                 src=eid, dst=cid, type="participated_in", source=SOURCE_MARK,

@@ -3545,6 +3545,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("말뭉치에 문서가 있는 근현대 사건의 참여 엣지만 후보다",
           {c["src"] for c in cands} == {"wd:P1", "wd:P2"}, str([c["src"] for c in cands]))
     check("문서명 괄호를 뗀 이름으로도 찾는다", "김용현" in roles_mod.names_of(store, "wd:P2"))
+    # 판정 안 된 참여가 3,665건이라 한 번에 다 물으면 며칠이 걸린다.
+    # 새로 들어온 것부터 묻는 칸 (2026-09-06, `causes` 가 돌린 참여).
+    check("소스를 주면 그 소스가 만든 참여만 후보다",
+          {c["src"] for c in roles_mod.candidates(store, conn, since=1945,
+                                                  sources=frozenset({"kowiki:infobox"}))}
+          == {"wd:P1", "wd:P2"}
+          and roles_mod.candidates(store, conn, since=1945,
+                                   sources=frozenset({"causes"})) == [])
     got = roles_mod.gather(store, conn, "wd:P1", "wd:EV")
     check("그 사람이 나오는 문단만 모은다", got and all("이재명" in g["text"] for g in got))
     check("문단이 없으면 빈 목록", roles_mod.gather(store, conn, "wd:P2", "wd:EV") == [])

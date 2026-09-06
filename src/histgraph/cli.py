@@ -1303,8 +1303,10 @@ def cmd_roles(args: argparse.Namespace) -> int:
     conn = corpus_mod.open_corpus(args.corpus)
     with GraphStore(args.db) as store:
         only = frozenset(r.strip() for r in args.redo_roles.split(",") if r.strip()) if args.redo_roles else None
+        srcs = frozenset(x.strip() for x in args.sources.split(",") if x.strip()) if args.sources else None
         got = roles_mod.run(store, conn, backend, since=args.since, limit=args.limit,
-                            dry_run=args.dry_run, redo=args.redo, only_roles=only)
+                            dry_run=args.dry_run, redo=args.redo, only_roles=only,
+                            sources=srcs)
     c = got["counts"]
     print(f"  후보 {c['후보']:,}건 · 근거 문단 있음 {c['문단 있음']:,} · 없음 {c['문단 없음']:,}")
     if got["by_role"]:
@@ -2464,6 +2466,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ro.add_argument("--model", default=None)
     p_ro.add_argument("--dry-run", action="store_true", help="모델 없이 근거 문단 유무만 센다")
     p_ro.add_argument("--redo", action="store_true", help="이미 판정한 엣지도 다시")
+    p_ro.add_argument("--sources", default=None,
+                      help="이 소스가 만든 참여만 판정 (쉼표, 예: causes)")
     p_ro.add_argument("--redo-roles", default=None,
                       help="이 역할로 판정됐던 엣지만 다시 묻는다 (쉼표, 예: 주도)")
     p_ro.set_defaults(func=cmd_roles)
