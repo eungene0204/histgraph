@@ -368,6 +368,18 @@ def validate(payload: dict) -> tuple[dict, list[str]]:
         e = parse_when(n.get("end_date"), birth)[0]
         n["year"], n["end_year"], n["precision"] = y, (e if e is not None else (y2 if y2 != y else None)), prec
 
+    # 양끝을 id 대신 **이름**으로 적는 모델이 있다 (2026-09-08 실측: 무료
+    # 모델 하나가 관계 열일곱 중 여섯을 그렇게 적었다). 관계는 참인데 부르는
+    # 법만 다른 것이라 버리지 않고 되짚는다. 같은 이름이 둘이면 손대지 않는다.
+    by_name: dict[str, str] = {}
+    for n in nodes:
+        by_name[_norm_label(n["name"])] = "" if _norm_label(n["name"]) in by_name else n["id"]
+
+    def _endpoint(ref: Any) -> str | None:
+        if ref in by_id:
+            return str(ref)
+        return by_name.get(_norm_label(ref)) or None
+
     edges: list[dict] = []
     for e in payload.get("edges") or []:
         if not isinstance(e, dict):
@@ -376,10 +388,14 @@ def validate(payload: dict) -> tuple[dict, list[str]]:
         if t not in EDGE_TYPE_KO:
             notes.append(f"모르는 관계 {t!r}: {e.get('source')} → {e.get('target')} — 버림")
             continue
-        if e.get("source") not in by_id or e.get("target") not in by_id:
+        src, dst = _endpoint(e.get("source")), _endpoint(e.get("target"))
+        if src is None or dst is None:
             notes.append(f"양끝이 없는 관계 {e.get('source')} → {e.get('target')} — 버림")
             continue
-        edges.append(dict(e, confidence=_clip(e.get("confidence", 1.0), 0.0, 1.0)))
+        if src != e.get("source") or dst != e.get("target"):
+            notes.append(f"이름으로 적힌 관계를 노드에 이음: {e.get('source')} → {e.get('target')}")
+        edges.append(dict(e, source=src, target=dst,
+                          confidence=_clip(e.get("confidence", 1.0), 0.0, 1.0)))
     out["edges"] = edges
 
     timeline: list[dict] = []
@@ -427,6 +443,10 @@ def validate(payload: dict) -> tuple[dict, list[str]]:
     out["family_analysis"] = payload.get("family_analysis") or {"members": []}
     out["counterfactual_analysis"] = [c for c in payload.get("counterfactual_analysis") or [] if isinstance(c, dict)]
     out["life_patterns"] = [p for p in payload.get("life_patterns") or [] if isinstance(p, dict)]
+    # 어느 모델이 쓴 그래프인지. 백엔드가 여럿이라(로컬 MLX·OpenRouter 무료
+    # 모델) 이 값이 없으면 나중에 이상한 노드의 출처를 가릴 수 없다.
+    if payload.get("_model"):
+        out["_model"] = payload["_model"]
     out["notes"] = notes
     return out, notes
 
@@ -440,6 +460,10 @@ def _clip(v: Any, lo: float, hi: float) -> float:
 
 
 # --- 그래프에 잇기 -----------------------------------------------------------
+# 이름 뒤에 붙은 해 — '3·1 운동(1919)' · '6.25 전쟁 (1950년)'.
+_TRAILING_YEAR = re.compile(r"[（(]\s*(\d{3,4})\s*년?\s*[）)]\s*$")
+
+
 def link(payload: dict, api) -> int:
     """모델이 이름으로만 부른 역사 사건을 그래프의 노드에 잇는다.
 
@@ -453,6 +477,14 @@ def link(payload: dict, api) -> int:
         label = c.get("historical_event") or ""
         if not label:
             continue
+        # 모델은 우리가 보여 준 목록('이름(1997)')을 괄호째 베껴 온다
+        # (2026-09-08 실측 — 그 때문에 이은 것이 0 이었다). 뒤에 붙은 해는
+        # 이름이 아니라 해다. 떼어 내고 해가 비었으면 그 값을 쓴다.
+        m = _TRAILING_YEAR.search(label)
+        if m:
+            label = label[: m.start()].strip()
+            if c.get("year") is None:
+                c["year"] = int(m.group(1))
         hits = api.search(label, 8) if hasattr(api, "search") else []
         want = _norm_label(label)
         best = None

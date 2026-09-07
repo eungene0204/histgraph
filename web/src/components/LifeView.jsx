@@ -82,6 +82,9 @@ export default function LifeView() {
   const [tab, setTab] = useState('event');
   const [writing, setWriting] = useState(false);   // 이야기 상자를 폈나
   const [job, setJob] = useState(null);   // 분석 상태 (running·done·error)
+  // 이야기를 읽는 모델이 이 컴퓨터에 있는가. 서버가 `/api/life/job` 에 적어
+  // 준다 — 밖의 무료 모델로 읽으면 글이 이 컴퓨터를 나가므로 **그렇게 적는다.**
+  const [local, setLocal] = useState(true);
   const [offline, setOffline] = useState(false);
   const rootRef = useRef(null);
   const boardRef = useRef(null);
@@ -149,7 +152,7 @@ export default function LifeView() {
   const onStory = useCallback(async (text, name) => {
     const r = await postJson('/api/life/analyze', { text, name });
     if (r.ok || r.status === 409) {   // 409 는 이미 돌고 있다는 뜻이라 같이 지켜본다
-      setJob({ state: 'running', step: '모델을 올리는 중', elapsed: 0 });
+      setJob({ state: 'running', step: '모델에게 묻는 중', elapsed: 0 });
       watchJob();
       return;
     }
@@ -172,7 +175,9 @@ export default function LifeView() {
     // 창을 닫았다 다시 열어도 돌던 분석은 서버에서 계속 돈다.
     (async () => {
       const st = await getJson('/api/life/job').catch(() => null);
-      if (!alive || st?.state !== 'running') return;
+      if (!alive || !st) return;
+      setLocal(st.backend !== 'openrouter' && st.backend !== 'anthropic');
+      if (st.state !== 'running') return;
       setJob(st); setWriting(true); watchJob();
     })();
     return () => { alive = false; };
@@ -241,7 +246,7 @@ export default function LifeView() {
         <ThemeToggle onChange={() => boardRef.current?.layout()} />
       </header>
 
-      {writing && <StoryBox job={job} onSubmit={onStory} onClose={() => setWriting(false)} />}
+      {writing && <StoryBox job={job} local={local} onSubmit={onStory} onClose={() => setWriting(false)} />}
 
       <div className="layout life-layout">
         {/* 연표 판은 늘 붙어 있다(LifeBoard 가 DOM 을 쥔다). 자료가 없으면 빈
@@ -252,7 +257,7 @@ export default function LifeView() {
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
-            {!life && <Empty offline={offline} onSample={loadSample} onWrite={() => setWriting(true)} />}
+            {!life && <Empty offline={offline} local={local} onSample={loadSample} onWrite={() => setWriting(true)} />}
           </div>
         </section>
         {life && (
@@ -303,7 +308,7 @@ export default function LifeView() {
   );
 }
 
-function Empty({ offline, onSample, onWrite }) {
+function Empty({ offline, local, onSample, onWrite }) {
   return (
     <div className="life-empty">
       <h2>내 삶을 한국사 옆에 세웁니다</h2>
@@ -311,7 +316,9 @@ function Empty({ offline, onSample, onWrite }) {
       <ol>
         <li><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
           잊히지 않는 책·영화·음악·게임.</li>
-        <li>로컬 모델이 그 글을 읽어 사건과 인과로 옮깁니다. 몇 분 걸립니다. 글도 결과도 이 컴퓨터 밖으로 나가지 않습니다.</li>
+        <li>{local
+          ? '이 컴퓨터의 모델이 그 글을 읽어 사건과 인과로 옮깁니다. 몇 분 걸립니다. 글도 결과도 이 컴퓨터 밖으로 나가지 않습니다.'
+          : '모델이 그 글을 읽어 사건과 인과로 옮깁니다. 1~2분 걸립니다. 읽는 모델이 인터넷 너머에 있어 글이 그리로 갑니다 — 결과는 이 컴퓨터에 남습니다.'}</li>
         <li>사건을 누르면 오른쪽에 원인과 결과, 그 해의 한국사, 전환점 점수가 나옵니다.</li>
       </ol>
       <div className="life-empty-row">
@@ -326,7 +333,7 @@ function Empty({ offline, onSample, onWrite }) {
 // 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
 // 빈 칸에 '자유롭게 적으세요' 라고 쓰면 아무도 첫 줄을 못 적는다.
 // 적다 만 글은 브라우저에 남긴다. 분석이 몇 분이라 그동안 창을 닫는다.
-function StoryBox({ job, onSubmit, onClose }) {
+function StoryBox({ job, local, onSubmit, onClose }) {
   const [text, setText] = useState(() => {
     try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
   });
@@ -345,7 +352,9 @@ function StoryBox({ job, onSubmit, onClose }) {
         ) : job?.state === 'error' ? (
           <span className="tl-hint life-warn">{job.error}</span>
         ) : (
-          <span className="tl-hint">이 컴퓨터의 모델이 읽습니다. 글은 어디로도 보내지 않습니다.</span>
+          <span className="tl-hint">{local
+            ? '이 컴퓨터의 모델이 읽습니다. 글은 어디로도 보내지 않습니다.'
+            : '인터넷 너머의 모델이 읽습니다. 적은 글이 그 모델로 갑니다.'}</span>
         )}
         <button type="button" className="life-btn" onClick={onClose}>닫기</button>
         <button type="button" className="life-btn on" disabled={running || text.trim().length < 40}

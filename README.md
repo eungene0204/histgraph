@@ -101,14 +101,25 @@ Wikidata 한국어 한 줄 설명을 갖고 있었고, `props.no_kowiki` 표식�
 환경은 uv 가 잡는다 (Python 3.11+). 본체는 표준 라이브러리만 쓰고,
 서드파티는 추출 백엔드에만 붙는다 — `--extra mlx` 는 로컬 추출(Apple
 Silicon), `--extra anthropic` 은 원격 추출. 둘 다 없어도 수집·화면은 돈다.
+**OpenRouter 는 서드파티가 없다** (표준 라이브러리로 부른다) — `.env` 에
+`OPENROUTER_API_KEY` 만 있으면 된다.
 
 ### 개인 역사 — 내 삶을 한국사 옆에 (`life`)
 
 ```
-uv run histgraph life data/life/나.txt      # 이야기(글) → data/life/나.json (MLX, 35GB)
+uv run histgraph life data/life/나.txt      # 이야기(글) → data/life/나.json
 uv run histgraph life --json 받은.json      # 채팅으로 받은 JSON 을 검증·연결만
 open http://127.0.0.1:8100/life.html       # 왼쪽 왕·대통령 · 가운데 한국사 · 오른쪽 내 역사
 ```
+
+**이야기를 읽는 모델은 둘이다.** `.env` 에 OpenRouter 열쇠가 있으면 그쪽의
+무료 모델(`OPENROUTER_MODEL`, 기본 `nvidia/nemotron-3-super-120b-a12b:free`)
+이고, 없으면 로컬 MLX(35GB)다 — `backends.default_life_backend`. `--backend`
+로 골라 쓸 수 있다. 무료 모델을 고른 기준은 **JSON 스키마를 진짜로 지키는가**
+하나였다 (무료 19개 중 다섯. 나머지는 라벨을 중국어로 내거나, 상류가 늘 429
+이거나, 스키마를 아예 안 받는다 — HANDOFF 2026-09-08). 남의 GPU 라 이야기
+원문이 OpenRouter 를 지난다 — 그것이 싫으면 `--backend mlx` 가 이 컴퓨터
+밖으로 아무것도 내보내지 않는다.
 
 **터미널을 안 열어도 된다.** 화면 머리의 '내 역사 입력하기' 에 이야기를 적고
 '세우기' 를 누르면 로컬 서버가 같은 길을 대신 지난다 (`POST /api/life/analyze`

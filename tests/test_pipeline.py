@@ -1055,6 +1055,96 @@ try:
     check("알 수 없는 백엔드는 거부", False)
 except ValueError:
     check("알 수 없는 백엔드는 거부", True)
+# --- OpenRouter (무료 모델). 네트워크 없이 몸통만 본다 ---------------------
+import json as _j0  # noqa: E402
+import os as _os0  # noqa: E402
+import time as _t0  # noqa: E402
+import urllib.request as _ur  # noqa: E402
+
+import histgraph.backends as _bk  # noqa: E402
+
+_keep_or = {k: _os0.environ.get(k) for k in (_bk.ENV_OPENROUTER_KEY, _bk.ENV_OPENROUTER_MODEL)}
+_bk.OPENROUTER_MIN_INTERVAL = 0     # 테스트가 한도를 지키느라 3초씩 자지 않게
+try:
+    _os0.environ.pop(_bk.ENV_OPENROUTER_KEY, None)
+    _os0.environ.pop(_bk.ENV_OPENROUTER_MODEL, None)
+    check("열쇠가 없으면 개인 역사는 로컬 모델로", _bk.default_life_backend() == "mlx")
+    check("열쇠가 없으면 부르지 않는다 (빈 답)",
+          _bk.OpenRouterBackend().complete_json("s", "u", {"type": "object"}) is None)
+    _os0.environ[_bk.ENV_OPENROUTER_KEY] = "sk-or-test"
+    check("열쇠가 있으면 OpenRouter 로", _bk.default_life_backend() == "openrouter")
+    check("모델 기본값은 무료 모델", build_backend("openrouter").model.endswith(":free"))
+    _os0.environ[_bk.ENV_OPENROUTER_MODEL] = "다른/모델:free"
+    check("모델은 환경변수가 정한다", build_backend("openrouter").model == "다른/모델:free")
+    check("--model 이 환경변수를 이긴다", build_backend("openrouter", "고른/모델").model == "고른/모델")
+
+    class _Resp:
+        def __init__(self, body): self.body = _j0.dumps(body).encode()
+        def read(self): return self.body
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    calls: list[dict] = []
+
+    def _fake_urlopen(req, timeout=None):
+        calls.append(_j0.loads(req.data.decode()))
+        return _Resp(replies.pop(0))
+
+    class _NoSleep:      # 재시도의 대기를 테스트가 실제로 자지 않게
+        sleep = staticmethod(lambda _s: None)
+        monotonic = staticmethod(_t0.monotonic)
+
+    _keep_urlopen, _ur.urlopen = _ur.urlopen, _fake_urlopen
+    _keep_time, _bk.time = _bk.time, _NoSleep
+    try:
+        # 상류 오류는 **HTTP 200 으로도** 온다 — 몸을 보지 않으면 빈 답을 정답으로 읽는다.
+        replies = [{"error": {"code": 502, "message": "Service temporarily overloaded"}},
+                   {"choices": [{"finish_reason": "stop",
+                                 "message": {"content": '{"nodes": []}'}}]}]
+        calls.clear()
+        _bk.OPENROUTER_MIN_INTERVAL = 0
+        back = _bk.OpenRouterBackend(retries=2)
+        got = back.complete_json("s", "u", {"type": "object"}, max_tokens=100)
+        check("200 으로 온 오류를 답으로 읽지 않고 다시 묻는다", got == {"nodes": []} and len(calls) == 2)
+        check("사고는 꺼서 묻는다 (안 끄면 상한을 사고가 다 쓴다)",
+              calls[0]["reasoning"] == {"enabled": False} and calls[0]["temperature"] == 0)
+        check("스키마를 강제해 묻는다",
+              calls[0]["response_format"]["json_schema"]["strict"] is True)
+
+        # 사고를 못 끄는 모델이 있다 (liquid: 400). 켜고 다시 묻는다.
+        replies = [{"error": {"code": 400, "message": "Reasoning is mandatory for this endpoint and cannot be disabled."}},
+                   {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}]
+        calls.clear()
+        back2 = _bk.OpenRouterBackend(retries=3)
+        check("사고를 못 끄는 모델은 켜고 다시 묻는다",
+              back2.complete_json("s", "u", {"type": "object"}) == {}
+              and "reasoning" not in calls[1] and back2.reasoning_locked)
+
+        # 스키마를 안 받는 모델은 한 칸씩 물러난다 (strict → 느슨 → JSON 모드).
+        replies = [{"error": {"code": 400, "message": "response_format.json_schema is not supported"}},
+                   {"error": {"code": 400, "message": "response_format.json_schema is not supported"}},
+                   {"choices": [{"finish_reason": "stop", "message": {"content": '```json\n{"a":1}\n```'}}]}]
+        calls.clear()
+        got3 = _bk.OpenRouterBackend(retries=1).complete_json("s", "u", {"type": "object"})
+        check("스키마를 거절하면 형식을 낮춰 다시 묻는다",
+              got3 == {"a": 1} and [c["response_format"]["type"] for c in calls]
+              == ["json_schema", "json_schema", "json_object"])
+
+        # 형식 탓이 아닌 거절(모델 없음)에는 물러나 봐야 소용없다 — 한 번만 묻는다.
+        replies = [{"error": {"code": 404, "message": "No endpoints found for 없는/모델"}}]
+        calls.clear()
+        check("형식 탓이 아니면 물러나지 않는다",
+              _bk.OpenRouterBackend(retries=1).complete_json("s", "u", {"type": "object"}) is None
+              and len(calls) == 1)
+    finally:
+        _ur.urlopen = _keep_urlopen
+        _bk.time = _keep_time
+finally:
+    for _k, _v in _keep_or.items():
+        if _v is None:
+            _os0.environ.pop(_k, None)
+        else:
+            _os0.environ[_k] = _v
 
 print("\n[승격 — ex: 고아 노드]")
 from histgraph.promote import (  # noqa: E402
@@ -5496,6 +5586,33 @@ with tempfile.TemporaryDirectory() as tmp:
     c0 = payload["historical_connections"][0]
     check("이름과 해가 맞는 사건 노드에 잇는다 (1897 년의 동명 사건이 아니라)", linked == 1 and c0["node_id"] == "wd:IMF", str(c0))
     check("못 이은 것은 None 으로 둔다", payload["historical_connections"][1]["node_id"] is None)
+    # 무료 모델이 실제로 낸 두 가지 어긋남 (2026-09-08). 관계·연결은 참인데
+    # 부르는 법만 다르다 — 버리면 화면에서 그 사건이 없었던 일이 된다.
+    named = {
+        "nodes": [{"id": "p1", "type": "Person", "name": "나", "confidence": 1.0},
+                  {"id": "l1", "type": "Residence", "name": "서울 관악구", "confidence": 1.0},
+                  {"id": "l2", "type": "Residence", "name": "대구", "confidence": 1.0},
+                  {"id": "l3", "type": "TravelLocation", "name": "대구", "confidence": 1.0}],
+        "edges": [{"source": "나", "target": "서울관악구", "type": "lived_in", "confidence": 1.0},
+                  {"source": "p1", "target": "대구", "type": "born_in", "confidence": 1.0},
+                  {"source": "p1", "target": "없는 것", "type": "lived_in", "confidence": 1.0}],
+        "timeline": [],
+        "historical_connections": [
+            {"personal_event": "p1", "historical_event": "대한민국의 IMF 구제금융 요청(1997)",
+             "impact_type": "direct", "description": "…", "confidence": 1.0}],
+        "_model": "무료/모델:free",
+    }
+    fixed, fnotes = life_mod.validate(named)
+    check("양끝을 이름으로 적은 관계는 노드에 이어 준다",
+          [(e["source"], e["target"]) for e in fixed["edges"]] == [("p1", "l1")], str(fixed["edges"]))
+    check("같은 이름이 둘이면 잇지 않는다 (대구가 둘)",
+          any("대구" in n for n in fnotes) and any("없는 것" in n for n in fnotes), str(fnotes))
+    check("어느 모델이 쓴 그래프인지 남긴다", fixed["_model"] == "무료/모델:free")
+    check("이름 뒤에 붙은 해는 이름이 아니다 — 떼고 잇는다",
+          life_mod.link(fixed, api) == 1
+          and fixed["historical_connections"][0]["node_id"] == "wd:IMF"
+          and fixed["historical_connections"][0]["year"] == 1997,
+          str(fixed["historical_connections"][0]))
     st, ctx = _life_dispatch(api, "/api/context", {"from": ["1985"], "to": ["2026"]})
     check("/api/context 가 구간의 재위 띠와 사건을 준다",
           st == 200 and [r["label"] for r in ctx["reigns"]] == ["김대중"] and {a["id"] for a in ctx["anchors"]} == {"wd:IMF", "wd:COV"}, str(ctx))
@@ -5527,7 +5644,11 @@ with tempfile.TemporaryDirectory() as tmp:
     tapi = _LifeAPI(Path(tmp) / "korea.sqlite", era="korea")
     try:
         job = _LifeJob()
-        check("분석 전에는 idle", job.status() == {"state": "idle"})
+        idle = job.status()
+        check("분석 전에는 idle", idle["state"] == "idle")
+        # 화면이 '글이 이 컴퓨터 밖으로 나가지 않는다'고 적어도 되는지가
+        # 이 값으로 갈린다 (LifeView 의 `local`).
+        check("어느 모델로 읽는지 같이 알린다", idle["backend"] in ("mlx", "openrouter"))
         check("이야기를 주면 띄운다", job.start(tapi, "이야기", name="시험"))
         for _ in range(200):
             if job.status()["state"] != "running":

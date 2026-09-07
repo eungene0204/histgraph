@@ -2283,15 +2283,18 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_life(args: argparse.Namespace) -> int:
     """인생 이야기(글 파일)를 개인 역사 그래프(JSON)로. `life` 모듈 머리글.
 
-        uv run histgraph life data/life/나.txt                # MLX 로 분석해 data/life/나.json
+        uv run histgraph life data/life/나.txt                # 분석해 data/life/나.json
+        uv run histgraph life data/life/나.txt --backend mlx    # 로컬 모델로 (열쇠 없이)
         uv run histgraph life --json data/life/나.json         # 이미 받은 JSON 을 검증·연결만
         uv run histgraph life data/life/나.txt --dry-run       # 프롬프트만 찍는다
 
-    모델은 MLX 가 기본이고 35GB 를 잡는다 — `extract`·`roles`·`causes` 와
-    함께 띄우지 말 것. 지시문을 그대로 Claude 채팅에 넣어 받은 JSON 도
-    `--json` 으로 같은 관문을 지난다. 결과는 data/life/ 에 남고 저장소에는
-    안 올라간다. 화면은 http://127.0.0.1:8100/life.html 이다."""
+    모델은 `.env` 에 OpenRouter 열쇠가 있으면 **openrouter**(무료 모델,
+    남의 GPU)이고 없으면 MLX 다. MLX 는 35GB 를 잡는다 — `extract`·`roles`·
+    `causes` 와 함께 띄우지 말 것. 지시문을 그대로 Claude 채팅에 넣어 받은
+    JSON 도 `--json` 으로 같은 관문을 지난다. 결과는 data/life/ 에 남고
+    저장소에는 안 올라간다. 화면은 http://127.0.0.1:8100/life.html 이다."""
     from . import life as life_mod
+    from .backends import default_life_backend
     from .server import GraphAPI
 
     if args.json is None and args.text is None:
@@ -2315,7 +2318,8 @@ def cmd_life(args: argparse.Namespace) -> int:
             print("\n" + "=" * 46 + "\n")
             print(life_mod.build_user(text, anchors=anchors))
             return 0
-        backend = build_backend(args.backend, args.model)
+        backend = build_backend(args.backend or default_life_backend(), args.model)
+        print(f"  모델: {backend.name} · {backend.model}")
         raw = life_mod.analyze(text, backend, anchors=anchors)
         if raw is None:
             print("  모델이 JSON 을 돌려주지 않았습니다.", file=sys.stderr)
@@ -2726,8 +2730,11 @@ def main(argv: list[str] | None = None) -> int:
     p_lf.add_argument("--era", default="korea", help="역사 사건을 이을 그래프 (data/{era}.sqlite)")
     p_lf.add_argument("--from-year", type=int, default=1940,
                       help="모델에게 보일 그래프 사건 목록의 시작 해 (생년보다 앞이면 된다)")
-    p_lf.add_argument("--backend", default="mlx", choices=["mlx", "anthropic"])
-    p_lf.add_argument("--model", default=None)
+    p_lf.add_argument("--backend", default=None, choices=["openrouter", "mlx", "anthropic"],
+                      help="해석할 모델. 기본은 .env 에 OpenRouter 열쇠가 있으면 openrouter, "
+                           "없으면 mlx (로컬 35GB)")
+    p_lf.add_argument("--model", default=None,
+                      help="모델 이름 (openrouter 는 .env 의 OPENROUTER_MODEL 이 기본)")
     p_lf.add_argument("--dry-run", action="store_true", help="프롬프트만 찍고 모델은 안 부른다")
     p_lf.set_defaults(func=cmd_life)
 

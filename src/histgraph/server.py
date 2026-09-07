@@ -1091,11 +1091,17 @@ class GraphAPI:
 # 계속 돈다. 그래서 스레드에 맡기고 화면이 `/api/life/job` 으로 물어본다.
 # **한 번에 하나만** 돈다 — 두 개를 띄우면 자리가 없어 커널이 죽인다.
 #
-# 배포에는 없는 길이다. 개인 자료는 저장소 밖(`data/life/`)이고 모델도
-# 로컬에만 있다 — 서버리스 함수는 do_POST 를 갖지 않는다.
+# 배포에는 없는 길이다. 개인 자료는 저장소 밖(`data/life/`)이고 이 화면은
+# 아직 로컬에만 있다 — 서버리스 함수는 do_POST 를 갖지 않는다. 모델은
+# 이제 둘이다: 로컬 MLX 와 OpenRouter 의 무료 모델. 어느 쪽인지는 `.env` 의
+# 열쇠가 정한다 (`backends.default_life_backend`).
 # 모델에게 보일 그래프 사건 목록의 시작 해. CLI 는 1940 을 기본으로 물어보지만
 # 화면은 생년을 묻지 않으므로 조금 앞에서 시작한다 (1900~오늘 = 사건 221건).
 LIFE_FROM_YEAR = 1900
+# 기다리는 사람에게 무엇을 기다리는지 적는다. 로컬 모델은 35GB 를 읽느라
+# 첫 몇 분이 조용하고, OpenRouter 는 남의 GPU 라 그 줄이 없다.
+FIRST_STEP = {"mlx": "모델을 올리는 중", "openrouter": "모델에게 묻는 중",
+              "anthropic": "모델에게 묻는 중"}
 
 
 def _life_name(name: str) -> str:
@@ -1112,21 +1118,34 @@ class LifeAnalysis:
         self._state: dict = {"state": "idle"}
 
     def status(self) -> dict:
+        """지금 상태. **어느 모델로 읽는지도 같이 준다** — 화면이 '글이 이
+        컴퓨터 밖으로 나가지 않는다'고 적어도 되는지가 그것으로 갈린다."""
+        from .backends import default_life_backend
+
         with self._lock:
             st = dict(self._state)
         started = st.pop("started", None)
         if st.get("state") == "running" and started is not None:
             st["elapsed"] = int(time.time() - started)
+        st.setdefault("backend", default_life_backend())
         return st
 
     def start(self, api: GraphAPI, text: str, name: str = "나",
-              backend: str = "mlx") -> bool:
+              backend: str = "") -> bool:
+        """분석을 띄운다. 이미 돌고 있으면 False.
+
+        백엔드를 안 주면 `.env` 를 보고 고른다 — 열쇠가 있으면 OpenRouter
+        (무료 모델), 없으면 로컬 MLX (`backends.default_life_backend`).
+        화면은 어느 쪽인지 묻지 않는다."""
+        from .backends import default_life_backend
+
+        kind = backend or default_life_backend()
         with self._lock:
             if self._state.get("state") == "running":
                 return False
-            self._state = {"state": "running", "started": time.time(),
-                           "step": "모델을 올리는 중"}
-        threading.Thread(target=self._run, args=(api, text, name, backend),
+            self._state = {"state": "running", "started": time.time(), "backend": kind,
+                           "step": FIRST_STEP.get(kind, "모델에게 묻는 중")}
+        threading.Thread(target=self._run, args=(api, text, name, kind),
                          name="life-analyze", daemon=True).start()
         return True
 
@@ -1313,7 +1332,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "이야기가 너무 짧습니다 — 몇 문장이라도 적어 주세요."}, 400)
             return
         if not LIFE_JOBS.start(self.api, text, str(body.get("name") or "나"),
-                               str(body.get("backend") or "mlx")):
+                               str(body.get("backend") or "")):
             self._json({"error": "이미 분석 중입니다."}, 409)
             return
         self._json(LIFE_JOBS.status(), 202)
