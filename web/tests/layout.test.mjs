@@ -442,6 +442,52 @@ console.log('\nsetData 와 same_as');
   }
 }
 
+// --- 같은 캔버스에 다시 세워도 배율이 산다 --------------------------------
+// 2026-09-08: 개인 역사 그래프가 잔상으로 뒤덮였다. StrictMode 가 같은
+// 캔버스에 GraphView 를 다시 세우면 배킹 크기가 이미 맞아 _resize 가 일찍
+// 돌아갔고, 그때 dpr 이 없어 setTransform 에 NaN 이 들어갔다 — 캔버스는
+// 변환을 통째로 무시하므로 1배로 그리고, 지우는 자리도 왼쪽 위 1/4 뿐이라
+// 나머지에 지난 프레임이 쌓인다.
+console.log('\n배율(dpr)');
+{
+  const noop = () => {};
+  const calls = [];
+  const ctx = new Proxy({}, {
+    get: (_t, k) => (...args) => { calls.push([k, ...args]); },
+    set: () => true,
+  });
+  const canvas = {
+    getContext: () => ctx, clientWidth: 800, clientHeight: 600,
+    // 이미 2배로 잡혀 있는 캔버스 — 두 번째 GraphView 가 물려받는 자리다.
+    width: 1600, height: 1200,
+    style: {}, parentElement: {}, addEventListener: noop,
+    setPointerCapture: noop, releasePointerCapture: noop,
+  };
+  const saved = { RO: globalThis.ResizeObserver, raf: globalThis.requestAnimationFrame,
+                  caf: globalThis.cancelAnimationFrame, win: globalThis.window };
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  globalThis.requestAnimationFrame = () => 0;
+  globalThis.cancelAnimationFrame = noop;
+  globalThis.window = { devicePixelRatio: 2 };
+  try {
+    const view = new GraphView(canvas);
+    ok('크기가 그대로여도 배율을 든다', view.dpr === 2, String(view.dpr));
+    calls.length = 0;
+    view._draw();
+    const t = calls.find((c) => c[0] === 'setTransform');
+    ok('변환에 NaN 이 안 간다', t && t.slice(1).every(Number.isFinite), JSON.stringify(t));
+    ok('변환이 배율 그대로', t && t[1] === 2 && t[4] === 2, JSON.stringify(t));
+    const clear = calls.find((c) => c[0] === 'clearRect');
+    ok('지우는 자리가 캔버스 전체', clear && clear[3] * view.dpr >= canvas.width && clear[4] * view.dpr >= canvas.height, JSON.stringify(clear));
+    view.destroy();
+  } finally {
+    globalThis.ResizeObserver = saved.RO;
+    globalThis.requestAnimationFrame = saved.raf;
+    globalThis.cancelAnimationFrame = saved.caf;
+    if (saved.win === undefined) delete globalThis.window; else globalThis.window = saved.win;
+  }
+}
+
 console.log('\n==============================================');
 console.log(`통과 ${pass} / 실패 ${fail}`);
 process.exit(fail ? 1 : 0);

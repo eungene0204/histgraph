@@ -194,6 +194,15 @@ export class GraphView {
     this.onCausalExit = opts.onCausalExit || (() => {});
     this.forces = { ...DEFAULT_FORCES };
 
+    // **여기서 한 번 정해 둔다.** _resize 는 배킹 크기가 그대로면 일찍
+    // 돌아가는데, StrictMode 가 같은 캔버스에 GraphView 를 다시 세우면
+    // (개발 서버 5173) 크기가 이미 맞아 그 길로 빠진다. 그때 dpr 이 없으면
+    // setTransform 에 NaN 이 들어가 **캔버스가 변환을 통째로 무시하고**
+    // 1배로 그린다 — 화면의 왼쪽 위 1/4 에만 그려지고, 지우는 자리도 그
+    // 1/4 뿐이라 나머지 3/4 에 지난 프레임이 겹겹이 쌓인다
+    // (실측 2026-09-08: 개인 역사 그래프가 잔상으로 뒤덮였다).
+    this.dpr = window.devicePixelRatio || 1;
+
     this._acc = 0;
     this._prev = 0;
     this._raf = 0;
@@ -714,11 +723,12 @@ export class GraphView {
     const h = this.canvas.clientHeight;
     const pw = Math.round(w * dpr);
     const ph = Math.round(h * dpr);
+    // 배율은 일찍 돌아가더라도 늘 최신으로 둔다 (그리는 쪽이 이걸 읽는다).
+    this.dpr = dpr;
     // **크기가 그대로면 아무것도 하지 않는다.** ResizeObserver 는 상세
     // 패널이 열리거나 소수점 반올림이 달라져도 불린다. 그때마다 alpha 를
     // 되살리면 시뮬레이션이 영영 식지 않아 배치가 계속 떤다.
     if (pw === this.canvas.width && ph === this.canvas.height) return;
-    this.dpr = dpr;
     this.canvas.width = pw;
     this.canvas.height = ph;
     if (this.causalView) { this._layoutCausal(); return; }
