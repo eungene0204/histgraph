@@ -125,12 +125,18 @@ export function graphMeta(life) {
 // 연결선이 지난다 — 라벨 위를 지나면 글자를 가른다. 인생 단계 띠는 **맨
 // 오른쪽**이다: 개인 열 왼쪽에 두면 연결선이 띠의 이름을 가로지른다
 // (실측: '초등학교 1997~1998' 위로 IMF 선이 지났다).
+//
+// 너비는 **좁게** 잡는다 (2026-09-08 지적: "연표 폭을 줄여줘 너무 넓어").
+// 세 열을 다 펴면 그만큼 가운데 그래프가 좁아지는데, 줄은 이름 한 줄이라
+// 넘치면 말줄임으로 접히고 전체 이름은 title 에 남는다 — 넓게 잡을 값이
+// 아니다. 왼쪽 띠만 시대 연표와 같은 104px 로 둔다 (막대 자리가 timeline.js
+// 에 박혀 있다).
 export const COLS = {
   lane: 104,      // 왕·대통령 띠
-  history: 300,   // 역사 열
-  gutter: 44,     // 연결선이 지나는 홈
-  personal: 320,  // 개인 열 (오른쪽 24px 은 인과 선의 자리)
-  stage: 84,      // 인생 단계 띠
+  history: 208,   // 역사 열
+  gutter: 28,     // 연결선이 지나는 홈
+  personal: 214,  // 개인 열 (오른쪽 24px 은 인과 선의 자리)
+  stage: 78,      // 인생 단계 띠 (라벨은 .life-stage 가 54px 로 접는다)
 };
 // 연표 판의 너비 — 세 열과 세로 스크롤바. 화면(LifeView)이 왼쪽 칸을 이만큼 잡는다.
 export function boardWidth() {
@@ -395,10 +401,10 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
 
   // 인생 단계 띠 — 재위 띠와 같은 문법(막대 + 이름·연도), 강조색
   const stageSvg = layout.stages.map((s, i) => `
-    <rect x="${xS + 8}" y="${s.y1.toFixed(1)}" width="6" height="${Math.max(s.y2 - s.y1, 2).toFixed(1)}" rx="3"
+    <rect x="${xS + 6}" y="${s.y1.toFixed(1)}" width="6" height="${Math.max(s.y2 - s.y1, 2).toFixed(1)}" rx="3"
           fill="${STAGE_COLOR}" opacity="${i % 2 ? 0.45 : 0.75}"><title>${esc(s.stage)} ${s.start}~${s.end}</title></rect>`).join('');
   const stageItems = layout.stages.map((s) => `
-    <div class="tl-reign life-stage" style="left:${xS + 24}px; top:${s.y1.toFixed(1)}px" title="${esc(s.stage)} · ${s.start}~${s.end}">
+    <div class="tl-reign life-stage" style="left:${xS + 18}px; top:${s.y1.toFixed(1)}px" title="${esc(s.stage)} · ${s.start}~${s.end}">
       <b>${esc(s.stage)}</b><i>${s.start}~${s.end === s.start ? '' : s.end}</i></div>`).join('');
 
   // 점과 구간
