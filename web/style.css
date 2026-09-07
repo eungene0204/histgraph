@@ -730,7 +730,6 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .life-top .brand .era { text-decoration: none; }
 .life-here { color: var(--text-normal); background: var(--background-modifier-hover); cursor: default; }
 .life-tools { display: flex; align-items: center; gap: 6px; grid-column: 2; }
-.life-source { font-size: var(--font-ui-smaller); color: var(--text-faint); margin-right: 6px; }
 .life-btn {
   display: inline-flex; align-items: center; padding: 4px 10px;
   border: 1px solid var(--background-modifier-border); border-radius: var(--pill-radius);
@@ -740,6 +739,7 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .life-btn.on, .life-btn[aria-pressed="true"] { color: var(--text-accent); border-color: var(--tag-border); background: var(--tag-background); }
 .life-btn.big { font-size: var(--font-ui-small); padding: 8px 16px; margin-top: 14px; }
 
+/* 머리 아래로 펴지는 입력 상자 — 이제 이야기 상자 하나가 쓴다. */
 .life-paste { padding: 10px 12px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
 .life-paste textarea {
   width: 100%; height: 120px; resize: vertical; padding: 8px 10px;
@@ -749,6 +749,17 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 }
 .life-paste-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .life-paste-row .tl-hint { margin: 0 auto 0 0; }
+.life-paste textarea:disabled { opacity: 0.6; }
+.life-paste-row .life-btn:disabled { opacity: 0.45; cursor: default; }
+/* 이야기 상자는 JSON 상자와 달리 사람이 읽고 쓰는 글이다 — 고정폭이 아니라
+   본문 글꼴로, 보기글이 네 줄이라 넉넉히 편다. */
+.life-story textarea { height: 190px; font-family: inherit; font-size: var(--font-ui-small); line-height: 1.7; }
+/* 글은 한 줄이 너무 길면 안 읽힌다 — 넓은 화면에서도 폭을 묶는다. */
+.life-story textarea, .life-story .life-paste-row { max-width: 900px; }
+.life-story textarea::placeholder { color: var(--text-faint); }
+/* 안 된 것은 눈에 띄어야 한다 — 팔레트에 빨강이 없어 본문색으로 세운다. */
+.life-warn { color: var(--text-normal); }
+.life-empty-row { display: flex; gap: 8px; align-items: center; }
 
 .life-layout { min-height: 0; }
 .life-board { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--background-primary); }

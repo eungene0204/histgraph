@@ -20,6 +20,7 @@ import logging
 import mimetypes
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -1080,6 +1081,101 @@ class GraphAPI:
         return payload
 
 
+# --- 개인 역사 분석 (로컬 전용) --------------------------------------------
+# 화면의 '내 인생 입력하기' 가 글을 보내면 여기서 모델에게 묻는다. CLI 의
+# `histgraph life 이야기.txt` 와 같은 길을 지난다 (analyze → validate → link
+# → save) — 사람이 파일을 만들고 터미널을 열지 않아도 되게 한 것뿐이다.
+#
+# **응답에 매달아 두지 않는다.** MLX 는 35GB 를 잡고 몇 분을 돈다. 요청
+# 하나를 그동안 붙들고 있으면 브라우저가 먼저 끊고, 끊긴 뒤에도 모델은
+# 계속 돈다. 그래서 스레드에 맡기고 화면이 `/api/life/job` 으로 물어본다.
+# **한 번에 하나만** 돈다 — 두 개를 띄우면 자리가 없어 커널이 죽인다.
+#
+# 배포에는 없는 길이다. 개인 자료는 저장소 밖(`data/life/`)이고 모델도
+# 로컬에만 있다 — 서버리스 함수는 do_POST 를 갖지 않는다.
+# 모델에게 보일 그래프 사건 목록의 시작 해. CLI 는 1940 을 기본으로 물어보지만
+# 화면은 생년을 묻지 않으므로 조금 앞에서 시작한다 (1900~오늘 = 사건 221건).
+LIFE_FROM_YEAR = 1900
+
+
+def _life_name(name: str) -> str:
+    """저장 파일 이름. 화면이 준 이름이 경로가 되지 않게 한다."""
+    safe = re.sub(r"[^\w가-힣 .-]", "", (name or "").strip()).strip(". ")
+    return safe[:40] or "나"
+
+
+class LifeAnalysis:
+    """이야기 → 개인 그래프. 한 번에 하나, 상태는 화면이 물어 간다."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state: dict = {"state": "idle"}
+
+    def status(self) -> dict:
+        with self._lock:
+            st = dict(self._state)
+        started = st.pop("started", None)
+        if st.get("state") == "running" and started is not None:
+            st["elapsed"] = int(time.time() - started)
+        return st
+
+    def start(self, api: GraphAPI, text: str, name: str = "나",
+              backend: str = "mlx") -> bool:
+        with self._lock:
+            if self._state.get("state") == "running":
+                return False
+            self._state = {"state": "running", "started": time.time(),
+                           "step": "모델을 올리는 중"}
+        threading.Thread(target=self._run, args=(api, text, name, backend),
+                         name="life-analyze", daemon=True).start()
+        return True
+
+    def _step(self, step: str) -> None:
+        with self._lock:
+            if self._state.get("state") == "running":
+                self._state["step"] = step
+
+    def _done(self, state: dict) -> None:
+        with self._lock:
+            self._state = state
+
+    def _run(self, api: GraphAPI, text: str, name: str, backend_kind: str) -> None:
+        from . import life as life_mod
+        from .backends import build_backend
+
+        try:
+            # 이야기가 걸칠 만한 구간의 사건 이름을 모델에게 보인다. 생년은
+            # 아직 모르니 LIFE_FROM_YEAR 부터 오늘까지다 (cli.cmd_life 와 같다).
+            anchors = api.context(LIFE_FROM_YEAR, datetime.date.today().year)["anchors"]
+            backend = build_backend(backend_kind)
+            self._step("이야기를 읽는 중")
+            raw = life_mod.analyze(text, backend, anchors=anchors)
+            if raw is None:
+                self._done({"state": "error", "error": "모델이 답을 돌려주지 않았습니다."})
+                return
+            raw["_model"] = getattr(backend, "model", backend_kind)
+            self._step("답을 검증하는 중")
+            payload, notes = life_mod.validate(raw)
+            life_mod.link(payload, api)
+            out = life_mod.LIFE_DIR / f"{_life_name(name)}.json"
+            try:
+                life_mod.save(payload, out)
+                # 이야기 원문도 옆에 둔다 — 고쳐 쓰고 `histgraph life` 로
+                # 다시 돌릴 수 있게. 여기도 저장소 밖이다.
+                out.with_suffix(".txt").write_text(text, encoding="utf-8")
+            except OSError as err:
+                notes = [*notes, f"저장하지 못했습니다: {err}"]
+                out = None
+            self._done({"state": "done", "payload": payload, "notes": notes,
+                        "file": out.name if out else None})
+        except Exception as err:  # 모델이 없는·메모리가 없는 자리에서도 화면은 살아야 한다
+            log.exception("개인 역사 분석 실패")
+            self._done({"state": "error", "error": f"{type(err).__name__}: {err}"})
+
+
+LIFE_JOBS = LifeAnalysis()
+
+
 def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
     """정적 파일 경로. 루트 밖을 가리키면 None.
 
@@ -1146,6 +1242,10 @@ def dispatch(
     if path == "/api/life":
         got = api.life(one("name") or None)
         return (200, got) if got else (404, {"error": "저장된 개인 역사가 없습니다"})
+    # 분석이 도는 중인지. 글을 보내는 쪽은 POST 라 로컬에만 있고(Handler.do_POST),
+    # 배포에서는 이 자리가 늘 'idle' 이다 — 화면이 그것을 보고 물러난다.
+    if path == "/api/life/job":
+        return 200, LIFE_JOBS.status()
     if path == "/api/context":
         return 200, api.context(int(one("from", "0")), int(one("to", "0")))
     if path.startswith("/api/node/"):
@@ -1192,6 +1292,31 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
+        """이야기를 받아 개인 역사 분석을 띄운다 — 로컬 서버에만 있는 길.
+
+        답을 기다리지 않는다. 띄웠다는 것만 알리고 화면이 /api/life/job 으로
+        물어본다 (LifeAnalysis)."""
+        url = urlparse(self.path)
+        if url.path != "/api/life/analyze":
+            self._json({"error": "unknown endpoint", "path": url.path}, 404)
+            return
+        try:
+            size = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(size) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            self._json({"error": "JSON 이 아닙니다"}, 400)
+            return
+        text = str(body.get("text") or "").strip()
+        if len(text) < 40:
+            self._json({"error": "이야기가 너무 짧습니다 — 몇 문장이라도 적어 주세요."}, 400)
+            return
+        if not LIFE_JOBS.start(self.api, text, str(body.get("name") or "나"),
+                               str(body.get("backend") or "mlx")):
+            self._json({"error": "이미 분석 중입니다."}, 409)
+            return
+        self._json(LIFE_JOBS.status(), 202)
 
     def do_GET(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
         url = urlparse(self.path)

@@ -9,12 +9,25 @@ import { LifeBoard, normalize, graphPayload, graphMeta, boardWidth, NODE_TYPE_KO
 // 사건의 상세와 분석(가족 뿌리·전환점·패턴·영향·가상 역사·물음)을 읽는다.
 //
 // 자료는 셋 중 하나에서 온다: (1) 로컬 서버가 저장한 것(/api/life —
-// `histgraph life` 가 만든다), (2) 사람이 붙여 넣거나 올린 JSON (브라우저에
-// 남긴다 — 배포된 화면에는 서버 저장이 없다), (3) 예시. 역사 쪽 자료
-// (재위 띠·큰 사건)는 언제나 서버(/api/context)다.
+// `histgraph life` 가 만든다), (2) **이 화면에 이야기를 적어 로컬 모델에게
+// 물은 것**(POST /api/life/analyze — 몇 분 걸리므로 띄워 두고 /api/life/job
+// 으로 물어본다), (3) 예시. 역사 쪽 자료(재위 띠·큰 사건)는 언제나
+// 서버(/api/context)다.
+//
+// **머리에는 '내 역사 입력하기' 하나만 둔다** (2026-09-08 사용자: "'JSON 파일
+// 열기', '붙여넣기', '연표접기' 버튼 모두 삭제해줘"). 붙여 넣기·파일 열기는
+// 사람이 모델과 따로 대화해 받은 JSON 을 넣던 길이고, 이제 화면이 직접
+// 물어본다. 연표는 늘 펴 둔다.
 
-const STORE_KEY = 'life-json';
-const RAIL_KEY = 'life-rail';   // 연표를 접어 두었나 ('0' 이면 접힘)
+const STORE_KEY = 'life-json';  // 옛 화면이 브라우저에 남긴 자료 (지금도 읽는다)
+const STORY_KEY = 'life-story'; // 적다 만 이야기 (분석은 몇 분이라 새로고침해도 글은 남긴다)
+
+// 입력 상자의 보기글. 무엇을 적어야 하는지는 설명보다 예가 빠르다 —
+// **해와 곳, 가족, 이사, 학교, 일, 만남, 그때의 마음.** 지어낸 사람이다.
+const STORY_EXAMPLE = `나는 1982년 서울에서 태어나 2살 무렵부터 강동구 성내동에서 10년 정도 살았다. 아버지는 작은 인쇄소를 하셨고 어머니는 시장에서 옷 가게를 했다.
+1989년에 성내국민학교에 들어갔고, 1995년 아버지 일 때문에 분당으로 이사하면서 전학을 갔다. 친구를 다 잃은 기분이었던 게 아직도 기억난다.
+1997년 겨울 외환위기로 인쇄소가 문을 닫았다. 그때부터 어머니가 식당 일을 나갔고, 나는 처음으로 돈이 무엇인지 알았다.
+2001년에 대학에 들어가 컴퓨터를 전공했다. 2003년에 읽은 책 한 권이 진로를 바꿨고, 2008년 첫 직장에 들어갔다. 2014년에 지금의 아내를 만났다.`;
 
 // 개인 그래프의 선 범례. 역사 그래프의 '구조화 소스/산문 추출' 대신 —
 // 실선은 본인이 말한 것, 점선은 말한 것에서 미룬 것(confidence < 1).
@@ -27,6 +40,23 @@ async function getJson(path) {
   const res = await fetch(path);
   if (!res.ok) return null;
   return res.json();
+}
+
+// 이야기를 로컬 서버에 보낸다. 서버가 없는 자리(배포·정적 파일)에서는
+// fetch 자체가 실패하므로 상태 0 으로 돌려주고 화면이 그렇게 말한다.
+async function postJson(path, body) {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    let payload = null;
+    try { payload = await res.json(); } catch { /* 본문이 없을 수 있다 */ }
+    return { ok: res.ok, status: res.status, payload };
+  } catch {
+    return { ok: false, status: 0, payload: null };
+  }
 }
 
 // 서버에 물을 구간 — 이 사람의 삶이다. 이어진 역사 사건이 그보다 앞서면
@@ -43,11 +73,15 @@ function yearsOf(life) {
 export default function LifeView() {
   const [life, setLife] = useState(null);
   const [context, setContext] = useState(null);
+  // 자료가 어디서 왔는지는 **화면에 적지 않는다** (2026-09-08 사용자: "'로컬
+  // 서버에 저장된 자료' 문구도 삭제해"). 서버가 쥔 자료는 화면이 지울 수 없으니
+  // '지우기' 를 낼지 정하는 데만 쓴다.
   const [source, setSource] = useState('');       // 'server' | 'local' | 'sample'
   // 주소의 #사건id 가 고른 사건이다 — 새로고침해도 자리를 잃지 않고 "이거 봐" 하고 줄 수 있다.
   const [selected, setSelected] = useState(() => (typeof location !== 'undefined' && location.hash ? decodeURIComponent(location.hash.slice(1)) : null));
   const [tab, setTab] = useState('event');
-  const [pasting, setPasting] = useState(false);
+  const [writing, setWriting] = useState(false);   // 이야기 상자를 폈나
+  const [job, setJob] = useState(null);   // 분석 상태 (running·done·error)
   const [offline, setOffline] = useState(false);
   const rootRef = useRef(null);
   const boardRef = useRef(null);
@@ -55,16 +89,7 @@ export default function LifeView() {
   // --- 그래프 (역사 그래프와 같은 캔버스·설정 상자) ---------------------
   // **연표와 그래프는 동시에 보인다** (2026-09-07 사용자: "연표와 그래프를
   // 동시에 보여줘"). 역사 화면과 같은 배치 — 왼쪽 연표, 가운데 그래프, 오른쪽
-  // 상세. 연표는 세 열이라 넓으니(boardWidth) 접을 수 있게만 한다.
-  const [railOpen, setRailOpen] = useState(() => {
-    try { return localStorage.getItem(RAIL_KEY) !== '0'; } catch { return true; }
-  });
-  const toggleRail = () => {
-    setRailOpen((v) => {
-      try { localStorage.setItem(RAIL_KEY, v ? '0' : '1'); } catch { /* 저장 못 해도 동작한다 */ }
-      return !v;
-    });
-  };
+  // 상세. 연표는 접지 않는다 (2026-09-08 — 세 열을 좁게 잡아 접을 이유가 없어졌다).
   const [sideOpen, setSideOpen] = useState(false);
   const [settings, setSettings] = useState({
     depth: 2, limit: 120, includePeriod: false, hiddenEdges: [],
@@ -102,6 +127,37 @@ export default function LifeView() {
     if (raw) adopt(raw, 'sample');
   }, [adopt]);
 
+  // --- 이야기 → 개인 그래프 (로컬 서버의 모델) --------------------------
+  // 모델은 몇 분을 돈다. 답을 기다리는 요청 하나에 매달면 브라우저가 먼저
+  // 끊으므로, 서버는 띄우기만 하고(POST /api/life/analyze) 여기서 2초마다
+  // 물어본다. 새로고침해도 돌던 것을 다시 붙잡는다 (부팅 효과).
+  const pollRef = useRef(null);
+  const watchJob = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      const st = await getJson('/api/life/job').catch(() => null);
+      if (!st) return;   // 한 번 못 물었다고 그만두지 않는다
+      setJob(st);
+      if (st.state === 'running') return;
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+      if (st.state === 'done' && st.payload) await adopt(st.payload, 'server');
+    }, 2000);
+  }, [adopt]);
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const onStory = useCallback(async (text, name) => {
+    const r = await postJson('/api/life/analyze', { text, name });
+    if (r.ok || r.status === 409) {   // 409 는 이미 돌고 있다는 뜻이라 같이 지켜본다
+      setJob({ state: 'running', step: '모델을 올리는 중', elapsed: 0 });
+      watchJob();
+      return;
+    }
+    // 화면 글자에 영어를 두지 않는다 (CLAUDE.md §1) — 명령 이름도 적지 않는다.
+    setJob({ state: 'error', error: r.payload?.error
+      || '로컬 서버에 닿지 못했습니다. 이 컴퓨터에서 띄운 화면에서만 분석할 수 있습니다.' });
+  }, [watchJob]);
+
   // 부팅: 서버 → 브라우저에 남긴 것 → 빈 화면
   useEffect(() => {
     let alive = true;
@@ -113,8 +169,14 @@ export default function LifeView() {
       try { kept = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { /* 비었다 */ }
       if (kept && await adopt(kept, 'local')) return;
     })();
+    // 창을 닫았다 다시 열어도 돌던 분석은 서버에서 계속 돈다.
+    (async () => {
+      const st = await getJson('/api/life/job').catch(() => null);
+      if (!alive || st?.state !== 'running') return;
+      setJob(st); setWriting(true); watchJob();
+    })();
     return () => { alive = false; };
-  }, [adopt]);
+  }, [adopt, watchJob]);
 
   // 판 — DOM 을 직접 그리는 쪽
   useEffect(() => {
@@ -152,28 +214,13 @@ export default function LifeView() {
     gv.select(selected);
     gv.focusOn(selected);
   }, [selected]);
-  // 연표를 접었다 펴면 캔버스 폭이 바뀐다 — GraphView 의 ResizeObserver 가 따라간다.
 
-  const onFile = async (ev) => {
-    const f = ev.target.files?.[0];
-    if (!f) return;
-    try { await adopt(JSON.parse(await f.text()), 'local'); } catch { alert('JSON 을 읽지 못했습니다.'); }
-    ev.target.value = '';
-  };
-  const onPaste = async (text) => {
-    try {
-      const ok = await adopt(JSON.parse(text), 'local');
-      if (ok) setPasting(false);
-      else alert('노드가 없는 JSON 입니다.');
-    } catch { alert('JSON 이 아닙니다.'); }
-  };
   const forget = () => {
     try { localStorage.removeItem(STORE_KEY); } catch { /* 없다 */ }
     setLife(null); setContext(null); setSource(''); setSelected(null);
   };
 
   const name = life?.subject?.name || '나';
-  const sourceText = { server: '로컬 서버에 저장된 자료', local: '이 브라우저에 남긴 자료', sample: '예시 자료' }[source] || '';
 
   return (
     <>
@@ -185,31 +232,27 @@ export default function LifeView() {
           <span className="era life-here">내 역사</span>
         </div>
         <div className="life-tools">
-          {life && (
-            <button type="button" className="life-btn" onClick={toggleRail} aria-pressed={railOpen}
-                    title="왼쪽 연표를 접거나 폅니다">{railOpen ? '연표 접기' : '연표 펴기'}</button>
-          )}
-          {life && <span className="life-source">{sourceText}</span>}
-          <button type="button" className="life-btn" onClick={loadSample}>예시 보기</button>
-          <label className="life-btn">JSON 파일 열기<input type="file" accept=".json,application/json" onChange={onFile} hidden /></label>
-          <button type="button" className="life-btn" onClick={() => setPasting((v) => !v)} aria-pressed={pasting}>붙여 넣기</button>
+          {/* 상자를 닫아도 분석은 계속 돈다 — 단추가 그것을 말한다. */}
+          <button type="button" className="life-btn" onClick={() => setWriting((v) => !v)} aria-pressed={writing}>
+            {job?.state === 'running' ? `내 역사 읽는 중 · ${job.elapsed ?? 0}초` : '내 역사 입력하기'}
+          </button>
           {life && source !== 'server' && <button type="button" className="life-btn" onClick={forget}>지우기</button>}
         </div>
         <ThemeToggle onChange={() => boardRef.current?.layout()} />
       </header>
 
-      {pasting && <PasteBox onSubmit={onPaste} onClose={() => setPasting(false)} />}
+      {writing && <StoryBox job={job} onSubmit={onStory} onClose={() => setWriting(false)} />}
 
       <div className="layout life-layout">
         {/* 연표 판은 늘 붙어 있다(LifeBoard 가 DOM 을 쥔다). 자료가 없으면 빈
             안내가 이 자리를 다 쓰고, 있으면 세 열 너비로 왼쪽에 선다 — 단 화면의
             45% 까지다. 1440px 에서 864px 를 다 주면 그래프 폭이 0 이 된다 (실측).
             좁으면 연표 안에서 가로로 훑는다. */}
-        <section className="life-board" ref={rootRef} hidden={!!life && !railOpen}
+        <section className="life-board" ref={rootRef}
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
-            {!life && <Empty offline={offline} onSample={loadSample} />}
+            {!life && <Empty offline={offline} onSample={loadSample} onWrite={() => setWriting(true)} />}
           </div>
         </section>
         {life && (
@@ -260,33 +303,53 @@ export default function LifeView() {
   );
 }
 
-function Empty({ offline, onSample }) {
+function Empty({ offline, onSample, onWrite }) {
   return (
     <div className="life-empty">
       <h2>내 삶을 한국사 옆에 세웁니다</h2>
       <p>왼쪽에 왕과 대통령의 재위, 가운데에 그 무렵의 큰 사건, 오른쪽에 내 사건이 같은 해에 같은 높이로 섭니다.</p>
       <ol>
-        <li>자기 이야기를 글로 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남, 잊히지 않는 책·영화·음악·게임.</li>
-        <li>로컬에서 <code>uv run histgraph life 이야기.txt</code> 를 돌리면 이 화면이 그 결과를 바로 읽습니다.
-          모델과 대화로 받은 JSON 이 있으면 위의 <b>붙여 넣기</b>로 넣습니다. 이 브라우저에만 남고 어디로도 보내지 않습니다.</li>
+        <li><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
+          잊히지 않는 책·영화·음악·게임.</li>
+        <li>로컬 모델이 그 글을 읽어 사건과 인과로 옮깁니다. 몇 분 걸립니다. 글도 결과도 이 컴퓨터 밖으로 나가지 않습니다.</li>
         <li>사건을 누르면 오른쪽에 원인과 결과, 그 해의 한국사, 전환점 점수가 나옵니다.</li>
       </ol>
-      <button type="button" className="life-btn big" onClick={onSample}>예시로 먼저 보기</button>
+      <div className="life-empty-row">
+        <button type="button" className="life-btn big on" onClick={onWrite}>내 역사 입력하기</button>
+        <button type="button" className="life-btn big" onClick={onSample}>예시로 먼저 보기</button>
+      </div>
       {offline && <p className="tl-hint">자료 서버에 닿지 못해 왕·대통령과 한국사 열이 비어 있습니다.</p>}
     </div>
   );
 }
 
-function PasteBox({ onSubmit, onClose }) {
-  const [text, setText] = useState('');
+// 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
+// 빈 칸에 '자유롭게 적으세요' 라고 쓰면 아무도 첫 줄을 못 적는다.
+// 적다 만 글은 브라우저에 남긴다. 분석이 몇 분이라 그동안 창을 닫는다.
+function StoryBox({ job, onSubmit, onClose }) {
+  const [text, setText] = useState(() => {
+    try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
+  });
+  const running = job?.state === 'running';
+  const change = (v) => {
+    setText(v);
+    try { localStorage.setItem(STORY_KEY, v); } catch { /* 저장 못 해도 적을 수 있다 */ }
+  };
   return (
-    <div className="life-paste">
-      <textarea value={text} onChange={(e) => setText(e.target.value)}
-                placeholder='{"nodes": [...], "edges": [...], "timeline": [...], ...}' />
+    <div className="life-paste life-story">
+      <textarea value={text} onChange={(e) => change(e.target.value)} disabled={running}
+                placeholder={STORY_EXAMPLE} spellCheck={false} />
       <div className="life-paste-row">
-        <span className="tl-hint">모델이 돌려준 JSON 그대로. 브라우저 밖으로 나가지 않습니다.</span>
+        {running ? (
+          <span className="tl-hint">{job.step || '읽는 중'} · {job.elapsed ?? 0}초 — 몇 분 걸립니다. 창을 닫아도 계속 돕니다.</span>
+        ) : job?.state === 'error' ? (
+          <span className="tl-hint life-warn">{job.error}</span>
+        ) : (
+          <span className="tl-hint">이 컴퓨터의 모델이 읽습니다. 글은 어디로도 보내지 않습니다.</span>
+        )}
         <button type="button" className="life-btn" onClick={onClose}>닫기</button>
-        <button type="button" className="life-btn on" onClick={() => onSubmit(text)}>세우기</button>
+        <button type="button" className="life-btn on" disabled={running || text.trim().length < 40}
+                onClick={() => onSubmit(text, '나')}>{running ? '읽는 중' : '세우기'}</button>
       </div>
     </div>
   );

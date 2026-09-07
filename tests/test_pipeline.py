@@ -5507,6 +5507,57 @@ with tempfile.TemporaryDirectory() as tmp:
     life_mod.save(payload, life_mod.LIFE_DIR / "나.json")
     st, body = _life_dispatch(api, "/api/life", {})
     check("저장하면 /api/life 가 그것을 준다", st == 200 and body["subject"]["name"] == "나" and body["_file"] == "나.json")
+
+    # 화면의 '내 인생 입력하기' — 글을 받아 스레드에서 묻고, 화면이 물어 간다.
+    # 모델은 부르지 않는다 (MLX 는 35GB 를 잡는다). 백엔드를 가짜로 바꿔 낀다.
+    import time  # noqa: E402  (여기서만 쓴다)
+    import histgraph.backends as _backends
+    from histgraph.server import LifeAnalysis as _LifeJob, _life_name
+
+    class _FakeLife:
+        model = "fake"
+        def complete_json(self, system, user, schema, max_tokens=None):
+            self.user = user
+            return {"nodes": [{"id": "me", "type": "Person", "name": "나", "confidence": 1.0}],
+                    "edges": [], "timeline": [], "historical_connections": []}
+    made = _FakeLife()
+    keep_build, _backends.build_backend = _backends.build_backend, lambda kind, model=None: made
+    # 분석은 다른 스레드에서 돈다 — 저장소를 통째로 준 api(테스트용, 연결
+    # 하나)가 아니라 서버가 쓰는 것처럼 경로로 연 api 를 준다.
+    tapi = _LifeAPI(Path(tmp) / "korea.sqlite", era="korea")
+    try:
+        job = _LifeJob()
+        check("분석 전에는 idle", job.status() == {"state": "idle"})
+        check("이야기를 주면 띄운다", job.start(tapi, "이야기", name="시험"))
+        for _ in range(200):
+            if job.status()["state"] != "running":
+                break
+            time.sleep(0.02)
+        st = job.status()
+        check("끝나면 화면이 쓸 그래프를 준다",
+              st["state"] == "done" and st["payload"]["subject"]["name"] == "나" and st["file"] == "시험.json", str(st)[:200])
+        check("저장까지 한다 (data/life 밖으로 안 나간다)", (life_mod.LIFE_DIR / "시험.json").is_file()
+              and (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기")
+        check("모델에게 그래프의 사건 이름을 보인다", "대한민국의 IMF 구제금융 요청" in made.user)
+        st, body = _life_dispatch(api, "/api/life/job", {})
+        check("/api/life/job 이 상태를 준다 (배포에서는 늘 idle)", st == 200 and "state" in body)
+        class _Slow(_FakeLife):
+            def complete_json(self, *a, **kw):
+                time.sleep(0.3)
+                return super().complete_json(*a, **kw)
+        made2 = _Slow()
+        _backends.build_backend = lambda kind, model=None: made2
+        job2 = _LifeJob()
+        job2.start(tapi, "이야기", name="시험2")
+        check("한 번에 하나만 돈다 (MLX 는 자리를 두 벌 못 잡는다)", job2.start(tapi, "또", name="시험3") is False)
+        for _ in range(200):
+            if job2.status()["state"] != "running":
+                break
+            time.sleep(0.02)
+    finally:
+        _backends.build_backend = keep_build
+    check("이름이 경로가 되지 않는다", "/" not in _life_name("../../etc/passwd") and _life_name("") == "나")
+
     life_mod.LIFE_DIR = keep_dir
     check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
 
