@@ -6563,6 +6563,23 @@ try:
     tx_cookie = heads["Set-Cookie"].split(";")[0]
     tx = _js.loads(_auth._unsign(tx_cookie.split("=", 1)[1]))
 
+    # 쿠키가 안에 적은 시각보다 먼저 죽으면, 오래 걸린 사람에게 '쿠키가
+    # 막혀 있다'는 엉뚱한 말이 뜬다 (2026-09-09 지적).
+    _maxage = int(next(b.split("=")[1] for b in heads["Set-Cookie"].split("; ")
+                       if b.startswith("Max-Age=")))
+    check("왕복 쿠키는 안에 적은 시각보다 오래 산다", _maxage > _auth.TX_TTL)
+
+    # 없는 것과 맞지 않는 것을 갈라 말한다 — 둘 다 400 이지만 문장이 다르다.
+    _no_cookie = _auth.route(req("GET", "/api/auth/callback",
+                                 {"code": ["c"], "state": [tx["s"]]})).body.decode()
+    _bad_sign = _auth.route(req("GET", "/api/auth/callback",
+                                {"code": ["c"], "state": [tx["s"]]},
+                                cookies="hg_oauth=" + tx_cookie.split("=", 1)[1][:-4]
+                                        + "AAAA")).body.decode()
+    check("쿠키가 없을 때와 서명이 틀릴 때를 갈라 말한다",
+          "쿠키를 막고" in _no_cookie and "이 서버의 것이 아닙니다" in _bad_sign)
+    check("실패 화면은 다시 시작할 자리를 준다", "/api/auth/google" in _no_cookie)
+
     # 2) 구글이 돌려보낸 자리. 토큰 교환만 가로챈다.
     seen = {}
     def fake_exchange(code, verifier, redirect_uri):

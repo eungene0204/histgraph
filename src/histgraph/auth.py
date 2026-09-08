@@ -83,7 +83,16 @@ LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
 SESSION_DAYS = 30
 SESSION_TOUCH = 24 * 3600      # 하루 지난 세션만 만료를 밀어 준다 (쓰기 줄이기)
-TX_TTL = 600                   # 로그인 왕복에 주는 시간 (초)
+# 로그인 왕복에 주는 시간 (초). **처음 들어오는 계정에는 10분이 모자랐다**
+# (2026-09-09 지적: 처음 쓰는 구글 아이디로 들어오면 "쿠키가 차단되어
+# 있습니다" 가 떴다) — 계정 고르기·비밀번호·2단계 인증·동의 화면을 다 지나야
+# 하고, 그 자리에서 계정을 새로 만들면 더 걸린다. 그동안 왕복 쿠키가 먼저
+# 죽으면 우리는 그 사람이 오래 걸렸다는 것을 알 길이 없다.
+TX_TTL = 1800                  # 30분
+# **쿠키는 그보다 조금 더 산다.** 둘이 같으면 늦게 온 사람의 쿠키가 사라져
+# '시간이 지났습니다' 대신 '쿠키가 차단되어 있습니다' 라는 엉뚱한 말이 뜬다 —
+# 안에 적어 둔 시각(`x`)이 먼저 걸려야 우리가 참말을 할 수 있다.
+TX_COOKIE_TTL = TX_TTL + 300
 MAX_BODY = 1 << 20             # 요청 본문 1MB
 MAX_LIFE = 512 * 1024          # 개인 역사 문서 512KB
 MAX_BOOKMARKS = 1000
@@ -324,9 +333,14 @@ class Response:
                    headers=[("Location", to)] + (headers or []))
 
     @classmethod
-    def page(cls, title: str, message: str, status: int = 400) -> Response:
+    def page(cls, title: str, message: str, status: int = 400,
+             retry: bool = False) -> Response:
         """사람이 읽는 실패 화면. 구글에서 돌아오는 길은 브라우저 이동이라
-        JSON 을 뿌리면 날것이 그대로 보인다."""
+        JSON 을 뿌리면 날것이 그대로 보인다.
+
+        `retry` 는 **여기서 바로 다시 시작할 자리**를 준다 — 로그인이 깨진
+        자리에서 '처음 화면으로' 만 주면, 다시 하려는 사람이 단추를 찾아
+        되돌아가야 한다."""
         html = (
             "<!doctype html><html lang=ko><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1'>"
@@ -339,7 +353,8 @@ class Response:
             "p{margin:0 0 18px;color:#a6a6a6;font-size:14px}"
             "a{color:#8a6cef;font-size:14px}</style>"
             f"<div><h1>{_esc(title)}</h1><p>{_esc(message)}</p>"
-            "<a href='/'>처음 화면으로</a></div></html>"
+            + ("<a href='/api/auth/google'>다시 로그인하기</a><br>" if retry else "")
+            + "<a href='/'>처음 화면으로</a></div></html>"
         )
         return cls(status, html.encode("utf-8"), ctype="text/html; charset=utf-8")
 
@@ -469,7 +484,7 @@ def start(req: Request) -> Response:
     }
     cookie = set_cookie(
         cookie_name(COOKIE_TX, req.secure), _sign(json.dumps(tx).encode()),
-        secure=req.secure, max_age=TX_TTL,
+        secure=req.secure, max_age=TX_COOKIE_TTL,
     )
     return Response.redirect(
         GOOGLE_AUTH + "?" + urllib.parse.urlencode(params),
@@ -485,28 +500,44 @@ def callback(req: Request) -> Response:
     if req.one("error"):
         # 사용자가 동의 화면에서 취소한 것도 여기로 온다.
         return Response.page("로그인을 마치지 못했습니다",
-                             "구글 로그인이 취소되었거나 거절되었습니다.", 400)
+                             "구글 로그인이 취소되었거나 거절되었습니다.", 400,
+                             retry=True)
 
-    raw = _unsign(req.cookie(COOKIE_TX))
-    if raw is None:
+    # **없는 것과 맞지 않는 것을 갈라 적는다.** 둘을 한 문장으로 묶어 두면
+    # 화면에 뜬 말로는 무엇이 일어났는지 알 수 없다 (2026-09-09).
+    signed = req.cookie(COOKIE_TX)
+    if not signed:
+        log.info("왕복 쿠키가 없다 (secure=%s, 쿠키 %d개)", secure, len(req.cookies))
         return Response.page(
             "로그인을 마치지 못했습니다",
-            "로그인 절차가 만료되었거나 쿠키가 차단되어 있습니다. 다시 시도해 주세요.", 400)
+            "로그인을 시작한 지 오래되었거나 브라우저가 쿠키를 막고 있습니다. "
+            "다시 시도해 주세요.", 400, retry=True)
+    raw = _unsign(signed)
+    if raw is None:
+        # 서명 열쇠(HISTGRAPH_SESSION_SECRET)가 시작할 때와 달라졌다는 뜻이다.
+        log.warning("왕복 쿠키의 서명이 맞지 않는다 — 서명 열쇠가 바뀌었는가")
+        return Response.page("로그인을 마치지 못했습니다",
+                             "로그인 표가 이 서버의 것이 아닙니다. 다시 시도해 주세요.",
+                             400, retry=True)
     try:
         tx = json.loads(raw)
     except ValueError:
-        return Response.page("로그인을 마치지 못했습니다", "요청이 손상되었습니다.", 400)
+        return Response.page("로그인을 마치지 못했습니다", "요청이 손상되었습니다.", 400,
+                             retry=True)
 
     if tx.get("x", 0) < time.time():
         return Response.page("로그인을 마치지 못했습니다",
-                             "시간이 너무 지났습니다. 다시 시도해 주세요.", 400)
+                             "로그인에 30분이 넘게 걸렸습니다. 다시 시도해 주세요.", 400,
+                             retry=True)
     # state 대조 — 남이 자기 계정으로 우리 세션을 만들어 두는 길을 막는다.
     if not hmac.compare_digest(str(tx.get("s", "")), req.one("state")):
         return Response.page("로그인을 마치지 못했습니다",
-                             "요청이 확인되지 않았습니다. 다시 시도해 주세요.", 400)
+                             "요청이 확인되지 않았습니다. 다시 시도해 주세요.", 400,
+                             retry=True)
     code = req.one("code")
     if not code:
-        return Response.page("로그인을 마치지 못했습니다", "인가 코드가 없습니다.", 400)
+        return Response.page("로그인을 마치지 못했습니다", "인가 코드가 없습니다.", 400,
+                             retry=True)
 
     try:
         claims = _exchange(code, tx["v"], f"{req.origin}/api/auth/callback")
@@ -514,7 +545,7 @@ def callback(req: Request) -> Response:
         user_id = _upsert_user(claims)
         token = _new_session(user_id, req.headers.get("user-agent", "")[:300])
     except AuthError as err:
-        return Response.page("로그인을 마치지 못했습니다", str(err), 400)
+        return Response.page("로그인을 마치지 못했습니다", str(err), 400, retry=True)
     except accounts.StoreError as err:
         log.warning("가입 저장 실패: %s", err)
         return Response.page("가입자 정보를 저장하지 못했습니다",
