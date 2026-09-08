@@ -98,6 +98,12 @@ function yearsOf(life) {
 
 export default function LifeView() {
   const [life, setLife] = useState(null);
+  // 계정에 올려 둔 것을 다 읽기 전에는 '비었다'고 그리지 않는다 (2026-09-09
+  // 사용자: "메세지 화면이 한 번 보이고 그 다음에 그래프가 보여"). 계정을 읽는
+  // 데 왕복이 셋이라(`/api/me` → `/api/my/life` → `/api/life/refine`) 그동안
+  // `life` 가 null 인데, 그것을 없는 것으로 읽으면 있는 사람에게도 '내 역사를
+  // 기록하세요'가 한 번 번쩍인다. **없다고 확인되기 전까지는 아무 말도 안 한다.**
+  const [booting, setBooting] = useState(true);
   const [context, setContext] = useState(null);
   // 자료가 어디서 왔는지는 **화면에 적지 않는다** (2026-09-08 사용자: "'로컬
   // 서버에 저장된 자료' 문구도 삭제해"). 어디서 왔든 하는 일이 같아졌으므로
@@ -369,30 +375,36 @@ export default function LifeView() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      // 로그인해 두었고 계정에 올려 둔 것이 있으면 그것을 읽는다. 없으면
-      // 조용히 지나간다 — 로그인이 아직 열리지 않은 자리에서는 조건이 아니다.
-      // 옛 자료는 서버에게 다듬어 달라고 한다 (POST /api/life/refine — 모델 없이
-      // 규칙만: 생년·학년의 해·만난 곳과의 연결). 규칙이 늘면 옛 그래프도 따라온다.
-      // 서버가 없는 자리에서는 그대로 쓴다.
-      const refined = async (doc) => {
-        const r = await postJson('/api/life/refine', doc);
-        return r.ok && r.payload?.nodes ? r.payload : doc;
-      };
-      // 계정을 못 읽은 것(네트워크)과 계정이 빈 것을 가른다 — 못 읽었는데
-      // 브라우저의 옛 자료를 올리면 계정에 있던 새 것을 덮는다.
-      const me = await auth.me();
-      let mine = null, read = false;
-      if (me.user) {
-        try { mine = await auth.life.load(); read = true; } catch { /* 못 읽었다 */ }
-      }
-      if (!alive) return;
-      if (mine?.doc && await adopt(await refined(mine.doc), 'account')) return;
-      let kept = null;
-      try { kept = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { /* 비었다 */ }
-      if (kept && await adopt(await refined(kept), 'local')) {
-        // 브라우저에만 있던 것을 계정으로 옮기는 길. 단추가 하던 일이다.
-        if (me.user && read) await keepInAccount(rawRef.current);
-        return;
+      try {
+        // 로그인해 두었고 계정에 올려 둔 것이 있으면 그것을 읽는다. 없으면
+        // 조용히 지나간다 — 로그인이 아직 열리지 않은 자리에서는 조건이 아니다.
+        // 옛 자료는 서버에게 다듬어 달라고 한다 (POST /api/life/refine — 모델 없이
+        // 규칙만: 생년·학년의 해·만난 곳과의 연결). 규칙이 늘면 옛 그래프도 따라온다.
+        // 서버가 없는 자리에서는 그대로 쓴다.
+        const refined = async (doc) => {
+          const r = await postJson('/api/life/refine', doc);
+          return r.ok && r.payload?.nodes ? r.payload : doc;
+        };
+        // 계정을 못 읽은 것(네트워크)과 계정이 빈 것을 가른다 — 못 읽었는데
+        // 브라우저의 옛 자료를 올리면 계정에 있던 새 것을 덮는다.
+        const me = await auth.me();
+        let mine = null, read = false;
+        if (me.user) {
+          try { mine = await auth.life.load(); read = true; } catch { /* 못 읽었다 */ }
+        }
+        if (!alive) return;
+        if (mine?.doc && await adopt(await refined(mine.doc), 'account')) return;
+        let kept = null;
+        try { kept = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { /* 비었다 */ }
+        if (kept && await adopt(await refined(kept), 'local')) {
+          // 브라우저에만 있던 것을 계정으로 옮기는 길. 단추가 하던 일이다.
+          if (me.user && read) await keepInAccount(rawRef.current);
+          return;
+        }
+      } finally {
+        // 읽어 봤다는 것 자체를 남긴다 — 있든 없든, 중간에 터졌든.
+        // 여기서 안 내리면 자료가 없는 사람의 화면이 영영 빈 채로 멈춘다.
+        if (alive) setBooting(false);
       }
     })();
     // 창을 닫았다 다시 열어도 돌던 분석은 서버에서 계속 돈다.
@@ -575,7 +587,8 @@ export default function LifeView() {
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
-            {!life && <Empty offline={offline} onWrite={() => setWriting(true)} />}
+            {booting && <p className="life-booting">내 역사를 불러오는 중입니다…</p>}
+            {!life && !booting && <Empty offline={offline} onWrite={() => setWriting(true)} />}
           </div>
         </section>
         {life && (

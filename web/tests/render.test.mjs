@@ -36,8 +36,8 @@ import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
 import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
 import { LoginModal } from './src/components/LoginModal.jsx';
-import { StoryLog } from './src/components/LifeView.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog };
+import LifeView, { StoryLog } from './src/components/LifeView.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, LifeView };
 `;
 
 await build({
@@ -54,7 +54,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, LifeView } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -430,6 +430,15 @@ let detailHtml = '';
      && box.includes('내가 적은 이야기') && box.includes('삭제') && box.includes('닫기'));
   const none = plain(renderToString(h(StoryLog, { stories: [], running: false, onPick: () => {}, onDrop: () => {}, onClose: () => {} })));
   ok('적은 것이 없으면 그렇게 적는다', none.includes('아직 적은 이야기가 없습니다'));
+  // 첫 그림에 '기록하세요'가 서면 안 된다 (2026-09-09 사용자: "메세지 화면이
+  // 한 번 보이고 그 다음에 그래프가 보여"). 계정을 읽는 데 왕복이 셋이라 그
+  // 동안 자료는 null 인데, 그것을 '없다'로 읽으면 있는 사람에게도 빈 안내가
+  // 번쩍인다. 서버 렌더링은 효과가 돌기 전이라 **바로 그 첫 그림**이다.
+  const first = plain(renderToString(h(LifeView)));
+  ok('계정을 읽기 전에는 비었다고 말하지 않는다',
+     !first.includes('내 삶을 세상의 역사와 나란히 봅니다')
+     && first.includes('내 역사를 불러오는 중입니다'));
+
   // 머리 줄의 아이콘 — 그림만 서고 글자는 title·aria 로 말한다.
   const lifeSrc2 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
   ok("아이콘이 '내 역사 입력하기' 오른쪽에 선다",
