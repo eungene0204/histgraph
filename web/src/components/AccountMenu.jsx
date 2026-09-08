@@ -2,6 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { auth } from '../lib/auth.js';
 import { GoogleMark } from './LoginModal.jsx';
 
+// 톱니 하나. 다른 아이콘들과 같은 결(24 격자·선 그리기)이라 크기만 달라진다.
+function GearMark() {
+  return (
+    <svg className="account-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 // 머리 줄 오른쪽 끝의 계정 자리.
 //
 // **로그인 단추는 언제나 서 있는다** (2026-09-08 사용자: "그냥 로그인 버튼이
@@ -134,7 +145,7 @@ export function AccountMenu() {
 
               <div className="account-nav">
                 <button type="button" className="account-row" onClick={() => setView('settings')}>
-                  <span>설정</span><span className="account-more">›</span>
+                  <GearMark /><span>설정</span>
                 </button>
               </div>
 
@@ -154,7 +165,7 @@ export function AccountMenu() {
               {back('main')}
               <div className="account-nav">
                 <button type="button" className="account-row" onClick={openMarks}>
-                  <span>즐겨찾기</span><span className="account-more">›</span>
+                  <span>즐겨찾기</span>
                 </button>
               </div>
 

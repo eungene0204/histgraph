@@ -371,16 +371,18 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 }
 .account-back:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 
-/* 한 층 들어가는 줄. 오른쪽 꺾쇠가 '여기 더 있다'를 말한다. */
+/* 한 층 들어가는 줄. 아이콘이 왼쪽에 서고 오른쪽에는 아무 표시도 없다
+   (2026-09-09 사용자: "'>' 표시를 삭제하고 설정 앞에 설정 아이콘"). */
 .account-nav { border-top: 1px solid var(--background-modifier-border); padding-top: 6px; }
 .account-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   width: 100%; padding: 7px 8px; margin: 0 -8px;
   font-size: var(--font-ui-small); color: var(--text-normal); text-align: left;
   background: none; border: none; border-radius: var(--radius-s); cursor: pointer;
 }
 .account-row:hover { background: var(--background-modifier-hover); }
-.account-more { color: var(--text-faint); }
+.account-icon { width: 15px; height: 15px; flex: none; color: var(--text-muted); }
+.account-row:hover .account-icon { color: var(--text-normal); }
 
 .account-marks { padding: 4px 0 0; }
 .account-marks h4 { margin: 0 0 6px; font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-muted); }
