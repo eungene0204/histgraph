@@ -176,6 +176,20 @@ console.log('\n개인 역사 — 세 열이 한 자');
       { event_id: 'mv', life_stage: null, year: 2006 }],
   });
   const ss = Object.fromEntries(stages.timeline.map((t) => [t.event_id, t.life_stage]));
+  // 같은 해의 앞 항목에서 잇는다 — 2000년 대학 입학 다음에 선 '최근호를 만남'은 '대학'.
+  const sameYear = normalize({
+    nodes: [{ id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'entry', type: 'PersonalEvent', name: '신구대학 입학', start_date: '2000', confidence: 1 },
+      { id: 'met', type: 'PersonalEvent', name: '최근호를 만남', start_date: '2000', confidence: 0.9 },
+      { id: 'army', type: 'PersonalEvent', name: '30사단 훈련소 입소', start_date: '2002', confidence: 1 }],
+    edges: [],
+    timeline: [{ event_id: 'entry', life_stage: '대학', year: 2000 },
+      { event_id: 'met', life_stage: null, year: 2000 },
+      { event_id: 'army', life_stage: '군복무', year: 2002 }],
+  });
+  ok('같은 해의 앞 항목에서 단계를 잇는다',
+    sameYear.timeline.find((t) => t.event_id === 'met').life_stage === '대학',
+    JSON.stringify(sameYear.timeline));
   ok('스무 살의 항목이 초등학교로 되돌아가지 않는다', ss.gf === '군복무', JSON.stringify(ss));
   ok('뒤가 없으면 빈 단계는 채우지 않는다', ss.mv === null, JSON.stringify(ss));
   ok("'공익생활'도 군복무로 읽는다", MILITARY.test('공익생활을 하던 시절'));

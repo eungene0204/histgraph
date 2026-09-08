@@ -761,6 +761,12 @@ export function normalize(raw) {
     if (cur != null && ONE_WAY_STAGES.has(stage) && STAGE_ORDER.get(stage) < STAGE_ORDER.get(cur)) t.life_stage = cur;
     else cur = stage;
   }
+  // 같은 해의 바로 앞 항목과 같은 시절이다 (life.py refine 4 와 같다).
+  timeline.forEach((t, i) => {
+    if (i === 0 || STAGE_ORDER.has(t.life_stage) || t.year == null) return;
+    const prev = timeline[i - 1];
+    if (STAGE_ORDER.has(prev.life_stage) && prev.year === t.year) t.life_stage = prev.life_stage;
+  });
   timeline.forEach((t, i) => {
     if (STAGE_ORDER.has(t.life_stage)) return;
     const before = timeline.slice(0, i).reverse().find((x) => STAGE_ORDER.has(x.life_stage))?.life_stage ?? null;

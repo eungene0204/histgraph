@@ -5715,6 +5715,57 @@ with tempfile.TemporaryDirectory() as tmp:
     check("두 번 돌려도 만남은 하나다",
           len([n for n in life_mod.refine(met_out, met_text)["nodes"] if n["id"] == "met_gf"]) == 1)
 
+    # '신구대학 시절' — 이야기가 **이미 선 노드의 이름**으로 때를 말한다 (2026-09-09
+    # 사용자: "이미 내 역사에 신구대학 시절이 이미 있는데 이걸 이용하지 못하네").
+    # 해도 나이도 학년도 없는 문장이라 이름이 마지막 근거다. 만든 모임도 사건이다.
+    club_text = "신구대학 시절 만난 친구들은 최근호, 석민혁, 이수혁이고 우리는 a-club이란 모임도 만들었어."
+    check("이야기가 부른 이름이 해를 빌려 준다",
+          life_mod.year_from_story(club_text, "최근호", 1982, {}, {"신구대학": 2000}) == (2000, "year"))
+    check("이름이 여럿 걸리면 긴 쪽이 이긴다",
+          life_mod.year_from_story("신구대학 컴퓨터정보학과 시절 최근호를 만났어", "최근호", 1982, {},
+                                   {"신구대학": 2000, "신구대학 컴퓨터정보학과": 1999}) == (1999, "year"))
+    check("이야기가 스스로 말한 해가 이름을 이긴다",
+          life_mod.year_from_story("1998년에 신구대학에서 최근호를 만났어", "최근호", 1982, {},
+                                   {"신구대학": 2000}) == (1998, "year"))
+    check("때의 닻에 사람은 넣지 않는다 (그 사람의 해가 이 일의 해는 아니다)",
+          life_mod.time_anchors([{"id": "p", "type": "Person", "name": "김일권", "year": 1997},
+                                 {"id": "s", "type": "School", "name": "신구대학", "year": 2000}],
+                                None) == {"신구대학": 2000})
+    club = life_mod.refine({
+        "subject": {"id": "me", "name": "나", "birth_year": 1982},
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                  {"id": "col", "type": "School", "name": "신구대학", "year": 2000},
+                  {"id": "entry", "type": "PersonalEvent", "name": "신구대학 입학", "year": 2000},
+                  {"id": "f1", "type": "Person", "name": "최근호", "confidence": 1.0},
+                  {"id": "club", "type": "Organization", "name": "a-club", "confidence": 1.0}],
+        "edges": [{"source": "me", "target": "entry", "type": "experienced", "confidence": 1.0},
+                  {"source": "me", "target": "f1", "type": "met", "confidence": 1.0},
+                  {"source": "me", "target": "club", "type": "member_of", "confidence": 1.0},
+                  {"source": "f1", "target": "club", "type": "member_of", "confidence": 1.0}],
+        "timeline": [{"event_id": "entry", "life_stage": "대학", "year": 2000}]}, club_text)
+    club_by = {n["id"]: n for n in club["nodes"]}
+    check("'신구대학 시절' 이 사람의 해가 된다", club_by["f1"].get("year") == 2000, str(club_by["f1"]))
+    check("만든 모임도 사건으로 선다",
+          club_by.get("made_club", {}).get("name") == "a-club 결성"
+          and club_by["made_club"]["year"] == 2000, str(club_by.get("made_club")))
+    check("같이 만든 사람은 '함께' 로 선다",
+          {(e["source"], e.get("role")) for e in club["edges"] if e["target"] == "made_club"}
+          == {("me", "결성"), ("f1", "함께")}, str([e for e in club["edges"] if e["target"] == "made_club"]))
+    club_tl = {t["event_id"]: t for t in club["timeline"]}
+    check("같은 해의 앞 항목에서 단계를 잇는다",
+          club_tl["made_club"]["life_stage"] == "대학" and club_tl["met_f1"]["life_stage"] == "대학",
+          str(club["timeline"]))
+    made_again = life_mod.refine(club, club_text)
+    check("두 번 돌려도 만든 일은 하나다",
+          len([n for n in made_again["nodes"] if n["id"] == "made_club"]) == 1)
+    check("들어간 것은 만든 것이 아니다 (가입은 세우지 않는다)",
+          "made_club2" not in {n["id"] for n in life_mod.refine({
+              "subject": {"id": "me", "name": "나", "birth_year": 1982},
+              "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                        {"id": "club2", "type": "Organization", "name": "산악회", "year": 2010}],
+              "edges": [{"source": "me", "target": "club2", "type": "member_of", "confidence": 1.0}],
+              "timeline": []}, "2010년에 산악회에 들어갔어.")["nodes"]})
+
     # 단계는 뒤로 가지 않는다 — 스무 살에 '초등학교'인 삶은 없다. 모델은 사람 노드의
     # 연표 항목에 단계를 아무렇게나 적는다 (실측: 2002년 항목이 '초등학교').
     back = life_mod.refine({

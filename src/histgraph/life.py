@@ -609,6 +609,8 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
             if src and src.get("year") is not None and dst.get("year") is None and "졸업" not in str(src.get("name") or ""):
                 dst["year"], dst["precision"] = src["year"], "year"
     entries = school_entries(nodes)
+    # 이미 해를 아는 것들의 이름 — 이야기가 '신구대학 시절'이라 부르면 그 해를 빌린다.
+    anchors = time_anchors(nodes, me)
     for n in nodes:
         if n.get("year") is not None and n.get("precision") != "age":
             continue
@@ -619,8 +621,8 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
         # 그 사람이 내 삶에 들어온 해는 **이야기가 그 사람을 부르는 문장**에 있다.
         # '만20살때 여자친구를 만났고, 이름은 정혜림 이었다' 의 해는 생년+20 이다
         # (2026-09-09 사용자: "'만20세', '공익생활'이라고 언급 했으면 … 충분히 유추").
-        if y is None and n.get("type") in PERSON_TYPES and n is not me:
-            y, prec = year_from_story(story, n.get("name"), birth, entries)
+        if y is None and n is not me and n.get("type") in PERSON_TYPES | ORG_TYPES:
+            y, prec = year_from_story(story, n.get("name"), birth, entries, anchors)
         if y is None and birth is not None:
             # 이름을 text 로 두지 않는다 — 이 함수의 `text` 는 **원문**이고,
             # 여기서 가리면 뒤의 관문(gate_connections)이 원문 대신 노드 설명을 읽는다.
@@ -658,8 +660,10 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
     participants_from_story(nodes, story)
     link_participants(nodes, edges, me)
 
-    # 3-3. **만난 일은 사건이다.** 사람만 세우고 끝내면 연표에 아무것도 서지 않는다.
-    if meet_events(payload, nodes, edges, me, story, entries):
+    # 3-3. **만난 일도 만든 일도 사건이다.** 사람·단체만 세우고 끝내면 연표에
+    #      아무것도 서지 않는다.
+    if meet_events(payload, nodes, edges, me, story, entries) \
+            + founding_events(payload, nodes, edges, me, story):
         by_id = {n["id"]: n for n in nodes}
 
     # 4. 연표
@@ -710,9 +714,17 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
             t["life_stage"] = cur
         else:
             cur = stage
-    # 단계를 안 적은 항목은 **앞뒤가 같은 단계일 때만** 그 단계를 잇는다 — 코드가 세운
-    # 만남 사건이 그렇다 (공익 근무와 소집해제 사이의 만남은 '군복무'다). 앞만 보고
-    # 이으면 십 년 뒤의 일이 '초등학교'가 된다 — 모르는 것은 모르는 채로 둔다.
+    # 단계를 안 적은 항목은 **같은 해의 바로 앞 항목**의 단계를 잇는다 — 같은 해에 이미
+    # 서 있는 일과 같은 시절이다 (2000년 신구대학 입학 다음에 선 '최근호를 만남'은 '대학').
+    for i, t in enumerate(timeline):
+        if i == 0 or t.get("life_stage") in STAGE_ORDER or t.get("year") is None:
+            continue
+        prev = timeline[i - 1]
+        if prev.get("life_stage") in STAGE_ORDER and prev.get("year") == t.get("year"):
+            t["life_stage"] = prev["life_stage"]
+    # 그러고도 비었으면 **앞뒤가 같은 단계일 때만** 잇는다 — 공익 근무와 소집해제 사이의
+    # 만남은 '군복무'다. 앞만 보고 이으면 십 년 뒤의 일이 '초등학교'가 된다 — 모르는
+    # 것은 모르는 채로 둔다.
     for i, t in enumerate(timeline):
         if t.get("life_stage") in STAGE_ORDER:
             continue
@@ -773,13 +785,20 @@ def _obj(word: str) -> str:
 
 
 def year_from_story(story: str | None, name: str | None, birth: int | None,
-                    entries: dict[str, int]) -> tuple[int | None, str]:
-    """이야기가 그 사람을 부르는 **첫 문장**에서 그 사람이 내 삶에 들어온 해를 셈한다.
+                    entries: dict[str, int], anchors: dict[str, int] | None = None) -> tuple[int | None, str]:
+    """이야기가 그것을 부르는 **첫 문장**에서 그것이 내 삶에 들어온 해를 셈한다.
 
     2026-09-09 사용자 지적: "'만20세', '공익생활'이라고 언급 했으면 이미 존재하는
     역사를 보면 충분히 유추 할 수 있었는데 그걸 못했어." 셈하는 자는 이미 있었다 —
     학년은 입학 해에서(`school_year`), 나이는 생년에서(`parse_when`). 없던 것은
     **그 자를 이야기 문장에 대 보는 자리**뿐이다. 노드의 날짜 칸만 보고 있었다.
+
+    `anchors` 는 **이미 해를 아는 노드의 이름 → 해**다. 같은 날 두 번째 지적: "이미
+    내 역사에 신구대학 시절이 이미 있는데 이걸 이용하지 못하네" — '신구대학 시절 만난
+    친구들은 …' 에는 해도 나이도 학년도 없다. 이야기가 부른 것은 **이미 선 노드의
+    이름**이고 그 노드가 해를 안다. 이야기가 스스로 해를 말하면(1998년·만20살·2학년)
+    그것이 먼저고 이름은 마지막 근거다 — 이름이 여럿 걸리면 긴 쪽이 이긴다
+    ('신구대학 컴퓨터정보학과 입학'이 '신구대학'을 이긴다).
 
     돌려주는 정밀도는 화면이 단정의 폭을 정하는 데 쓴다 (`parse_when` 머리글).
     """
@@ -790,11 +809,31 @@ def year_from_story(story: str | None, name: str | None, birth: int | None,
         y, _, prec = parse_when(line, birth)
         if y is not None:
             return y, prec or "year"
+        said = [(len(k), v) for k, v in (anchors or {}).items() if k in line]
+        if said:
+            return max(said)[1], "year"
     return None, ""
 
 
 # 만남으로 읽는 관계. 가족은 뺀다 — 어머니를 '만난' 것이 아니다.
 MET_EDGES = frozenset({"met", "friend_of", "worked_with", "schoolmate"})
+# 내가 들거나 만드는 것.
+ORG_TYPES = frozenset({"Company", "Organization", "Community", "Business"})
+# **때의 닻** — 이야기가 이름으로 부르면 그 해를 빌려 주는 노드의 갈래. 사람은 넣지
+# 않는다: '김일권과 자주 놀았어' 의 해가 김일권을 만난 해는 아니다. 자리(학교·회사·
+# 단체)와 사건은 '그 시절'을 가리키는 말로 쓰인다 — '신구대학 시절'·'공익 시절'.
+ANCHOR_TYPES = EVENT_TYPES | ORG_TYPES | {"School", "University", "Period", "LifeStage", "Time"}
+
+
+def time_anchors(nodes: list[dict], me: dict | None) -> dict[str, int]:
+    """이미 해를 아는 것들의 이름 → 해 (`year_from_story` 의 마지막 근거)."""
+    out: dict[str, int] = {}
+    for n in nodes:
+        name = str(n.get("name") or "").strip()
+        if n is me or n.get("year") is None or len(name) < 2 or n.get("type") not in ANCHOR_TYPES:
+            continue
+        out.setdefault(name, int(n["year"]))
+    return out
 
 
 def meet_events(payload: dict, nodes: list[dict], edges: list[dict], me: dict | None,
@@ -870,6 +909,73 @@ def meet_events(payload: dict, nodes: list[dict], edges: list[dict], me: dict | 
             timeline.append({"event_id": ev_id, "life_stage": None, "year": year,
                              "age": None, "date_text": None})
         _during(by_id, edges, pid, ev_id)
+        made += 1
+    return made
+
+
+# 내가 만든 것으로 읽는 말. '들어갔다'·'다녔다'는 아니다 — 만든 사람만 세운다.
+_FOUND_STORY = re.compile(r"만들|만든|세웠|세운|결성|창단|창립|설립|차렸|차린|꾸렸|꾸린")
+# 만든 일의 이름. 회사는 창업이고 모임은 결성이다.
+_FOUND_DEED = {"Company": "창업", "Business": "창업"}
+
+
+def founding_events(payload: dict, nodes: list[dict], edges: list[dict], me: dict | None,
+                    story: str | None) -> int:
+    """'모임을 만들었어' 를 **사건**으로 세운다. 돌아오는 것은 새로 세운 수.
+
+    2026-09-09 사용자: '신구대학 시절 만난 친구들은 … 우리는 a-club이란 모임도
+    만들었어' 를 넣었는데 "전혀 반영 하지 못했어". 단체는 연표에 서지 않는다 —
+    이어지는 것이라 점이 아니다. 만든 **일**은 사건이라 선다 (만남과 같은 자리:
+    `meet_events` 머리글).
+
+    근거는 셋이 다 있어야 한다: 내가 든 단체라는 관계, 이야기가 **만들었다고 말한**
+    문장, 그리고 해. 들어간 것(입사·가입)은 만든 것이 아니라 세우지 않는다.
+    """
+    if me is None or not story:
+        return 0
+    by_id = {n["id"]: n for n in nodes}
+    mine: dict[str, dict] = {}
+    for e in edges:
+        src, dst = e.get("source"), e.get("target")
+        if src != me["id"] or e.get("type") not in ("member_of", "worked_at"):
+            continue
+        org = by_id.get(dst)
+        if org is not None and org.get("type") in ORG_TYPES:
+            mine.setdefault(org["id"], org)
+    named = [str(n.get("name") or "") for n in nodes if n.get("type") in EVENT_TYPES]
+    people = [n for n in nodes if n.get("type") in PERSON_TYPES and n is not me
+              and len(str(n.get("name") or "").strip()) >= 2]
+    timeline: list[dict] = payload.setdefault("timeline", [])
+    made = 0
+    for oid, org in mine.items():
+        name = str(org.get("name") or "").strip()
+        year = org.get("year")
+        ev_id = f"made_{oid}"
+        if len(name) < 2 or year is None or ev_id in by_id:
+            continue
+        lines = [ln for ln in _sentences_about(story, name) if _FOUND_STORY.search(ln)]
+        if not lines or any(name in ev for ev in named):
+            continue
+        deed = _FOUND_DEED.get(str(org.get("type")), "결성")
+        # 같이 만든 사람 — 그 문장이 함께 부른 사람이다 ('우리는 … 만들었어').
+        with_me = [p["id"] for p in people if any(p["name"] in ln for ln in lines)]
+        event = {
+            "id": ev_id, "type": "PersonalEvent", "name": f"{name} {deed}",
+            "description": lines[0].strip(), "start_date": str(year), "end_date": None,
+            "location": None, "participants": [me["id"], *with_me],
+            "importance_score": org.get("importance_score"), "emotional_impact": None,
+            "confidence": min(float(org.get("confidence") or 1.0), 0.9),
+            "year": year, "end_year": None, "precision": org.get("precision") or "year",
+        }
+        nodes.append(event)
+        by_id[ev_id] = event
+        edges.append({"source": me["id"], "target": ev_id, "type": "experienced",
+                      "description": None, "confidence": event["confidence"], "role": deed})
+        for pid in with_me:
+            edges.append({"source": pid, "target": ev_id, "type": "experienced",
+                          "description": None, "confidence": event["confidence"], "role": "함께"})
+        timeline.append({"event_id": ev_id, "life_stage": None, "year": year,
+                         "age": None, "date_text": None})
         made += 1
     return made
 
@@ -1234,7 +1340,7 @@ _COLLEAGUE = re.compile(r"동료|같이 일|함께 일|같은 회사|같은 팀"
 # (한국사 그래프의 역할 머리말 '주도'·'지휘'와 같은 자리).
 _DEED = re.compile(r"(입학|졸업|수료|자퇴|휴학|복학|편입|전학|유학|이주|이사|이민|귀국|출국|귀화|창업|개업|폐업|"
                    r"입사|퇴사|이직|취업|취직|승진|발령|전근|파견|은퇴|입소|입대|전역|제대|소집해제|결혼|이혼|약혼|"
-                   r"출생|출산|사망|합격|낙방|수상|당선|낙선|출마|입원|수술|데뷔|입양|만남|이별|재회|시작|종료)\s*$")
+                   r"출생|출산|사망|합격|낙방|수상|당선|낙선|출마|입원|수술|데뷔|입양|만남|이별|재회|결성|창단|창립|설립|시작|종료)\s*$")
 _EVENT_KIND_ROLE = {"TurningPoint": "전환점", "Crisis": "위기", "Achievement": "성취",
                     "Failure": "실패", "Decision": "결정", "Memory": "기억"}
 
