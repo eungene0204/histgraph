@@ -5,13 +5,12 @@ import { auth } from '../lib/auth.js';
 // "'내 역사' 버튼을 눌렀을때 로그인 안 돼쓰면 로그인 모달을 보여줘서 로그인을
 // 하게 강제해. 내 역사는 개인별로 다 다르니깐").
 //
-// 그래프는 로그인 없이 다 보인다. 막는 것은 **사람마다 다른 것** 하나뿐이라,
-// 이 상자는 왜 여기서만 묻는지를 먼저 적는다 — 이유 없이 막는 화면은 그냥
-// 닫힌 문이다.
+// 그래프는 로그인 없이 다 보인다. 막는 것은 **사람마다 다른 것** 하나뿐이다.
+// 제목이 그것을 말하므로 **덧붙여 설명하지 않는다** (2026-09-09 사용자 결정).
 //
 // `dismissible` 이 거짓이면 닫는 단추 대신 **돌아갈 자리**를 준다. 막다른
 // 곳에 세워 두지 않는다.
-export function LoginModal({ next = '/', title, why, dismissible = true, onClose, ready = true }) {
+export function LoginModal({ next = '/', title, dismissible = true, onClose, ready = true }) {
   useEffect(() => {
     if (!dismissible) return undefined;
     const esc = (e) => { if (e.key === 'Escape') onClose?.(); };
@@ -24,7 +23,6 @@ export function LoginModal({ next = '/', title, why, dismissible = true, onClose
          onMouseDown={(e) => { if (dismissible && e.target === e.currentTarget) onClose?.(); }}>
       <div className="login-box" role="dialog" aria-modal="true" aria-label={title}>
         <h2>{title}</h2>
-        <p>{why}</p>
 
         {ready ? (
           <button className="login-go" type="button" onClick={() => auth.login(next)}>
@@ -39,12 +37,6 @@ export function LoginModal({ next = '/', title, why, dismissible = true, onClose
             들어오실 수 있습니다.
           </p>
         )}
-
-        <p className="login-fine">
-          로그인하면 <a href="/terms.html">이용약관</a>과{' '}
-          <a href="/privacy.html">개인정보처리방침</a>에 동의하는 것으로 봅니다.
-          받는 것은 이름·이메일·프로필 사진뿐이고, 탈퇴하면 함께 지워집니다.
-        </p>
 
         {dismissible
           ? <button className="login-back" type="button" onClick={onClose}>나중에</button>

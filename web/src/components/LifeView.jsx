@@ -524,7 +524,6 @@ export default function LifeView() {
           next="/life.html"
           dismissible={false}
           title="내 역사는 로그인이 필요합니다"
-          why="내 역사는 사람마다 다릅니다. 누구의 연표인지 알아야 다음에 다시 열어 드릴 수 있어서, 이 장에서만 로그인을 여쭙니다. 그래프를 보고 검색하는 데에는 로그인이 필요하지 않습니다."
         />
       </>
     );
