@@ -10,6 +10,7 @@ import {
   ladder,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
+  linkPeople, kinIn,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
 } from '../src/lib/life.js';
 import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
@@ -469,6 +470,52 @@ console.log('\n개인 역사 — 함께한 사람 (2026-09-08 "친구 김일권�
   nodes[2].participants = ['me', 'kim'];
   ok('이미 이어진 것은 다시 잇지 않는다', linkParticipants(nodes, edges, nodes[0]) === 0 && edges.length === 1);
   ok('이야기가 없으면 아무것도 안 한다', participantsFromStory(doc().nodes, '') === 0);
+}
+
+console.log('\n개인 역사 — 가족은 호칭으로 잇는다 (2026-09-08 "왜 엄마라고 분명히 말했고 … 엣지를 그리지 않았지?")');
+{
+  // 더한 토막의 모델 답이 person_mother → person_1 을 적었지만 주인공 노드가 새 답에
+  // 없어 관문이 버렸고, 브라우저에 남은 그래프에는 어머니가 홀로 떴다. 화면은 이야기를
+  // 읽어 잇는다 — 서버 없이도, 새로고침만으로.
+  const doc = () => ({
+    nodes: [
+      { id: 'person_1', type: 'Person', name: '나', start_date: '1982-02-27', confidence: 1 },
+      { id: 'kim', type: 'Person', name: '김일권', description: '고등학교 1학년 때 만난 친구', confidence: 1 },
+      { id: 'gig', type: 'PersonalEvent', name: '메탈리카 공연 관람', start_date: '1998-04-24', confidence: 1 },
+      { id: 'person_mother', type: 'Person', name: '백경순', start_date: '1953-07-09', confidence: 1 },
+    ],
+    edges: [{ source: 'person_1', target: 'gig', type: 'experienced', confidence: 1 },
+      { source: 'kim', target: 'gig', type: 'experienced', confidence: 1 }],
+    timeline: [{ event_id: 'gig', year: 1998 }],
+    subject: { id: 'person_1', name: '나', birth_year: 1982 },
+    stories: [{ at: '', text: '1998년 4월 24일 메탈리카 공연을 친구 김일권과 함께 갔어.' },
+      { at: '', text: '우리 엄마는 1953년 7월 9일에 태어나셨어. 성함은 백경순이야.' }],
+  });
+  const life = normalize(doc());
+  const mom = life.edges.find((e) => [e.source, e.target].includes('person_mother'));
+  ok('엄마와 나 사이에 부모 관계가 선다 (부모 → 자녀)',
+    mom && mom.type === 'parent_of' && mom.source === 'person_mother' && mom.target === 'person_1', JSON.stringify(life.edges));
+  ok("호칭 '엄마'가 선의 이름이다", mom?.role === '엄마' && graphPayload(life).edges.find((e) => e.s === 'person_mother')?.label === '엄마');
+  ok('본인이 말한 것이라 확신 1', mom?.confidence === 1);
+  const momNode = life.nodes.find((n) => n.id === 'person_mother');
+  ok('사용자가 말한 생일 1953-07-09 는 남는다', momNode.start_date === '1953-07-09' && momNode.year === 1953 && nodeYears(momNode) === '1953');
+  ok('이미 이어진 사람(김일권)은 건드리지 않는다', life.edges.filter((e) => e.source === 'kim' || e.target === 'kim').length === 1);
+  ok('두 번 다듬어도 그대로', normalize(life).edges.length === life.edges.length);
+  // 호칭은 낱말이다 — 이름 안의 글자('나형철'의 '형')로는 잇지 않는다
+  ok("'나형철'의 '형'은 호칭이 아니다", kinIn('이름은 나형철이고 지금까지 만나고 있어', ['나형철']) === null);
+  ok("'우리형은' 은 형이다", kinIn('우리형은 1980년생이야')?.term === '형' && kinIn('동생 박준영과 갔어')?.kind === 'relative_of');
+  const me = { id: 'me', type: 'Person', name: '나' };
+  const two = () => [me, { id: 'k', type: 'Person', name: '김일권' }];
+  let edges = [];
+  linkPeople(two(), edges, me, '친구 김일권의 엄마는 선생님이셨어.');
+  ok("남의 가족('김일권의 엄마')은 내 가족이 아니다 — 이름이 불렸으니 만난 사이", edges.length === 1 && edges[0].type === 'met' && edges[0].confidence === 0.8, JSON.stringify(edges));
+  edges = [];
+  linkPeople(two(), edges, me, '내 아들 김일권은 2010년에 태어났어.');
+  ok('아들은 나 → 그 사람 (부모 → 자녀)', edges[0]?.type === 'parent_of' && edges[0].source === 'me' && edges[0].role === '아들', JSON.stringify(edges));
+  edges = [{ source: 'k', target: 'me', type: 'parent_of', confidence: 1 }];
+  ok('모델이 이미 이은 가족 관계에는 호칭만 단다', linkPeople(two(), edges, me, '우리 아버지는 김일권이야.') === 0 && edges.length === 1 && edges[0].role === '아버지');
+  ok('이름이 이야기에 없으면 잇지 않는다', linkPeople(two(), [], me, '우리 엄마는 1953년에 태어나셨어.') === 0);
+  ok('이야기가 없으면 아무것도 안 한다', linkPeople(two(), [], me, '') === 0);
 }
 
 console.log('\n개인 역사 — 노드를 지운다');

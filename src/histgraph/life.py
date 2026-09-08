@@ -383,6 +383,29 @@ _FULL_DATE = re.compile(r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})"
 _YEAR_MONTH = re.compile(r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*월")
 
 
+def _sentences_about(text: str, name: str | None) -> list[str]:
+    """이름을 부르는 문장과 **그 바로 앞 문장** (같은 문단 안). 앞 문장이 먼저가 아니라
+    이름 문장이 먼저다 — 이름 문장에 근거가 있으면 그것을 쓴다.
+
+    한 문단은 한 사람을 두 문장으로 말하곤 한다 — "우리 엄마는 1953년 7월 9일에
+    태어나셨어. 성함은 백경순이야." (2026-09-08 실측: 이름 문장만 보니 날짜가 없어
+    사용자가 말한 생일을 지웠다). 앞 문장은 **이름 문장에 해가 하나도 없고 앞 문장이
+    가족 호칭으로 그 사람을 부를 때만** 본다 — 아니면 '나는 1982년에 태어났다. …
+    김일권을 만났다' 의 1982 가 김일권의 생년이 된다. 문단(줄) 을 넘어서는 보지 않는다.
+    """
+    if not name:
+        return []
+    out: list[str] = []
+    for para in text.split("\n"):
+        sents = [s for s in re.split(r"[.!?。]", para) if s.strip()]
+        for i, s in enumerate(sents):
+            if name in s:
+                out.append(s)
+                if i > 0 and not _YEAR.search(s) and _KIN.search(sents[i - 1]):
+                    out.append(sents[i - 1])
+    return out
+
+
 def stated_date(text: str | None, name: str | None, date: str | None, *, whole: bool = False) -> str | None:
     """원문이 말한 만큼의 날짜. 그 해를 말한 적이 없으면 None.
 
@@ -393,7 +416,7 @@ def stated_date(text: str | None, name: str | None, date: str | None, *, whole: 
     year = parse_when(date)[0]
     if year is None:
         return None
-    where = [text] if whole else [s for s in re.split(r"[.!?\n。]", text) if name and name in s]
+    where = [text] if whole else _sentences_about(text, name)
     for s in where:
         for m in _FULL_DATE.finditer(s):
             if int(m.group(1)) == year:
@@ -504,7 +527,14 @@ def birth_from_nodes(me: dict, nodes: list[dict], edges: list[dict]) -> int | No
     return parse_when(birth_date_from_nodes(me, nodes, edges))[0]
 
 
-def refine(payload: dict, text: str | None = None) -> dict:
+def refine(payload: dict, text: str | None = None, *, added: str | None = None) -> dict:
+    """모델 없이 규칙만으로 그래프를 다듬는다.
+
+    `text` 는 이 그래프를 만든 이야기 **전부**다 — 인물의 날짜와 역사 연결의 관문이
+    여기에 대 본다. `added` 는 **이번에 더한 토막**이다 — 이야기 안의 근거(함께한
+    사람·가족 호칭·이름이 불린 사람)를 읽는 데만 쓰고, 관문은 걸지 않는다 (토막만
+    보고 옛 이야기가 부른 역사 연결을 버리면 안 된다: `merge` 머리글).
+    """
     nodes: list[dict] = payload.get("nodes") or []
     edges: list[dict] = payload.setdefault("edges", [])
     if not nodes:
@@ -626,6 +656,8 @@ def refine(payload: dict, text: str | None = None) -> dict:
     #      그렇게 모인 participants 를 사람 노드로 풀어 사건에 잇는다.
     story = text if text else "\n".join(
         str(r.get("text") or "") for r in (payload.get("stories") or []) if isinstance(r, dict))
+    if added and added.strip() and added.strip() not in story:
+        story = "\n".join(x for x in (story, added.strip()) if x)
     participants_from_story(nodes, story)
     link_participants(nodes, edges, me)
 
@@ -633,8 +665,8 @@ def refine(payload: dict, text: str | None = None) -> dict:
     for issue in tidy_edges(nodes, edges, me):
         log.warning("개인 그래프 온톨로지 밖: %s", issue)
 
-    # 6. 섬을 잇는다 — 내 삶의 사건은 내가 겪은 것이다
-    if link_orphans(nodes, edges, me):
+    # 6. 섬을 잇는다 — 내 삶의 사건은 내가 겪은 것이고, 가족은 이야기가 호칭으로 말한다
+    if link_orphans(nodes, edges, me) + link_people(nodes, edges, me, story):
         tidy_edges(nodes, edges, me)   # 새로 이은 선에도 이름(역할)을 단다
 
     # 7. 역사 연결의 관문 — 이야기가 부르지 않은 사건·결과보다 늦은 원인을 지운다.
@@ -778,6 +810,139 @@ def link_orphans(nodes: list[dict], edges: list[dict], me: dict | None) -> int:
                               "description": None, "confidence": 0.8})
                 made += 1
                 break
+    return made
+
+
+# --- 가족은 이야기가 호칭으로 말한다 ---------------------------------------------------
+# 2026-09-08 사용자: "왜 엄마라고 분명히 말했고 엄마는 매우 중요한 사람인데 그래프에서
+# 나와 엄마 사이에 엣지를 그리지 않았지?" 모델은 관계를 적었지만 관문이 버렸고
+# (validate 머리글), 코드에는 호칭을 읽는 자리가 없었다. 가족 호칭은 모델에게 다시
+# 물을 것이 아니다 — `participants_from_story` 가 한 문장의 사건과 사람을 잇듯, 이야기가
+# 호칭과 이름을 함께 부르면 코드가 잇는다. 호칭이 선의 이름(역할)이다.
+#
+# 호칭 → (관계, 방향). 방향은 LIFE_EDGES 의 출발·도착대로: `in` 은 그 사람 → 나
+# (parent_of 는 부모 → 자녀), `out` 은 나 → 그 사람, `sym` 은 대칭(relative_of).
+# 형제·배우자는 relative_of 에 호칭을 역할로 단다 — 관계 타입을 늘리면 지시문·스키마·
+# 문장 규칙을 같이 늘려야 한다 (graph-drawer §1.4). 긴 호칭이 먼저다 (외할머니 ⊃ 할머니).
+_KIN_TERMS: dict[str, tuple[str, str]] = {
+    **{t: ("ancestor_of", "in") for t in ("증조할머니", "증조할아버지", "고조할머니", "고조할아버지",
+                                          "증조부", "증조모", "고조부", "고조모")},
+    **{t: ("grandparent_of", "in") for t in ("외할머니", "외할아버지", "친할머니", "친할아버지",
+                                             "할머니", "할아버지", "조모", "조부")},
+    **{t: ("parent_of", "in") for t in ("어머니", "어머님", "엄마", "모친", "아버지", "아버님", "아빠", "부친",
+                                        "새어머니", "새아버지", "양어머니", "양아버지", "계모", "계부")},
+    **{t: ("parent_of", "out") for t in ("큰아들", "작은아들", "큰딸", "작은딸", "아들", "딸", "자식", "자녀")},
+    **{t: ("grandparent_of", "out") for t in ("외손자", "외손녀", "손자", "손녀")},
+    **{t: ("relative_of", "sym") for t in (
+        "남동생", "여동생", "형님", "누님", "쌍둥이", "형", "누나", "언니", "오빠", "동생",
+        "아내", "남편", "부인", "집사람", "신랑", "배우자",
+        "외삼촌", "삼촌", "이모부", "고모부", "외숙모", "이모", "고모", "숙부", "숙모", "백부", "백모",
+        "큰아버지", "작은아버지", "큰어머니", "작은어머니", "사촌", "조카",
+        "장인", "장모", "시아버지", "시어머니", "며느리", "사위", "처남", "처형", "처제",
+        "매형", "매제", "형수", "제수", "올케", "시누이", "동서")},
+}
+# 호칭은 낱말이어야 한다 — 앞에 한글이 붙으면 다른 낱말이다 ('나형철'의 '형'). 다만
+# '우리형'·'내동생'처럼 붙여 쓴 것은 받는다. 뒤에는 조사나 띄어쓰기가 온다 ('엄마는'·'형이').
+_KIN_ALT = "|".join(sorted(_KIN_TERMS, key=len, reverse=True))
+_KIN_TAIL = r"(?=[은는이가을를과와의도만께랑한로들야]|\s|[,.!?)]|$)"
+_KIN = re.compile(r"(?:(?<![가-힣])|(?<=우리)|(?<=내)|(?<=저희)|(?<=울))(" + _KIN_ALT + ")" + _KIN_TAIL)
+# 가족 관계 — 이미 이어진 사람은 건드리지 않되, 이 관계에 역할이 비어 있으면 호칭을 단다.
+_FAMILY_EDGES = frozenset({"parent_of", "child_of", "grandparent_of", "ancestor_of", "relative_of"})
+
+
+def kin_in(sentence: str, names: list[str] | None = None) -> tuple[str, str, str, int] | None:
+    """문장 속 가족 호칭 하나 — (호칭, 관계, 방향, 자리). `names` 는 그 문장의 사람 이름이라
+    호칭 찾기 전에 가린다 (이름 안의 글자가 호칭으로 읽히면 안 된다)."""
+    masked = sentence
+    for nm in names or []:
+        masked = masked.replace(nm, "○" * len(nm))
+    m = _KIN.search(masked)
+    if not m:
+        return None
+    term = m.group(1)
+    kind, direction = _KIN_TERMS[term]
+    return term, kind, direction, m.start(1)
+
+
+def _kin_of_other(sentence: str, name: str) -> bool:
+    """'김일권의 엄마'·'김일권 엄마' — 남의 가족이지 내 가족이 아니다."""
+    return re.search(re.escape(name) + r"\s*(?:의|네)?\s*(?:" + _KIN_ALT + ")" + _KIN_TAIL, sentence) is not None
+
+
+def link_people(nodes: list[dict], edges: list[dict], me: dict | None, text: str | None) -> int:
+    """주인공과 떨어진 **사람**을 잇는다. 돌아오는 것은 새로 이은 수.
+
+    사람 섬은 남기지 않는다 (2026-09-08 사용자 — 어머니 백경순이 홀로 떠 있었다):
+      1. 이야기가 한 문장(또는 바로 앞 문장까지)에서 **가족 호칭과 그 사람의 이름**을
+         함께 부르면 LIFE_EDGES 의 가족 관계로 잇고 호칭을 역할로 단다 — 나와 직접
+         이어져 있지 않은 사람만. 남의 가족('김일권의 엄마')은 아니다.
+      2. 그러고도 주인공에게 닿지 않는 사람은, 이야기가 이름을 부르면 `met`(0.8) 로
+         잇는다 — 설명이 '친구'라 하면 tidy_edges 가 friend_of 로 옮긴다.
+    이미 이어진 사람은 건드리지 않는다. 근거는 이야기 밖에서 오지 않는다."""
+    if me is None:
+        return 0
+    story = str(text or "").strip()
+    if not story:
+        return 0
+    people = [n for n in nodes if n.get("type") in PERSON_TYPES and n is not me
+              and n.get("id") != me.get("id") and len(str(n.get("name") or "").strip()) >= 2]
+    if not people:
+        return 0
+    tied = {(e.get("source"), e.get("target")) for e in edges}
+    direct = {b if a == me["id"] else a for a, b in tied if me["id"] in (a, b)}
+    # 모델이 이미 가족 관계로 이었는데 역할이 비어 있으면 호칭만 단다 (선의 이름).
+    unnamed: dict[str, dict] = {}
+    for e in edges:
+        if e.get("type") in _FAMILY_EDGES and not e.get("role") and me["id"] in (e.get("source"), e.get("target")):
+            other = e["target"] if e.get("source") == me["id"] else e["source"]
+            unnamed.setdefault(str(other), e)
+    made = 0
+    # 1. 호칭
+    for n in people:
+        if n["id"] in direct and n["id"] not in unnamed:
+            continue
+        name = str(n["name"]).strip()
+        hit = None
+        for para in story.split("\n"):
+            sents = [s for s in re.split(r"[.!?。]", para) if s.strip()]
+            for i, s in enumerate(sents):
+                if name not in s or _kin_of_other(s, name):
+                    continue
+                names = [str(p["name"]).strip() for p in people if str(p["name"]).strip() in s]
+                hit = kin_in(s, names) or (kin_in(sents[i - 1], names) if i > 0 else None)
+                if hit:
+                    break
+            if hit:
+                break
+        if not hit:
+            continue
+        term, kind, direction, _ = hit
+        if n["id"] in unnamed:
+            unnamed[n["id"]]["role"] = term
+            continue
+        src, dst = (n["id"], me["id"]) if direction == "in" else (me["id"], n["id"])
+        edges.append({"source": src, "target": dst, "type": kind, "role": term,
+                      "description": None, "confidence": 1.0})
+        tied.add((src, dst))
+        direct.add(n["id"])
+        made += 1
+    # 2. 이름이 불린 사람 — 주인공에게 닿지 않으면 만난 사이로
+    reach = {me["id"]}
+    grew = True
+    while grew:
+        grew = False
+        for a, b in tied:
+            if (a in reach) != (b in reach):
+                reach.update((a, b))
+                grew = True
+    for n in people:
+        if n["id"] in reach or str(n["name"]).strip() not in story:
+            continue
+        edges.append({"source": me["id"], "target": n["id"], "type": "met",
+                      "description": n.get("description"), "confidence": 0.8})
+        tied.add((me["id"], n["id"]))
+        reach.add(n["id"])
+        made += 1
     return made
 
 
@@ -1232,10 +1397,19 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
 
     # 생년 — 나이로 적힌 날짜를 푸는 열쇠. 주인공(Person) 의 start_date 다.
     me = None
+    # 더하는 이야기의 주인공은 **옛 그래프에 있다** — 모델은 시킨 대로 그 노드를 다시
+    # 만들지 않는다. 그때 새 답의 첫 인물을 주인공으로 잡으면 남(어머니)이 주인공이
+    # 되고, 주인공을 가리키는 관계는 "양끝이 없다"고 버려진다 (2026-09-08 실측:
+    # '우리 엄마는 … 백경순이야' 의 `person_mother → person_1` 이 그렇게 사라져
+    # 어머니가 그래프에 홀로 떴다). 주인공 id 는 노드에 없어도 관계의 끝이 된다 —
+    # `merge` 가 옛 그래프의 그 노드에 잇는다.
+    ghost: str | None = None
     if subject and subject.get("id"):
         me = by_id.get(subject["id"]) or next(
             (n for n in nodes if n["type"] == "Person" and n["name"].strip().lower() in SELF_NAMES | {"나"}), None)
-    if me is None:
+        if me is None:
+            ghost = str(subject["id"])
+    if me is None and ghost is None:
         me = next((n for n in nodes if n["type"] == "Person"), None)
     if me and me["name"].strip().lower() in SELF_NAMES:
         # 지시문이 화자를 '사용자'라 부르니 모델도 그 이름을 노드에 적는다.
@@ -1248,7 +1422,8 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
         birth = int(subject["birth_year"])
     if birth is None and me:
         birth = birth_from_nodes(me, nodes, payload.get("edges") or [])
-    out["subject"] = {"id": me["id"], "name": me["name"], "birth_year": birth} if me else None
+    out["subject"] = {"id": me["id"], "name": me["name"], "birth_year": birth} if me else \
+        (dict(subject, birth_year=birth) if ghost else None)
     for n in nodes:
         y, y2, prec = parse_when(n.get("start_date"), birth)
         e = parse_when(n.get("end_date"), birth)[0]
@@ -1271,7 +1446,7 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
         by_name[_norm_label(n["name"])] = "" if _norm_label(n["name"]) in by_name else n["id"]
 
     def _endpoint(ref: Any) -> str | None:
-        if ref in by_id:
+        if ref in by_id or (ghost is not None and ref == ghost):
             return str(ref)
         return by_name.get(_norm_label(ref)) or None
 
@@ -1354,7 +1529,7 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
     if payload.get("_model"):
         out["_model"] = payload["_model"]
     out["notes"] = notes   # refine 이 뒤에 제 사유(역사 연결 버림)를 잇는다
-    refine(out)
+    refine(out, added=text)
     return out, out["notes"]
 
 
@@ -1581,7 +1756,10 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
     # refine 에는 이야기를 주지 않는다 — 여기 있는 것은 **이번에 더한 토막**이라
     # 옛 이야기가 부른 역사 연결이 통째로 걸린다 (부르는 쪽이 옛 이야기까지 합쳐
     # gate_connections 를 한 번 더 돈다: server._run · cli.cmd_life).
-    refine(out)   # 옛 그래프에 비어 있던 해·연결도 이 김에 채운다 (사유는 notes 뒤에 잇는다)
+    # 옛 그래프에 비어 있던 해·연결도 이 김에 채운다 (사유는 notes 뒤에 잇는다).
+    # 이번 토막은 `added` 로 준다 — 이야기 안의 근거(함께한 사람·가족 호칭)는 읽되
+    # 역사 연결의 관문은 걸지 않는다.
+    refine(out, added=text)
     return out, stats
 
 

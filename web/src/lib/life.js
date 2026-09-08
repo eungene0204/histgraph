@@ -268,6 +268,104 @@ export function linkOrphans(nodes, edges, me) {
   return made;
 }
 
+// --- 가족은 이야기가 호칭으로 말한다 (life.py link_people 과 같은 규칙) --------------
+// 2026-09-08 사용자: "왜 엄마라고 분명히 말했고 엄마는 매우 중요한 사람인데 그래프에서
+// 나와 엄마 사이에 엣지를 그리지 않았지?" 가족 호칭은 모델에게 다시 물을 것이 아니다 —
+// 이야기가 한 문장(또는 바로 앞 문장까지)에서 호칭과 이름을 함께 부르면 코드가 잇는다.
+// 호칭이 선의 이름(역할)이다. 방향은 LIFE_EDGES 대로: in = 그 사람 → 나 (부모 → 자녀),
+// out = 나 → 그 사람, sym = 대칭(relative_of — 형제·배우자·친척은 호칭을 역할로 단다).
+const KIN_TERMS = {};
+for (const t of ['증조할머니', '증조할아버지', '고조할머니', '고조할아버지', '증조부', '증조모', '고조부', '고조모']) KIN_TERMS[t] = ['ancestor_of', 'in'];
+for (const t of ['외할머니', '외할아버지', '친할머니', '친할아버지', '할머니', '할아버지', '조모', '조부']) KIN_TERMS[t] = ['grandparent_of', 'in'];
+for (const t of ['어머니', '어머님', '엄마', '모친', '아버지', '아버님', '아빠', '부친', '새어머니', '새아버지', '양어머니', '양아버지', '계모', '계부']) KIN_TERMS[t] = ['parent_of', 'in'];
+for (const t of ['큰아들', '작은아들', '큰딸', '작은딸', '아들', '딸', '자식', '자녀']) KIN_TERMS[t] = ['parent_of', 'out'];
+for (const t of ['외손자', '외손녀', '손자', '손녀']) KIN_TERMS[t] = ['grandparent_of', 'out'];
+for (const t of ['남동생', '여동생', '형님', '누님', '쌍둥이', '형', '누나', '언니', '오빠', '동생',
+  '아내', '남편', '부인', '집사람', '신랑', '배우자',
+  '외삼촌', '삼촌', '이모부', '고모부', '외숙모', '이모', '고모', '숙부', '숙모', '백부', '백모',
+  '큰아버지', '작은아버지', '큰어머니', '작은어머니', '사촌', '조카',
+  '장인', '장모', '시아버지', '시어머니', '며느리', '사위', '처남', '처형', '처제',
+  '매형', '매제', '형수', '제수', '올케', '시누이', '동서']) KIN_TERMS[t] = ['relative_of', 'sym'];
+const KIN_ALT = Object.keys(KIN_TERMS).sort((a, b) => b.length - a.length).join('|');
+// 호칭은 낱말이어야 한다 — 앞에 한글이 붙으면 다른 낱말이다 ('나형철'의 '형'). '우리형'은 받는다.
+const KIN_TAIL = '(?=[은는이가을를과와의도만께랑한로들야]|\\s|[,.!?)]|$)';
+const KIN = new RegExp(`(?:(?<![가-힣])|(?<=우리|내|저희|울))(${KIN_ALT})${KIN_TAIL}`);
+const FAMILY_EDGES = new Set(['parent_of', 'child_of', 'grandparent_of', 'ancestor_of', 'relative_of']);
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// 문장 속 가족 호칭 하나 — {term, kind, dir}. names 는 그 문장의 사람 이름이라 먼저 가린다.
+export function kinIn(sentence, names = []) {
+  let masked = String(sentence || '');
+  for (const nm of names) masked = masked.split(nm).join('○'.repeat(nm.length));
+  const m = KIN.exec(masked);
+  if (!m) return null;
+  const [kind, dir] = KIN_TERMS[m[1]];
+  return { term: m[1], kind, dir };
+}
+// '김일권의 엄마'·'김일권 엄마' — 남의 가족이지 내 가족이 아니다.
+const kinOfOther = (sentence, name) => new RegExp(`${escapeRe(name)}\\s*(?:의|네)?\\s*(?:${KIN_ALT})${KIN_TAIL}`).test(sentence);
+
+// 주인공과 떨어진 **사람**을 잇는다. 사람 섬은 남기지 않는다:
+//   1. 호칭과 이름을 함께 부른 사람 → 가족 관계 (확신 1, 호칭이 역할). 나와 직접 이어져
+//      있지 않은 사람만 — 모델이 가족 관계로 이었는데 역할이 비면 호칭만 단다.
+//   2. 그러고도 주인공에게 닿지 않는 사람은 이야기가 이름을 부르면 met(0.8) —
+//      설명이 '친구'라 하면 tidyEdges 가 friend_of 로 옮긴다.
+export function linkPeople(nodes, edges, me, text) {
+  const story = String(text || '').trim();
+  if (!me || !story) return 0;
+  const people = nodes.filter((n) => PERSON_TYPES.has(n.type) && n !== me && n.id !== me.id
+    && String(n.name || '').trim().length >= 2);
+  if (!people.length) return 0;
+  const tied = edges.map((e) => [e.source, e.target]);
+  const direct = new Set(tied.filter(([a, b]) => a === me.id || b === me.id).map(([a, b]) => (a === me.id ? b : a)));
+  const unnamed = new Map();
+  for (const e of edges) {
+    if (FAMILY_EDGES.has(e.type) && !e.role && (e.source === me.id || e.target === me.id)) {
+      const other = e.source === me.id ? e.target : e.source;
+      if (!unnamed.has(other)) unnamed.set(other, e);
+    }
+  }
+  let made = 0;
+  for (const n of people) {
+    if (direct.has(n.id) && !unnamed.has(n.id)) continue;
+    const name = String(n.name).trim();
+    let hit = null;
+    for (const para of story.split('\n')) {
+      const sents = para.split(/[.!?。]/).filter((s) => s.trim());
+      for (let i = 0; i < sents.length && !hit; i += 1) {
+        const s = sents[i];
+        if (!s.includes(name) || kinOfOther(s, name)) continue;
+        const names = people.map((p) => String(p.name).trim()).filter((nm) => s.includes(nm));
+        hit = kinIn(s, names) || (i > 0 ? kinIn(sents[i - 1], names) : null);
+      }
+      if (hit) break;
+    }
+    if (!hit) continue;
+    if (unnamed.has(n.id)) { unnamed.get(n.id).role = hit.term; continue; }
+    const [src, dst] = hit.dir === 'in' ? [n.id, me.id] : [me.id, n.id];
+    edges.push({ source: src, target: dst, type: hit.kind, role: hit.term, description: null, confidence: 1 });
+    tied.push([src, dst]);
+    direct.add(n.id);
+    made += 1;
+  }
+  const reach = new Set([me.id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [a, b] of tied) {
+      if (reach.has(a) !== reach.has(b)) { reach.add(a); reach.add(b); grew = true; }
+    }
+  }
+  for (const n of people) {
+    if (reach.has(n.id) || !story.includes(String(n.name).trim())) continue;
+    edges.push({ source: me.id, target: n.id, type: 'met', description: n.description ?? null, confidence: 0.8 });
+    tied.push([me.id, n.id]);
+    reach.add(n.id);
+    made += 1;
+  }
+  return made;
+}
+
 // --- 함께한 사람 -------------------------------------------------------------
 // 화면에 낼 수 있는 이름인가. 그래프에 있으면 그 노드의 이름이고, 없으면 **한글로
 // 적힌 말일 때만** 그대로 쓴다 — 모델의 식별자(`person_1`)를 화면에 내지 않는다
@@ -606,8 +704,12 @@ export function normalize(raw) {
   participantsFromStory(nodes, storyText(raw));
   linkParticipants(nodes, kept, subj);
   out.edges = tidyEdges(nodes, kept, subj);
-  // 섬을 잇는다 — 온톨로지를 씌운 뒤에 (버려질 엣지를 이어진 것으로 세면 섬이 남는다)
-  if (linkOrphans(nodes, out.edges, subj)) out.edges = tidyEdges(nodes, out.edges, subj);
+  // 섬을 잇는다 — 온톨로지를 씌운 뒤에 (버려질 엣지를 이어진 것으로 세면 섬이 남는다).
+  // 사건은 내가 겪은 것으로, 사람은 이야기의 호칭(엄마·형·아들)으로 — 브라우저에 남은
+  // 옛 그래프도 새로고침으로 여기서 이어진다.
+  if (linkOrphans(nodes, out.edges, subj) + linkPeople(nodes, out.edges, subj, storyText(raw))) {
+    out.edges = tidyEdges(nodes, out.edges, subj);
+  }
   const timeline = [];
   for (const t of raw.timeline || []) {
     if (!t || !byId.has(t.event_id)) continue;

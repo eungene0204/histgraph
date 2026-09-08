@@ -5739,6 +5739,81 @@ with tempfile.TemporaryDirectory() as tmp:
           str(got["edges"]))
     check("한 번 이은 것을 두 번 잇지 않는다", life_mod.link_orphans(got["nodes"], got["edges"], got["nodes"][0]) == 0)
 
+    # 가족은 이야기가 호칭으로 말한다 (2026-09-08 사용자: "왜 엄마라고 분명히 말했고
+    # 엄마는 매우 중요한 사람인데 그래프에서 나와 엄마 사이에 엣지를 그리지 않았지?").
+    # 실측: 더한 토막의 답이 person_mother → person_1 을 적었는데 주인공 노드가 새 답에
+    # 없어(옛 그래프에 있다) validate 가 "양끝이 없다"고 버렸고, 부팅 refine 은 이름
+    # 문장('성함은 백경순이야')에 날짜가 없다고 생일까지 지웠다.
+    import copy
+
+    mom_text = "우리 엄마는 1953년 7월 9일에 태어나셨어. 성함은 백경순이야."
+    mom_base = {"nodes": [
+        {"id": "person_1", "type": "Person", "name": "나", "start_date": "1982-02-27", "year": 1982, "precision": "exact"},
+        {"id": "kim", "type": "Person", "name": "김일권", "description": "고등학교 1학년 때 만난 친구"},
+        {"id": "gig", "type": "PersonalEvent", "name": "메탈리카 공연 관람", "start_date": "1998-04-24", "year": 1998},
+    ], "edges": [{"source": "person_1", "target": "gig", "type": "experienced", "role": "관람"},
+                 {"source": "kim", "target": "gig", "type": "experienced", "role": "함께"}],
+        "timeline": [{"event_id": "gig", "year": 1998}],
+        "subject": {"id": "person_1", "name": "나", "birth_year": 1982},
+        "stories": [{"at": "", "text": "1998년 4월 24일 메탈리카 공연을 친구 김일권과 함께 갔어."}]}
+    mom_add = {"nodes": [{"id": "person_mother", "type": "Person", "name": "백경순",
+                          "start_date": "1953-07-09", "confidence": 1.0}],
+               "edges": [{"source": "person_mother", "target": "person_1", "type": "parent_of", "confidence": 1.0}],
+               "timeline": [], "historical_connections": []}
+    mv, mnotes = life_mod.validate(copy.deepcopy(mom_add), subject=mom_base["subject"], text=mom_text)
+    check("더하는 답에서 주인공을 가리키는 관계는 버리지 않는다 (주인공은 옛 그래프에 있다)",
+          len(mv["edges"]) == 1 and mv["edges"][0]["target"] == "person_1", str(mnotes))
+    check("새 답의 첫 인물(어머니)을 주인공으로 잡지 않는다", mv["subject"]["id"] == "person_1", str(mv["subject"]))
+    mm, _ = life_mod.merge(copy.deepcopy(mom_base), mv, mom_text)
+    mom_e = [e for e in mm["edges"] if "person_mother" in (e["source"], e["target"])]
+    check("합친 그래프에 어머니 → 나 부모 관계가 서고 호칭이 선의 이름이다",
+          len(mom_e) == 1 and mom_e[0]["type"] == "parent_of" and mom_e[0]["source"] == "person_mother"
+          and mom_e[0].get("role") == "엄마", str(mom_e))
+    # 모델이 관계를 아예 안 적어도 코드가 이야기에서 읽어 잇는다
+    no_edge = copy.deepcopy(mom_add); no_edge["edges"] = []
+    mv0, _ = life_mod.validate(no_edge, subject=mom_base["subject"], text=mom_text)
+    mm0, _ = life_mod.merge(copy.deepcopy(mom_base), mv0, mom_text)
+    mom_e0 = [e for e in mm0["edges"] if "person_mother" in (e["source"], e["target"])]
+    check("관계를 안 적어 와도 '엄마' 호칭으로 잇는다 (확신 1)",
+          len(mom_e0) == 1 and mom_e0[0]["type"] == "parent_of" and mom_e0[0]["role"] == "엄마"
+          and mom_e0[0]["confidence"] == 1.0, str(mom_e0))
+    # 브라우저에 남은 옛 그래프(어머니가 홀로 뜬 것)도 부팅 refine 이 원문으로 잇는다
+    old = copy.deepcopy(mom_base)
+    old["nodes"].append({"id": "person_mother", "type": "Person", "name": "백경순",
+                         "start_date": "1953-07-09", "year": 1953, "precision": "exact", "confidence": 1.0})
+    whole = mom_base["stories"][0]["text"] + "\n\n" + mom_text
+    rb = life_mod.refine(old, text=whole)
+    momn = next(n for n in rb["nodes"] if n["id"] == "person_mother")
+    check("옛 그래프도 새로고침(refine)으로 이어진다",
+          any(e["source"] == "person_mother" and e["target"] == "person_1" and e["type"] == "parent_of"
+              and e.get("role") == "엄마" for e in rb["edges"]), str(rb["edges"]))
+    check("사용자가 말한 생일 1953-07-09 는 남는다 (앞 문장이 말했다)",
+          (momn.get("start_date"), momn.get("year")) == ("1953-07-09", 1953), str(momn))
+    kim_e = [e for e in rb["edges"] if "kim" in (e["source"], e["target"])]
+    check("이미 이어진 사람(김일권)은 가족으로 잇지 않는다 (설명의 '친구'는 refine 4 가 friend_of 로)",
+          not any(e["type"] in life_mod._FAMILY_EDGES for e in kim_e)
+          and {e["type"] for e in kim_e} <= {"experienced", "friend_of"}, str(kim_e))
+    check("두 번 다듬어도 그대로", len(life_mod.refine(copy.deepcopy(rb), text=whole)["edges"]) == len(rb["edges"]))
+    check("'나형철'의 '형'은 호칭이 아니다", life_mod.kin_in("이름은 나형철이고 지금까지 만나고 있어", ["나형철"]) is None)
+    check("'우리형은' 은 형, '동생 박준영' 은 친척(대칭)에 호칭",
+          life_mod.kin_in("우리형은 1980년생이야")[:3] == ("형", "relative_of", "sym")
+          and life_mod.kin_in("동생 박준영과 갔어")[1] == "relative_of")
+    me_n = {"id": "me", "type": "Person", "name": "나"}
+    two = lambda: [me_n, {"id": "k", "type": "Person", "name": "김일권"}]  # noqa: E731
+    e1: list = []
+    life_mod.link_people(two(), e1, me_n, "친구 김일권의 엄마는 선생님이셨어.")
+    check("남의 가족('김일권의 엄마')은 내 가족이 아니다 — 이름이 불렸으니 만난 사이(0.8)",
+          len(e1) == 1 and e1[0]["type"] == "met" and e1[0]["confidence"] == 0.8, str(e1))
+    e2: list = []
+    life_mod.link_people(two(), e2, me_n, "내 아들 김일권은 2010년에 태어났어.")
+    check("아들은 나 → 그 사람 (부모 → 자녀)", e2 and e2[0]["type"] == "parent_of" and e2[0]["source"] == "me"
+          and e2[0]["role"] == "아들", str(e2))
+    e3 = [{"source": "k", "target": "me", "type": "parent_of", "confidence": 1}]
+    check("모델이 이미 이은 가족 관계에는 호칭만 단다",
+          life_mod.link_people(two(), e3, me_n, "우리 아버지는 김일권이야.") == 0 and e3[0].get("role") == "아버지")
+    check("이름이 이야기에 없으면 잇지 않는다", life_mod.link_people(two(), [], me_n, "우리 엄마는 1953년에 태어나셨어.") == 0)
+    check("이야기가 없으면 아무것도 안 한다", life_mod.link_people(two(), [], me_n, None) == 0)
+
     # 군복무 — 공익근무도 병역이다 (2026-09-08 사용자: "사실 공익근무는 군복무 기간이야.
     # 훈련소, 공익근무 역시 군복무로 인식할 수 있게 해줘"). 모델은 '사회생활'로 적어 왔다.
     army = dict(island, timeline=[
