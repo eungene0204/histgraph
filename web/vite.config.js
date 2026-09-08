@@ -7,11 +7,13 @@ import { fileURLToPath } from 'node:url';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 
-// **개인 역사(life.html)는 아직 배포하지 않는다** (2026-09-07 사용자: "이건 아직
-// 배포 하면 안돼. 로컬에서 개발하고 테스트 해야 함"). Vercel 이 빌드할 때는
-// (VERCEL 환경변수) 그 장과 머리의 링크를 빼고, 로컬 빌드에만 넣는다.
-// 켜고 끄는 자리는 여기 하나다 — 화면 코드는 `import.meta.env.VITE_LIFE` 만 본다.
-export const LIFE_PAGE = !process.env.VERCEL;
+// **개인 역사(life.html)를 배포한다** (2026-09-09 사용자: "개인 역사도 이제 배포
+// 해줘"). 2026-09-07 에 걸어 둔 `!process.env.VERCEL` 을 푼 자리다 — 그때는
+// 이야기를 읽는 길이 로컬 서버(스레드+폴링)에만 있어 배포에 내면 껍데기였다.
+// 지금은 배포도 같은 몸통을 요청 하나 안에서 돈다 (`server.life_post`).
+// 켜고 끄는 자리는 여전히 여기 하나다 — 화면 코드는 `import.meta.env.VITE_LIFE`
+// 만 본다.
+export const LIFE_PAGE = true;
 
 export default {
   root: '.',

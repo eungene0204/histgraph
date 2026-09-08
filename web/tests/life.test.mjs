@@ -594,16 +594,17 @@ console.log('\n개인 역사 — 오른쪽 상세는 접힌다');
   ok('손잡이 글자가 한국어다', /aria-label="상세 펼치기"/.test(view) && /<span>상세<\/span>/.test(view));
 }
 
-console.log('\n개인 역사 — 아직 배포하지 않는다');
+console.log('\n개인 역사 — 배포에도 싣는다');
 {
-  // 사용자 결정(2026-09-07): 로컬에서만 개발·테스트한다. Vercel 빌드에는 장이 없어야 한다.
+  // 사용자 결정(2026-09-09): 배포한다. 2026-09-07 에 걸어 둔 `!VERCEL` 을 풀었다 —
+  // 그때 막은 이유(이야기를 읽는 길이 로컬에만 있었다)가 없어졌다.
   delete process.env.VERCEL;
   const local = (await import('../vite.config.js?local')).default;
   process.env.VERCEL = '1';
   const vercel = (await import('../vite.config.js?vercel')).default;
   delete process.env.VERCEL;
-  ok('로컬 빌드에는 life.html 이 있다', !!local.build.rollupOptions.input.life && local.define['import.meta.env.VITE_LIFE'] === '"1"');
-  ok('Vercel 빌드에는 life.html 이 없다', !vercel.build.rollupOptions.input.life && vercel.define['import.meta.env.VITE_LIFE'] === '""');
+  ok('로컬 빌드에 life.html 이 있다', !!local.build.rollupOptions.input.life && local.define['import.meta.env.VITE_LIFE'] === '"1"');
+  ok('배포 빌드에도 life.html 이 있다', !!vercel.build.rollupOptions.input.life && vercel.define['import.meta.env.VITE_LIFE'] === '"1"');
 }
 
 console.log(`\n${'='.repeat(46)}\n통과 ${pass} / 실패 ${fail}`);

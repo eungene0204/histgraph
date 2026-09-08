@@ -40,6 +40,12 @@ SITE = os.environ.get("HISTGRAPH_SITE", "https://www.histgraph.space").rstrip("/
 # 것과 같은 번호다.
 ADS_CLIENT = "ca-pub-8335444243080631"
 
+# 저작권 한 줄. **화면에 영어를 두지 않는 규칙(CLAUDE.md §1)의 두 번째
+# 예외다** (2026-09-09 사용자 결정: "원문 그대로"). 저작권 표시는 나라를
+# 가리지 않고 이 문구로 굳었으므로 옮기지 않는다. 예외는 이 한 줄뿐이고,
+# 방침·약관과 그래프 화면에는 세우지 않는다.
+COPYRIGHT = "© 2026 histgraph. All rights reserved."
+
 # 엣지 라벨은 출발 노드 기준이라 그대로 쓰면 방향이 뒤집힌다. `child_of` 는
 # 'A → B = A 가 B 의 자녀'라, 나가는 상대는 부모이고 들어오는 상대가 자녀다.
 # (같은 표가 `web/src/lib/relations.js` 의 DIR_HEAD 에도 있다. 방향이 뜻을
@@ -228,6 +234,9 @@ li .meta { color: var(--text-faint); font-size: 12px; }
 .foot a { color: var(--text-faint); text-decoration: none; }
 .foot a:hover { color: var(--color-accent); }
 .foot span { margin: 0 7px; }
+/* 저작권 한 줄. 여기만 영어다 (2026-09-09 사용자 결정) — 저작권 표시는
+   관례로 굳은 문구라 옮기지 않는다. 화면의 다른 글자는 그대로 한국어다. */
+.foot .copy { text-align: center; margin-top: 12px; letter-spacing: -0.01em; }
 """
 
 GROUP_COLOR = {"actor": "var(--actor)", "event": "var(--event)",
@@ -371,6 +380,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 <meta property="og:locale" content="ko_KR">
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={ADS_CLIENT}"
         crossorigin="anonymous"></script>
+<script async src="/analytics.js"></script>
 <style>{STYLE}</style>
 </head>
 <body>
@@ -383,6 +393,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 
 <footer class="foot">
   <a href="/">histgraph</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
+  <div class="copy">{COPYRIGHT}</div>
 </footer>
 
 </body>

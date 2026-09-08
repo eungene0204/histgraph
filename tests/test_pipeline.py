@@ -4576,6 +4576,13 @@ with tempfile.TemporaryDirectory() as tmp:
         html = _re.sub(r"<!--[\s\S]*?-->", " ", html)
         return _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", " ", html)).strip()
 
+    # 영어 관문이 봐주는 것은 제품 이름과 **저작권 한 줄**뿐이다
+    # (2026-09-09 사용자 결정 · pages.COPYRIGHT). 문구를 늘리면 여기서
+    # 걸리도록, 봐주는 글자를 상수 하나에서 가져온다.
+    def _foreign(text: str) -> set[str]:
+        text = text.replace(pages.COPYRIGHT, " ").replace("histgraph", " ")
+        return set(_re.findall(r"[A-Za-z]{2,}", text))
+
     status, ctype, body = pages.route(api, "/n/wd:S")
     text = _visible(body)
     check("노드 장이 열린다", status == 200 and ctype.startswith("text/html"))
@@ -4604,11 +4611,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("정본 주소를 스스로 말한다",
           '<link rel="canonical" href="https://www.histgraph.space/n/wd%3AS">' in body)
     check("광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
+    # 방문 통계는 화면 네 장과 이 장이 **같은 파일 하나**를 부른다. 측정 ID 를
+    # 여기 박으면 화면과 어긋나므로, 부르는 것은 주소뿐이다
+    # (web/public/analytics.js · web/tests/render.test.mjs 가 나머지를 잰다).
+    check("방문 통계도 같은 파일 하나를 부른다",
+          '<script async src="/analytics.js"></script>' in body
+          and not _re.search(r"G-[A-Z0-9]{6,}", Path(pages.__file__).read_text()),
+          body[:400])
     check("방침·약관으로 이어진다",
           '/privacy.html' in body and '/terms.html' in body)
-    check("사람이 읽는 글자에 영어가 없다",
-          not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
-          str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))
+    check("사람이 읽는 글자에 영어가 없다 — 저작권 한 줄 말고는",
+          not _foreign(text), str(_foreign(text)))
+    check("저작권 한 줄이 footer 가운데에 선다",
+          pages.COPYRIGHT in text and '<div class="copy">' in body
+          and ".copy { text-align: center" in body, text[-120:])
 
     # 설명이 없는 장은 이름과 목록뿐이다. 색인에 올리면 읽을 것이 있는
     # 장까지 그 속에 묻힌다 — 왜 비었는지만 적고 물러난다.
@@ -4669,9 +4685,9 @@ with tempfile.TemporaryDirectory() as tmp:
     text = _visible(body)
     check("목록 장은 읽을 것이 있는 장만 세운다",
           status == 200 and "인물" in text and "세종" in text and "태종" not in text, text[:200])
-    check("목록 장에도 영어가 없다",
-          not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
-          str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))
+    check("목록 장에도 영어가 없다 — 저작권 한 줄 말고는",
+          not _foreign(text), str(_foreign(text)))
+    check("목록 장에도 저작권 한 줄이 선다", pages.COPYRIGHT in text)
 
     # 배포에서는 rewrite 가 `/api/n/…` 으로 바꿔 넘긴다 — 같은 표가 받아야 한다.
     check("배포 경로(/api/n/…)도 같은 장을 낸다",
@@ -6218,6 +6234,83 @@ with tempfile.TemporaryDirectory() as tmp:
         _backends.build_backend = keep_build
     check("이름이 경로가 되지 않는다", "/" not in _life_name("../../etc/passwd") and _life_name("") == "나")
 
+    # --- 배포는 요청 하나 안에서 돈다 (2026-09-09 "개인 역사도 이제 배포 해줘") ---
+    # 서버리스 함수는 응답과 함께 죽어서 **띄워 둔 스레드도 그것이 적은 상태도
+    # 다음 요청이 못 본다.** 그래서 배포는 같은 몸통(`life_post`)을 blocking 으로
+    # 돌리고, 파일은 남기지 않는다 — 남의 삶이 적힌 글을 우리 서버에 두지 않는다.
+    import os as _osl  # noqa: E402  (여기서만 쓴다)
+
+    from histgraph.server import LIFE_POSTS as _LIFE_POSTS  # noqa: E402
+    from histgraph.server import life_post as _life_post  # noqa: E402
+    from histgraph.server import LIFE_JOBS as _LIFE_JOBS  # noqa: E402
+
+    made3 = _FakeLife()
+    _backends.build_backend = lambda kind, model=None: made3
+    try:
+        st, body = _life_post(tapi, "/api/life/analyze",
+                              _j0.dumps({"text": "이야기", "name": "배포시험"}).encode("utf-8"),
+                              blocking=True, save=False)
+        check("배포 — 답이 요청 하나에 실려 온다",
+              st == 200 and body["state"] == "done" and body["payload"]["subject"]["name"] == "나",
+              str(body)[:200])
+        check("배포 — 파일을 남기지 않는다 (남의 삶을 우리 서버에 두지 않는다)",
+              body["file"] is None and not (life_mod.LIFE_DIR / "배포시험.json").exists())
+        st, body = _life_post(tapi, "/api/life/analyze", b'{"text": "   "}', blocking=True, save=False)
+        check("빈 이야기는 400", st == 400 and "비어" in body["error"], str(body))
+        st, body = _life_post(tapi, "/api/life/analyze", b"not json", blocking=True, save=False)
+        check("JSON 이 아니면 400", st == 400, str(body))
+        st, body = _life_post(tapi, "/api/life/refine",
+                              _j0.dumps({"subject": {"id": "me"}, "nodes": [], "edges": []}).encode("utf-8"))
+        check("다듬는 길은 모델 없이 200", st == 200 and "nodes" in body, str(body)[:120])
+        st, body = _life_post(tapi, "/api/life/analyze", b'{"text": "\uc774\uc57c\uae30"}')
+        check("로컬은 띄우고 202 로 물러난다", st == 202 and body["state"] == "running", str(body)[:120])
+        for _ in range(200):
+            if _LIFE_JOBS.status()["state"] != "running":
+                break
+            time.sleep(0.02)
+    finally:
+        _backends.build_backend = keep_build
+    check("두 길의 이름은 한 곳에 있다", _LIFE_POSTS == ("/api/life/analyze", "/api/life/refine"))
+
+    # 모델이 답을 안 줬을 때 **까닭을 한국어로** 말한다. 까닭을 말해야 사람이
+    # 다음에 뭘 할지 안다 — 붐비면 다시 누르면 되고, 열쇠가 없으면 소용없다.
+    # 상류가 주는 말은 영어라 화면에 옮기지 않는다 (CLAUDE.md §1).
+    from histgraph.server import model_silence as _silence  # noqa: E402
+
+    check("붐비는 것과 멎은 것과 열쇠 없는 것을 갈라 말한다",
+          "붐빕" in _silence("HTTP 429: rate limit")
+          and "응답하지 않" in _silence("HTTP 503: busy")
+          and "응답하지 않" in _silence("연결 실패: timed out")
+          and "준비되지 않" in _silence("OPENROUTER_API_KEY 없음")
+          and "돌려주지 않" in _silence("답에 choices 가 없음"))
+    check("어느 문구에도 영어가 없다",
+          not any(ch.isascii() and ch.isalpha() for w in
+                  ("HTTP 429", "HTTP 503", "연결 실패", "OPENROUTER_API_KEY 없음", "")
+                  for ch in _silence(w)))
+    # 모델이 답을 안 주면 그 까닭이 답에 실려 온다 (화면은 안 그리고, 사람이 물어볼 때 쓴다).
+    class _Silent(_FakeLife):
+        last_error = "HTTP 429: rate limited"
+        def complete_json(self, *a, **kw):
+            return None
+    _backends.build_backend = lambda kind, model=None: _Silent()
+    try:
+        st, body = _life_post(tapi, "/api/life/analyze", b'{"text": "x"}', blocking=True, save=False)
+        check("답이 없으면 까닭을 한국어로, 원문은 detail 로",
+              st == 500 and "붐빕" in body["error"] and "429" in body["detail"], str(body)[:200])
+    finally:
+        _backends.build_backend = keep_build
+
+    # 화면이 기다리는 모습을 여기서 가른다 — 창을 닫아도 되는지가 이것으로 갈린다.
+    _keep_vercel = _osl.environ.pop("VERCEL", None)
+    try:
+        check("로컬은 물어 가는 길이라고 알린다", _LifeJob().status()["blocking"] is False)
+        _osl.environ["VERCEL"] = "1"
+        check("배포는 답이 한 번에 온다고 알린다", _LifeJob().status()["blocking"] is True)
+    finally:
+        _osl.environ.pop("VERCEL", None)
+        if _keep_vercel is not None:
+            _osl.environ["VERCEL"] = _keep_vercel
+
     # --- 학제의 차례 (2026-09-08 사용자: "초등학교 졸업을 해야 중학교 입학을 하지.
     # 같은 연도에 일어난 일이지만 월을 입력 하지 않아서 … 논리상 초등학교 졸업이
     # 무조건 먼저 일어나야 하잖아?") — 달을 모르는 차례는 모델이 아니라 규칙이 정한다.
@@ -6470,6 +6563,23 @@ try:
     tx_cookie = heads["Set-Cookie"].split(";")[0]
     tx = _js.loads(_auth._unsign(tx_cookie.split("=", 1)[1]))
 
+    # 쿠키가 안에 적은 시각보다 먼저 죽으면, 오래 걸린 사람에게 '쿠키가
+    # 막혀 있다'는 엉뚱한 말이 뜬다 (2026-09-09 지적).
+    _maxage = int(next(b.split("=")[1] for b in heads["Set-Cookie"].split("; ")
+                       if b.startswith("Max-Age=")))
+    check("왕복 쿠키는 안에 적은 시각보다 오래 산다", _maxage > _auth.TX_TTL)
+
+    # 없는 것과 맞지 않는 것을 갈라 말한다 — 둘 다 400 이지만 문장이 다르다.
+    _no_cookie = _auth.route(req("GET", "/api/auth/callback",
+                                 {"code": ["c"], "state": [tx["s"]]})).body.decode()
+    _bad_sign = _auth.route(req("GET", "/api/auth/callback",
+                                {"code": ["c"], "state": [tx["s"]]},
+                                cookies="hg_oauth=" + tx_cookie.split("=", 1)[1][:-4]
+                                        + "AAAA")).body.decode()
+    check("쿠키가 없을 때와 서명이 틀릴 때를 갈라 말한다",
+          "쿠키를 막고" in _no_cookie and "이 서버의 것이 아닙니다" in _bad_sign)
+    check("실패 화면은 다시 시작할 자리를 준다", "/api/auth/google" in _no_cookie)
+
     # 2) 구글이 돌려보낸 자리. 토큰 교환만 가로챈다.
     seen = {}
     def fake_exchange(code, verifier, redirect_uri):
@@ -6540,6 +6650,71 @@ try:
                     body='{"doc":{"nodes":[{"id":"me","name":"나"}]}}'.encode()))
     life = _js.loads(_auth.route(req("GET", "/api/my/life", cookies=jar)).body)
     check("내 역사를 계정에 담고 되읽는다", life["doc"]["nodes"][0]["name"] == "나", str(life)[:120])
+
+    # 5-2) **내 역사의 문 (배포 함수)** — 이야기를 모델에게 보내는 길은
+    # 로그인한 사람의 것만 받는다. 이 관문이 없으면 남의 사이트가 이 사람의
+    # 브라우저로 우리 모델을 부를 수 있다 (2026-09-09 배포와 함께 낸 길).
+    import importlib.util as _ilu  # noqa: E402  (여기서만 쓴다)
+
+    _spec = _ilu.spec_from_file_location(
+        "vercel_api", Path(__file__).resolve().parents[1] / "api" / "index.py")
+    _vapi = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_vapi)
+
+    def gate(cookies="", extra=None):
+        """배포 함수의 `_life_gate` 를 그대로 부른다 → (막았나, (상태, 몸))."""
+        h = _vapi.handler.__new__(_vapi.handler)
+        h.command, h.path = "POST", "/api/life/analyze"
+        h.headers = {"Host": "127.0.0.1:8100", "Cookie": cookies, **(extra or {})}
+        said = []
+        h._json = lambda status, payload: said.append((status, payload))
+        return h._life_gate(b'{"text": "\uc774\uc57c\uae30"}'), (said[0] if said else (None, None))
+
+    check("배포 함수가 개인 역사의 POST 를 받는다",
+          _vapi.LIFE_POSTS == ("/api/life/analyze", "/api/life/refine"))
+
+    # 배포 번들에 **패키지가 읽는 파일**이 실리는가. 파이썬 런타임은 임포트를
+    # 따라간 `.py` 만 담으므로 그 밖의 파일은 `includeFiles` 로 이름을 대야 하고,
+    # `excludeFiles` 에 걸려서도 안 된다. 2026-09-09 실측: 배포에서 이야기를
+    # 보내면 `src/histgraph/life_prompt.md` 가 없다며 FileNotFoundError 로
+    # 떨어졌다 — 문서를 뺀다고 `*.md` 를 적은 것이 하나, 이름을 안 댄 것이 하나.
+    import fnmatch as _fn  # noqa: E402
+
+    _root = Path(__file__).resolve().parents[1]
+    _ex = _js.loads((_root / "vercel.json").read_text(encoding="utf-8"))
+    _pats = _ex["functions"]["api/index.py"]["excludeFiles"].strip("{}").split(",")
+    _needed = [q for q in (_root / "src").rglob("*")
+               if q.is_file() and q.suffix != ".py" and "__pycache__" not in q.parts]
+    # 걷어내는 자리가 **둘**이다 — `vercel.json` 의 excludeFiles 와 `.vercelignore`.
+    # 뒤엣것은 "CLI 로 올릴 때만 쓰인다"고 적혀 있었지만 Git 연동 배포도 본다.
+    _pats += [ln.strip() for ln in (_root / ".vercelignore").read_text(encoding="utf-8").splitlines()
+              if ln.strip() and not ln.strip().startswith(("#", "!"))]
+    _cut = [str(q.relative_to(_root)) for q in _needed
+            if any(_fn.fnmatch(str(q.relative_to(_root)), pat) or _fn.fnmatch(q.name, pat)
+                   for pat in _pats)]
+    _inc = _ex["functions"]["api/index.py"].get("includeFiles", "")
+    _missed = [str(q.relative_to(_root)) for q in _needed
+               if not _fn.fnmatch(str(q.relative_to(_root)), _inc)]
+    check("배포 번들이 패키지가 읽는 파일을 걷어내지 않는다 (두 자리 다)",
+          not _cut and any(q.name == "life_prompt.md" for q in _needed), str(_cut))
+    check("배포 번들이 패키지가 읽는 파일을 이름 대어 싣는다", not _missed, str(_missed))
+    blocked, (st, body) = gate()
+    check("로그인 없이 이야기를 보내면 401",
+          blocked is True and st == 401 and body["error"] == "로그인이 필요합니다.", str((st, body)))
+    blocked, (st, body) = gate(cookies=jar)
+    check("로그인해도 표가 없으면 400 (남의 사이트가 쏜 요청)",
+          blocked is True and st == 400, str((st, body)))
+    blocked, _ = gate(cookies=jar, extra=csrf_head)
+    check("로그인하고 표가 맞으면 지나간다", blocked is False)
+    # 로컬 서버와 반대다 — 열린 인터넷에서 문을 안 잠그면 아무나 우리 모델을 부른다.
+    _keep_cid = _os.environ.pop("GOOGLE_CLIENT_ID", None)
+    try:
+        blocked, (st, body) = gate(cookies=jar, extra=csrf_head)
+        check("가입이 안 열린 배포에서는 내 역사를 아예 안 받는다 (503)",
+              blocked is True and st == 503 and "로그인이 아직" in body["error"], str((st, body)))
+    finally:
+        if _keep_cid is not None:
+            _os.environ["GOOGLE_CLIENT_ID"] = _keep_cid
 
     # 6) 로그아웃 — **서버에서** 지운다
     out = _auth.route(req("POST", "/api/auth/logout", cookies=jar, extra=csrf_head))

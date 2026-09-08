@@ -281,7 +281,8 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-l);
 }
-.login-box h2 { margin: 0 0 10px; font-size: var(--font-ui-larger); font-weight: 600; }
+/* 제목 아래는 곧바로 단추다 — 설명 문단이 없으므로 그 자리를 여백이 든다. */
+.login-box h2 { margin: 0 0 18px; font-size: var(--font-ui-larger); font-weight: 600; }
 .login-box > p { margin: 0 0 18px; font-size: var(--font-ui-small); color: var(--text-muted); line-height: 1.8; }
 
 /* 들어가는 단추. 이 화면에서 할 일이 하나뿐이라 폭을 다 쓴다. */
@@ -299,8 +300,6 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   background: var(--background-modifier-subtle);
   font-size: var(--font-ui-small); color: var(--text-muted); line-height: 1.8;
 }
-.login-fine { margin: 0 0 16px; font-size: var(--font-ui-smaller); color: var(--text-faint); line-height: 1.8; }
-.login-fine a { color: var(--text-muted); }
 /* 물러날 자리. 막다른 곳에 세워 두지 않는다. */
 .login-back {
   display: inline-block; padding: 0; border: none; background: none;
@@ -989,8 +988,6 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 
 .life-empty { max-width: 560px; margin: 48px auto; padding: 0 24px; color: var(--text-muted); font-size: var(--font-ui-small); line-height: 1.7; }
 .life-empty h2 { font-size: var(--font-ui-larger); color: var(--text-normal); margin: 0 0 8px; letter-spacing: -0.02em; }
-.life-empty ol { padding-left: 20px; }
-.life-empty li { margin: 6px 0; }
 .life-empty code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--background-modifier-hover); padding: 1px 5px; border-radius: var(--radius-s); }
 
 .life-detail { padding-top: 0; }

@@ -408,6 +408,9 @@ class OpenRouterBackend:
         self.retries = retries
         # 이 모델이 사고를 끌 수 없다고 답했는지. 한 번 배우면 다시 안 묻는다.
         self.reasoning_locked = False
+        # 마지막으로 실패한 까닭. 답이 안 왔을 때 **화면이 왜인지 말할 수 있게**
+        # 남긴다 (`server.model_silence`). 로그는 배포에서 사람이 못 본다.
+        self.last_error = ""
 
     # --- 부르기 ---------------------------------------------------------
     def _throttle(self) -> None:
@@ -495,9 +498,11 @@ class OpenRouterBackend:
 
     def _generate(self, system: str, user: str, schema: dict[str, Any],
                   max_tokens: int) -> Any | None:
+        self.last_error = ""
         if not self.key:
             log.warning("%s 가 없습니다 — .env 에 OpenRouter 열쇠를 넣어 주세요.",
                         ENV_OPENROUTER_KEY)
+            self.last_error = f"{ENV_OPENROUTER_KEY} 없음"
             return None
         base = {
             "model": self.model,
@@ -511,6 +516,7 @@ class OpenRouterBackend:
             data, detail = self._ask(base, fmt)
             if data is not None:
                 return self._read(data)
+            self.last_error = detail
             if not self._format_problem(detail):
                 return None     # 형식 탓이 아니면 물러나도 소용없다
             log.info("응답 형식을 낮춰 다시 부릅니다: %s", detail[:120])

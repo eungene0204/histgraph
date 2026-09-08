@@ -18,8 +18,8 @@ import { auth } from './lib/auth.js';
 // (design.md §4 '인과 도면'). 꺼져 있으면 전처럼 그 노드의 주변 관계를 편다.
 export const CAUSAL_DIAGRAM = false;
 
-// 개인 역사 장이 이 빌드에 있는가. 배포(Vercel)에서는 비어 온다 — vite.config.js.
-// 서버 렌더 테스트(esbuild)에는 import.meta.env 가 없으므로 없는 것으로 친다.
+// 개인 역사 장이 이 빌드에 있는가 — vite.config.js. 서버 렌더 테스트(esbuild)
+// 에는 import.meta.env 가 없으므로 없는 것으로 친다.
 const LIFE_PAGE = Boolean(import.meta.env?.VITE_LIFE);
 
 function hashId() {
@@ -277,14 +277,13 @@ export default function App() {
             {era}
           </button>
           {/* 개인 역사 — 내 삶을 왕·대통령의 띠와 한국사 옆에 세우는 장 (life.html).
-              아직 배포하지 않는다 — 로컬 빌드에만 있다 (vite.config.js LIFE_PAGE).
 
               **여기만 로그인을 묻는다** (2026-09-08 사용자: "내 역사는 개인별로
               다 다르니깐"). 그래프는 로그인 없이 다 보이고, 사람마다 다른 것
               하나만 막는다. 로그인 전이면 옮겨가지 않고 상자를 세운다 — 빈
               화면을 보여 준 뒤에 묻는 것보다 낫다. */}
           {LIFE_PAGE && (
-            <a className="era" href="/life.html" title="내 삶을 한국사 옆에 세웁니다"
+            <a className="era" href="/life.html" title="내 삶을 세상의 역사와 나란히 봅니다"
                onClick={(e) => { if (!mine?.user) { e.preventDefault(); setAskLogin(true); } }}>
               내 역사
             </a>
@@ -309,7 +308,6 @@ export default function App() {
           next="/life.html"
           ready={Boolean(mine?.enabled)}
           title="내 역사는 로그인이 필요합니다"
-          why="내 역사는 사람마다 다릅니다. 누구의 연표인지 알아야 다음에 다시 열어 드릴 수 있어서, 이 장에서만 로그인을 여쭙니다. 그래프를 보고 검색하는 데에는 로그인이 필요하지 않습니다."
           onClose={() => setAskLogin(false)}
         />
       )}
