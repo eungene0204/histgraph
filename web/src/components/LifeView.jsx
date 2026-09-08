@@ -575,7 +575,7 @@ export default function LifeView() {
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
-            {!life && <Empty offline={offline} local={local} onWrite={() => setWriting(true)} />}
+            {!life && <Empty offline={offline} onWrite={() => setWriting(true)} />}
           </div>
         </section>
         {life && (
@@ -645,20 +645,12 @@ export default function LifeView() {
   );
 }
 
-function Empty({ offline, local, onWrite }) {
+function Empty({ offline, onWrite }) {
   return (
     <div className="life-empty">
       <h2>내 삶을 한국사 옆에 세웁니다</h2>
-      <ol>
-        <li><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
-          잊히지 않는 책·영화·음악·게임.</li>
-        <li>{local
-          ? '이 컴퓨터의 모델이 그 글을 읽어 사건과 인과로 옮깁니다. 몇 분 걸립니다. 글도 결과도 이 컴퓨터 밖으로 나가지 않습니다.'
-          : <>모델이 그 글을 읽어 사건과 인과로 옮깁니다. 1~2분 걸립니다. 글은 밖의 모델 제공자에게
-            보내집니다 — 어디로 어떤 조건으로 가는지는 <a href="/privacy.html">개인정보처리방침</a> 제4조에
-            적혀 있습니다.</>}</li>
-        <li>사건을 누르면 오른쪽에 원인과 결과, 그 해의 한국사, 전환점 점수가 나옵니다.</li>
-      </ol>
+      <p><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
+        잊히지 않는 책·영화·음악·게임.</p>
       <div className="life-empty-row">
         <button type="button" className="life-btn big on" onClick={onWrite}>내 역사 입력하기</button>
       </div>
