@@ -1142,6 +1142,22 @@ export function renderHead(subjectName) {
     <div class="life-col-head" style="width:${personal + stage}px">${esc(subjectName)}의 역사</div>`;
 }
 
+// 고른 노드를 연표 어디에 맞출 것인가. 그 노드의 표시가 서 있으면 그 자리(같은
+// 노드가 두 열에 다 서면 둘 다), 없으면 그와 이어진 표시들의 자리다 — 인물·장소
+// 노드는 연표에 서지 않지만 그 사람이 낀 사건들은 서 있다.
+export function markYs(lay, life, id) {
+  if (!lay || !id) return [];
+  const marks = [...lay.personal, ...lay.history];
+  const hit = marks.filter((p) => p.m.id === id);
+  if (hit.length) return hit.map((p) => p.ty);
+  const near = new Set();
+  for (const e of life?.edges || []) {
+    if (e.source === id) near.add(e.target);
+    else if (e.target === id) near.add(e.source);
+  }
+  return marks.filter((p) => near.has(p.m.id)).map((p) => p.ty);
+}
+
 // --- 브라우저 --------------------------------------------------------------
 export class LifeBoard {
   constructor(root, { onPick } = {}) {
@@ -1168,8 +1184,30 @@ export class LifeBoard {
 
   select(id) {
     if (!this.state) return;
+    const moved = this.state.selected !== id;
     this.state.selected = id;
     this.layout();
+    // 그래프에서 고른 노드는 연표도 따라간다 — 한국사 연표(TimelineRail.recenter)와
+    // 같은 규칙이다. 판을 다시 그린 뒤라 자리는 새 자리다.
+    if (moved) this.reveal(id);
+  }
+
+  // 그 노드가 선 자리를 한가운데로. 연표에 세우지 않는 노드(인물·장소·감정)는
+  // **이어진 사건들**이 다 들도록 그 폭의 가운데로 간다 — 아무 데도 안 가면
+  // 고른 것이 화면 밖에 있는 채로 남는다. 세울 자리를 못 찾으면 false 다.
+  reveal(id, behavior = 'smooth') {
+    const ys = this.marksFor(id);
+    if (!ys.length) return false;
+    const mid = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const off = this.body.querySelector('.life-canvas')?.offsetTop || 0;   // 머리(태어나기 전)만큼
+    const top = clamp(off + mid - this.body.clientHeight / 2, 0,
+      Math.max(0, this.body.scrollHeight - this.body.clientHeight));
+    this.body.scrollTo({ top, behavior });
+    return true;
+  }
+
+  marksFor(id) {
+    return this.state && this.layoutData ? markYs(this.layoutData, this.state.life, id) : [];
   }
 
   layout({ recenter = false } = {}) {
@@ -1186,9 +1224,9 @@ export class LifeBoard {
     if (recenter) {
       // 고른 사건이 있으면 그 자리를 한가운데로. 없으면 맨 위 — 축이 생년
       // 두 해 앞에서 열리므로 출생과 '태어나기 전' 머리가 첫 화면에 같이 든다.
-      const target = selected ? lay.personal.find((p) => p.m.id === selected) : null;
-      const off = this.body.querySelector('.life-canvas')?.offsetTop || 0;   // 머리(태어나기 전)만큼
-      this.body.scrollTop = target ? Math.max(0, off + target.ty - this.body.clientHeight / 2) : 0;
+      // 첫 그림은 미끄러지지 않는다('auto') — 열자마자 움직이면 읽는 사람이
+      // 무엇이 지나갔는지 모른다.
+      if (!(selected && this.reveal(selected, 'auto'))) this.body.scrollTop = 0;
     } else {
       this.body.scrollTop = top;
     }

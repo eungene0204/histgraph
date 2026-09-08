@@ -10,7 +10,7 @@ import {
   ladder,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
-  linkPeople, kinIn,
+  linkPeople, kinIn, markYs,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
 } from '../src/lib/life.js';
 import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
@@ -256,6 +256,27 @@ console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만�
   const issues = [];
   const kept = tidyEdges([{ id: 'a', type: 'Book', name: '책' }, { id: 'b', type: 'School', name: '학교' }], [{ source: 'a', target: 'b', type: 'parent_of', confidence: 1 }], null, issues);
   ok('표 밖 엣지는 버리지 않고 센다', kept.length === 1 && issues.length === 1);
+}
+
+console.log("\n개인 역사 — 노드를 고르면 연표도 간다 (2026-09-09 \"한국사 처럼 자동으로 이동시켜줘\")");
+{
+  const life = normalize(sample);
+  const lay = lifeLayout({ life, context, bodyH: 700, today: 2026 });
+  // 사건은 제 자리 하나
+  const bust = lay.personal.find((p) => p.m.id === 'ev_bankrupt');
+  ok('고른 사건의 자리로 간다', JSON.stringify(markYs(lay, life, 'ev_bankrupt')) === JSON.stringify([bust.ty]));
+  // 역사 열의 사건도 (그래프에서 눌러도, 연표에서 눌러도 같은 노드다)
+  const imf = lay.history.find((p) => p.m.id === 'wd:Q625457');
+  ok('역사 열의 사건도 찾는다', markYs(lay, life, 'wd:Q625457').includes(imf.ty));
+  // 연표에 서지 않는 노드(인물)는 그와 이어진 사건들의 폭으로
+  const person = life.nodes.find((n) => n.type === 'Person' && n.id !== life.subject?.id
+    && life.edges.some((e) => e.source === n.id || e.target === n.id));
+  const near = life.edges.filter((e) => e.source === person.id || e.target === person.id)
+    .map((e) => (e.source === person.id ? e.target : e.source));
+  const want = lay.personal.filter((p) => near.includes(p.m.id)).map((p) => p.ty);
+  ok('연표에 없는 인물은 이어진 사건의 자리로', want.length > 0
+    && JSON.stringify(markYs(lay, life, person.id).sort()) === JSON.stringify(want.sort()), person?.name);
+  ok('아무 데도 안 걸리면 움직이지 않는다', markYs(lay, life, 'x:없는것').length === 0);
 }
 
 console.log('\n개인 역사 — 빈 자료');
