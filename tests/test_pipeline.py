@@ -1705,6 +1705,12 @@ with tempfile.TemporaryDirectory() as tmp:
         # 건국보다 먼저 태어난 사람 — 자기 자리는 서야 한다
         Node(id="wd:P4", type="person", label="조선 태조", source="wd",
              start_date="1335-10-19", end_date="1408-06-18"),
+        # 같은 해의 인과. 둘 다 뼈대라 고른 노드의 `rel` 로는 알 수 없다
+        # (실측: 한일병합과 무단통치가 같은 날 1910-08-29 이다).
+        Node(id="wd:C1", type="event", label="앞선 일", source="wd",
+             start_date="1600-05-01"),
+        Node(id="wd:C2", type="event", label="뒤의 일", source="wd", start_date="1600"),
+        Node(id="wd:C3", type="event", label="이듬해 일", source="wd", start_date="1601"),
     ])
     store.upsert_edges([
         Edge(src="wd:E2", dst="time:1504", type="from_period", source="timeline"),
@@ -1724,6 +1730,8 @@ with tempfile.TemporaryDirectory() as tmp:
         Edge(src="wd:G0", dst="wd:E1", type="related_to", source="wd"),
         Edge(src="wd:G1", dst="wd:G0", type="related_to", source="wd"),
         Edge(src="wd:P4", dst="wd:G1", type="participated_in", source="wd"),
+        Edge(src="wd:C1", dst="wd:C2", type="caused", source="extract"),
+        Edge(src="wd:C1", dst="wd:C3", type="caused", source="extract"),
     ])
     tl_api = GraphAPI(store, era="joseon")
 
@@ -1767,6 +1775,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("어느 노드를 골라도 같은 축 위에 선다",
           tl_api.timeline("wd:E1")["axis"] == tl_api.timeline("wd:E3")["axis"],
           str(tl_api.timeline("wd:E1")["axis"]))
+
+    # **원인은 결과보다 위에 선다** (CLAUDE.md 1-5). 화면은 고른 노드에 달린
+    # 관계만으로는 둘 다 뼈대인 쌍의 인과를 모른다 — 같은 해에 함께 선
+    # 마크들 사이의 인과를 아이디 쌍으로 함께 보낸다 (2026-09-08 지적).
+    check("같은 해에 함께 선 마크들 사이의 인과를 보낸다",
+          ["wd:C1", "wd:C2"] in t["causes"], str(t["causes"]))
+    check("해가 다른 쌍은 보내지 않는다",
+          ["wd:C1", "wd:C3"] not in t["causes"], str(t["causes"]))
+    check("보내는 것은 아이디 쌍뿐이다",
+          all(len(c) == 2 and all(isinstance(x, str) for x in c) for c in t["causes"]),
+          str(t["causes"]))
 
     bones = {m["id"] for m in t["marks"] if m["kind"] == "anchor"}
     # 연표에서 빠진 사건은 그 시대에 없었던 일이 된다. 한 십년에 몰려

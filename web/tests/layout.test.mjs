@@ -337,6 +337,72 @@ console.log('\n배치 (d3-force)');
      && dateContains('1907-08-01', '1907-08-01') && !dateContains('1636-1', '1636-12-09') && !dateContains('1637', '1636-12'));
 }
 
+// 고른 노드가 끼지 않은 쌍도 원인이 먼저다. 서버가 마크들 사이의 인과를
+// [원인 id, 결과 id] 로 보내 준다 (2026-09-08 지적: 한일병합과 무단통치는
+// 같은 날 1910-08-29 이라 가나다로 갈렸고, 을사조약(1905-11-17)은 그
+// 결과인 애국계몽운동(1905) 아래에 섰다).
+{
+  const self = { id: 's', kind: 'self', year: 1905, date: '1905-11-17', label: '고른 것' };
+  const a = { id: 'a', kind: 'anchor', year: 1910, date: '1910-08-29', label: '한일병합' };
+  const b = { id: 'b', kind: 'anchor', year: 1910, date: '1910-08-29', label: '무단통치' };
+  const order = sortMarks([b, a, self], [['a', 'b']]).map((m) => m.id);
+  ok('둘 다 뼈대여도 같은 날의 원인이 먼저다', order.join() === 's,a,b', order.join());
+  ok('인과를 안 주면 날짜·가나다 순 그대로',
+     sortMarks([b, a, self]).map((m) => m.id).join() === 's,b,a');
+
+  const c = { id: 'c', kind: 'anchor', year: 1905, date: '1905-11-17', label: '을사조약' };
+  const e = { id: 'e', kind: 'anchor', year: 1905, date: '1905', label: '애국계몽운동' };
+  const f = { id: 'f', kind: 'anchor', year: 1905, date: '1905-01', label: '다른 일' };
+  const o2 = sortMarks([e, f, c], [['c', 'e']]).map((m) => m.id);
+  ok('연도만 아는 뼈대 결과도 원인 뒤에 선다', o2.join() === 'f,c,e', o2.join());
+
+  // 날짜가 서로를 품지 않으면 날짜가 이긴다 — 화면이 자료의 날짜를 뒤집지
+  // 않는다 (그것은 chronology 가 잡을 일이다).
+  const late = { id: 'l', kind: 'anchor', year: 1636, date: '1636-12-09', label: '늦은 원인' };
+  const early = { id: 'r', kind: 'anchor', year: 1636, date: '1636-03-01', label: '이른 결과' };
+  ok('날짜가 서로를 안 품으면 날짜 순 그대로',
+     sortMarks([late, early], [['l', 'r']]).map((m) => m.id).join() === 'r,l');
+
+  // 순환 — 진주농민봉기와 임술민란은 서로를 원인으로 물고 둘 다 1862년이다.
+  const p1 = { id: 'p', kind: 'anchor', year: 1862, date: '1862', label: '임술민란' };
+  const p2 = { id: 'q', kind: 'anchor', year: 1862, date: '1862', label: '진주농민봉기' };
+  const p3 = { id: 'z', kind: 'anchor', year: 1862, date: '1862', label: '평안 소요' };
+  const cyc = sortMarks([p3, p2, p1], [['p', 'q'], ['q', 'p'], ['p', 'z']]).map((m) => m.id);
+  ok('순환이 있어도 모든 마크가 한 번씩 선다', cyc.length === 3 && new Set(cyc).size === 3, cyc.join());
+  ok('순환에서도 풀 수 있는 차례는 지킨다', cyc.indexOf('p') < cyc.indexOf('z'), cyc.join());
+}
+
+// 날짜를 모르는 마크는 '그 해 어딘가'이지 '그 해 첫날'이 아니다. 연표는
+// 연도 노드에서 해만 빌려 세우고 date 가 빈 문자열이라, 그 해의 어떤
+// 원인보다도 위에 섰다 (2026-09-08 지적: 함흥차사 아래에 그 원인인
+// 왕자의 난(1398-08-26)이 섰다).
+{
+  const cause = { id: 'w', kind: 'anchor', year: 1398, date: '1398-08-26', label: '제1차 왕자의 난' };
+  const nodate = { id: 'h', kind: 'anchor', year: 1398, date: '', label: '함흥차사' };
+  const order = sortMarks([nodate, cause], [['w', 'h']]).map((m) => m.id);
+  ok('날짜를 모르는 결과도 원인 뒤에 선다', order.join() === 'w,h', order.join());
+  ok('빈 날짜는 무엇이든 품는다', dateContains('', '1398-08-26') && dateContains('', ''));
+  ok('인과를 모르면 날짜 없는 것이 여전히 앞이다',
+     sortMarks([nodate, cause]).map((m) => m.id).join() === 'h,w');
+  // 둘 다 날짜가 없어도 인과는 안다 (송유진 -> 송유진의 난)
+  const a0 = { id: 'a', kind: 'anchor', year: 1594, date: '', label: '송유진' };
+  const b0 = { id: 'b', kind: 'anchor', year: 1594, date: '', label: '송유진의 난' };
+  ok('둘 다 날짜가 없어도 원인이 먼저다',
+     sortMarks([b0, a0], [['a', 'b']]).map((m) => m.id).join() === 'a,b');
+
+  // 단체는 끝난 날이 아니라 **시작한 날**에 선다 — 창립이 곧 결과인 쌍
+  // (3·1 운동 -> 북로군정서)도 같은 규칙으로 갈린다.
+  const mv = { id: 'm', kind: 'anchor', year: 1919, date: '1919-03-01', label: '3·1 운동' };
+  const org = { id: 'g', kind: 'era', year: 1919, date: '1919', label: '북로군정서' };
+  ok('단체의 창립이 결과면 원인 아래에 선다',
+     sortMarks([org, mv], [['m', 'g']]).map((m) => m.id).join() === 'm,g');
+  // 결과의 날짜가 원인보다 분명히 앞서면 끌어내리지 않는다 (청나라 건국 4월)
+  const war = { id: 'x', kind: 'anchor', year: 1636, date: '1636-12-09', label: '병자호란' };
+  const qing = { id: 'y', kind: 'era', year: 1636, date: '1636-04-11', label: '청나라' };
+  ok('원인보다 앞선 것이 분명한 날짜는 인과로 끌어내리지 않는다',
+     sortMarks([qing, war], [['x', 'y']]).map((m) => m.id).join() === 'y,x');
+}
+
 // 원인은 caused 엣지의 들어오는 쪽이다. 결과(out)와 다른 관계는 잇지 않는다.
 // 선은 원인 줄에서 오른쪽으로 나가 꺾여 고른 노드 줄로 돌아온다 — 세로
 // 선은 캔버스 오른쪽 여백 안에 서고, 화살촉은 고른 노드 줄에 찍힌다.

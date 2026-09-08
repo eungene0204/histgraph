@@ -866,6 +866,38 @@ class GraphAPI:
         self._local.reigns = out
         return out
 
+    def _mark_causes(self, marks: list[dict]) -> list[list[str]]:
+        """연표에 함께 선 마크들 사이의 인과 — [원인 id, 결과 id].
+
+        같은 해의 쌍만 준다. 화면은 해가 다른 두 마크를 축으로 이미
+        갈라 놓으므로 그 쌍은 차례를 다툴 일이 없고, 뼈대를 통째로
+        보내는 연표에서는 쌍의 수가 마크 수만큼 늘어나 봐야 소용이 없다.
+
+        질의는 마크 아이디를 400개씩 끊어 몇 번으로 끝낸다 (뼈대가 수백
+        이라 한 번에 넣으면 SQLite 의 변수 한도에 걸린다)."""
+        year_of: dict[str, int] = {}
+        for m in marks:
+            year_of.setdefault(m["id"], m["year"])
+        ids = list(year_of)
+        if not ids:
+            return []
+        pairs: set[tuple[str, str]] = set()
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            holes = ",".join("?" * len(chunk))
+            for r in self.store.conn.execute(
+                f"""SELECT DISTINCT src, dst FROM edges
+                     WHERE type = 'caused' AND src IN ({holes})""",
+                chunk,
+            ).fetchall():
+                src, dst = r["src"], r["dst"]
+                if src == dst or dst not in year_of:
+                    continue
+                if year_of[src] != year_of[dst]:
+                    continue
+                pairs.add((src, dst))
+        return [[s, d] for s, d in sorted(pairs)]
+
     def timeline(self, node_id: str) -> dict | None:
         """이 노드가 몇 년쯤의 일이고, 그 앞뒤에 무엇이 있었나.
 
@@ -1003,6 +1035,17 @@ class GraphAPI:
 
         marks.sort(key=lambda m: (m["year"], m["label"]))
 
+        # **같은 해 안의 인과.** 연표의 차례는 곧 시간 순으로 읽히므로
+        # 원인이 결과보다 위에 서야 한다 (CLAUDE.md 1-5). 화면은 지금까지
+        # 고른 노드와 그 이웃 사이의 인과(`rel`)만 알아서, 둘 다 뼈대인
+        # 쌍은 날짜 문자열 순으로만 섰다 — 한일병합과 무단통치는 같은 날
+        # (1910-08-29)이라 가나다로 갈렸고, 을사조약(1905-11-17)은 그
+        # 결과인 애국계몽운동(1905) 아래에 섰다 (2026-09-08 지적).
+        # 마크들 **사이의** caused 엣지를 함께 보내 화면이 차례를 세운다.
+        # 다른 해의 쌍은 축이 이미 갈라 놓으므로 보내지 않는다.
+        # 보내는 것은 아이디 쌍뿐이다 — 화면에 새 글자가 서지 않는다.
+        causes = self._mark_causes(marks)
+
         # 자리를 무엇에 기대어 잡았는지. 화면이 단정할 수 있는 범위가
         # 여기서 갈린다.
         basis = "self" if start is not None else "near" if near else "era"
@@ -1042,6 +1085,8 @@ class GraphAPI:
             # 이 연표가 담은 처음과 끝 해. 화면의 훑기 막대가 쓰는 눈금이다.
             "axis": {"from": axis_from, "to": axis_to},
             "marks": marks,
+            # [원인 id, 결과 id] — 같은 해에 함께 선 마크들 사이의 인과.
+            "causes": causes,
             # 왕의 재위 띠. 고른 노드와 무관하게 늘 같은 자를 세운다.
             "reigns": reigns,
         }

@@ -117,52 +117,123 @@ export function placeMarks(marks, { from, to, pos }) {
 // 해는 가나다가 아니라 날짜로 세운다 (실측: 1592년 38건이 가나다순이라
 // 부산진 전투(5월)가 한산도 대첩(7월)보다 아래에 섰다). 날짜를 모르는
 // 것은 앞에 둔다 — 위키데이터는 연도만 아는 날을 1월 1일로 적어 보내므로
-// 달을 따로 적어 주지는 않는다.
+// 달을 따로 적어 주지는 않는다. 다만 그 해에 제 원인이 함께 서 있으면
+// 원인 뒤로 물러난다 (아래 `dateContains`).
 //
-// **원인은 결과보다 위에 선다.** 결과의 날짜가 거칠어서(연도만) 원인의
-// 날짜(12월 9일)를 품으면, 날짜 문자열로는 결과가 먼저다 — 병자호란
-// (1636-12-09)이 그 결과인 공석신주사건(1636) 아래에 섰다 (2026-09-05
-// 지적). 거친 날짜는 '그 해 어딘가'이지 '1월 1일'이 아니므로, 원인을
-// 품는 거친 날짜는 원인 **바로 뒤**에 세운다. 고른 노드와 그 이웃 사이의
-// 인과만 안다 (서버가 `rel` 로 준다). 같은 날이어도 원인이 먼저다.
-export function sortMarks(marks) {
-  const self = marks.find((m) => m.kind === 'self');
-  const key = new Map(marks.map((m) => [m, sortKey(m, self, marks)]));
-  return [...marks].sort((a, b) => a.year - b.year
-    || key.get(a).localeCompare(key.get(b))
-    || a.label.localeCompare(b.label, 'ko'));
+// **원인은 결과보다 위에 선다.** 날짜만으로는 그 차례가 안 나온다. 같은
+// 날인 인과가 있고(한일병합·무단통치 1910-08-29, 3·1독립선언서·3·1운동
+// 1919-03-01), 결과의 날짜가 본래 거칠어서 원인의 날짜를 품기도 한다
+// (을사조약 1905-11-17 → 애국계몽운동 1905). 거친 날짜는 '그 해 어딘가'
+// 이지 1월 1일이 아니므로, **결과의 날짜가 원인의 날짜를 품으면 결과를
+// 원인 뒤에 세운다.** 날짜가 서로를 품지 않으면(원인 12월, 결과 3월)
+// 날짜가 이긴다 — 그것은 자료의 날짜가 틀린 것이라 `chronology` 가 잡을
+// 일이지 화면이 지어낼 일이 아니다 (병자호란 1636-12-09 옆의 청나라
+// 1636년 자리는 건국(4월)이지 그 결과가 아니다).
+//
+// 품는 쪽에는 **날짜를 모르는 마크**와 **단체의 창립**이 함께 걸린다.
+// 앞은 해만 빌려 선 것이라 '그 해 어딘가'이고(왕자의 난 1398-08-26 →
+// 함흥차사), 뒤는 연표가 단체를 끝난 날이 아니라 **시작한 날**에 세우기
+// 때문이다 (3·1 운동 1919-03-01 → 북로군정서 1919, 5·16 군사정변
+// 1961-05-16 → 국가재건최고회의 1961).
+//
+// 인과는 두 곳에서 온다: 서버가 보내는 마크 사이의 인과(`causes`,
+// [원인 id, 결과 id])와 고른 노드에 달린 `rel`. 전에는 뒤엣것뿐이라
+// **둘 다 뼈대인 쌍은 인과를 아예 몰랐다** (2026-09-08 지적).
+export function sortMarks(marks, causes) {
+  const cmp = plainOrder(marks);
+  const rel = causeEdges(marks, causes);
+  const years = new Map();
+  for (const m of marks) {
+    if (!years.has(m.year)) years.set(m.year, []);
+    years.get(m.year).push(m);
+  }
+  const out = [];
+  for (const y of [...years.keys()].sort((a, b) => a - b)) {
+    out.push(...orderYear(years.get(y), rel, cmp));
+  }
+  return out;
+}
+
+// 인과가 없을 때의 차례 — 날짜, 같으면 가나다, 그래도 같으면 들어온 순
+// (같은 자료면 같은 그림이어야 한다).
+function plainOrder(marks) {
+  const at = new Map(marks.map((m, i) => [m, i]));
+  return (a, b) => {
+    const da = String(a.date || '');
+    const db = String(b.date || '');
+    if (da !== db) return da < db ? -1 : 1;
+    return String(a.label || '').localeCompare(String(b.label || ''), 'ko')
+      || at.get(a) - at.get(b);
+  };
 }
 
 // 거친 날짜가 고운 날짜를 품는가 — '1636' ⊇ '1636-12-09', '1920-10' ⊇
-// '1920-10-21'. 같은 날도 품는다. 날짜를 모르면('') 무엇이든 품는다.
+// '1920-10-21'. 같은 날도 품는다.
+//
+// **날짜를 모르면('') 무엇이든 품는다.** 연표는 날짜가 없는 마크도 연도
+// 노드에서 해를 빌려 세우는데(`time:1398`), 그 자리는 '그 해 어딘가'이지
+// '그 해 첫날'이 아니다 — 거친 연도가 1월 1일이 아닌 것과 같은 이치다.
 export function dateContains(coarse, fine) {
   const c = String(coarse || '');
   const f = String(fine || '');
+  if (!c) return true;
   return f.startsWith(c) && (f.length === c.length || f[c.length] === '-');
 }
 
-// 정렬용 날짜 열쇠. 원인을 품는 거친 날짜는 '원인 날짜 + ~' 가 되어
-// 원인 바로 뒤에 선다 ('~' 는 숫자와 '-' 보다 뒤다). 비교기는 그대로
-// 문자열 순이라 순환이 생기지 않는다.
-function sortKey(m, self, marks) {
-  const own = String(m.date || '');
-  if (!self) return own;
-  if (m === self) {
-    // 고른 노드가 결과: 그 날짜가 품는 원인들 중 가장 늦은 것 뒤.
-    let latest = null;
-    for (const n of marks) {
-      if (n.rel?.type !== 'caused' || n.rel.dir !== 'in' || n.year !== m.year) continue;
-      const d = String(n.date || '');
-      if (dateContains(own, d) && (latest === null || d > latest)) latest = d;
+// 같은 해에 함께 선 마크들 사이의 [원인, 결과] 짝. 결과의 날짜가 원인의
+// 날짜를 품는 것만 남긴다 (위 설명).
+function causeEdges(marks, causes) {
+  const byId = new Map(marks.map((m) => [m.id, m]));
+  const pairs = [];
+  const add = (c, e) => {
+    if (!c || !e || c === e || c.year !== e.year) return;
+    if (!dateContains(e.date, c.date)) return;
+    pairs.push([c, e]);
+  };
+  for (const [src, dst] of causes || []) add(byId.get(src), byId.get(dst));
+  // 고른 노드에 달린 관계도 같은 인과다. 서버가 `causes` 를 안 보내던
+  // 때의 자료와 개인 연표에서도 이 길로 선다.
+  const self = marks.find((m) => m.kind === 'self');
+  if (self) {
+    for (const m of marks) {
+      if (m === self || m.rel?.type !== 'caused') continue;
+      if (m.rel.dir === 'in') add(m, self);
+      else if (m.rel.dir === 'out') add(self, m);
     }
-    return latest === null ? own : `${latest}~`;
   }
-  // 이웃이 결과(고른 노드가 원인): 이웃의 거친 날짜가 고른 노드를 품으면 그 뒤.
-  if (m.rel?.type === 'caused' && m.rel.dir === 'out' && m.year === self.year
-      && dateContains(own, self.date)) {
-    return `${String(self.date || '')}~`;
+  return pairs;
+}
+
+// 한 해 안의 차례 — 날짜 순을 지키되 원인을 결과보다 위에 세운다.
+// 위상 정렬(칸)로 세우고, 세울 수 있는 것 중 날짜가 앞선 것을 고른다.
+// **순환이 있어도 멈추지 않는다** — 진주농민봉기와 임술민란은 서로를
+// 원인으로 물고 둘 다 1862년이다. 아무도 앞설 수 없으면 남은 것 중
+// 날짜·가나다가 앞선 것을 세우고 마저 푼다.
+function orderYear(group, rel, cmp) {
+  const inYear = new Set(group);
+  const edges = rel.filter(([c, e]) => inYear.has(c) && inYear.has(e));
+  if (!edges.length) return [...group].sort(cmp);
+  const waiting = new Map(group.map((m) => [m, 0]));
+  const next = new Map(group.map((m) => [m, []]));
+  for (const [c, e] of edges) {
+    next.get(c).push(e);
+    waiting.set(e, waiting.get(e) + 1);
   }
-  return own;
+  const left = new Set(group);
+  const out = [];
+  while (left.size) {
+    let pick = null;
+    for (const m of left) {
+      if (waiting.get(m) === 0 && (pick === null || cmp(m, pick) < 0)) pick = m;
+    }
+    if (pick === null) {
+      for (const m of left) if (pick === null || cmp(m, pick) < 0) pick = m;
+    }
+    out.push(pick);
+    left.delete(pick);
+    for (const e of next.get(pick)) waiting.set(e, waiting.get(e) - 1);
+  }
+  return out;
 }
 
 export class TimelineRail {
@@ -344,7 +415,7 @@ export class TimelineRail {
     // --- 누가 서는가 ---------------------------------------------------
     // 전부 선다. 고른 노드도 왕조도 이웃도 배경이 된 큰 사건도 가리지
     // 않는다 — 몰린 해는 그 해가 늘어나 자리를 내주므로 다툴 일이 없다.
-    const visible = sortMarks(marks);
+    const visible = sortMarks(marks, d.causes);
 
     // 시대 전체가 한 화면에 드는 높이의 ZOOM 배가 '빈 해'의 몫이다.
     this.axis = buildScale(visible, { from, to, base: (bodyH - PAD_TOP - PAD_BOTTOM) * ZOOM });
