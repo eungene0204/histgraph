@@ -6611,6 +6611,23 @@ try:
 
     check("배포 함수가 개인 역사의 POST 를 받는다",
           _vapi.LIFE_POSTS == ("/api/life/analyze", "/api/life/refine"))
+
+    # 배포 번들이 **패키지가 읽는 파일**을 걷어내지 않는가. 2026-09-09 실측:
+    # `excludeFiles` 의 `*.md` 가 문서만이 아니라 `src/histgraph/life_prompt.md`
+    # 까지 빼서, 배포에서 이야기를 보내면 FileNotFoundError 로 떨어졌다. 문서를
+    # 뺄 때는 **이름으로** 적는다 — 확장자로 쓸면 코드가 읽는 것이 같이 쓸린다.
+    import fnmatch as _fn  # noqa: E402
+
+    _root = Path(__file__).resolve().parents[1]
+    _ex = _js.loads((_root / "vercel.json").read_text(encoding="utf-8"))
+    _pats = _ex["functions"]["api/index.py"]["excludeFiles"].strip("{}").split(",")
+    _needed = [q for q in (_root / "src").rglob("*")
+               if q.is_file() and q.suffix != ".py" and "__pycache__" not in q.parts]
+    _cut = [str(q.relative_to(_root)) for q in _needed
+            if any(_fn.fnmatch(str(q.relative_to(_root)), pat) or _fn.fnmatch(q.name, pat)
+                   for pat in _pats)]
+    check("배포 번들이 패키지가 읽는 파일을 걷어내지 않는다",
+          not _cut and any(q.name == "life_prompt.md" for q in _needed), str(_cut))
     blocked, (st, body) = gate()
     check("로그인 없이 이야기를 보내면 401",
           blocked is True and st == 401 and body["error"] == "로그인이 필요합니다.", str((st, body)))
