@@ -31,12 +31,16 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+# **파이썬 런타임은 임포트를 따라간 `.py` 만 담는다.** 코드가 읽는 그 밖의
+# 파일은 `vercel.json` 의 `includeFiles` 로 이름을 대야 번들에 실린다 —
+# 안 대면 배포에서만 `FileNotFoundError` 로 떨어진다 (2026-09-09 실측:
+# `src/histgraph/life_prompt.md`, 개인 역사의 지시문).
 from histgraph import accounts, auth, pages  # noqa: E402
-
-log = logging.getLogger("histgraph.api")
 from histgraph.server import (  # noqa: E402
     LIFE_MAX_BODY, LIFE_POSTS, GraphAPI, dispatch, life_post,
 )
+
+log = logging.getLogger("histgraph.api")
 
 # 화면이 띄우는 것은 시대 그래프다 — 전체 그래프(38,654 노드)가 아니라
 # data/korea.sqlite. cli.py 의 serve 가 고르는 것과 같은 파일을 고른다.
