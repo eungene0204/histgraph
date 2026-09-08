@@ -2305,9 +2305,14 @@ def cmd_life(args: argparse.Namespace) -> int:
     api = GraphAPI(db, era=args.era, readonly=True) if db.exists() else None
     base = life_mod.load(Path(args.base)) if args.base else None
     existing = life_mod.existing_summary(base) if base else None
+    text = None
     if args.json is not None:
         raw = life_mod.load(Path(args.json))
         name = args.name or Path(args.json).stem
+        # 옆에 원문이 있으면 같이 읽는다 — 인물의 생몰년을 거기에 대 본다.
+        story = Path(args.json).with_suffix(".txt")
+        if story.is_file():
+            text = story.read_text(encoding="utf-8")
     else:
         text = Path(args.text).read_text(encoding="utf-8")
         name = args.name or Path(args.text).stem
@@ -2328,10 +2333,17 @@ def cmd_life(args: argparse.Namespace) -> int:
             print("  모델이 JSON 을 돌려주지 않았습니다.", file=sys.stderr)
             return 1
         raw["_model"] = backend.model
-    payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"))
+    payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text)
     linked = life_mod.link(payload, api) if api is not None else 0
+    # 역사 연결의 관문 — 이야기가 부르지 않은 사건은 잇지 않는다 (2026-09-08).
+    # 더할 때는 옛 이야기(base 옆의 .txt)까지 합쳐 옛 연결도 다시 잰다.
+    dropped = life_mod.gate_connections(payload, text)
     if base:
         payload, added = life_mod.merge(base, payload)
+        old_story = Path(args.base).with_suffix(".txt")
+        whole = old_story.read_text(encoding="utf-8") if old_story.is_file() else ""
+        whole = "\n".join(x for x in (whole, text) if x) or None
+        dropped += life_mod.gate_connections(payload, whole)
         notes = payload.get("notes") or notes
         print(f"  있는 그래프에 더함: 노드 {added['nodes']} · 관계 {added['edges']}"
               f" · 연표 {added['timeline']} · 역사 연결 {added['connections']}")
@@ -2339,6 +2351,8 @@ def cmd_life(args: argparse.Namespace) -> int:
             name = Path(args.base).stem
     out = Path(args.out) if args.out else life_mod.LIFE_DIR / f"{name}.json"
     life_mod.save(payload, out)
+    for line in dropped:
+        print(f"  {line}")
     lo, hi = life_mod.span(payload)
     print(f"  노드 {len(payload['nodes'])} · 관계 {len(payload['edges'])} · 연표 {len(payload['timeline'])}"
           f" · 역사 연결 {len(payload['historical_connections'])} (그래프에 이은 것 {linked})")

@@ -1097,6 +1097,23 @@ def _life_name(name: str) -> str:
     return safe[:40] or "나"
 
 
+def _life_story(doc: dict) -> str | None:
+    """이 그래프를 만든 이야기 원문 (data/life/<이름>.txt). 없으면 None.
+
+    인물의 생몰년을 여기에 대 본다 — 이야기가 말하지 않은 생년은 화면에 세우지
+    않는다 (2026-09-08 사용자). 이 컴퓨터에 원문이 없으면 재지 않는다."""
+    from . import life as life_mod
+
+    name = ((doc.get("subject") or {}).get("name") or "").strip()
+    if not name:
+        return None
+    path = life_mod.LIFE_DIR / f"{_life_name(name)}.txt"
+    try:
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+    except OSError:
+        return None
+
+
 class LifeAnalysis:
     """이야기 → 개인 그래프. 한 번에 하나, 상태는 화면이 물어 간다."""
 
@@ -1166,16 +1183,22 @@ class LifeAnalysis:
                 return
             raw["_model"] = getattr(backend, "model", backend_kind)
             self._step("답을 검증하는 중")
-            payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"))
+            payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text)
             self._step("한국사 사건에 잇는 중")
             life_mod.link(payload, api)
+            # 이야기가 부르지 않은 역사는 잇지 않는다 (2026-09-08 "세월호 사건과
+            # 퍼듀대학교 졸업은 도대체 무슨 상관이지?"). 더할 때는 옛 이야기까지
+            # 합쳐 옛 연결도 다시 잰다.
+            life_mod.gate_connections(payload, text)
             added = None
+            out = life_mod.LIFE_DIR / f"{_life_name(name)}.json"
             if base:
                 self._step("있는 역사에 더하는 중")
                 payload, added = life_mod.merge(base, payload)
+                whole = _life_story(base) or ""
+                life_mod.gate_connections(payload, "\n".join(x for x in (whole, text) if x) or None)
                 notes = payload.get("notes") or notes
             self._step("저장하는 중")
-            out = life_mod.LIFE_DIR / f"{_life_name(name)}.json"
             try:
                 life_mod.save(payload, out)
                 # 이야기 원문도 옆에 둔다 — 고쳐 쓰고 `histgraph life` 로
@@ -1375,7 +1398,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "그래프가 아닙니다"}, 400)
                 return
             from . import life as life_mod
-            self._json(life_mod.refine(body), 200)
+            # 이야기 원문이 옆에 있으면 같이 준다 — 인물의 생몌년을 원문에 대 본다
+            # (life.gate_person_dates). 없으면 재지 않는다.
+            self._json(life_mod.refine(body, text=_life_story(body)), 200)
             return
         if url.path != "/api/life/analyze":
             self._json({"error": "unknown endpoint", "path": url.path}, 404)

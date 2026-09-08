@@ -92,8 +92,19 @@ EDGE_TYPE_KO: dict[str, str] = {
 # 사건 관계 가운데 **원인 → 결과**로 읽는 것. 화면이 개인 연표에서 인과 선으로 긋는다.
 CAUSAL_EDGES = frozenset({"caused", "triggered", "led_to", "resulted_in"})
 IMPACT_KO = {"direct": "직접", "indirect": "간접", "possible": "가능성"}
-LIFE_STAGES = ["출생", "어린 시절", "초등학교", "중학교", "고등학교", "대학",
+# 인생 단계 — 지시문(life_prompt.md)의 목록에 '군복무'를 더했다 (2026-09-08 사용자:
+# "공익근무는 군복무 기간이야. 훈련소, 공익근무 역시 군복무로 인식할 수 있게 해줘").
+# 이 목록은 모델에게 주는 스키마의 enum 이기도 하다 — 여기 없으면 모델이 못 고른다.
+LIFE_STAGES = ["출생", "어린 시절", "초등학교", "중학교", "고등학교", "대학", "군복무",
                "사회생활", "창업", "가족 형성", "현재"]
+# 군복무로 읽는 말. 현역만이 아니다 — 공익근무요원·사회복무요원·상근예비역·방위병·
+# 의무경찰도 병역이고, 훈련소 입소부터 소집해제까지가 그 기간이다. 모델이 '사회생활'
+# 이라 적어 와도 이 표가 이긴다 (사람이 정한 것이지 모델이 고를 것이 아니다).
+MILITARY = re.compile(
+    r"군복무|군 복무|병역|입대|입영|훈련소|신병교육|\d+\s*사단|공익근무|공익요원|사회복무요원|"
+    r"상근예비역|방위병|의무경찰|의경대|카투사|해병대|현역|전역|소집해제|(?<![가-힣])제대(?!로)")
+# 그 단계를 **끝내는** 사건 (화면이 띠를 여기서 닫는다 — web/src/lib/life.js STAGE_END).
+STAGE_ENDS_ON = re.compile(r"전역|소집해제|(?<![가-힣])제대(?!로)|만기")
 # 연표에 점으로 찍는 타입. 사람·장소·책은 이어지는 것이라 점이 아니다
 # (server.POINT_TYPES 와 같은 이유).
 EVENT_TYPES = frozenset({"PersonalEvent", "HistoricalEvent", "TurningPoint", "Crisis",
@@ -254,8 +265,16 @@ def build_user(text: str, today: datetime.date | None = None,
     known = ""
     if anchors:
         names = ", ".join(f"{a['label']}({a['year']})" for a in anchors)
-        known = ("\n\n한국사 그래프에 있는 이 무렵의 사건 이름이다. 역사 연결"
-                 "(historical_connections.historical_event)에는 되도록 이 이름을 그대로 쓴다:\n"
+        # 목록은 **표기**를 맞추라고 주는 것이지 고르라고 주는 것이 아니다. 2026-09-08
+        # 지적: 모델이 개인 사건마다 같은 해의 큰 사건을 목록에서 집어 "간접 영향을
+        # 미쳤을 수 있음"으로 이었다 — 공익요원 시작에 제2연평해전, 대학 졸업에 세월호.
+        # 이야기가 말하지 않은 역사는 잇지 않는다. 코드의 관문(gate_connections)이
+        # 같은 규칙으로 한 번 더 거른다.
+        known = ("\n\n역사 연결(historical_connections)은 **이야기가 직접 말한** 역사 사건만 적는다 — "
+                 "본인이 겪었다거나 그 때문에 무엇이 바뀌었다고 말한 것. 같은 해에 일어났다는 이유로 "
+                 "잇지 않고, '영향을 미쳤을 수 있다'는 짐작으로 잇지 않는다. 이야기에 그런 사건이 없으면 "
+                 "빈 배열로 둔다. 적을 때는 한국사 그래프의 이름을 쓴다 — 이 무렵의 사건 이름은 이렇다"
+                 "(표기를 맞추라고 보이는 것이지 여기서 고르라는 것이 아니다):\n"
                  f"{names}")
     # **더하는 이야기**: 이미 있는 그래프의 노드를 보여 주고 같은 것은 그 id 를
     # 쓰게 한다 — 그래야 `merge` 가 새 답을 옛 그래프에 잇는다 (2026-09-08 사용자:
@@ -296,7 +315,12 @@ def build_user(text: str, today: datetime.date | None = None,
         "어디서 만났는지(학교·회사·모임)를 말했으면 "
         "그 사람을 그 학교·회사 노드와도 잇는다(studied_at·worked_at·member_of) — 새 노드를 "
         "만들지 말고 이야기가 말한 그 학교·회사 노드를 쓴다. 만난 일은 timeline 에도 세운다. "
-        "주인공의 생년월일은 주인공 노드의 start_date 에 적는다. "
+        "주인공의 생년월일은 주인공 노드의 start_date 에 적는다 — 이야기가 말한 만큼만이다. "
+        # 남의 생년은 짐작하지 않는다 (2026-09-08 사용자: "인물들의 출생연도 나이는
+        # 사용자가 입력하지 않은 이상 추측해서 명시 하지마"). 실측: 친구 노드에
+        # 주인공과 같은 생일이 붙어 있었다.
+        "주인공 말고 다른 사람의 생년월일·나이는 **이야기가 그 사람에 대해 말했을 때만** 적는다. "
+        "말하지 않았으면 그 사람의 start_date 는 null 이다 — 또래일 것 같다고 적지 않는다. "
         # 시간 관계는 사건과 사건 사이의 것이다 (실측 2026-09-08: 주인공 → '미국으로
         # 이주' 가 after, → '잠실고등학교 입학' 이 during 으로 와 화면에 '뒤'·'동안'이 섰다).
         "주인공과 주인공 자신의 사건은 experienced 로 잇는다 — before·after·during·overlapped 는 "
@@ -322,6 +346,7 @@ def analyze(text: str, backend, anchors: list[dict] | None = None,
 # --- 다듬기: 앞뒤에서 셈하고, 만난 곳에 잇는다 -----------------------------------
 # 모델이 빠뜨린 것을 이야기 안의 다른 노드에서 채운다. 검증 끝과 더하기 끝에
 # 한 번씩 돈다 (옛 그래프도 다음 더하기 때 같이 고쳐진다).
+#   0. 인물의 생몰년: 원문을 아는 자리에서는 근거 없는 것을 비운다 (gate_person_dates).
 #   1. 생년: 주인공 노드의 start_date 가 비었으면 '출생' 노드나 설명에서.
 #   2. 해: 학년('고등학교 2학년')은 입학 해에서, 없으면 생년에서. 사람 노드는
 #      설명의 '…1학년 때 만난' 도 본다 — 그 사람이 내 삶에 들어온 해다.
@@ -329,31 +354,149 @@ def analyze(text: str, backend, anchors: list[dict] | None = None,
 #   4. 잇기: 사람의 설명이 이야기 속 학교·회사 이름을 부르면 그 노드에 잇고
 #      (studied_at·worked_at), 주인공과 아무 관계가 없는 '만난' 사람은 met 으로 잇는다.
 _BIRTH_DESC = re.compile(r"(\d{4})\s*년[^.。]{0,25}?(태어|출생)")
+_BIRTH_DESC_FULL = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일[^.。]{0,25}?(태어|출생)")
 _MET_WORDS = re.compile(r"만난|만났|만나|친구|동료|선배|후배|사귀|알게")
 _BIRTH_NODE = re.compile(r"^(출생|탄생|태어남)$")
 
 
-def birth_from_nodes(me: dict, nodes: list[dict], edges: list[dict]) -> int | None:
-    """주인공의 생년 — 노드 자신에 없으면 '출생' 노드(born_in 으로 이어진 것이나
-    그 이름의 노드)나 설명의 '1982년 … 태어난' 에서."""
-    by_id = {n["id"]: n for n in nodes}
-    for e in edges:
-        if isinstance(e, dict) and e.get("source") == me["id"] and e.get("type") == "born_in":
-            t = by_id.get(e.get("target"))
-            if t and t.get("type") in ("Time", "PersonalEvent", "LifeStage"):
-                y = parse_when(t.get("start_date"))[0]
-                if y is not None:
-                    return y
+# --- 인물의 생년월일은 원문이 말한 것만 -------------------------------------------
+# 2026-09-08 사용자: "인물들의 출생연도 나이는 사용자가 입력하지 않은 이상 추측해서
+# 명시 하지마. 모르면 그냥 아예 명시를 하지마." 실측: 모델이 친구 노드에 주인공과
+# 똑같은 생일(1982-01-01, confidence 0.9)을 달아 놓았고, 주인공의 생일도 이야기는
+# 해만 말했는데 1월 1일이 붙어 있었다. 화면은 그것을 그 사람의 생년으로 읽는다.
+#
+# 그래서 인물의 날짜는 **원문에 근거가 있어야 남는다** (인과의 fact_check 와 같은 관문).
+#   - 주인공: 해는 그대로 둔다 — 연표의 나이·학년·시기가 전부 여기서 선다. 달·날은
+#     이야기가 말했을 때만 적는다 (안 말했으면 해까지만).
+#   - 다른 사람: 그 사람 이름을 부르는 문장이 그 해를 말할 때만 남긴다. 아니면 비운다.
+# 원문이 없는 자리에서는 재지 않는다 — 없는 근거로 지우지 않는다.
+PERSON_TYPES = {"Person", "FamilyMember", "Ancestor", "Relationship"}
+_FULL_DATE = re.compile(r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})")
+_YEAR_MONTH = re.compile(r"(\d{4})\s*[-./년]\s*(\d{1,2})\s*월")
+
+
+def stated_date(text: str | None, name: str | None, date: str | None, *, whole: bool = False) -> str | None:
+    """원문이 말한 만큼의 날짜. 그 해를 말한 적이 없으면 None.
+
+    `whole` 은 주인공이다 — 이야기가 자기 이름을 부르지 않으므로 글 전체에서 찾는다.
+    """
+    if not date or not text:
+        return date
+    year = parse_when(date)[0]
+    if year is None:
+        return None
+    where = [text] if whole else [s for s in re.split(r"[.!?\n。]", text) if name and name in s]
+    for s in where:
+        for m in _FULL_DATE.finditer(s):
+            if int(m.group(1)) == year:
+                return f"{year:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        for m in _YEAR_MONTH.finditer(s):
+            if int(m.group(1)) == year:
+                return f"{year:04d}-{int(m.group(2)):02d}"
+        if re.search(rf"(?<!\d){year}(?!\d)", s):
+            return str(year)
+    return None
+
+
+def gate_person_dates(nodes: list[dict], me: dict | None, text: str | None,
+                      timeline: list[dict] | None = None) -> list[str]:
+    """인물 노드의 생몰년을 원문에 대 보고, 근거 없는 것을 비운다.
+
+    비운 사람은 **연표에서도 내린다** (준 `timeline` 을 그 자리에서 고친다) — 연표
+    항목은 그 해의 나이와 단계를 들고 있어서, 남겨 두면 화면이 그 사람 이름 아래에
+    '0세 · 출생'을 적는다 (2026-09-08 실측: 친구 하나가 주인공과 같은 해에 태어난
+    것으로 연표에 서 있었다).
+    """
+    notes: list[str] = []
+    if not text:
+        return notes
+    dropped: set[str] = set()
     for n in nodes:
-        if n.get("type") in ("Time", "PersonalEvent", "LifeStage") and _BIRTH_NODE.match(str(n.get("name") or "").strip()):
-            y = parse_when(n.get("start_date"))[0]
-            if y is not None:
-                return y
-    m = _BIRTH_DESC.search(str(me.get("description") or ""))
-    return int(m.group(1)) if m else None
+        if n.get("type") not in PERSON_TYPES:
+            continue
+        mine = me is not None and n is me
+        for key in ("start_date", "end_date"):
+            was = n.get(key)
+            if not was:
+                continue
+            now = stated_date(text, n.get("name"), was, whole=mine)
+            if mine and now is None:
+                # 주인공의 해는 남긴다 (연표가 여기서 선다) — 지어낸 달·날만 자른다.
+                y = parse_when(was)[0]
+                now = str(y) if y is not None else None
+            if now == was:
+                continue
+            n[key] = now
+            if key == "start_date":
+                y, y2, prec = parse_when(now)
+                n["year"], n["precision"] = y, prec
+                if now is None:
+                    n["end_year"] = None
+                    dropped.add(str(n.get("id")))
+            notes.append(f"이야기가 말하지 않은 날짜를 뺐다: {n.get('name')} {was}"
+                         + (f" → {now}" if now else ""))
+    if timeline is not None and dropped:
+        keep = [t for t in timeline if not (isinstance(t, dict) and t.get("event_id") in dropped)]
+        if len(keep) != len(timeline):
+            notes.append(f"생년이 없어진 사람을 연표에서 내렸다: {len(timeline) - len(keep)}건")
+            timeline[:] = keep
+    return notes
 
 
-def refine(payload: dict) -> dict:
+_WHEN_TYPES = ("Time", "PersonalEvent", "LifeStage")
+
+
+def birth_date_from_nodes(me: dict, nodes: list[dict], edges: list[dict]) -> str | None:
+    """주인공의 생일 — '출생' 사건이 든 날짜, 없으면 설명의 '1982년 2월 27일 … 태어난'.
+
+    **출생 사건의 날짜가 주인공 노드의 날짜를 이긴다.** 모델은 해만 아는 사람에게
+    1월 1일을 적어 두는데(2026-09-08 사용자: "2월 27일에 태어 났다고 했는데, 왜
+    헷갈리게 '1982-01-01 · 0세 · 출생' 이라고 써있지"), 화면은 사람 노드의 날짜를
+    그 사람의 생일로 읽는다. 이야기가 날짜를 말했으면 그 말이 '출생' 노드에 서 있다.
+
+    가장 자세한 것을 고른다 (날짜 > 달 > 해). 주인공 노드가 든 해와 다른 해는
+    버린다 — 다른 사람의 출생이거나 잘못 이어진 것이다."""
+    by_id = {n["id"]: n for n in nodes}
+    said: list[str] = []
+
+    def take(when: object) -> None:
+        if isinstance(when, str) and parse_when(when)[0] is not None:
+            said.append(when.strip())
+
+    for e in edges:
+        if not isinstance(e, dict) or e.get("source") != me.get("id"):
+            continue
+        t = by_id.get(e.get("target"))
+        if not t or t.get("type") not in _WHEN_TYPES:
+            continue
+        # born_in 은 다듬기 전의 이름이고, 다듬은 뒤에는 experienced 에 역할이 '출생'이다.
+        if e.get("type") == "born_in" or _BIRTH_NODE.match(str(e.get("role") or "").strip()) \
+                or _BIRTH_NODE.match(str(t.get("name") or "").strip()):
+            take(t.get("start_date"))
+    for n in nodes:
+        if n.get("type") in _WHEN_TYPES and _BIRTH_NODE.match(str(n.get("name") or "").strip()):
+            take(n.get("start_date"))
+    desc = str(me.get("description") or "")
+    m = _BIRTH_DESC_FULL.search(desc)
+    if m:
+        take(f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}")
+    else:
+        m = _BIRTH_DESC.search(desc)
+        if m:
+            take(m.group(1))
+    if not said:
+        return None
+    year = parse_when(me.get("start_date"))[0]
+    fit = [w for w in said if year is None or parse_when(w)[0] == year]
+    return max(fit, key=len) if fit else None
+
+
+def birth_from_nodes(me: dict, nodes: list[dict], edges: list[dict]) -> int | None:
+    """주인공의 생년 — 노드 자신에 없으면 '출생' 노드나 설명에서."""
+    return parse_when(birth_date_from_nodes(me, nodes, edges))[0]
+
+
+def refine(payload: dict, text: str | None = None) -> dict:
     nodes: list[dict] = payload.get("nodes") or []
     edges: list[dict] = payload.setdefault("edges", [])
     if not nodes:
@@ -361,8 +504,17 @@ def refine(payload: dict) -> dict:
     by_id = {n["id"]: n for n in nodes}
     subject = payload.get("subject") or {}
     me = by_id.get(subject.get("id"))
+    # 0. 인물의 생몰년 — 원문을 아는 자리에서는 여기서도 잰다 (옛 그래프가 들고 있는
+    #    지어낸 생년은 이 길로 빠진다. 원문을 모르면 그대로 둔다.)
+    gate_person_dates(nodes, me, text, payload.get("timeline"))
 
-    # 1. 생년
+    # 1. 생년 — 그리고 생일. '출생' 사건이 든 날짜가 주인공 노드의 날짜를 이긴다
+    #    (birth_date_from_nodes: 모델은 해만 알면 1월 1일을 적는다).
+    if me is not None:
+        said = birth_date_from_nodes(me, nodes, edges)
+        if said and said != me.get("start_date") and len(said) >= len(str(me.get("start_date") or "")):
+            me["start_date"] = said
+            me["year"], _, me["precision"] = parse_when(said)
     birth = subject.get("birth_year")
     if birth is None and me is not None:
         birth = parse_when(me.get("start_date"))[0] or birth_from_nodes(me, nodes, edges)
@@ -395,6 +547,12 @@ def refine(payload: dict) -> dict:
 
     # 3. 연표
     timeline: list[dict] = payload.get("timeline") or []
+    # 주인공은 연표의 항목이 아니라 연표 그 자체다. 모델이 자기 노드를 0세 자리에
+    # 세워 두면 '출생' 사건 옆에 같은 것이 하나 더 서고, 그 줄이 주인공 노드의 날짜를
+    # 생일로 읽어 준다 (2026-09-08 사용자).
+    if me is not None:
+        timeline = [t for t in timeline if t.get("event_id") != me.get("id")]
+    payload["timeline"] = timeline
     for t in timeline:
         node = by_id.get(t.get("event_id"))
         if t.get("year") is None:
@@ -409,6 +567,13 @@ def refine(payload: dict) -> dict:
             t["age"] = int(t["year"]) - birth
         if node is not None and node.get("year") is None and t.get("year") is not None:
             node["year"], node["precision"] = t["year"], "year"
+    # 군복무 — 훈련소 입소부터 소집해제까지는 병역이지 사회생활이 아니다
+    # (2026-09-08 사용자). 모델이 '사회생활'로 적어 와도 이름이 말하면 여기서 고친다.
+    for t in timeline:
+        node = by_id.get(t.get("event_id"))
+        if node is not None and klass(node) in ("event", "period") \
+                and MILITARY.search(f"{node.get('name') or ''} {node.get('description') or ''}"):
+            t["life_stage"] = "군복무"
     timeline.sort(key=lambda t: (t.get("year") is None, t.get("year") or 0))
     for i, t in enumerate(timeline):
         t["previous_event"] = timeline[i - 1]["event_id"] if i else None
@@ -439,7 +604,64 @@ def refine(payload: dict) -> dict:
     # 5. 관계의 이름 — 온톨로지(LIFE_EDGES)에 맞추고 역할을 단다
     for issue in tidy_edges(nodes, edges, me):
         log.warning("개인 그래프 온톨로지 밖: %s", issue)
+
+    # 6. 섬을 잇는다 — 내 삶의 사건은 내가 겪은 것이다
+    if link_orphans(nodes, edges, me):
+        tidy_edges(nodes, edges, me)   # 새로 이은 선에도 이름(역할)을 단다
+
+    # 7. 역사 연결의 관문 — 이야기가 부르지 않은 사건·결과보다 늦은 원인을 지운다.
+    # 옛 그래프도 화면이 열 때 refine 을 지나므로(POST /api/life/refine) 여기서
+    # 같이 걸린다. 원문(text)을 모르면 이름으로는 안 버리고 순서만 잰다.
+    gate_connections(payload, text)
     return payload
+
+
+def link_orphans(nodes: list[dict], edges: list[dict], me: dict | None) -> int:
+    """주인공과 떨어져 뜬 섬을 잇는다. 돌아오는 것은 새로 이은 수.
+
+    2026-09-08 사용자: "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜 따로
+    떼어둔거지?" 모델은 **한 번에 준 이야기 안에서는** 주인공 → 사건을 잇지만,
+    더하기(merge)로 뒤에 붙인 토막에서는 사건끼리만 이어 놓는다 — 실측: 군복무 세
+    사건(입소 → 공익요원 → 소집해제)이 led_to 사슬로만 서 있었고, 성내중학교
+    입학·졸업은 학교하고만 이어져 섬이 됐다. 이 그래프는 **한 사람의 삶**이므로
+    개인 사건은 임자가 정해져 있다. 근거는 이야기 밖에서 오지 않는다:
+
+      1. 어떤 인물과도 안 이어진 개인 사건 → 주인공이 겪은 것(experienced).
+         **남의 사건은 그대로 둔다** — 이미 인물과 이어진 사건(아버지의 부도)과
+         세계사 사건(HistoricalEvent)은 임자가 주인공이 아니다.
+      2. 아무 데도 안 이어진 장소·단체가 어떤 사건의 이름·설명에 그대로 불리면
+         그 사건이 일어난 곳(at). 실측: '천호3동 사무소'가 '천호3동 사무소 공익요원
+         근무 시작' 옆에서 홀로 떠 있었다. 이미 이어진 곳은 모델이 말한 것이 맞다.
+
+    온톨로지를 씌운 뒤(tidy_edges)에 잰다 — 버려질 엣지를 이어진 것으로 세면
+    섬이 그대로 남는다."""
+    if me is None:
+        return 0
+    who = {n["id"] for n in nodes if n.get("type") in PERSON_TYPES}
+    tied = {(e.get("source"), e.get("target")) for e in edges}
+    touched = {i for pair in tied for i in pair}
+    made = 0
+    for n in nodes:
+        if klass(n) != "event" or n.get("type") == "HistoricalEvent":
+            continue
+        if any((a in who and b == n["id"]) or (b in who and a == n["id"]) for a, b in tied):
+            continue
+        edges.append({"source": me["id"], "target": n["id"], "type": "experienced",
+                      "description": None, "confidence": 0.8})
+        made += 1
+    for spot in nodes:
+        name = str(spot.get("name") or "").strip()
+        if klass(spot) not in ("place", "org") or spot["id"] in touched or len(name) < 2:
+            continue
+        for ev in nodes:
+            if klass(ev) not in ("event", "period") or ev["id"] == spot["id"]:
+                continue
+            if name in f"{ev.get('name') or ''} {ev.get('description') or ''}":
+                edges.append({"source": ev["id"], "target": spot["id"], "type": "at",
+                              "description": None, "confidence": 0.8})
+                made += 1
+                break
+    return made
 
 
 # --- 온톨로지: 관계마다 출발·도착 갈래 ---------------------------------------------
@@ -770,7 +992,7 @@ def _norm_label(s: str) -> str:
 SELF_NAMES = {"사용자", "본인", "화자", "주인공", "나 (사용자)", "사용자 (나)", "user", "me", "self"}
 
 
-def validate(payload: dict, subject: dict | None = None) -> tuple[dict, list[str]]:
+def validate(payload: dict, subject: dict | None = None, text: str | None = None) -> tuple[dict, list[str]]:
     """모델의 답을 화면이 믿고 그릴 수 있는 꼴로 다듬고, 고친 것을 적어 준다.
 
     형태는 스키마가 지켰다고 보고 **내용**만 본다:
@@ -779,6 +1001,7 @@ def validate(payload: dict, subject: dict | None = None) -> tuple[dict, list[str
       - 신뢰도는 0~1 로, 점수는 1~10 으로 자른다.
       - 노드의 날짜를 풀어 `year`·`end_year`·`precision` 을 단다. 연표 항목이
         연도를 안 적었으면 노드의 것을 쓴다. 나이만 있으면 생년으로 푼다.
+      - **인물의 생몰년은 원문(`text`)이 말한 것만 남긴다** (gate_person_dates).
       - 노드 이름·설명에 한글이 한 자도 없어도 손대지 않는다.
 
     `subject` 는 **더하는 이야기**일 때 옛 그래프의 주인공(id·생년)이다 — 새 답의
@@ -822,6 +1045,8 @@ def validate(payload: dict, subject: dict | None = None) -> tuple[dict, list[str
         # 지시문이 화자를 '사용자'라 부르니 모델도 그 이름을 노드에 적는다.
         # 화면에서 그 사람은 '나'다 (2026-09-08 사용자: "'사용자'라고 하지 말고 '나' 라고 해줘").
         me["name"] = "나"
+    # 인물의 생몰년은 원문이 말한 것만 남긴다 (gate_person_dates 머리글).
+    notes += gate_person_dates(nodes, me, text, payload.get("timeline"))
     birth = parse_when(me.get("start_date") if me else None)[0]
     if birth is None and subject and subject.get("birth_year") is not None:
         birth = int(subject["birth_year"])
@@ -904,10 +1129,19 @@ def validate(payload: dict, subject: dict | None = None) -> tuple[dict, list[str
             if isinstance(it, dict) and it.get("event"):
                 items.append(dict(it, **{field: int(_clip(it.get(field, 5), 1, 10))}))
         out[key] = items
-    out["historical_connections"] = [
-        dict(c, impact_type=c.get("impact_type") if c.get("impact_type") in IMPACT_KO else "possible")
-        for c in payload.get("historical_connections") or [] if isinstance(c, dict)
-    ]
+    # 개인 사건도 관계처럼 **이름으로** 적어 온다 (2026-09-08 실측: 'IMF 때 아버지
+    # 사업이 망했어'를 읽은 모델이 personal_event 에 'event_0' 대신 '아버지 사업
+    # 실패'를 적었다). 되짚어 id 로 바꾼다 — 못 찾으면 관문이 버린다.
+    conns = []
+    for c in payload.get("historical_connections") or []:
+        if not isinstance(c, dict):
+            continue
+        pe = _endpoint(c.get("personal_event"))
+        if pe is None and c.get("personal_event") not in (None, ""):
+            notes.append(f"역사 연결의 개인 사건 '{c.get('personal_event')}' 을 노드에서 못 찾음 — 버림")
+        conns.append(dict(c, personal_event=pe or c.get("personal_event"),
+                          impact_type=c.get("impact_type") if c.get("impact_type") in IMPACT_KO else "possible"))
+    out["historical_connections"] = conns
     ranking = payload.get("influence_ranking") or {}
     # 지시문의 형태('{}')는 범주 → 항목일 수도, 목록일 수도 있다. 둘 다 받는다.
     if isinstance(ranking, dict) and not isinstance(ranking.get("items"), list):
@@ -923,9 +1157,9 @@ def validate(payload: dict, subject: dict | None = None) -> tuple[dict, list[str
     # 모델) 이 값이 없으면 나중에 이상한 노드의 출처를 가릴 수 없다.
     if payload.get("_model"):
         out["_model"] = payload["_model"]
+    out["notes"] = notes   # refine 이 뒤에 제 사유(역사 연결 버림)를 잇는다
     refine(out)
-    out["notes"] = notes
-    return out, notes
+    return out, out["notes"]
 
 
 def _clip(v: Any, lo: float, hi: float) -> float:
@@ -1093,8 +1327,8 @@ def merge(base: dict, add: dict) -> tuple[dict, dict]:
         out["subject"] = dict(subject, birth_year=add["subject"]["birth_year"])
     if add.get("_model"):
         out["_model"] = add["_model"]
-    refine(out)   # 옛 그래프에 비어 있던 해·연결도 이 김에 채운다
     out["notes"] = list(add.get("notes") or [])
+    refine(out)   # 옛 그래프에 비어 있던 해·연결도 이 김에 채운다 (사유는 notes 뒤에 잇는다)
     return out, stats
 
 
@@ -1143,12 +1377,98 @@ def link(payload: dict, api) -> int:
             continue
         c["node_id"] = best["id"]
         c["node_label"] = best.get("label")
+        # 그래프가 아는 다른 이름('6·25 전쟁'·'한국 전쟁'). 관문이 이야기 원문에
+        # 이 이름들이 있는지 볼 때 쓴다 — 모델이 정식 이름으로 바꿔 불러도 잇는다.
+        # 검색 결과의 names 는 props 의 병기 이름뿐이다. 손으로 적은 별칭
+        # (data/aliases.tsv → aliases 표: '외환 위기')은 노드 상세에만 온다.
+        names = list(best.get("names") or [])
+        if hasattr(api, "node"):
+            detail = api.node(best["id"]) or {}
+            names += list(detail.get("aliases") or [])
+        c["node_names"] = sorted({x for x in names if x and x != best.get("label")})
         hy = best.get("start")
         if c.get("year") is None and hy is not None:
             c["year"] = hy
             c["year_from"] = "graph"
         n += 1
     return n
+
+
+# --- 역사 연결의 관문 ----------------------------------------------------------
+# 2026-09-08 지적: "세월호 사건과 사용자의 퍼듀대학교 졸업은 도대체 무슨 상관이지?
+# 연평해전과 동사무소 공익요원 시작은 어떤 관계가 있지?" 모델이 이야기에 없는
+# 역사를 같은 해라는 이유로 이었다. 한국사 인과와 같은 관문을 둔다 — (1) 근거가
+# 원문에 있어야 한다: 이야기가 그 사건을 이름으로 부르지 않았으면 버린다.
+# (2) 원인은 결과보다 먼저다: 역사 사건이 개인 사건보다 뒤면 버린다.
+# 이름 대조에서 빼는 낱말 — 이것만 겹친 것은 부른 것이 아니다 ('전쟁'·'사고').
+_GROUND_STOP = frozenset({
+    "대한민국", "대한민국의", "한국", "한국의", "조선", "서울", "사건", "사고", "사태", "요청", "시행",
+    "선언", "발표", "운동", "위기", "전쟁", "항쟁", "혁명", "붕괴", "침몰", "폭발", "범유행", "유행",
+    "대통령", "정부", "국가", "제", "년", "월", "일", "및", "the", "of",
+})
+
+
+def _ground_tokens(name: str) -> list[str]:
+    toks = [t for t in re.split(r"[\s·.,()（）\-–—/]+", str(name or "")) if t]
+    return [_norm_label(t) for t in toks if len(t) >= 2 and t not in _GROUND_STOP and _norm_label(t)]
+
+
+def grounded(text: str | None, *names: str | None) -> bool:
+    """이야기 원문이 이 사건을 부르는가. 이름 전체(띄어쓰기 무시)나, 이름의 낱말
+    하나('IMF'·'연평'·'6·25')가 원문에 있으면 부른 것이다. 원문을 모르면 참."""
+    if text is None:
+        return True
+    body = _norm_label(text)
+    if not body:
+        return False
+    for name in names:
+        if not name:
+            continue
+        whole = _norm_label(name)
+        if whole and whole in body:
+            return True
+        if any(t in body for t in _ground_tokens(name)):
+            return True
+    return False
+
+
+def _connection_year(c: dict) -> int | None:
+    y = c.get("year")
+    if y is None:
+        y = _year_of(c.get("date"))
+    return int(y) if y is not None else None
+
+
+def gate_connections(payload: dict, text: str | None) -> list[str]:
+    """이야기가 부르지 않은 역사와 결과보다 늦은 원인을 지운다. 지운 사유를 돌려주고
+    `notes` 에도 적는다. `text` 는 이 그래프를 만든 이야기 전부다 (`stories`)."""
+    years: dict[str, int] = {}
+    for n in payload.get("nodes") or []:
+        if n.get("year") is not None:
+            years[n["id"]] = int(n["year"])
+    for t in payload.get("timeline") or []:
+        if t.get("year") is not None:
+            years[t["event_id"]] = int(t["year"])
+    ids = {n.get("id") for n in payload.get("nodes") or []}
+    kept, notes = [], []
+    for c in payload.get("historical_connections") or []:
+        label = c.get("historical_event") or ""
+        pe = c.get("personal_event")
+        if pe not in ids:
+            notes.append(f"역사 연결 버림 — 개인 사건이 없다: {label} → {pe}")
+            continue
+        if not grounded(text, label, c.get("node_label"), *(c.get("node_names") or [])):
+            notes.append(f"역사 연결 버림 — 이야기가 부르지 않은 사건: {label} → {pe}")
+            continue
+        hy, py = _connection_year(c), years.get(pe)
+        if hy is not None and py is not None and hy > py:
+            notes.append(f"역사 연결 버림 — 원인({hy})이 결과({py})보다 뒤: {label} → {pe}")
+            continue
+        kept.append(c)
+    payload["historical_connections"] = kept
+    if notes:
+        payload["notes"] = list(payload.get("notes") or []) + notes
+    return notes
 
 
 def _year_of(date: str | None) -> int | None:

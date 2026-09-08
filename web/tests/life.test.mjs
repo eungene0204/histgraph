@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  normalize, removeNode, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
+  normalize, removeNode, nodeYears, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
 } from '../src/lib/life.js';
@@ -92,7 +92,9 @@ console.log('\n개인 역사 — 정규화');
   const who = normalize({ nodes: [{ id: 'p1', type: 'Person', name: '사용자', confidence: 1 }], edges: [], timeline: [],
     subject: { id: 'p1', name: '사용자', birth_year: null } });
   ok("주인공을 '사용자'라 적어 와도 화면에서는 '나'", who.nodes[0].name === '나' && who.subject.name === '나', JSON.stringify(who.subject));
-  ok('양끝 없는 관계·모르는 관계는 버린다', n.edges.length === 0);
+  ok('양끝 없는 관계·모르는 관계는 버린다', !n.edges.some((e) => e.type === 'flew' || e.target === 'bad'));
+  ok('버려서 섬이 된 사건은 주인공에게 잇는다', n.edges.length === 1 && n.edges[0].type === 'experienced'
+    && n.edges[0].source === 'me' && n.edges[0].target === 'e1', JSON.stringify(n.edges));
   ok("'20대 초반' 이 생년으로 풀린다 (1990 → 2010)", n.nodes[1].year === 2010 && n.nodes[1].precision === 'age');
   ok('연표 항목이 노드의 해와 나이를 받는다', n.timeline[0].year === 2010 && n.timeline[0].age === 20);
 }
@@ -115,6 +117,18 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('한 해에 셋이면 30px 씩 내려 선다', ys.length === 3 && ys[1] - ys[0] >= 30 && ys[2] - ys[1] >= 30, ys.join(','));
   // 역사 → 개인 연결선
   ok('역사 연결이 선이 된다 (IMF → 부도, IMF → 이사, 코로나 → 재택)', lay.links.length >= 3, String(lay.links.length));
+  // '가능성'은 화살표를 긋지 않는다 (2026-09-08 "세월호 사건과 퍼듀대학교 졸업은 도대체 무슨 상관이지?")
+  {
+    const guess = normalize({ ...sample, historical_connections: [
+      ...sample.historical_connections,
+      { personal_event: 'ev_bankrupt', historical_event: '제2연평해전', year: 2002, node_id: 'x:guess', node_label: '제2연평해전',
+        impact_type: 'possible', description: '영향을 미쳤을 수 있음', confidence: 0.4 },
+    ] });
+    const g = lifeLayout({ life: guess, context, bodyH: 700, today: 2026 });
+    ok("'가능성' 연결은 역사 열에 서되 화살표가 없다",
+      g.history.some((p) => p.m.id === 'x:guess' && p.m.linked) && !g.links.some((l) => l.from === 'x:guess'),
+      String(g.links.length));
+  }
   ok('그래프에 없는 사건도 세우되 표시한다', lay.history.some((p) => p.m.kind === 'extra' && p.m.label === '2002년 FIFA 월드컵'));
   ok('생년보다 앞선 사건(6·25)은 축이 아니라 머리에 선다', lay.before.some((m) => m.id === 'wd:Q8663' && m.links.length === 1) && !lay.history.some((p) => p.m.id === 'wd:Q8663'));
   ok('축은 생년 두 해 앞에서 연다', lay.from === 1983);
@@ -124,6 +138,28 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('구간에 걸친 대통령만 선다', lay.reigns.length === 3);
   const st = stageBands(life, 2026);
   ok('인생 단계 띠가 이어진다', st.length >= 6 && st.every((b, i) => !i || st[i - 1].end === b.start) && st[st.length - 1].end === 2026, JSON.stringify(st));
+  // 군복무 — 공익근무도 병역이다 (2026-09-08 사용자: "사실 공익근무는 군복무 기간이야.
+  // 훈련소, 공익근무 역시 군복무로 인식할 수 있게 해줘"). 모델은 '사회생활'로 적어 온다.
+  const army = normalize({
+    nodes: [{ id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'col', type: 'PersonalEvent', name: '신구대학 입학', start_date: '2000', confidence: 1 },
+      { id: 'a1', type: 'PersonalEvent', name: '30사단 훈련소 입소', start_date: '2002-03', confidence: 1 },
+      { id: 'a2', type: 'PersonalEvent', name: '천호3동 사무소 공익요원 근무 시작', start_date: '2002-04', confidence: 1 },
+      { id: 'a3', type: 'PersonalEvent', name: '소집해제', start_date: '2004', confidence: 1 },
+      { id: 'mv', type: 'PersonalEvent', name: '미국으로 이주', start_date: '2006', confidence: 1 }],
+    edges: [],
+    timeline: [{ event_id: 'col', life_stage: '대학', year: 2000 },
+      { event_id: 'a1', life_stage: '사회생활', year: 2002 },
+      { event_id: 'a2', life_stage: '사회생활', year: 2002 },
+      { event_id: 'a3', life_stage: '사회생활', year: 2004 },
+      { event_id: 'mv', life_stage: '사회생활', year: 2006 }],
+  });
+  const as = Object.fromEntries(army.timeline.map((t) => [t.event_id, t.life_stage]));
+  ok('훈련소·공익근무·소집해제는 군복무다', as.a1 === '군복무' && as.a2 === '군복무' && as.a3 === '군복무', JSON.stringify(as));
+  ok('병역이 아닌 것은 그대로', as.col === '대학' && as.mv === '사회생활', JSON.stringify(as));
+  const ab = stageBands(army, 2026).map((b) => `${b.stage} ${b.start}~${b.end}`);
+  ok('띠는 소집해제한 해에 닫는다 (2년 복무가 4년이 되지 않게)',
+    ab.includes('군복무 2002~2004') && ab.includes('사회생활 2006~2026'), ab.join(' · '));
 
   // 그리기
   const html = renderLife(lay, { selected: 'ev_fail', subjectName: '나' }) + renderHead('나');
@@ -179,7 +215,11 @@ console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만�
   ok('주인공 → 자기 사건의 시간 관계는 참여(experienced) — 뒤·동안이 아니다', mk.get('me>mv') === 'experienced' && mk.get('me>hs') === 'experienced' && !mk.has('hs>me'));
   ok('친구라 적힌 만남은 friend_of · 동료는 worked_with · 말 없으면 met', mk.get('me>kim') === 'friend_of' && mk.get('me>lee') === 'worked_with' && mk.get('me>na') === 'met');
   ok('일한 곳 없이 미룬 함께 일함은 같은 학교면 schoolmate', mk.get('kim>park') === 'schoolmate');
-  ok('양방향 met 은 하나만', !mk.has('na>me') && messy.edges.length === 14);
+  ok('양방향 met 은 하나만', !mk.has('na>me') && messy.edges.length === 15);
+  // 섬 — '성내중학교 졸업'은 다른 사건하고만 이어져 있었다 (2026-09-08 사용자:
+  // "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜 따로 떼어둔거지?")
+  ok('떨어진 사건은 주인공이 겪은 것으로 잇고 이름도 단다',
+    mk.get('me>gr') === 'experienced' && mr.get('me>gr') === '졸업', mk.get('me>gr'));
   ok('사건 → 사건의 before 는 그대로', mk.get('gr>hs') === 'before');
   ok('사건 → 학교·전공의 studied_at 은 그 곳(at)으로 옮긴다', mk.get('hs>sch') === 'at' && mk.get('hs>major') === 'at');
   ok('사람 → 사건의 역할은 사건 이름의 술어 (이주·입학), 없으면 사건의 종류(실패); 옮긴 전공은 역할 "전공"',
@@ -245,6 +285,64 @@ console.log('\n개인 역사 — 그래프 (역사 그래프와 같은 캔버스
   } else {
     ok('GraphView 는 브라우저가 필요하다 (여기서는 건너뜀)', true);
   }
+}
+
+console.log('\n개인 역사 — 남의 생년은 짐작해 세우지 않는다');
+{
+  // 2026-09-08 사용자: "인물들의 출생연도 나이는 사용자가 입력하지 않은 이상 추측해서
+  // 명시 하지마. 모르면 그냥 아예 명시를 하지마." 사람 노드의 year 는 생년이 아니라
+  // 그 사람이 내 삶에 들어온 해(refine 이 '1학년 때 만난' 에서 센 것)다.
+  ok('이야기가 말한 생년은 세운다', nodeYears({ type: 'FamilyMember', start_date: '1955', year: 1955 }) === '1955');
+  ok('셈한 해뿐인 인물은 세우지 않는다', nodeYears({ type: 'Person', start_date: null, year: 1997 }) === '');
+  ok('가족·조상·관계도 같다', ['FamilyMember', 'Ancestor', 'Relationship']
+    .every((t) => nodeYears({ type: t, start_date: null, year: 1960 }) === ''));
+  ok('책·영화의 해는 그대로', nodeYears({ type: 'Book', start_date: null, year: 1996 }) === '1996');
+  // 원문을 모르는 자리(계정에만 있는 옛 그래프)에서는 미룬 날짜를 표식으로 읽는다
+  ok('미룬 생년(confidence < 1)은 세우지 않는다',
+    nodeYears({ type: 'Person', start_date: '1982-01-01', year: 1982, confidence: 0.9 }) === '');
+  ok('말한 생년(confidence 1)은 세운다',
+    nodeYears({ type: 'Person', start_date: '1982', year: 1982, confidence: 1 }) === '1982');
+  // 연표에 서면 그 자리가 곧 생년이다 — 나이('0세')와 단계('출생')를 달고 선다
+  const guessed = normalize({
+    nodes: [
+      { id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'f1', type: 'Person', name: '친구', start_date: null, confidence: 0.9 },
+      { id: 'f2', type: 'FamilyMember', name: '딸', start_date: '2024', confidence: 1 },
+    ],
+    edges: [],
+    timeline: [{ event_id: 'f1', life_stage: '출생', year: 1982 }, { event_id: 'f2', life_stage: '가족 형성', year: 2024 }],
+  });
+  const marks = personalMarks(guessed).map((m) => m.id);
+  ok('이야기가 날짜를 말하지 않은 인물은 연표에 안 선다', !marks.includes('f1'), marks.join(','));
+  ok('말한 인물은 그대로 선다', marks.includes('f2'), marks.join(','));
+  // 주인공의 생일 — '출생' 사건이 든 날짜가 이긴다 (2026-09-08 사용자: "2월 27일에
+  // 태어 났다고 했는데, 왜 헷갈리게 '1982-01-01 · 0세 · 출생' 이라고 써있지").
+  const born = normalize({
+    nodes: [
+      { id: 'me', type: 'Person', name: '나', start_date: '1982-01-01', confidence: 1,
+        description: '1982년 2월 27일 서울에서 태어난 사람.' },
+      { id: 'b1', type: 'Time', name: '출생', start_date: '1982-02-27', confidence: 1 },
+    ],
+    edges: [{ source: 'me', target: 'b1', type: 'experienced', role: '출생', confidence: 1 }],
+    timeline: [{ event_id: 'b1', life_stage: '출생', age: 0, date_text: '1982-02-27', year: 1982 },
+      { event_id: 'me', life_stage: '출생', age: 0, year: 1982 }],
+    subject: { id: 'me', name: '나' },
+  });
+  ok("모델이 적어 둔 1월 1일 대신 '출생' 사건의 날짜를 쓴다",
+    born.nodes[0].start_date === '1982-02-27', born.nodes[0].start_date);
+  ok('주인공은 연표의 항목이 아니다', born.timeline.map((t) => t.event_id).join(',') === 'b1',
+    born.timeline.map((t) => t.event_id).join(','));
+  ok('생년은 그대로', born.subject.birth_year === 1982, JSON.stringify(born.subject));
+  ok('해가 다른 출생은 남의 것이라 가져오지 않는다', normalize({
+    nodes: [{ id: 'me', type: 'Person', name: '나', start_date: '1982-01-01', confidence: 1 },
+      { id: 'b1', type: 'Time', name: '출생', start_date: '1955-03-02', confidence: 1 }],
+    edges: [], timeline: [],
+  }).nodes[0].start_date === '1982-01-01');
+  ok('해가 없으면 빈 칸', nodeYears({ type: 'Book', year: null }) === '');
+  ok('끝나는 해가 있으면 물결로', nodeYears({ type: 'Company', start_date: '2004', year: 2004, end_year: 2011 }) === '2004~2011');
+  // 화면이 그 규칙을 쓰는지 — '사람 · 문화' 탭이 nodeYears 로 해를 세운다
+  const view = readFileSync(here('../src/components/LifeView.jsx'), 'utf8');
+  ok('사람 · 문화 탭이 이 규칙으로 해를 세운다', /nodeYears\(n\)/.test(view) && !/\{n\.year\}/.test(view));
 }
 
 console.log('\n개인 역사 — 노드를 지운다');

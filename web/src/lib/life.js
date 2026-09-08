@@ -53,11 +53,73 @@ export const EDGE_TYPE_KO = {
 // 원인 → 결과로 읽는 관계. 개인 연표에서 오른쪽 여백의 꺾인 선이 된다.
 export const CAUSAL_EDGES = new Set(['caused', 'triggered', 'led_to', 'resulted_in']);
 export const IMPACT_KO = { direct: '직접', indirect: '간접', possible: '가능성' };
-export const LIFE_STAGES = ['출생', '어린 시절', '초등학교', '중학교', '고등학교', '대학',
+export const LIFE_STAGES = ['출생', '어린 시절', '초등학교', '중학교', '고등학교', '대학', '군복무',
   '사회생활', '창업', '가족 형성', '현재'];
+// 군복무로 읽는 말 (life.py MILITARY 와 같다). 현역만이 아니다 — 공익근무요원·
+// 사회복무요원·상근예비역·방위병·의무경찰도 병역이고, 훈련소 입소부터 소집해제까지가
+// 그 기간이다 (2026-09-08 사용자: "공익근무는 군복무 기간이야. 훈련소, 공익근무 역시
+// 군복무로 인식할 수 있게 해줘"). 모델이 '사회생활'로 적어 와도 이 표가 이긴다.
+export const MILITARY = /군복무|군 복무|병역|입대|입영|훈련소|신병교육|\d+\s*사단|공익근무|공익요원|사회복무요원|상근예비역|방위병|의무경찰|의경대|카투사|해병대|현역|전역|소집해제|(?<![가-힣])제대(?!로)/;
+// 그 단계를 **끝내는** 사건 — 띠를 여기서 닫는다. 없으면 띠는 다음 단계가 시작할
+// 때까지 이어져 2년 복무가 4년으로 칠해진다.
+export const STAGE_END = { 군복무: /전역|소집해제|(?<![가-힣])제대(?!로)|만기/ };
 // 연표에 점으로 찍는 타입. 사람·장소·책은 이어지는 것이라 점이 아니다.
 export const EVENT_TYPES = new Set(['PersonalEvent', 'HistoricalEvent', 'TurningPoint', 'Crisis',
   'Achievement', 'Failure', 'Decision', 'Memory']);
+// 사람 갈래 (life.py PERSON_TYPES 와 같다).
+export const PERSON_TYPES = new Set(['Person', 'FamilyMember', 'Ancestor', 'Relationship']);
+
+// 이름 옆에 세우는 해. **인물은 이야기가 말한 날짜가 있을 때만 세운다**
+// (2026-09-08 사용자: "인물들의 출생연도 나이는 사용자가 입력하지 않은 이상 추측해서
+// 명시 하지마. 모르면 그냥 아예 명시를 하지마"). 사람 노드의 `year` 는 생년이 아니라
+// **그 사람이 내 삶에 들어온 해**다 — refine 이 '고등학교 1학년 때 만난' 에서 센 것이라
+// 이름 옆에 숫자로 적으면 읽는 사람은 생년으로 읽는다. 책·영화의 해는 그대로 세운다.
+// 이야기가 이 사람의 날짜를 **말했는가**. 인물이 아니면 늘 참이다.
+// 서버는 원문에 대 보고 근거 없는 날짜를 비운다(life.gate_person_dates). 원문이
+// 없는 자리(계정에만 있는 옛 그래프·다른 컴퓨터)에서는 화면이 한 가지를 더 본다 —
+// **미룬 날짜(confidence < 1)는 세우지 않는다.** 지시문이 "셈한 해는 confidence 를
+// 0.7~0.9 로 낮춘다"고 하므로 그 값이 곧 '이야기가 말한 것이 아니다' 라는 표식이다.
+export function dateSaid(n) {
+  if (!PERSON_TYPES.has(n.type)) return true;
+  return !!n.start_date && (n.confidence == null || n.confidence >= 1);
+}
+// 주인공의 생일 — '출생' 사건이 든 날짜가 주인공 노드의 날짜를 이긴다
+// (life.py birth_date_from_nodes 와 같은 규칙). 모델은 해만 알면 1월 1일을 적어 두고
+// 화면은 그것을 생일로 읽는다 (2026-09-08 사용자: "2월 27일에 태어 났다고 했는데,
+// 왜 헷갈리게 '1982-01-01 · 0세 · 출생' 이라고 써있지"). 서버를 안 거친 옛 그래프도
+// 여기서 고쳐진다.
+const WHEN_TYPES = new Set(['Time', 'PersonalEvent', 'LifeStage']);
+const BIRTH_NODE = /^(출생|탄생|태어남)$/;
+const BIRTH_FULL = /(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일[^.。]{0,25}?(태어|출생)/;
+const BIRTH_YEAR = /(\d{4})\s*년[^.。]{0,25}?(태어|출생)/;
+export function birthDate(me, nodes, edges) {
+  if (!me) return null;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const said = [];
+  const take = (w) => { if (typeof w === 'string' && parseWhen(w).year != null) said.push(w.trim()); };
+  for (const e of edges || []) {
+    if (!e || e.source !== me.id) continue;
+    const t = byId.get(e.target);
+    if (!t || !WHEN_TYPES.has(t.type)) continue;
+    // born_in 은 다듬기 전의 이름이고, 다듬은 뒤에는 experienced 에 역할이 '출생'이다.
+    if (e.type === 'born_in' || BIRTH_NODE.test(String(e.role || '').trim())
+        || BIRTH_NODE.test(String(t.name || '').trim())) take(t.start_date);
+  }
+  for (const n of nodes) {
+    if (WHEN_TYPES.has(n.type) && BIRTH_NODE.test(String(n.name || '').trim())) take(n.start_date);
+  }
+  const desc = String(me.description || '');
+  const full = BIRTH_FULL.exec(desc);
+  if (full) take(`${full[1]}-${String(+full[2]).padStart(2, '0')}-${String(+full[3]).padStart(2, '0')}`);
+  else { const y = BIRTH_YEAR.exec(desc); if (y) take(y[1]); }
+  const year = parseWhen(me.start_date).year;
+  const fit = said.filter((w) => year == null || parseWhen(w).year === year);
+  return fit.length ? fit.reduce((a, b) => (b.length > a.length ? b : a)) : null;
+}
+export function nodeYears(n) {
+  if (n.year == null || !dateSaid(n)) return '';
+  return `${n.year}${n.end_year != null ? `~${n.end_year}` : ''}`;
+}
 
 // --- 온톨로지: 관계마다 출발·도착 갈래 (life.py LIFE_EDGES 와 같은 표) ----------------
 // 한국사 그래프의 ontology.EDGE_TYPES 와 같은 꼴 — [일반 이름, 출발 갈래, 도착 갈래].
@@ -134,6 +196,33 @@ export function fits(kind, s, t) {
 //   3. 미룬(확신 < 1) worked_with 인데 둘 다 일한 곳이 없고 같은 학교면 schoolmate
 //   4. 사람 → 사건은 역할을 단다 — 당사자는 사건의 술어(입학·졸업), 남은 '함께'
 //   5. 대칭 관계의 역방향 중복은 하나만
+// 주인공과 떨어져 뜬 섬을 잇는다 (life.py link_orphans 와 같은 규칙). 모델은 한 번에
+// 준 이야기 안에서는 주인공 → 사건을 잇지만, 더하기로 뒤에 붙인 토막에서는 사건끼리만
+// 이어 놓는다 (2026-09-08 사용자: "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜
+// 따로 떼어둔거지?"). 남의 사건(이미 인물과 이어진 것)과 세계사 사건은 그대로 둔다.
+// 온톨로지를 씌운 뒤에 잰다 — 계정·브라우저에 남은 옛 그래프도 여기서 이어진다.
+export function linkOrphans(nodes, edges, me) {
+  if (!me) return 0;
+  const who = new Set(nodes.filter((n) => PERSON_TYPES.has(n.type)).map((n) => n.id));
+  const touched = new Set();
+  for (const e of edges) { touched.add(e.source); touched.add(e.target); }
+  let made = 0;
+  for (const n of nodes) {
+    if (klass(n) !== 'event' || n.type === 'HistoricalEvent') continue;
+    if (edges.some((e) => (who.has(e.source) && e.target === n.id) || (who.has(e.target) && e.source === n.id))) continue;
+    edges.push({ source: me.id, target: n.id, type: 'experienced', description: null, confidence: 0.8 });
+    made += 1;
+  }
+  for (const spot of nodes) {
+    const name = String(spot.name || '').trim();
+    if (!['place', 'org'].includes(klass(spot)) || touched.has(spot.id) || name.length < 2) continue;
+    const ev = nodes.find((n) => ['event', 'period'].includes(klass(n)) && n.id !== spot.id
+      && `${n.name || ''} ${n.description || ''}`.includes(name));
+    if (ev) { edges.push({ source: ev.id, target: spot.id, type: 'at', description: null, confidence: 0.8 }); made += 1; }
+  }
+  return made;
+}
+
 export function tidyEdges(nodes, edges, me, issues = []) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const schools = new Map();
@@ -352,6 +441,11 @@ export function normalize(raw) {
   // 지시문이 화자를 '사용자'라 부르니 모델도 그 이름을 적는다. 화면에서는 '나'다
   // (2026-09-08). 서버를 안 거친 자료(브라우저·계정에 남은 것)도 여기서 고쳐진다.
   if (me && SELF_NAMES.has(me.name.trim().toLowerCase())) me.name = '나';
+  const said = birthDate(me, nodes, raw.edges || []);
+  if (me && said && said !== me.start_date && said.length >= String(me.start_date || '').length) {
+    const w = parseWhen(said);
+    me.start_date = said; me.year = w.year; me.precision = w.precision;
+  }
   const birth = me ? parseWhen(me.start_date).year : null;
   for (const n of nodes) {
     if (n.year !== undefined && n.precision !== undefined) continue;   // 서버가 이미 풀었다
@@ -363,18 +457,28 @@ export function normalize(raw) {
   }
   out.nodes = nodes;
   out.subject = raw.subject
-    ? { ...raw.subject, name: (me && raw.subject.id === me.id) ? me.name : raw.subject.name }
+    ? { ...raw.subject, name: (me && raw.subject.id === me.id) ? me.name : raw.subject.name,
+      birth_year: raw.subject.birth_year ?? (raw.subject.id === me?.id ? birth : null) }
     : (me ? { id: me.id, name: me.name, birth_year: birth } : null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  const subj = out.subject ? byId.get(out.subject.id) || me : me;
   out.edges = tidyEdges(nodes,
     (raw.edges || []).filter((e) => e && EDGE_TYPE_KO[e.type] && byId.has(e.source) && byId.has(e.target)),
-    out.subject ? byId.get(out.subject.id) || me : me);
+    subj);
+  // 섬을 잇는다 — 온톨로지를 씌운 뒤에 (버려질 엣지를 이어진 것으로 세면 섬이 남는다)
+  if (linkOrphans(nodes, out.edges, subj)) out.edges = tidyEdges(nodes, out.edges, subj);
   const timeline = [];
   for (const t of raw.timeline || []) {
     if (!t || !byId.has(t.event_id)) continue;
+    // 주인공은 연표의 항목이 아니라 연표 그 자체다 — 자기 노드가 0세 자리에 서면
+    // '출생' 사건 옆에 같은 것이 하나 더 선다 (life.py refine 3 과 같다).
+    if (me && t.event_id === me.id) continue;
     const node = byId.get(t.event_id);
     const item = { ...t };
     if (!LIFE_STAGES.includes(item.life_stage)) item.life_stage = null;
+    // 훈련소 입소부터 소집해제까지는 병역이지 사회생활이 아니다 (life.py refine 3 과 같다)
+    if (['event', 'period'].includes(klass(node))
+      && MILITARY.test(`${node.name || ''} ${node.description || ''}`)) item.life_stage = '군복무';
     // 해의 출처 차례: 항목의 날짜 글 → 나이(생년을 알 때) → 노드의 날짜 (life.py 와 같다)
     if (item.year == null) item.year = parseWhen(item.date_text, birth).year;
     if (item.year == null && item.age != null && birth != null) item.year = birth + item.age;
@@ -464,7 +568,9 @@ export function personalMarks(life) {
   const seen = new Set();
   for (const t of life.timeline) {
     const n = byId.get(t.event_id);
-    if (!n || t.year == null) continue;
+    // 이야기가 날짜를 말하지 않은 인물은 연표에 세우지 않는다 — 연표 항목의 나이·단계가
+    // 그 사람 이름 아래 '0세 · 출생'으로 서면 그것이 곧 생년이다 (2026-09-08 사용자).
+    if (!n || t.year == null || !dateSaid(n)) continue;
     seen.add(n.id);
     marks.push(mark(n, t.year, t));
   }
@@ -520,15 +626,24 @@ export function historyMarks(life, context) {
 // 인생 단계 띠 — 연표 항목의 단계가 바뀌는 자리에서 시작해 다음 단계 앞까지.
 // 마지막 단계는 오늘까지. 항목이 단계를 안 적었으면 띠가 없다.
 export function stageBands(life, toYear) {
+  const byId = new Map(life.nodes.map((n) => [n.id, n]));
   const bands = [];
   for (const t of life.timeline) {
     if (!t.life_stage || t.year == null) continue;
     const last = bands[bands.length - 1];
-    if (last && last.stage === t.life_stage) continue;
+    if (last && last.stage === t.life_stage) { last.last = t; continue; }
     if (last) last.end = t.year;
-    bands.push({ stage: t.life_stage, start: t.year, end: null });
+    bands.push({ stage: t.life_stage, start: t.year, end: null, last: t });
   }
   if (bands.length) bands[bands.length - 1].end = Math.max(toYear, bands[bands.length - 1].start);
+  // 끝나는 사건이 있으면 거기서 닫는다 — 2004년에 소집해제하고 2006년에야 다음 일이
+  // 있으면, 다음 단계까지 칠한 띠는 2년 복무를 4년으로 만든다 (2026-09-08 사용자).
+  for (const b of bands) {
+    const n = byId.get(b.last?.event_id);
+    const rule = STAGE_END[b.stage];
+    if (n && rule && rule.test(`${n.name || ''} ${n.description || ''}`) && b.last.year < b.end) b.end = b.last.year;
+    delete b.last;
+  }
   return bands;
 }
 
@@ -580,6 +695,10 @@ export function lifeLayout({ life, context, bodyH = 700, today = new Date().getF
       continue;
     }
     if (!c._mark || !tyH.has(c._mark) || !tyP.has(c.personal_event)) continue;
+    // '가능성'은 화살표가 아니다 — 모델의 짐작("영향을 미쳤을 수 있음")을 선으로
+    // 그으면 읽는 사람에게 인과가 된다 (2026-09-08 지적: 세월호 → 퍼듀 졸업).
+    // 역사 열의 점과 툴팁에는 남는다.
+    if (c.impact_type === 'possible') continue;
     links.push({ from: c._mark, to: c.personal_event, y1: tyH.get(c._mark), y2: tyP.get(c.personal_event), impact: c.impact_type });
   }
   // 개인 사건 사이의 인과. 원인이 결과보다 위에 있어야 한다 — 아래에 있으면

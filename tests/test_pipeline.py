@@ -5555,7 +5555,11 @@ with tempfile.TemporaryDirectory() as tmp:
     payload, notes = life_mod.validate(raw)
     ids = {n["id"] for n in payload["nodes"]}
     check("모르는 타입은 버리고 적는다", "x" not in ids and any("Alien" in n for n in notes), str(notes))
-    check("양끝 없는 관계·모르는 관계는 버린다", [e["type"] for e in payload["edges"]] == ["caused"])
+    check("양끝 없는 관계·모르는 관계는 버린다",
+          [e["type"] for e in payload["edges"] if e["type"] != "experienced"] == ["caused"], str(payload["edges"]))
+    check("버려서 섬이 된 사건은 주인공에게 잇는다 (me -flew-> e1 이 사라진 자리)",
+          {e["target"] for e in payload["edges"] if e["type"] == "experienced" and e["source"] == "me"} == {"e1", "e2"},
+          str(payload["edges"]))
     check("점수는 1~10 로 자른다", next(n for n in payload["nodes"] if n["id"] == "e1")["importance_score"] == 10)
     check("주인공과 생년", payload["subject"] == {"id": "me", "name": "나", "birth_year": 1985})
     e2 = next(n for n in payload["nodes"] if n["id"] == "e2")
@@ -5571,6 +5575,113 @@ with tempfile.TemporaryDirectory() as tmp:
     check("한글 없는 이름은 메모하지 않는다 (2026-09-08 — nullSpace 는 본인의 회사 이름)",
           not any("한글" in n for n in notes), str(notes))
     check("구간은 생년부터 오늘까지", life_mod.span(payload, datetime.date(2026, 9, 7)) == (1985, 2026))
+
+    # 인물의 생몰년은 원문이 말한 것만 (2026-09-08 사용자: "인물들의 출생연도 나이는
+    # 사용자가 입력하지 않은 이상 추측해서 명시 하지마"). 실측: 모델이 친구에게
+    # 주인공과 같은 생일을 달았고, 주인공의 생일도 이야기는 해만 말했다.
+    story = ("나는 1982년에 태어났다. 1997년 잠실고등학교에 들어갔고 1학년 때 김일권을 만났다.\n"
+             "아버지는 1955년 3월 2일에 태어나셨다.")
+    people = {
+        "nodes": [
+            {"id": "me", "type": "Person", "name": "나", "start_date": "1982-01-01", "confidence": 1.0},
+            {"id": "dad", "type": "FamilyMember", "name": "아버지", "start_date": "1955", "confidence": 1.0},
+            {"id": "kim", "type": "Person", "name": "김일권", "start_date": "1982-01-01", "confidence": 0.9},
+        ],
+        "edges": [], "historical_connections": [],
+        "timeline": [{"event_id": "kim", "life_stage": "출생", "year": 1982},
+                     {"event_id": "dad", "life_stage": "출생", "year": 1955}],
+    }
+    gated, gnotes = life_mod.validate(people, text=story)
+    got = {n["id"]: (n.get("start_date"), n.get("year")) for n in gated["nodes"]}
+    check("주인공의 생일은 이야기가 말한 만큼만 (1982-01-01 → 1982)", got["me"] == ("1982", 1982), str(got))
+    check("이야기가 그 사람에 대해 말한 생년은 남는다", got["dad"] == ("1955-03-02", 1955), str(got))
+    check("이야기가 말하지 않은 남의 생년은 비운다", got["kim"] == (None, None), str(got))
+    check("뺀 것을 적어 준다", any("김일권" in n for n in gnotes), str(gnotes))
+    check("생년이 없어진 사람은 연표에서도 내린다 (그 자리가 곧 '0세 · 출생'이다)",
+          [t["event_id"] for t in gated["timeline"]] == ["dad"], str(gated["timeline"]))
+    check("주인공의 생년은 남는다 — 연표가 여기서 선다", gated["subject"]["birth_year"] == 1982, str(gated["subject"]))
+    check("원문을 모르면 재지 않는다",
+          {n["id"]: n.get("start_date") for n in life_mod.validate(people)[0]["nodes"]}["kim"] == "1982-01-01")
+    # 옛 그래프도 부팅 때 같은 관문을 지난다 (server 가 원문 파일을 같이 준다)
+    old_doc = {"nodes": [dict(n) for n in people["nodes"]], "edges": [], "timeline": [],
+               "subject": {"id": "me", "name": "나", "birth_year": 1982}}
+    for n in old_doc["nodes"]:
+        n["year"], n["precision"] = life_mod.parse_when(n["start_date"])[0], "exact"
+    refined = life_mod.refine(old_doc, text=story)
+    kim = next(n for n in refined["nodes"] if n["id"] == "kim")
+    check("refine 도 원문을 알면 지어낸 생년을 뺀다", (kim["start_date"], kim["year"]) == (None, None), str(kim))
+
+    # 주인공의 생일 — '출생' 사건이 든 날짜가 이긴다 (2026-09-08 사용자: "2월 27일에
+    # 태어 났다고 했는데, 왜 헷갈리게 '1982-01-01 · 0세 · 출생' 이라고 써있지").
+    born = {"nodes": [
+        {"id": "me", "type": "Person", "name": "나", "start_date": "1982-01-01",
+         "description": "1982년 2월 27일 서울에서 태어난 사람."},
+        {"id": "b1", "type": "Time", "name": "출생", "start_date": "1982-02-27"},
+    ], "edges": [{"source": "me", "target": "b1", "type": "experienced", "role": "출생"}],
+        "timeline": [{"event_id": "b1", "life_stage": "출생", "age": 0, "date_text": "1982-02-27"},
+                     {"event_id": "me", "life_stage": "출생", "age": 0}],
+        "subject": {"id": "me", "name": "나"}}
+    got = life_mod.refine(born)
+    me_n = next(n for n in got["nodes"] if n["id"] == "me")
+    check("모델이 적어 둔 1월 1일 대신 '출생' 사건의 날짜를 쓴다",
+          (me_n["start_date"], me_n["precision"]) == ("1982-02-27", "exact"), str(me_n))
+    check("주인공은 연표의 항목이 아니다 ('출생' 옆에 같은 것이 둘 서지 않는다)",
+          [t["event_id"] for t in got["timeline"]] == ["b1"], str(got["timeline"]))
+    check("생년은 그대로", got["subject"]["birth_year"] == 1982, str(got["subject"]))
+    # 사건이 없으면 설명이 말한 날짜로. 다른 해를 말하는 '출생'은 남의 것이라 안 쓴다.
+    only_desc = {"nodes": [dict(born["nodes"][0])], "edges": [], "timeline": [],
+                 "subject": {"id": "me", "name": "나"}}
+    check("사건이 없으면 설명의 '1982년 2월 27일 … 태어난'",
+          life_mod.refine(only_desc)["nodes"][0]["start_date"] == "1982-02-27")
+    other = {"nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982-01-01"},
+                       {"id": "b1", "type": "Time", "name": "출생", "start_date": "1955-03-02"}],
+             "edges": [], "timeline": [], "subject": {"id": "me", "name": "나"}}
+    check("해가 다른 '출생'은 남의 것이라 가져오지 않는다",
+          life_mod.refine(other)["nodes"][0]["start_date"] == "1982-01-01")
+
+    # 섬 — 더하기로 붙인 토막의 사건이 주인공과 안 이어져 따로 떠 있었다
+    # (2026-09-08 사용자: "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜 따로 떼어둔거지?")
+    island = {"nodes": [
+        {"id": "me", "type": "Person", "name": "나", "start_date": "1982"},
+        {"id": "a1", "type": "PersonalEvent", "name": "30사단 훈련소 입소", "start_date": "2002-03"},
+        {"id": "a2", "type": "PersonalEvent", "name": "천호3동 사무소 공익요원 근무 시작", "start_date": "2002-04"},
+        {"id": "a3", "type": "PersonalEvent", "name": "소집해제", "start_date": "2004"},
+        {"id": "ofc", "type": "Location", "name": "천호3동 사무소"},
+        {"id": "dad", "type": "FamilyMember", "name": "아버지"},
+        {"id": "bust", "type": "Crisis", "name": "아버지 인쇄소 부도", "start_date": "1997"},
+        {"id": "imf", "type": "HistoricalEvent", "name": "IMF 구제금융", "start_date": "1997-12"},
+    ], "edges": [
+        {"source": "a1", "target": "a2", "type": "led_to", "confidence": 1.0},
+        {"source": "a2", "target": "a3", "type": "led_to", "confidence": 1.0},
+        {"source": "dad", "target": "bust", "type": "experienced", "confidence": 1.0},
+    ], "timeline": [], "subject": {"id": "me", "name": "나", "birth_year": 1982}}
+    got = life_mod.refine(island)
+    mine = {e["target"] for e in got["edges"] if e["type"] == "experienced" and e["source"] == "me"}
+    check("떨어진 사건은 주인공이 겪은 것으로 잇는다", mine == {"a1", "a2", "a3"}, str(mine))
+    check("이은 선에도 이름을 단다 (입소·근무 시작·소집해제)",
+          {e.get("role") for e in got["edges"] if e["source"] == "me"} == {"입소", "근무 시작", "소집해제"},
+          str([e.get("role") for e in got["edges"] if e["source"] == "me"]))
+    check("남의 사건은 잇지 않는다 (아버지의 부도)", "bust" not in mine)
+    check("세계사 사건도 잇지 않는다 (내가 겪은 것이 아니라 옆에 선 것)", "imf" not in mine)
+    check("이름이 불린 곳은 그 사건에 잇는다 (천호3동 사무소)",
+          any(e["source"] == "a2" and e["target"] == "ofc" and e["type"] == "at" for e in got["edges"]),
+          str(got["edges"]))
+    check("한 번 이은 것을 두 번 잇지 않는다", life_mod.link_orphans(got["nodes"], got["edges"], got["nodes"][0]) == 0)
+
+    # 군복무 — 공익근무도 병역이다 (2026-09-08 사용자: "사실 공익근무는 군복무 기간이야.
+    # 훈련소, 공익근무 역시 군복무로 인식할 수 있게 해줘"). 모델은 '사회생활'로 적어 왔다.
+    army = dict(island, timeline=[
+        {"event_id": "a1", "life_stage": "사회생활", "year": 2002},
+        {"event_id": "a2", "life_stage": "사회생활", "year": 2002},
+        {"event_id": "a3", "life_stage": "사회생활", "year": 2004},
+        {"event_id": "bust", "life_stage": "고등학교", "year": 1997}])
+    stages = {t["event_id"]: t["life_stage"] for t in life_mod.refine(army)["timeline"]}
+    check("훈련소·공익근무·소집해제는 군복무다", [stages[i] for i in ("a1", "a2", "a3")] == ["군복무"] * 3, str(stages))
+    check("병역이 아닌 것은 그대로", stages["bust"] == "고등학교", str(stages))
+    check("'군복무'가 모델이 고를 수 있는 단계에 있다 (스키마의 enum)",
+          "군복무" in life_mod.LIFE_STAGES and "군복무" in life_mod.SCHEMA["properties"]["timeline"]["items"]["properties"]["life_stage"]["enum"])
+    check("지시문의 단계 목록에도 있다", "- 군복무" in life_mod.system_prompt())
+    check("'제대로'는 제대가 아니다", not life_mod.MILITARY.search("제대로 하지 못했다"))
 
     # 그래프에 잇기 + 엔드포인트
     store = GraphStore(Path(tmp) / "korea.sqlite")
@@ -5600,11 +5711,13 @@ with tempfile.TemporaryDirectory() as tmp:
                   {"source": "p1", "target": "없는 것", "type": "lived_in", "confidence": 1.0}],
         "timeline": [],
         "historical_connections": [
-            {"personal_event": "p1", "historical_event": "대한민국의 IMF 구제금융 요청(1997)",
+            {"personal_event": "나", "historical_event": "대한민국의 IMF 구제금융 요청(1997)",
              "impact_type": "direct", "description": "…", "confidence": 1.0}],
         "_model": "무료/모델:free",
     }
     fixed, fnotes = life_mod.validate(named)
+    check("역사 연결의 개인 사건도 이름으로 적어 오면 id 로 되짚는다 ('나' → p1)",
+          fixed["historical_connections"][0]["personal_event"] == "p1", str(fixed["historical_connections"]))
     check("양끝을 이름으로 적은 관계는 노드에 이어 준다",
           [(e["source"], e["target"]) for e in fixed["edges"]] == [("p1", "l1")], str(fixed["edges"]))
     check("같은 이름이 둘이면 잇지 않는다 (대구가 둘)",
@@ -5614,11 +5727,60 @@ with tempfile.TemporaryDirectory() as tmp:
                                 "edges": [], "timeline": [], "historical_connections": []})
     check("주인공을 '사용자'라 적어 와도 '나'다 (2026-09-08)",
           who["nodes"][0]["name"] == "나" and who["subject"]["name"] == "나", str(who["subject"]))
+    # 손으로 적은 별칭도 이름이다 — 이야기가 '외환위기'라 불러도 IMF 노드에 댄다.
+    store.conn.execute("INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?, ?)", ("wd:IMF", "외환 위기"))
+    store.conn.commit()
     check("이름 뒤에 붙은 해는 이름이 아니다 — 떼고 잇는다",
           life_mod.link(fixed, api) == 1
           and fixed["historical_connections"][0]["node_id"] == "wd:IMF"
           and fixed["historical_connections"][0]["year"] == 1997,
           str(fixed["historical_connections"][0]))
+    check("그래프의 별칭을 연결에 달아 온다 ('외환 위기')",
+          "외환 위기" in fixed["historical_connections"][0].get("node_names", []),
+          str(fixed["historical_connections"][0].get("node_names")))
+    fixed_copy = {"nodes": fixed["nodes"], "timeline": [], "historical_connections": [dict(fixed["historical_connections"][0])]}
+    check("이야기가 '외환위기'라 불러도 별칭으로 남는다",
+          not life_mod.gate_connections(fixed_copy, "외환위기 때 아버지 사업이 망했어") and len(fixed_copy["historical_connections"]) == 1)
+    # 이야기가 부르지 않은 역사는 잇지 않는다 (2026-09-08 사용자: "세월호 사건과
+    # 사용자의 퍼듀대학교 졸업은 도대체 무슨 상관이지? 연평해전과 동사무소 공익요원
+    # 시작은 어떤 관계가 있지?"). 모델이 같은 해의 큰 사건을 목록에서 집어 왔다.
+    story = "IMF 때 아버지 인쇄소가 부도났어. 2002년 4월에 동사무소 공익요원으로 들어갔고 2011년에 졸업했어."
+    guessed = {
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "confidence": 1.0},
+                  {"id": "ev_bust", "type": "Crisis", "name": "인쇄소 부도", "start_date": "1998", "confidence": 1.0},
+                  {"id": "ev_serve", "type": "PersonalEvent", "name": "공익요원 시작", "start_date": "2002-04", "confidence": 1.0},
+                  {"id": "ev_grad", "type": "Achievement", "name": "졸업", "start_date": "2011-05", "confidence": 1.0}],
+        "edges": [], "timeline": [],
+        "historical_connections": [
+            {"personal_event": "ev_bust", "historical_event": "대한민국의 IMF 구제금융 요청", "year": 1997,
+             "impact_type": "direct", "description": "부도", "confidence": 1.0},
+            {"personal_event": "ev_bust", "historical_event": "6·25 전쟁", "year": 1950, "node_label": "한국 전쟁",
+             "node_names": ["6.25 전쟁"], "impact_type": "indirect", "description": "…", "confidence": 0.5},
+            {"personal_event": "ev_serve", "historical_event": "제2연평해전", "year": 2002,
+             "impact_type": "indirect", "description": "국가적 책임감을 강화했을 수 있음", "confidence": 0.6},
+            {"personal_event": "ev_grad", "historical_event": "세월호 침몰 사고", "year": 2014,
+             "impact_type": "indirect", "description": "이후 인식 변화의 배경", "confidence": 0.5},
+            {"personal_event": "ev_grad", "historical_event": "졸업", "year": 2012,
+             "impact_type": "direct", "description": "이름은 이야기에 있지만 해가 뒤", "confidence": 0.5},
+        ],
+    }
+    gated, vnotes = life_mod.validate(guessed, text=story)
+    check("검증만으로도 결과보다 늦은 원인은 빠진다 (세월호 2014 → 졸업 2011)",
+          sum("보다 뒤" in n for n in vnotes) == 2
+          and not any(c["historical_event"] == "세월호 침몰 사고" for c in gated["historical_connections"]), str(vnotes))
+    dropped = life_mod.gate_connections(gated, story)
+    left = [(c["personal_event"], c["historical_event"]) for c in gated["historical_connections"]]
+    check("이야기가 부른 사건(IMF)만 남는다 — 연평해전·6·25는 버린다",
+          left == [("ev_bust", "대한민국의 IMF 구제금융 요청")], str(left))
+    check("버린 사유를 적는다 (부르지 않은 사건)",
+          sum("부르지 않은" in n for n in dropped) == 2 and dropped == gated["notes"][-2:], str(dropped))
+    check("원문을 모르면 이름으로는 안 버린다", life_mod.grounded(None, "제2연평해전"))
+    check("겹친 낱말이 '전쟁'·'사건'뿐이면 부른 것이 아니다",
+          not life_mod.grounded("전쟁 같은 사건이었어", "한국 전쟁") and life_mod.grounded("6.25때 피난", "6·25 전쟁"))
+    check("그래프의 다른 이름으로도 댄다 ('한국 전쟁' ← '6·25')",
+          life_mod.grounded("6·25 때 할아버지가 피난을", "한국 전쟁", "6·25 전쟁"))
+    check("지시문이 이야기가 말한 역사만 이으라고 한다",
+          "이야기가 직접 말한" in life_mod.build_user("이야기", anchors=[{"label": "제2연평해전", "year": 2002}]))
     # 학년은 해다 (2026-09-08 사용자: "1997년 고등학교 입학했다고 했고 1학년때
     # 누굴 만나고 2학년때 누굴 만났다고 하면 … 유추해서 알 수 있지 않나?").
     check("프롬프트가 앞뒤에서 해를 셈하라고 한다", "'2학년 때'는 1998년" in life_mod.build_user("이야기", anchors=[]))
@@ -5801,7 +5963,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("딴 id 로 부른 주인공은 옛 주인공에 잇는다",
           any(e["source"] == "father" and e["target"] == "person_1" and e["type"] == "parent_of" for e in merged["edges"]), str(merged["edges"]))
     check("같은 이름의 사건은 하나로 — 빈 칸만 채운다", merged["nodes"][1]["start_date"] == "1998-03" and merged["nodes"][1]["year"] == 1998)
-    check("이미 있는 관계는 두 번 세지 않는다", added["edges"] == 2 and sum(1 for e in merged["edges"] if e["type"] == "lived_in") == 1, str(merged["edges"]))
+    check("이미 있는 관계는 두 번 세지 않는다",
+          sum(1 for e in merged["edges"] if e["type"] == "lived_in") == 1, str(merged["edges"]))
+    check("더한 사건은 주인공에게 이어져 온다 (섬으로 붙지 않는다)",
+          {e["target"] for e in merged["edges"] if e["type"] == "experienced" and e["source"] == "person_1"}
+          == {"ev_move", "ev_univ"} and added["edges"] == 4, str(merged["edges"]))
     check("연표는 해 순으로 다시 서고 앞뒤가 이어진다",
           [t["event_id"] for t in merged["timeline"]] == ["ev_move", "ev_univ"] and merged["timeline"][0]["next_event"] == "ev_univ"
           and merged["timeline"][1]["previous_event"] == "ev_move", str(merged["timeline"]))

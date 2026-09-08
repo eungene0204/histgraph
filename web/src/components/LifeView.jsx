@@ -4,7 +4,7 @@ import { auth } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, graphPayload, graphMeta, boardWidth, edgeLabel, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -564,7 +564,8 @@ function EventDetail({ life, id, onPick, onDrop }) {
   if (!node) {
     return <p className="life-hint">오른쪽 열의 사건을 누르면 여기에 원인·결과와 그 해의 한국사가 나옵니다.</p>;
   }
-  const t = life.timeline.find((x) => x.event_id === id);
+  // 인물의 연표 항목은 이야기가 그 사람의 날짜를 말했을 때만 읽는다 (lib/life.js dateSaid).
+  const t = dateSaid(node) ? life.timeline.find((x) => x.event_id === id) : null;
   const ins = life.edges.filter((e) => e.target === id);
   const outs = life.edges.filter((e) => e.source === id);
   const causes = ins.filter((e) => CAUSAL_EDGES.has(e.type));
@@ -573,7 +574,9 @@ function EventDetail({ life, id, onPick, onDrop }) {
   const links = life.historical_connections.filter((c) => c.personal_event === id);
   const turning = life.turning_points.find((p) => p.event === id);
   const cf = life.counterfactual_analysis.filter((c) => c.event === id);
-  const when = [t?.date_text || node.start_date, t?.age != null ? `${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
+  // 날짜 줄도 같은 규칙이다 — 이야기가 말하지 않은 인물의 생년은 적지 않는다.
+  const when = [t?.date_text || (dateSaid(node) ? node.start_date : null),
+    t?.age != null ? `${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
   const nameOf = (nid) => byId.get(nid)?.name || nid;
   return (
     <div className="life-event">
@@ -754,7 +757,7 @@ function Things({ life }) {
           <ul>{items.map((n) => (
             <li key={n.id}><b>{n.name}</b>
               {n.author && <span className="tl-rel"> {n.author}</span>}
-              {(n.year != null) && <span className="tl-rel"> {n.year}{n.end_year != null ? `~${n.end_year}` : ''}</span>}
+              {nodeYears(n) && <span className="tl-rel"> {nodeYears(n)}</span>}
               {n.description && <p>{n.description}</p>}
               {n.influence && <p className="life-q">{n.influence}</p>}
             </li>
