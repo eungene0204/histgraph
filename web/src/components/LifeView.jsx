@@ -587,7 +587,12 @@ export default function LifeView() {
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
-            {booting && <p className="life-booting">내 역사를 불러오는 중입니다…</p>}
+            {booting && (
+              <div className="life-booting" role="status" aria-live="polite">
+                <span className="life-spinner" aria-hidden="true" />
+                <p>내 역사를 불러오는 중입니다…</p>
+              </div>
+            )}
             {!life && !booting && <Empty offline={offline} onWrite={() => setWriting(true)} />}
           </div>
         </section>

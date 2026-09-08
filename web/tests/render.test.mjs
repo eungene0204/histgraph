@@ -438,6 +438,15 @@ let detailHtml = '';
   ok('계정을 읽기 전에는 비었다고 말하지 않는다',
      !first.includes('내 삶을 세상의 역사와 나란히 봅니다')
      && first.includes('내 역사를 불러오는 중입니다'));
+  // 도는 표시가 글 위에 같이 선다 — 글만 있으면 멈춘 화면과 구별이 안 된다
+  // (2026-09-09 사용자: "가운데 정렬하고 indicator도 추가해줘").
+  ok('불러오는 동안 도는 표시가 함께 선다',
+     first.includes('life-spinner') && first.includes('role="status"'));
+  const css = readFileSync(join(WEB, 'style.css'), 'utf-8');
+  ok('그 자리는 판 가운데다',
+     /\.life-booting\s*\{[^}]*justify-content:\s*center/.test(css)
+     && /\.life-booting\s*\{[^}]*align-items:\s*center/.test(css)
+     && /@keyframes life-spin/.test(css));
 
   // 머리 줄의 아이콘 — 그림만 서고 글자는 title·aria 로 말한다.
   const lifeSrc2 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
