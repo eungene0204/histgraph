@@ -1224,6 +1224,22 @@ class LifeAnalysis:
                                 save=True, step=self._step))
 
 
+def model_silence(why: str) -> str:
+    """모델이 답을 안 준 까닭을 **한국어 한 문장으로**. 화면이 그대로 읽는다.
+
+    까닭을 말해야 사람이 다음에 무엇을 할지 안다 — 붐비는 것이면 다시 누르면
+    되고, 열쇠가 없는 것이면 눌러도 소용없다. 상류가 주는 말은 영어라 화면에
+    그대로 옮기지 않는다 (CLAUDE.md §1). 원문은 `detail` 로 따로 실어 보낸다."""
+    low = (why or "").lower()
+    if "429" in low or "rate" in low or "quota" in low:
+        return "지금 모델이 붐빕니다. 잠시 뒤에 다시 눌러 주세요."
+    if any(code in low for code in ("500", "502", "503", "504")) or "연결 실패" in why:
+        return "모델 쪽이 잠시 응답하지 않습니다. 잠시 뒤에 다시 눌러 주세요."
+    if "api_key" in low:      # 열쇠가 없다 — 다시 눌러도 소용없다
+        return "이야기를 읽을 모델이 준비되지 않았습니다."
+    return "모델이 답을 돌려주지 않았습니다. 잠시 뒤에 다시 눌러 주세요."
+
+
 def run_analysis(api: GraphAPI, text: str, name: str = "나", backend_kind: str = "",
                  base: dict | None = None, *, save: bool = True,
                  step: Callable[[str], None] | None = None) -> dict:
@@ -1259,7 +1275,10 @@ def run_analysis(api: GraphAPI, text: str, name: str = "나", backend_kind: str 
         existing = life_mod.existing_summary(base) if base else None
         raw = life_mod.analyze(text, backend, anchors=anchors, existing=existing)
         if raw is None:
-            return {"state": "error", "error": "모델이 답을 돌려주지 않았습니다."}
+            why = getattr(backend, "last_error", "")
+            # `detail` 은 화면이 안 그린다 — 배포에서 로그를 못 보는 사람이
+            # 무슨 일이 있었는지 물어 볼 수 있게 답에 실어 둔다.
+            return {"state": "error", "error": model_silence(why), "detail": why[:300]}
         raw["_model"] = getattr(backend, "model", backend_kind)
         say("답을 검증하는 중")
         payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text)
