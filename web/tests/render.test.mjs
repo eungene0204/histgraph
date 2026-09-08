@@ -381,19 +381,16 @@ let detailHtml = '';
 // 보여줘서 로그인을 하게 강제해. 내 역사는 개인별로 다 다르니깐."
 {
   const box = plain(renderToString(h(LoginModal, {
-    next: '/life.html', title: '내 역사는 로그인이 필요합니다',
-    why: '내 역사는 사람마다 다릅니다.', dismissible: false,
+    next: '/life.html', title: '내 역사는 로그인이 필요합니다', dismissible: false,
   })));
-  ok('로그인 상자가 왜 묻는지를 먼저 적는다',
-     box.includes('내 역사는 로그인이 필요합니다') && box.includes('사람마다 다릅니다'), box.slice(0, 200));
+  ok('로그인 상자가 제목으로 말한다',
+     box.includes('내 역사는 로그인이 필요합니다'), box.slice(0, 200));
   ok('구글로 들어가는 단추가 있다',
      box.includes('class="login-go"') && box.includes('구글 계정으로 로그인'));
-  ok('약관과 방침으로 가는 길이 있다',
-     box.includes('/terms.html') && box.includes('/privacy.html'));
   ok('닫을 수 없는 상자에는 돌아갈 자리를 준다',
      box.includes('한국사로 돌아가기') && !box.includes('나중에'));
   ok('아직 열리지 않았으면 누를 수 없는 단추를 세우지 않는다',
-     !plain(renderToString(h(LoginModal, { title: 'ㄱ', why: 'ㄴ', ready: false })))
+     !plain(renderToString(h(LoginModal, { title: 'ㄱ', ready: false })))
        .includes('class="login-go"'));
 
   // 머리 줄의 '내 역사'와 장 자체가 **둘 다** 막아야 한다 — 하나만 막으면

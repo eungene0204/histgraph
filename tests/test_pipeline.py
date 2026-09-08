@@ -4576,6 +4576,13 @@ with tempfile.TemporaryDirectory() as tmp:
         html = _re.sub(r"<!--[\s\S]*?-->", " ", html)
         return _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", " ", html)).strip()
 
+    # 영어 관문이 봐주는 것은 제품 이름과 **저작권 한 줄**뿐이다
+    # (2026-09-09 사용자 결정 · pages.COPYRIGHT). 문구를 늘리면 여기서
+    # 걸리도록, 봐주는 글자를 상수 하나에서 가져온다.
+    def _foreign(text: str) -> set[str]:
+        text = text.replace(pages.COPYRIGHT, " ").replace("histgraph", " ")
+        return set(_re.findall(r"[A-Za-z]{2,}", text))
+
     status, ctype, body = pages.route(api, "/n/wd:S")
     text = _visible(body)
     check("노드 장이 열린다", status == 200 and ctype.startswith("text/html"))
@@ -4613,9 +4620,11 @@ with tempfile.TemporaryDirectory() as tmp:
           body[:400])
     check("방침·약관으로 이어진다",
           '/privacy.html' in body and '/terms.html' in body)
-    check("사람이 읽는 글자에 영어가 없다",
-          not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
-          str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))
+    check("사람이 읽는 글자에 영어가 없다 — 저작권 한 줄 말고는",
+          not _foreign(text), str(_foreign(text)))
+    check("저작권 한 줄이 footer 가운데에 선다",
+          pages.COPYRIGHT in text and '<div class="copy">' in body
+          and ".copy { text-align: center" in body, text[-120:])
 
     # 설명이 없는 장은 이름과 목록뿐이다. 색인에 올리면 읽을 것이 있는
     # 장까지 그 속에 묻힌다 — 왜 비었는지만 적고 물러난다.
@@ -4676,9 +4685,9 @@ with tempfile.TemporaryDirectory() as tmp:
     text = _visible(body)
     check("목록 장은 읽을 것이 있는 장만 세운다",
           status == 200 and "인물" in text and "세종" in text and "태종" not in text, text[:200])
-    check("목록 장에도 영어가 없다",
-          not _re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")),
-          str(set(_re.findall(r"[A-Za-z]{2,}", text.replace("histgraph", " ")))))
+    check("목록 장에도 영어가 없다 — 저작권 한 줄 말고는",
+          not _foreign(text), str(_foreign(text)))
+    check("목록 장에도 저작권 한 줄이 선다", pages.COPYRIGHT in text)
 
     # 배포에서는 rewrite 가 `/api/n/…` 으로 바꿔 넘긴다 — 같은 표가 받아야 한다.
     check("배포 경로(/api/n/…)도 같은 장을 낸다",
