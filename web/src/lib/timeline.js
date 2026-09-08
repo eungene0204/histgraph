@@ -383,8 +383,9 @@ export class TimelineRail {
       ? place.filter((p) => isCause(p.m)).map((p) => causeWire(p.ty, self_.ty, W)).join('')
       : '';
 
+    const cells = yearCells(place.map((p) => p.m));
     const items = place.map(({ m, ty }, i) => {
-      const cell = yearCell(m, i ? place[i - 1].m : null);
+      const cell = cells[i];
       return `
       <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${ty.toFixed(1)}px"
               title="${esc(markName(m))} · ${esc(whenText(m))}">
@@ -645,11 +646,34 @@ export function markName(m) {
 // 비어 '연도를 모르는 사건'으로 읽힌다 (실측: 1380년에 진포 해전과
 // 황산대첩이 나란히 섰고, 가나다순으로 뒤인 황산대첩에 연도가 없었다).
 // 모르는 것은 달이지 해가 아니다 — 아는 것을 지워 모르는 척할 이유는 없다.
-export function yearCell(m, prev) {
-  if (!prev || prev.year !== m.year) return { text: shortYear(m.year), repeat: false };
-  const month = monthOf(m.date);
-  return month ? { text: month, repeat: false }
-    : { text: shortYear(m.year), repeat: true };
+//
+// **다만 연도는 달보다 위에 선다** (2026-09-08 지적: "연도가 항상 달보다
+// 위에 올라가야해"). '4월' 밑의 '1998' 은 해가 거기서 다시 시작하는 것처럼
+// 읽힌다. 그래서 그 해에 달을 이미 적었으면(`monthShown`) 뒤따르는 줄은
+// 해를 되풀이하지 않고 비운다 — 위의 실측과 어긋나지 않는다. 거기서 빈
+// 것은 **달이 하나도 없던 해**의 줄이었고, 여기서 비는 것은 달을 적은
+// 줄 바로 아래라 해가 눈에 남아 있다.
+//
+// 달은 **그 줄의 해와 같은 날짜**일 때만 적는다. 해와 날짜가 어긋난 자료
+// (모델이 1998-04-24 사건을 1997 로 적어 온 것)가 1997 칸에 '4월'을
+// 세우면 읽는 사람은 1997년 4월로 읽는다.
+export function yearCell(m, prev, monthShown = false) {
+  if (!prev || prev.year !== m.year) return { text: shortYear(m.year), repeat: false, month: false };
+  const month = monthOf(m.date, m.year);
+  if (month) return { text: month, repeat: false, month: true };
+  return { text: monthShown ? '' : shortYear(m.year), repeat: true, month: false };
+}
+
+// 줄줄이 이어 적을 때의 연도 칸. 한 해 안에서 달을 적었는지를 들고 간다.
+export function yearCells(marks) {
+  let monthShown = false;
+  return marks.map((m, i) => {
+    const prev = i ? marks[i - 1] : null;
+    if (!prev || prev.year !== m.year) monthShown = false;
+    const cell = yearCell(m, prev, monthShown);
+    if (cell.month) monthShown = true;
+    return cell;
+  });
 }
 
 // 왕은 재위하고 대통령은 재임한다. 서버가 자리의 종류를 준다.
@@ -685,9 +709,10 @@ function shortYear(y) {
 
 // 부분 날짜에서 달만. '1592-04-15' -> '4월', '1592' -> '' (달을 모른다).
 // 기원전은 앞에 부호가 붙어 한 칸 밀린다 ('-0400-04').
-function monthOf(date) {
-  const m = /^-?\d{1,4}-(\d{2})/.exec(String(date || ''));
-  return m ? `${Number(m[1])}월` : '';
+function monthOf(date, year = null) {
+  const m = /^(-?\d{1,4})-(\d{2})/.exec(String(date || ''));
+  if (!m || (year != null && Number(m[1]) !== year)) return '';
+  return `${Number(m[2])}월`;
 }
 
 // 도구말에 적는 날. 아는 만큼만 적는다 — 날을 모르면 달까지, 달도 모르면

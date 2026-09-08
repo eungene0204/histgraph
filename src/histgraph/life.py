@@ -319,6 +319,10 @@ def build_user(text: str, today: datetime.date | None = None,
         "어디서 만났는지(학교·회사·모임)를 말했으면 "
         "그 사람을 그 학교·회사 노드와도 잇는다(studied_at·worked_at·member_of) — 새 노드를 "
         "만들지 말고 이야기가 말한 그 학교·회사 노드를 쓴다. 만난 일은 timeline 에도 세운다. "
+        # 함께한 사람 (2026-09-08 사용자: "친구 김일권과 같이 갔다고 분명 말했는데
+        # '함께 person_1' 이라고 말하고 있어"). 모델이 participants 에 주인공만 적었다.
+        "어떤 일을 **누구와 함께** 했다고 말하면 그 사람을 사건 노드의 participants 에 "
+        "그 사람 **노드의 id** 로 적는다 — 주인공만 적지 말고 이야기가 부른 사람을 다 적는다. "
         "주인공의 생년월일은 주인공 노드의 start_date 에 적는다 — 이야기가 말한 만큼만이다. "
         # 남의 생년은 짐작하지 않는다 (2026-09-08 사용자: "인물들의 출생연도 나이는
         # 사용자가 입력하지 않은 이상 추측해서 명시 하지마"). 실측: 친구 노드에
@@ -542,9 +546,11 @@ def refine(payload: dict, text: str | None = None) -> dict:
         if y is None and n.get("type") == "Person" and n is not me:
             y = school_year(n.get("description"), entries)
         if y is None and birth is not None:
-            for text in (n.get("start_date"), n.get("description") if n.get("type") == "Person" and n is not me else None):
-                if school_ref(text) is not None:
-                    y, prec = parse_when(text, birth)[0], "age"
+            # 이름을 text 로 두지 않는다 — 이 함수의 `text` 는 **원문**이고,
+            # 여기서 가리면 뒤의 관문(gate_connections)이 원문 대신 노드 설명을 읽는다.
+            for said_in in (n.get("start_date"), n.get("description") if n.get("type") == "Person" and n is not me else None):
+                if school_ref(said_in) is not None:
+                    y, prec = parse_when(said_in, birth)[0], "age"
                     break
         if y is not None:
             n["year"], n["precision"] = y, prec
@@ -567,6 +573,13 @@ def refine(payload: dict, text: str | None = None) -> dict:
             t["year"] = birth + int(t["age"])
         if t.get("year") is None and node is not None:
             t["year"] = node.get("year")
+        # 달까지 아는 날짜는 항목이 적어 온 해를 이긴다 — 모델은 항목의 year 를
+        # 나이나 앞뒤 항목에서 어림해 적는다 (2026-09-08 지적: 1998년 4월 24일
+        # 메탈리카 공연이 1997 로 적혀 와 연표의 1997 칸에 '4월'로 섰다).
+        # 어림한 나이도 함께 버리고 생년에서 다시 센다 (life.js normalize 와 같다).
+        fine = month_year(node.get("start_date")) if node is not None else None
+        if fine is not None and fine != t.get("year"):
+            t["year"], t["age"] = fine, None
         if t.get("age") is None and t.get("year") is not None and birth is not None:
             t["age"] = int(t["year"]) - birth
         if node is not None and node.get("year") is None and t.get("year") is not None:
@@ -596,18 +609,25 @@ def refine(payload: dict, text: str | None = None) -> dict:
     for n in nodes:
         if n.get("type") != "Person" or n is me:
             continue
-        text = f"{n.get('name') or ''} {n.get('description') or ''}"
+        about = f"{n.get('name') or ''} {n.get('description') or ''}"
         for pl in places:
-            if pl["id"] != n["id"] and pl["name"] in text and not linked(n["id"], pl["id"]):
+            if pl["id"] != n["id"] and pl["name"] in about and not linked(n["id"], pl["id"]):
                 kind = "studied_at" if pl["type"] in ("School", "University") else \
                        "worked_at" if pl["type"] == "Company" else "member_of"
                 edges.append({"source": n["id"], "target": pl["id"], "type": kind,
                               "description": None, "confidence": 0.8})
                 have.add((n["id"], pl["id"]))
-        if me is not None and not linked(me["id"], n["id"]) and _MET_WORDS.search(text):
+        if me is not None and not linked(me["id"], n["id"]) and _MET_WORDS.search(about):
             edges.append({"source": me["id"], "target": n["id"], "type": "met",
                           "description": n.get("description"), "confidence": 0.8})
             have.add((me["id"], n["id"]))
+
+    # 4-2. 함께한 사람 — 이야기가 한 문장에서 같이 부른 사람을 participants 에 넣고,
+    #      그렇게 모인 participants 를 사람 노드로 풀어 사건에 잇는다.
+    story = text if text else "\n".join(
+        str(r.get("text") or "") for r in (payload.get("stories") or []) if isinstance(r, dict))
+    participants_from_story(nodes, story)
+    link_participants(nodes, edges, me)
 
     # 5. 관계의 이름 — 온톨로지(LIFE_EDGES)에 맞추고 역할을 단다
     for issue in tidy_edges(nodes, edges, me):
@@ -622,6 +642,95 @@ def refine(payload: dict, text: str | None = None) -> dict:
     # 같이 걸린다. 원문(text)을 모르면 이름으로는 안 버리고 순서만 잰다.
     gate_connections(payload, text)
     return payload
+
+
+def says_date(line: str, date: str | None) -> bool:
+    """문장이 이 날짜를 말하는가. **달까지 아는 날짜만** 잰다 ('1998' 은 너무 넓다).
+
+    '1998-04-24' · '1998년 4월 24일' · '1998년 4월' 을 같은 것으로 읽는다.
+    """
+    m = re.match(r"(\d{4})-(\d{2})(?:-(\d{2}))?", str(date or ""))
+    if not m:
+        return False
+    y, mo, d = m.group(1), m.group(2), m.group(3)
+    forms = [f"{y}-{mo}" + (f"-{d}" if d else ""),
+             f"{int(y)}년 {int(mo)}월" + (f" {int(d)}일" if d else ""),
+             f"{int(y)}년 {int(mo)}월"]
+    return any(f in line for f in forms)
+
+
+def participants_from_story(nodes: list[dict], text: str | None) -> int:
+    """이야기가 **한 문장 안에서** 사건과 사람을 함께 부르면 그 사람도 그 자리에 있었다.
+
+    모델은 participants 에 주인공만 적어 놓기도 한다 (2026-09-08 사용자: "친구
+    김일권과 같이 갔다고 분명 말했는데 '함께 person_1' 이라고 말하고 있어").
+
+    문장이 사건을 **이름으로 부르거나 달까지 아는 날짜로** 가리킬 때만 잰다 —
+    해만 말한 문장("1997년에 입학했고 김일권을 만났어")은 그 해의 일을 여럿
+    담으므로 누가 어디에 있었는지를 가르지 못한다. 근거는 원문에 있어야 한다.
+    """
+    story = str(text or "").strip()
+    if not story:
+        return 0
+    people = [n for n in nodes if n.get("type") in PERSON_TYPES and len(str(n.get("name") or "").strip()) >= 2]
+    events = [n for n in nodes if n.get("type") in EVENT_TYPES]
+    if not people or not events:
+        return 0
+    made = 0
+    for line in re.split(r"[.!?。\n]+", story):
+        said = [n for n in people if n["name"] in line]
+        if not said:
+            continue
+        for ev in events:
+            name = str(ev.get("name") or "").strip()
+            # 날짜로 가리키는 것은 **그 날 일어난 일**이다. 기억(Memory)은 물건이 그
+            # 날을 가리킬 뿐이라 날짜로 잡지 않는다 (공연에 함께 간 사람이 '공연
+            # 티켓'에도 서면 안 된다). 이름으로 부른 것은 그대로 잰다.
+            by_date = ev.get("type") != "Memory" and says_date(line, ev.get("start_date"))
+            if not (len(name) >= 2 and name in line) and not by_date:
+                continue
+            have = [str(x) for x in (ev.get("participants") or [])]
+            for n in said:
+                if n["id"] in have or n["name"] in have:
+                    continue
+                have.append(n["id"])
+                made += 1
+            ev["participants"] = have
+    return made
+
+
+def link_participants(nodes: list[dict], edges: list[dict], me: dict | None) -> int:
+    """participants 를 사람 노드로 풀어 **하나의 꼴(노드 id)** 로 만들고 사건에 잇는다.
+
+    모델은 여기에 id 를 적기도 하고 이름을 적기도 한다. 못 푸는 식별자는 버린다 —
+    화면이 그것을 그대로 적을 자리가 없어야 한다 (2026-09-08 사용자: "person_1이라고
+    변수 이름을 바로 노출 하면 안 돼"). 이은 선의 역할은 tidy_edges 가 '함께'로 단다.
+    """
+    by_id = {n["id"]: n for n in nodes}
+    by_name = {_norm_label(n.get("name")): n for n in nodes if n.get("type") in PERSON_TYPES}
+    tied = {(e.get("source"), e.get("target")) for e in edges}
+    made = 0
+    for ev in nodes:
+        if not isinstance(ev.get("participants"), list):
+            continue
+        kept: list[str] = []
+        for p in ev["participants"]:
+            who = by_id.get(str(p)) or by_name.get(_norm_label(p))
+            pid = who["id"] if who else (str(p).strip() if _HANGUL.search(str(p)) else "")
+            if not pid or pid == ev["id"] or pid in kept:
+                continue
+            kept.append(pid)
+            if who is None or who is me or who.get("type") not in PERSON_TYPES \
+                    or ev.get("type") not in EVENT_TYPES:
+                continue
+            if (who["id"], ev["id"]) in tied or (ev["id"], who["id"]) in tied:
+                continue
+            edges.append({"source": who["id"], "target": ev["id"], "type": "experienced",
+                          "description": None, "confidence": ev.get("confidence", 1)})
+            tied.add((who["id"], ev["id"]))
+            made += 1
+        ev["participants"] = kept
+    return made
 
 
 def link_orphans(nodes: list[dict], edges: list[dict], me: dict | None) -> int:
@@ -1071,6 +1180,9 @@ def _norm_label(s: str) -> str:
     """이름 대조용 — 띄어쓰기·가운뎃점·괄호를 걷는다 ('3·1 운동' = '3.1운동')."""
     return re.sub(r"[\s·.\-–—()（）]", "", str(s or "")).lower()
 
+
+# 한글이 한 자라도 있는가 — 화면에 낼 수 있는 말인지를 가른다 (CLAUDE.md §1).
+_HANGUL = re.compile(r"[가-힣]")
 
 # 모델이 주인공에게 붙이는 남의 이름. 화면에서 그 사람은 '나'다.
 SELF_NAMES = {"사용자", "본인", "화자", "주인공", "나 (사용자)", "사용자 (나)", "user", "me", "self"}

@@ -15,7 +15,7 @@
 // 브라우저에 붙는 부분(LifeBoard)을 가른다 — 배치가 어긋나는지는 브라우저
 // 없이 재야 한다.
 
-import { buildScale, placeMarks, reignBand, causeWire, CAUSE_WIRE, REIGN_COLOR } from './timeline.js';
+import { buildScale, placeMarks, reignBand, causeWire, yearCells, CAUSE_WIRE, REIGN_COLOR } from './timeline.js';
 
 export const NODE_TYPE_KO = {
   Person: '인물', FamilyMember: '가족', Ancestor: '조상', Relationship: '관계',
@@ -268,6 +268,98 @@ export function linkOrphans(nodes, edges, me) {
   return made;
 }
 
+// --- 함께한 사람 -------------------------------------------------------------
+// 화면에 낼 수 있는 이름인가. 그래프에 있으면 그 노드의 이름이고, 없으면 **한글로
+// 적힌 말일 때만** 그대로 쓴다 — 모델의 식별자(`person_1`)를 화면에 내지 않는다
+// (2026-09-08 지적: "person_1이라고 변수 이름을 바로 노출 하면 안 돼", CLAUDE.md §1).
+export const HANGUL = /[가-힣]/;
+export function nodeLabel(byId, id) {
+  const n = byId?.get?.(id);
+  if (n?.name) return String(n.name);
+  const s = String(id ?? '').trim();
+  return HANGUL.test(s) ? s : '';
+}
+
+// 이야기 글 전부 (적은 차례대로). 근거를 원문에서 찾는 자리가 읽는다.
+export function storyText(raw) {
+  return (raw?.stories || []).map((r) => String(r?.text || '')).filter(Boolean).join('\n');
+}
+
+// 이야기가 **한 문장 안에서** 사건과 사람을 함께 부르면 그 사람도 그 자리에 있었다.
+// 모델은 participants 에 주인공만 적어 놓기도 한다 (2026-09-08 지적: "친구 김일권과
+// 같이 갔다고 분명 말했는데 '함께 person_1' 이라고 말하고 있어").
+//
+// 문장이 사건을 **이름으로 부르거나 달까지 아는 날짜로** 가리킬 때만 잰다 — 해만
+// 말한 문장("1997년에 입학했고 김일권을 만났어")은 그 해의 일을 여럿 담으므로
+// 누가 어디에 있었는지를 가르지 못한다. 근거가 원문에 있어야 한다는 규칙 그대로다.
+export function participantsFromStory(nodes, text) {
+  const story = String(text || '').trim();
+  if (!story) return 0;
+  const people = nodes.filter((n) => PERSON_TYPES.has(n.type) && String(n.name || '').trim().length >= 2);
+  const events = nodes.filter((n) => EVENT_TYPES.has(n.type));
+  if (!people.length || !events.length) return 0;
+  let made = 0;
+  for (const line of story.split(/[.!?。\n]+/)) {
+    const said = people.filter((n) => line.includes(n.name));
+    if (!said.length) continue;
+    for (const ev of events) {
+      const name = String(ev.name || '').trim();
+      // 날짜로 가리키는 것은 **그 날 일어난 일**이다. 기억(Memory)은 물건이 그 날을
+      // 가리킬 뿐이라 날짜로 잡지 않는다 — 공연에 함께 간 사람이 '공연 티켓'에도
+      // 함께한 사람으로 서면 안 된다. 이름으로 부른 것은 그대로 잰다.
+      const byDate = ev.type !== 'Memory' && saysDate(line, ev.start_date);
+      if (!(name.length >= 2 && line.includes(name)) && !byDate) continue;
+      const have = Array.isArray(ev.participants) ? ev.participants.map(String) : [];
+      for (const n of said) {
+        if (have.includes(n.id) || have.includes(n.name)) continue;
+        have.push(n.id); made += 1;
+      }
+      ev.participants = have;
+    }
+  }
+  return made;
+}
+
+// 문장이 이 날짜를 말하는가. **달까지 아는 날짜만** 잰다 ('1998' 은 너무 넓다).
+// '1998-04-24' · '1998년 4월 24일' · '1998년 4월' 을 같은 것으로 읽는다.
+export function saysDate(line, date) {
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(String(date || ''));
+  if (!m) return false;
+  const [, y, mo, d] = m;
+  const forms = [`${y}-${mo}${d ? `-${d}` : ''}`, `${+y}년 ${+mo}월${d ? ` ${+d}일` : ''}`, `${+y}년 ${+mo}월`];
+  return forms.some((f) => line.includes(f));
+}
+
+// participants 를 사람 노드로 풀어 **하나의 꼴(노드 id)** 로 만들고 사건에 잇는다.
+// 모델은 여기에 id 를 적기도 하고 이름을 적기도 한다. 못 푸는 식별자는 버린다 —
+// 화면이 그것을 그대로 적을 자리가 없어야 한다. 이은 선의 역할은 tidyEdges 가
+// '함께'로 단다 (주인공은 사건의 술어 — '입학'·'졸업').
+export function linkParticipants(nodes, edges, me) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const byName = new Map();
+  for (const n of nodes) if (PERSON_TYPES.has(n.type)) byName.set(norm(n.name), n);
+  const tied = new Set(edges.map((e) => `${e.source}>${e.target}`));
+  let made = 0;
+  for (const ev of nodes) {
+    if (!Array.isArray(ev.participants)) continue;
+    const kept = [];
+    for (const p of ev.participants) {
+      const who = byId.get(String(p)) || byName.get(norm(p));
+      const id = who ? who.id : (HANGUL.test(String(p)) ? String(p).trim() : '');
+      if (!id || id === ev.id || kept.includes(id)) continue;
+      kept.push(id);
+      if (!who || who === me || !PERSON_TYPES.has(who.type) || !EVENT_TYPES.has(ev.type)) continue;
+      if (tied.has(`${who.id}>${ev.id}`) || tied.has(`${ev.id}>${who.id}`)) continue;
+      edges.push({ source: who.id, target: ev.id, type: 'experienced', description: null,
+        confidence: ev.confidence ?? 1 });
+      tied.add(`${who.id}>${ev.id}`);
+      made += 1;
+    }
+    ev.participants = kept;
+  }
+  return made;
+}
+
 export function tidyEdges(nodes, edges, me, issues = []) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const schools = new Map();
@@ -507,9 +599,13 @@ export function normalize(raw) {
     : (me ? { id: me.id, name: me.name, birth_year: birth } : null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const subj = out.subject ? byId.get(out.subject.id) || me : me;
-  out.edges = tidyEdges(nodes,
-    (raw.edges || []).filter((e) => e && EDGE_TYPE_KO[e.type] && byId.has(e.source) && byId.has(e.target)),
-    subj);
+  const kept = (raw.edges || []).filter((e) => e && EDGE_TYPE_KO[e.type] && byId.has(e.source) && byId.has(e.target));
+  // 함께한 사람 — 이야기가 한 문장에서 같이 부른 사람을 찾아 넣고(참여), 그렇게 모인
+  // participants 를 사람 노드로 풀어 사건에 잇는다. 온톨로지를 씌우기 전에 (새 선도
+  // 같은 관문을 지난다).
+  participantsFromStory(nodes, storyText(raw));
+  linkParticipants(nodes, kept, subj);
+  out.edges = tidyEdges(nodes, kept, subj);
   // 섬을 잇는다 — 온톨로지를 씌운 뒤에 (버려질 엣지를 이어진 것으로 세면 섬이 남는다)
   if (linkOrphans(nodes, out.edges, subj)) out.edges = tidyEdges(nodes, out.edges, subj);
   const timeline = [];
@@ -528,6 +624,12 @@ export function normalize(raw) {
     if (item.year == null) item.year = parseWhen(item.date_text, birth).year;
     if (item.year == null && item.age != null && birth != null) item.year = birth + item.age;
     if (item.year == null) item.year = node.year;
+    // **달까지 아는 날짜는 항목이 적어 온 해를 이긴다.** 모델은 항목의 `year` 를
+    // 나이나 앞뒤 항목에서 어림해 적는다 — 1998년 4월 24일 메탈리카 공연이
+    // 1997 로 적혀 와 1997 칸에 '4월'로 섰다 (2026-09-08 지적: "메탈리카 공연은
+    // 1998년 이었어"). 어림한 나이도 함께 버리고 생년에서 다시 센다.
+    const fine = monthYear(node.start_date);
+    if (fine != null && fine !== item.year) { item.year = fine; item.age = null; }
     if (item.age == null && item.year != null && birth != null) item.age = item.year - birth;
     timeline.push(item);
   }
@@ -865,8 +967,9 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
   // 겹치지 않게 선마다 4px 씩 안으로.
   const causalSvg = layout.causal.map((c, i) => causeWire(c.y1, c.y2, xS - (i % 5) * 4)).join('');
 
+  const hCells = yearCells(layout.history.map((p) => p.m));
   const hItems = layout.history.map(({ m, ty }, i) => {
-    const cell = yearText(m, i ? layout.history[i - 1].m : null);
+    const cell = hCells[i];
     const extra = m.kind === 'extra' ? '<span class="tl-rel">그래프에 없는 사건</span>' : '';
     const tag = m.kind === 'extra' ? 'span' : 'a';
     const href = m.kind === 'extra' ? '' : ` href="/#${encodeURIComponent(m.id)}"`;
@@ -875,8 +978,11 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
       <span class="tl-y${cell.repeat ? ' rep' : ''}">${cell.text}</span><span class="tl-name">${esc(m.label)}</span>${extra}</${tag}>`;
   }).join('');
 
+  // 연도 칸은 시대 연표와 같은 규칙이다 (yearCells) — 그 해의 첫 줄이 해를 적고
+  // 뒤따르는 줄은 달을 적는다. 연도는 언제나 달보다 위에 선다 (2026-09-08 지적).
+  const pCells = yearCells(layout.personal.map((p) => p.m));
   const pItems = layout.personal.map(({ m, ty }, i) => {
-    const cell = yearText(m, i ? layout.personal[i - 1].m : null);
+    const cell = pCells[i];
     // '세'는 만 나이다 (2026-09-08 사용자: "나이 앞에 '만'이라고 써줘") — 이야기가
     // 준 나이를 그대로 세는 것이라 한국 나이(세는 나이)로 헷갈릴 수 있다.
     const age = m.age != null ? `<span class="tl-rel">만 ${m.age}세</span>` : '';
@@ -977,10 +1083,11 @@ export class LifeBoard {
 }
 
 // --- 잔손 -------------------------------------------------------------------
-function yearText(m, prev) {
-  if (!prev || prev.year !== m.year) return { text: String(m.year), repeat: false };
-  const mm = /^-?\d{1,4}-(\d{2})/.exec(String(m.date || ''));
-  return mm ? { text: `${Number(mm[1])}월`, repeat: false } : { text: String(m.year), repeat: true };
+// 달까지 아는 날짜의 해. 'YYYY-MM' 부터가 달을 아는 것이다 — 'YYYY' 는 해뿐이라
+// 여기서는 없는 것으로 친다.
+export function monthYear(date) {
+  const m = /^(-?\d{1,4})-(\d{2})/.exec(String(date || ''));
+  return m ? Number(m[1]) : null;
 }
 
 export function norm(s) {

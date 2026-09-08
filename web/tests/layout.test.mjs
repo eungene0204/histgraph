@@ -6,7 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, isCause, causeWire, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
 import { causalReach, causalLayout, GraphView } from '../src/lib/graph-view.js';
 
 let pass = 0;
@@ -290,6 +290,27 @@ console.log('\n배치 (d3-force)');
      yearCell({ year: 1381, date: '1381-03' }, a).text === '1381');
   ok('기원전은 접두어를 줄여 적는다',
      yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '전57');
+}
+
+// --- 연도는 달보다 위에 선다 (2026-09-08 지적) ------------------------------
+// '4월' 밑의 '1998' 은 해가 거기서 다시 시작하는 것처럼 읽힌다. 달을 적은
+// 뒤의 줄은 해를 되풀이하지 않고 비운다 — 그 해의 첫 줄이 이미 해를 적었다.
+{
+  const cells = yearCells([
+    { year: 1998, date: '1998-04-24', label: '공연' },
+    { year: 1998, date: '1998-04-24', label: '티켓' },
+    { year: 1998, date: '1998', label: '친구' },
+    { year: 1999, date: '1999', label: '이사' },
+  ]).map((c) => c.text);
+  ok('첫 줄은 해, 다음은 달, 달 뒤의 모르는 줄은 빈다',
+     cells.join('|') === '1998|4월||1999', cells.join('|'));
+  const none = yearCells([
+    { year: 1380, date: '1380', label: '진포 해전' },
+    { year: 1380, date: '1380', label: '황산대첩' },
+  ]).map((c) => c.text);
+  ok('달이 하나도 없는 해는 그대로 해를 되풀이한다', none.join('|') === '1380|1380', none.join('|'));
+  ok('해와 어긋나는 날짜의 달은 적지 않는다',
+     yearCell({ year: 1997, date: '1998-04-24' }, { year: 1997, date: '1997' }).text === '1997');
 }
 
 // 원인은 결과보다 위에 선다. 결과의 거친 날짜(연도만)가 원인의 날짜를

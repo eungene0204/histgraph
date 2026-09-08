@@ -4,7 +4,7 @@ import { auth } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -784,7 +784,22 @@ function EventDetail({ life, id, onPick, onDrop }) {
   // '세'는 만 나이다 (2026-09-08 사용자: "나이 앞에 '만'이라고 써줘").
   const when = [t?.date_text || (dateSaid(node) ? node.start_date : null),
     t?.age != null ? `만 ${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
-  const nameOf = (nid) => byId.get(nid)?.name || nid;
+  // 이름을 모르는 아이디는 화면에 내지 않는다 (lib/life.js nodeLabel) — 모델의
+  // 식별자가 그대로 서는 자리가 없어야 한다 (2026-09-08 지적).
+  const nameOf = (nid) => nodeLabel(byId, nid);
+  // '함께' 는 나 말고 이 일에 같이 있던 사람이다. 아이디로 적혀 오므로 이름으로 풀고,
+  // 주인공과 못 푸는 식별자를 뺀다. 남는 사람이 없으면 **줄 자체를 세우지 않는다**
+  // (2026-09-08 지적: "함께한 사람이 없으면 그냐야 '함께'라는 섹션 자체를 보여주면 안돼").
+  //
+  // **'관련'에 이미 선 사람은 여기 다시 적지 않는다** (2026-09-08 지적: "왜 함께가
+  // 두 번 들어가지 한 번만 보여줘"). 함께한 사람은 사건에 이어지므로(experienced ·
+  // 역할 '함께') 대개 아래 '관련'에 선다 — 그 줄이 눌러서 옮겨가는 자리이고 역할이
+  // 머리글이다. 여기 남는 것은 **그래프에 노드가 없어 선을 못 그은 이름**뿐이다.
+  const tied = new Set([...ins, ...outs].map((e) => (e.source === id ? e.target : e.source)));
+  const withWhom = [...new Set(node.participants || [])]
+    .filter((pid) => pid !== life.subject?.id && !tied.has(pid))
+    .map((pid) => ({ id: byId.has(pid) ? pid : null, name: nameOf(pid) }))
+    .filter((w) => w.name);
   return (
     <div className="life-event">
       <span className="d-type">{NODE_TYPE_KO[node.type]}</span>
@@ -795,7 +810,10 @@ function EventDetail({ life, id, onPick, onDrop }) {
         {node.importance_score != null && <><dt>중요도</dt><dd><Meter v={node.importance_score} /></dd></>}
         {turning && <><dt>전환점</dt><dd><Meter v={turning.turning_point_score} /> {turning.reason}</dd></>}
         {node.emotional_impact && <><dt>감정</dt><dd>{node.emotional_impact}</dd></>}
-        {node.participants?.length > 0 && <><dt>함께</dt><dd>{node.participants.join(', ')}</dd></>}
+        {withWhom.length > 0 && <><dt>함께</dt><dd>{withWhom.map((w, i) => (
+          <span key={`${w.id || ''}${w.name}`}>{i ? ', ' : ''}{w.id
+            ? <button type="button" className="life-link" onClick={() => onPick(w.id)}>{w.name}</button>
+            : w.name}</span>))}</dd></>}
         {node.confidence < 1 && <><dt>확실함</dt><dd>본인이 말한 것에서 미룬 것 ({Math.round(node.confidence * 100)}%)</dd></>}
       </dl>
       {causes.length > 0 && <Rel head="원인" items={causes} side="source" nameOf={nameOf} onPick={onPick} />}
@@ -817,9 +835,19 @@ function EventDetail({ life, id, onPick, onDrop }) {
       {others.length > 0 && (
         <section className="life-sec">
           <h3>관련</h3>
-          <ul>{others.map((e, i) => (
-            <li key={i}><span className="tl-rel">{edgeLabel(e.type, byId.get(e.source)?.type, byId.get(e.target)?.type, e.role)}</span> {e.source === id ? nameOf(e.target) : nameOf(e.source)}{e.description ? <p>{e.description}</p> : null}</li>
-          ))}</ul>
+          {/* 상대는 눌러서 옮겨가는 자리다 — 원인·결과(Rel)와 같은 단추다
+              (2026-09-08 지적: "함께에 있는 사람이 node에 있으면 링크를 걸어 줘야지").
+              그래프에 없는 것은 이름만 적는다. */}
+          <ul>{others.map((e, i) => {
+            const other = e.source === id ? e.target : e.source;
+            return (
+              <li key={i}><span className="tl-rel">{edgeLabel(e.type, byId.get(e.source)?.type, byId.get(e.target)?.type, e.role)}</span>{' '}
+                {byId.has(other)
+                  ? <button type="button" className="life-link" onClick={() => onPick(other)}>{nameOf(other)}</button>
+                  : nameOf(other)}
+                {e.description ? <p>{e.description}</p> : null}</li>
+            );
+          })}</ul>
         </section>
       )}
       {cf.length > 0 && (
@@ -876,16 +904,23 @@ function Meter({ v }) {
 // --- 분석 -----------------------------------------------------------------
 function Analysis({ life, onPick }) {
   const byId = useMemo(() => new Map(life.nodes.map((n) => [n.id, n])), [life]);
-  const nameOf = (nid) => byId.get(nid)?.name || nid;
+  // 그래프에 없는 것을 모델이 아이디로 부르기도 한다 — 이름으로 못 풀면 그 줄을
+  // 세우지 않는다 (nodeLabel). 화면에 `person_1` 이 서는 자리를 없앤다.
+  const nameOf = (nid) => nodeLabel(byId, nid);
   const fam = life.family_analysis || {};
   const isEvent = (nid) => byId.has(nid);
+  // 그래프에 있는 것은 어디서든 눌러서 옮겨간다 (2026-09-08 지적: "node에 있으면
+  // 링크를 걸어 줘야지"). 없는 것은 이름만 적는다.
+  const Link = ({ id }) => (isEvent(id)
+    ? <button type="button" className="life-link" onClick={() => onPick(id)}>{nameOf(id)}</button>
+    : <b>{nameOf(id)}</b>);
   return (
     <div className="life-analysis">
       <section className="life-sec">
         <h3>어떤 흐름에서 태어났나</h3>
         {fam.origin && <p>{fam.origin}</p>}
         {fam.historical_flow && <p>{fam.historical_flow}</p>}
-        {fam.members?.length > 0 && <ul>{fam.members.map((m, i) => <li key={i}><b>{m.relation}</b> {nameOf(m.node_id)} — {m.description}</li>)}</ul>}
+        {fam.members?.length > 0 && <ul>{fam.members.map((m, i) => <li key={i}><b>{m.relation}</b> <Link id={m.node_id} /> — {m.description}</li>)}</ul>}
         {fam.values && <p className="life-q">{fam.values}</p>}
       </section>
       {life.turning_points.length > 0 && (
@@ -893,7 +928,7 @@ function Analysis({ life, onPick }) {
           <h3>전환점</h3>
           <ul>{[...life.turning_points].sort((a, b) => b.turning_point_score - a.turning_point_score).map((p, i) => (
             <li key={i}>
-              {isEvent(p.event) ? <button type="button" className="life-link" onClick={() => onPick(p.event)}>{nameOf(p.event)}</button> : <b>{p.event}</b>}
+              <Link id={p.event} />
               {' '}<Meter v={p.turning_point_score} /><p>{p.reason}</p>
             </li>
           ))}</ul>
@@ -903,7 +938,7 @@ function Analysis({ life, onPick }) {
         <section className="life-sec">
           <h3>역사가 준 영향</h3>
           <ul>{[...life.impact_analysis].sort((a, b) => b.strength - a.strength).map((p, i) => (
-            <li key={i}><b>{p.event}</b> <span className="tl-rel">{IMPACT_KO[p.impact_type]}</span> <Meter v={p.strength} /><p>{p.description}</p></li>
+            <li key={i}><Link id={p.event} /> <span className="tl-rel">{IMPACT_KO[p.impact_type]}</span> <Meter v={p.strength} /><p>{p.description}</p></li>
           ))}</ul>
         </section>
       )}
@@ -921,7 +956,7 @@ function Analysis({ life, onPick }) {
           <h3>가장 크게 영향을 준 것</h3>
           <ul>{[...life.influence_ranking.items].sort((a, b) => b.influence_score - a.influence_score).map((p, i) => (
             <li key={i}><span className="tl-rel">{p.category} </span>
-              {isEvent(p.node) ? <button type="button" className="life-link" onClick={() => onPick(p.node)}>{nameOf(p.node)}</button> : <b>{p.node}</b>}
+              <Link id={p.node} />
               {' '}<Meter v={p.influence_score} /><p>{p.reason}</p></li>
           ))}</ul>
         </section>

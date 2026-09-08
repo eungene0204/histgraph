@@ -9,7 +9,7 @@ import {
   normalize, removeNode, nodeYears, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
   ladder,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
-  splitStories, joinStories, appendDraft,
+  splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
 } from '../src/lib/life.js';
 import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
@@ -340,6 +340,26 @@ console.log('\n개인 역사 — 남의 생년은 짐작해 세우지 않는다'
       { id: 'b1', type: 'Time', name: '출생', start_date: '1955-03-02', confidence: 1 }],
     edges: [], timeline: [],
   }).nodes[0].start_date === '1982-01-01');
+  // 항목의 해와 노드의 날짜가 어긋나면 **달까지 아는 날짜**가 이긴다 (2026-09-08
+  // 지적: "메탈리카 공연은 1998년 이었어" — 1998-04-24 공연이 항목에는 1997 ·
+  // 만 15세로 적혀 와 1997 칸에 '4월'로 섰다).
+  const off = normalize({
+    nodes: [
+      { id: 'me', type: 'Person', name: '나', start_date: '1982-02-27', confidence: 1 },
+      { id: 'gig', type: 'PersonalEvent', name: '메탈리카 공연 관람', start_date: '1998-04-24', confidence: 1 },
+      { id: 'grad', type: 'PersonalEvent', name: '중학교 졸업', start_date: '1997', confidence: 1 },
+    ],
+    edges: [],
+    timeline: [{ event_id: 'gig', age: 15, year: 1997 }, { event_id: 'grad', age: 15, year: 1997 }],
+    subject: { id: 'me', name: '나', birth_year: 1982 },
+  });
+  const gig = off.timeline.find((t) => t.event_id === 'gig');
+  ok('달까지 아는 날짜가 항목의 해를 이긴다', gig.year === 1998, String(gig.year));
+  ok('어림한 나이도 다시 센다', gig.age === 16, String(gig.age));
+  ok('해까지만 아는 날짜는 항목의 해를 두고 본다',
+    off.timeline.find((t) => t.event_id === 'grad').year === 1997);
+  ok('연표의 그 줄도 1998 로 선다',
+    personalMarks(off).find((m) => m.id === 'gig').year === 1998);
   ok('해가 없으면 빈 칸', nodeYears({ type: 'Book', year: null }) === '');
   ok('끝나는 해가 있으면 물결로', nodeYears({ type: 'Company', start_date: '2004', year: 2004, end_year: 2011 }) === '2004~2011');
   // 화면이 그 규칙을 쓰는지 — '사람 · 문화' 탭이 nodeYears 로 해를 세운다
@@ -379,6 +399,76 @@ console.log('\n개인 역사 — 학제의 차례는 이야기의 차례를 이�
   ok('사다리에 없는 사건은 제자리에 남는다 (자리만 맞바꾼다)', order[1] === 'move', order.join(','));
   ok('연표의 차례도 같이 선다', school.timeline.map((t) => t.event_id).join(',') === 'es_out,move,ms_in',
     school.timeline.map((t) => t.event_id).join(','));
+}
+
+console.log('\n개인 역사 — 함께한 사람 (2026-09-08 "친구 김일권과 같이 갔다고 분명 말했는데")');
+{
+  const doc = () => ({
+    nodes: [
+      { id: 'me', type: 'Person', name: '나', start_date: '1982-02-27', confidence: 1 },
+      { id: 'kim', type: 'Person', name: '김일권', confidence: 1 },
+      { id: 'gig', type: 'PersonalEvent', name: '메탈리카 공연 관람', start_date: '1998-04-24',
+        participants: ['me'], confidence: 1 },
+      { id: 'ticket', type: 'Memory', name: '메탈리카 공연 티켓', start_date: '1998-04-24',
+        participants: ['me'], confidence: 1 },
+    ],
+    edges: [{ source: 'me', target: 'gig', type: 'experienced', confidence: 1 }],
+    timeline: [{ event_id: 'gig', year: 1998 }],
+    subject: { id: 'me', name: '나', birth_year: 1982 },
+    stories: [{ at: '', text: '1998년 4월 24일 메탈리카 공연을 친구 김일권과 함께 갔어. 티켓도 아직 가지고 있어.' }],
+  });
+  const life = normalize(doc());
+  const gig = life.nodes.find((n) => n.id === 'gig');
+  ok('이야기 한 문장이 사건과 사람을 함께 부르면 함께한 사람이다',
+    gig.participants.includes('kim'), JSON.stringify(gig.participants));
+  ok('그 사람은 사건에 이어진다 (역할 함께)',
+    life.edges.some((e) => e.source === 'kim' && e.target === 'gig' && e.type === 'experienced' && e.role === '함께'),
+    JSON.stringify(life.edges));
+  ok('기억(티켓)은 날짜로 잡지 않는다',
+    !life.nodes.find((n) => n.id === 'ticket').participants.includes('kim'));
+  // 이름으로 적어 와도 같은 자리에 선다
+  const named = doc();
+  named.nodes[2].participants = ['나', '김일권', 'person_9'];
+  const byName = normalize(named).nodes.find((n) => n.id === 'gig');
+  ok('이름으로 적어 온 것도 노드 id 로 푼다',
+    byName.participants.join(',') === 'me,kim', JSON.stringify(byName.participants));
+  ok('못 푸는 식별자는 버린다', !byName.participants.includes('person_9'));
+  // 근거가 없으면 잇지 않는다 — 해만 같은 문장은 그 해의 일을 여럿 담는다
+  const loose = doc();
+  loose.stories = [{ at: '', text: '1998년에 김일권과 자주 만났어. 메탈리카 공연도 갔어.' }];
+  loose.nodes[2].participants = ['me'];
+  loose.nodes[3].participants = ['me'];
+  const far = normalize(loose).nodes.find((n) => n.id === 'gig');
+  ok('해만 말한 문장으로는 잇지 않는다', !far.participants.includes('kim'), JSON.stringify(far.participants));
+  ok('달까지 아는 날짜만 잰다', saysDate('1998년 4월 24일 공연', '1998-04-24')
+    && saysDate('1998-04-24 공연', '1998-04-24') && !saysDate('1998년에 공연', '1998-04-24')
+    && !saysDate('1998년 공연', '1998'));
+  // 화면에 낼 수 있는 이름인가 — 아이디는 낼 수 없다
+  const byId = new Map(life.nodes.map((n) => [n.id, n]));
+  ok('아는 아이디는 이름으로', nodeLabel(byId, 'kim') === '김일권');
+  ok('모르는 식별자는 빈 칸', nodeLabel(byId, 'person_1') === '' && nodeLabel(byId, null) === '');
+  ok('그래프에 없어도 한글이면 그대로', nodeLabel(byId, '박정환') === '박정환');
+  // 화면이 그 규칙을 쓰는가 — '함께' 줄은 이름으로 서고, 아무도 없으면 서지 않는다
+  const view = readFileSync(here('../src/components/LifeView.jsx'), 'utf8');
+  ok("'함께' 줄은 푼 이름으로 선다", /withWhom\.length > 0 && <><dt>함께<\/dt>/.test(view)
+    && !/node\.participants\.join/.test(view), '아직 participants 를 그대로 적는다');
+  // 같은 사람이 위(함께)와 아래(관련)에 두 번 서지 않는다 (2026-09-08 "왜 함께가
+  // 두 번 들어가지 한 번만 보여줘"). 선이 그어진 사람은 '관련'이 맡는다.
+  // 그래프에 있는 것은 어디서든 눌러서 옮겨간다 (2026-09-08 "node에 있으면 링크를 걸어 줘야지")
+  ok("'관련'의 상대는 눌러서 옮겨간다",
+    /byId\.has\(other\)\s*\n?\s*\? <button type="button" className="life-link" onClick=\{\(\) => onPick\(other\)\}/.test(view),
+    '관련이 아직 이름만 적는다');
+  ok('분석의 사건·사람도 같은 단추다', /const Link = \(\{ id \}\) => \(isEvent\(id\)/.test(view)
+    && !/<b>\{nameOf\(p\.event\)\}<\/b>/.test(view));
+  ok("'관련'에 선 사람은 '함께' 줄에 다시 적지 않는다",
+    /const tied = new Set\(\[\.\.\.ins, \.\.\.outs\]/.test(view) && /!tied\.has\(pid\)/.test(view));
+  ok('이름을 못 푸는 아이디를 적는 자리가 없다', !/\?\.name \|\| nid/.test(view));
+  // linkParticipants 는 있는 선을 두 번 세우지 않는다
+  const nodes = doc().nodes;
+  const edges = [{ source: 'kim', target: 'gig', type: 'experienced', confidence: 1 }];
+  nodes[2].participants = ['me', 'kim'];
+  ok('이미 이어진 것은 다시 잇지 않는다', linkParticipants(nodes, edges, nodes[0]) === 0 && edges.length === 1);
+  ok('이야기가 없으면 아무것도 안 한다', participantsFromStory(doc().nodes, '') === 0);
 }
 
 console.log('\n개인 역사 — 노드를 지운다');

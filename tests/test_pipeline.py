@@ -5639,6 +5639,77 @@ with tempfile.TemporaryDirectory() as tmp:
     check("해가 다른 '출생'은 남의 것이라 가져오지 않는다",
           life_mod.refine(other)["nodes"][0]["start_date"] == "1982-01-01")
 
+    # 항목의 해와 노드의 날짜가 어긋나면 달까지 아는 날짜가 이긴다 (2026-09-08
+    # 사용자: "메탈리카 공연은 1998년 이었어" — 1998-04-24 공연이 항목에는
+    # 1997 · 만 15세로 적혀 와 연표의 1997 칸에 '4월'로 섰다).
+    off = {"nodes": [
+        {"id": "me", "type": "Person", "name": "나", "start_date": "1982-02-27"},
+        {"id": "gig", "type": "PersonalEvent", "name": "메탈리카 공연 관람", "start_date": "1998-04-24"},
+        {"id": "grad", "type": "PersonalEvent", "name": "중학교 졸업", "start_date": "1997"},
+    ], "edges": [],
+        "timeline": [{"event_id": "gig", "age": 15, "year": 1997},
+                     {"event_id": "grad", "age": 15, "year": 1997}],
+        "subject": {"id": "me", "name": "나", "birth_year": 1982}}
+    tl = {t["event_id"]: t for t in life_mod.refine(off)["timeline"]}
+    check("달까지 아는 날짜가 항목의 해를 이긴다", tl["gig"]["year"] == 1998, str(tl["gig"]))
+    check("어림한 나이도 다시 센다", tl["gig"]["age"] == 16, str(tl["gig"]))
+    check("해까지만 아는 날짜는 항목의 해를 두고 본다", tl["grad"]["year"] == 1997, str(tl["grad"]))
+    check("달만 아는 날짜도 해를 준다", life_mod.month_year("1998-04") == 1998
+          and life_mod.month_year("1998") is None and life_mod.month_year(None) is None)
+
+    # 원문은 마지막 단계까지 원문이어야 한다. `refine` 안에서 반복문이 `text` 를
+    # 가려(`for text in …`, `text = f"{이름} {설명}"`) 역사 연결의 관문이 원문 대신
+    # 남의 노드 설명을 읽고 있었다 — 이야기가 부른 사건까지 통째로 버려졌다.
+    grounded_doc = {"nodes": [
+        {"id": "me", "type": "Person", "name": "나", "start_date": "1982-02-27"},
+        {"id": "kim", "type": "Person", "name": "김일권", "description": "고등학교 1학년 때 만난 친구"},
+        {"id": "bust", "type": "Crisis", "name": "아버지 인쇄소 부도", "start_date": "1998"},
+    ], "edges": [], "timeline": [{"event_id": "bust", "year": 1998}],
+        "subject": {"id": "me", "name": "나", "birth_year": 1982},
+        "historical_connections": [{"historical_event": "외환 위기", "personal_event": "bust",
+                                    "impact_type": "direct", "year": 1997,
+                                    "description": "외환 위기로 일감이 끊겼다"}]}
+    kept = life_mod.refine(grounded_doc, text="1998년에 외환 위기로 아버지 인쇄소가 부도났어")
+    check("이야기가 부른 역사 연결은 남는다 (원문이 가려지지 않는다)",
+          len(kept["historical_connections"]) == 1, str(kept.get("notes")))
+
+    # 함께한 사람 (2026-09-08 사용자: "친구 김일권과 같이 갔다고 분명 말했는데
+    # '함께 person_1' 이라고 말하고 있어"). 모델이 participants 에 주인공만 적었다.
+    def gig_doc():
+        return {"nodes": [
+            {"id": "me", "type": "Person", "name": "나", "start_date": "1982-02-27"},
+            {"id": "kim", "type": "Person", "name": "김일권"},
+            {"id": "gig", "type": "PersonalEvent", "name": "메탈리카 공연 관람",
+             "start_date": "1998-04-24", "participants": ["me"]},
+            {"id": "ticket", "type": "Memory", "name": "메탈리카 공연 티켓",
+             "start_date": "1998-04-24", "participants": ["me"]},
+        ], "edges": [{"source": "me", "target": "gig", "type": "experienced"}],
+            "timeline": [{"event_id": "gig", "year": 1998}],
+            "subject": {"id": "me", "name": "나", "birth_year": 1982},
+            "stories": [{"at": "", "text": "1998년 4월 24일 메탈리카 공연을 친구 김일권과 함께 갔어. 티켓도 아직 가지고 있어."}]}
+    got = life_mod.refine(gig_doc())
+    by_gig = {n["id"]: n for n in got["nodes"]}
+    check("이야기 한 문장이 사건과 사람을 함께 부르면 함께한 사람이다",
+          "kim" in by_gig["gig"]["participants"], str(by_gig["gig"]["participants"]))
+    check("그 사람은 사건에 이어진다 (역할 함께)",
+          any(e["source"] == "kim" and e["target"] == "gig" and e["type"] == "experienced"
+              and e.get("role") == "함께" for e in got["edges"]), str(got["edges"]))
+    check("기억(티켓)은 날짜로 잡지 않는다", "kim" not in by_gig["ticket"]["participants"])
+    named = gig_doc()
+    named["nodes"][2]["participants"] = ["나", "김일권", "person_9"]
+    parts = {n["id"]: n for n in life_mod.refine(named)["nodes"]}["gig"]["participants"]
+    check("이름으로 적어 온 것도 노드 id 로 풀고 못 푸는 식별자는 버린다",
+          parts == ["me", "kim"], str(parts))
+    loose = gig_doc()
+    loose["stories"] = [{"at": "", "text": "1998년에 김일권과 자주 만났어. 메탈리카 공연도 갔어."}]
+    far = {n["id"]: n for n in life_mod.refine(loose)["nodes"]}["gig"]["participants"]
+    check("해만 말한 문장으로는 잇지 않는다", "kim" not in far, str(far))
+    check("달까지 아는 날짜만 잰다",
+          life_mod.says_date("1998년 4월 24일 공연", "1998-04-24")
+          and life_mod.says_date("1998-04-24 공연", "1998-04-24")
+          and not life_mod.says_date("1998년에 공연", "1998-04-24")
+          and not life_mod.says_date("1998년 공연", "1998"))
+
     # 섬 — 더하기로 붙인 토막의 사건이 주인공과 안 이어져 따로 떠 있었다
     # (2026-09-08 사용자: "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜 따로 떼어둔거지?")
     island = {"nodes": [
