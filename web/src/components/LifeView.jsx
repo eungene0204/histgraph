@@ -1019,14 +1019,21 @@ function EventDetail({ life, id, onPick, onDrop }) {
       <div className="d-dates">{when}{node.location ? ` · ${node.location}` : ''}</div>
       {node.description && <p className="life-desc">{node.description}</p>}
       <dl className="life-facts">
-        {node.importance_score != null && <><dt>중요도</dt><dd><Meter v={node.importance_score} /></dd></>}
+        {/* 중요도(importance_score)는 그리지 않는다 (2026-09-09 사용자 결정). 모델이
+            '1 = 거의 영향 없음, 10 = 인생을 바꾼 사건' 두 줄만 보고 매긴 값이라 재는
+            식이 없고, 짐작을 눈금으로 그리면 측정처럼 보인다. 수집은 그대로 두고
+            화면에서만 뺀다. 연표 점의 크기도 같은 이유로 중요도를 말하지 않는다. */}
         {turning && <><dt>전환점</dt><dd><Meter v={turning.turning_point_score} /> {turning.reason}</dd></>}
         {node.emotional_impact && <><dt>감정</dt><dd>{node.emotional_impact}</dd></>}
         {withWhom.length > 0 && <><dt>함께</dt><dd>{withWhom.map((w, i) => (
           <span key={`${w.id || ''}${w.name}`}>{i ? ', ' : ''}{w.id
             ? <button type="button" className="life-link" onClick={() => onPick(w.id)}>{w.name}</button>
             : w.name}</span>))}</dd></>}
-        {node.confidence < 1 && <><dt>확실함</dt><dd>본인이 말한 것에서 미룬 것 ({Math.round(node.confidence * 100)}%)</dd></>}
+        {/* 확신도 백분율(`확실함 … 90%`)도 그리지 않는다 (2026-09-09 사용자 결정).
+            모델이 붙인 값이고 코드가 만드는 엣지는 죄다 0.8 상수라 90% 는 잰 값이
+            아니라 적어 둔 값이다 — 짐작한 양을 눈금으로 그리지 않는다.
+            다만 '본인이 말한 것인가, 미룬 것인가'는 확인되는 이진 사실이라
+            관계 목록의 '미룬 것' 딱지와 그래프의 점선(LIFE_LINES)은 남는다. */}
       </dl>
       {causes.length > 0 && <Rel head="원인" items={causes} side="source" nameOf={nameOf} onPick={onPick} />}
       {effects.length > 0 && <Rel head="결과" items={effects} side="target" nameOf={nameOf} onPick={onPick} />}

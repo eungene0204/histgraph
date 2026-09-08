@@ -919,7 +919,6 @@ function mark(n, year, t) {
     end: n.end_year ?? null,
     date: n.start_date || '',
     age: t?.age ?? null, stage: t?.life_stage ?? null,
-    importance: n.importance_score ?? null,
     precision: n.precision || '',
     confidence: n.confidence,
   };
@@ -1077,14 +1076,21 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
       fill="${m.kind === 'extra' ? 'var(--surface-2)' : 'var(--text-faint)'}"
       stroke="${m.linked ? CAUSE_WIRE.color : 'none'}" stroke-width="1.4"/>`);
   }
+  // 개인 점은 **크기가 같다** (2026-09-09 사용자 결정: 중요도를 그리지 않는다).
+  // 전에는 반지름이 모델의 중요도 점수(1~10)에 비례했는데, 그 점수는 재는 식이
+  // 없이 모델이 짐작한 값이라 눈금으로 그리면 측정처럼 보인다 (CLAUDE.md §1-3
+  // '이름 말고 할 말이 없으면 화면에 세우지 않는다'와 같은 자리). 값은 계속 받아
+  // 두되 화면에는 세우지 않는다. 크기는 옆 역사 열의 문법을 따른다 — 이어진 것
+  // 3.4 · 뼈대 2.6 중 앞엣것이라, 이 사람의 열이 역사 열보다 앞에 선다.
+  // 고른 것은 크기가 아니라 링과 진하기로 말한다 (graph-drawer §4·§12.8).
+  const R_PERSONAL = 3.4;
   for (const { m, ty } of layout.personal) {
-    const r = 2.4 + (m.importance ? m.importance / 4 : 1);
     const on = m.id === selected;
     if (m.end != null && m.end !== m.year) {
       dots.push(`<line x1="${AXP}" y1="${ty.toFixed(1)}" x2="${AXP}" y2="${at(m.end).toFixed(1)}"
         stroke="${REIGN_COLOR}" stroke-width="3" stroke-linecap="round" opacity=".5"/>`);
     }
-    dots.push(`<circle cx="${AXP}" cy="${ty.toFixed(1)}" r="${r.toFixed(1)}" fill="${REIGN_COLOR}"
+    dots.push(`<circle cx="${AXP}" cy="${ty.toFixed(1)}" r="${R_PERSONAL}" fill="${REIGN_COLOR}"
       opacity="${on ? 1 : 0.85}"${on ? ' stroke="var(--text-normal)" stroke-width="1.5"' : ''}/>`);
   }
 
