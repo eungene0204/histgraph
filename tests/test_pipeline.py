@@ -1055,6 +1055,7 @@ try:
     check("알 수 없는 백엔드는 거부", False)
 except ValueError:
     check("알 수 없는 백엔드는 거부", True)
+
 # --- OpenRouter (무료 모델). 네트워크 없이 몸통만 본다 ---------------------
 import json as _j0  # noqa: E402
 import os as _os0  # noqa: E402
@@ -5567,7 +5568,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("영향 종류가 표 밖이면 '가능성'", payload["historical_connections"][1]["impact_type"] == "possible")
     check("순위표: 범주 → 항목 꼴도 목록으로", payload["influence_ranking"]["items"][0]["category"] == "인물")
     check("물음은 다섯까지", len(payload["follow_up_questions"]) == 5)
-    check("한글 없는 노드는 경고", any("Cosmos" in n for n in notes), str(notes))
+    check("한글 없는 이름은 메모하지 않는다 (2026-09-08 — nullSpace 는 본인의 회사 이름)",
+          not any("한글" in n for n in notes), str(notes))
     check("구간은 생년부터 오늘까지", life_mod.span(payload, datetime.date(2026, 9, 7)) == (1985, 2026))
 
     # 그래프에 잇기 + 엔드포인트
@@ -5608,22 +5610,215 @@ with tempfile.TemporaryDirectory() as tmp:
     check("같은 이름이 둘이면 잇지 않는다 (대구가 둘)",
           any("대구" in n for n in fnotes) and any("없는 것" in n for n in fnotes), str(fnotes))
     check("어느 모델이 쓴 그래프인지 남긴다", fixed["_model"] == "무료/모델:free")
+    who, _ = life_mod.validate({"nodes": [{"id": "p1", "type": "Person", "name": "사용자", "confidence": 1.0}],
+                                "edges": [], "timeline": [], "historical_connections": []})
+    check("주인공을 '사용자'라 적어 와도 '나'다 (2026-09-08)",
+          who["nodes"][0]["name"] == "나" and who["subject"]["name"] == "나", str(who["subject"]))
     check("이름 뒤에 붙은 해는 이름이 아니다 — 떼고 잇는다",
           life_mod.link(fixed, api) == 1
           and fixed["historical_connections"][0]["node_id"] == "wd:IMF"
           and fixed["historical_connections"][0]["year"] == 1997,
           str(fixed["historical_connections"][0]))
+    # 학년은 해다 (2026-09-08 사용자: "1997년 고등학교 입학했다고 했고 1학년때
+    # 누굴 만나고 2학년때 누굴 만났다고 하면 … 유추해서 알 수 있지 않나?").
+    check("프롬프트가 앞뒤에서 해를 셈하라고 한다", "'2학년 때'는 1998년" in life_mod.build_user("이야기", anchors=[]))
+    grade = {
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "confidence": 1.0},
+                  {"id": "hs", "type": "School", "name": "한별고등학교", "start_date": "1997", "confidence": 1.0},
+                  {"id": "m1", "type": "PersonalEvent", "name": "친구 A 를 만남", "start_date": "고등학교 1학년", "confidence": 0.8},
+                  {"id": "m2", "type": "PersonalEvent", "name": "친구 B 를 만남", "start_date": "고2 때", "confidence": 0.8},
+                  {"id": "u3", "type": "PersonalEvent", "name": "동아리", "start_date": "대학 3학년", "confidence": 0.8}],
+        "edges": [], "timeline": [{"event_id": "m2", "life_stage": "고등학교", "date_text": "고등학교 2학년 봄"}],
+        "historical_connections": [],
+    }
+    g, _ = life_mod.validate(grade)
+    ys = {n["id"]: (n["year"], n["precision"]) for n in g["nodes"]}
+    check("입학 해에서 학년을 센다 (1997 입학 → 1학년 1997 · 고2 1998)",
+          ys["m1"] == (1997, "year") and ys["m2"] == (1998, "year"), str(ys))
+    check("연표 항목의 '고등학교 2학년 봄'도 1998", g["timeline"][0]["year"] == 1998, str(g["timeline"]))
+    check("입학 해도 생년도 모르는 학교는 못 센다 (대학 3학년)", ys["u3"] == (None, "age"), str(ys))
+    grade["nodes"][0]["start_date"] = "1981"
+    g, _ = life_mod.validate(grade)
+    ys = {n["id"]: (n["year"], n["precision"]) for n in g["nodes"]}
+    check("생년을 알면 어림으로 센다 (1981년생 대학 3학년 = 2002 · 고2 는 여전히 입학 해에서)",
+          ys["u3"] == (2002, "age") and ys["m2"] == (1998, "year"), str(ys))
+    # 실측 (2026-09-08, 무료 모델의 답 꼴): 생년은 '출생' 노드에, 친구는 설명에만
+    # '잠실고등학교 1학년 때 만난' 이라 적히고 주인공·학교와 아무 관계가 없었다.
+    # 사용자: "고등학교에서 만났다고 하면 내가 입학했다고 말한 고등학교와 연결
+    # 시켜줘야 하는거야. 지금 그걸 못하고 있어. 연표에 추가도 안되고 있고."
+    check("프롬프트가 만난 사람을 주인공·만난 곳과 이으라고 한다", "met 관계로 잇고" in life_mod.build_user("이야기", anchors=[]))
+    told = {
+        "nodes": [{"id": "person_1", "type": "Person", "name": "나", "confidence": 1.0,
+                   "description": "1982년 2월 27일 서울에서 태어난 사람. 1997년 잠실고등학교 입학."},  # 실측: 이 문장이 입학 해를 생년으로 만들었다
+                  {"id": "birth_1", "type": "Time", "name": "출생", "start_date": "1982-02-27", "confidence": 1.0},
+                  {"id": "hs_entry", "type": "PersonalEvent", "name": "잠실고등학교 입학", "start_date": "1997-03-01", "confidence": 1.0},
+                  {"id": "hs_school", "type": "School", "name": "잠실고등학교", "confidence": 1.0},
+                  {"id": "kim", "type": "Person", "name": "김일권", "confidence": 1.0, "description": "잠실고등학교 1학년 때 만난 친구"},
+                  {"id": "park", "type": "Person", "name": "박준영", "confidence": 1.0, "description": "잠실고등학교 2학년 때 만난 친구"}],
+        "edges": [{"source": "person_1", "target": "birth_1", "type": "born_in", "confidence": 1.0},
+                  {"source": "hs_entry", "target": "hs_school", "type": "studied_at", "confidence": 1.0},
+                  {"source": "kim", "target": "park", "type": "worked_with", "confidence": 1.0}],
+        "timeline": [{"event_id": "hs_entry", "life_stage": "고등학교", "date_text": "1997-03-01"},
+                     {"event_id": "kim", "life_stage": "고등학교", "age": 15},
+                     {"event_id": "park", "life_stage": "고등학교", "age": 16}],
+        "historical_connections": [],
+    }
+    t, _ = life_mod.validate(told)
+    tn = {n["id"]: n for n in t["nodes"]}
+    check("생년은 '출생' 노드에서 찾는다", t["subject"]["birth_year"] == 1982, str(t["subject"]))
+    check("설명의 '1학년 때 만난' 이 해가 된다 (입학 해에서: 1997 · 1998)",
+          (tn["kim"]["year"], tn["park"]["year"]) == (1997, 1998), str((tn["kim"].get("year"), tn["park"].get("year"))))
+    check("학교 노드는 입학 사건의 해를 받는다", tn["hs_school"]["year"] == 1997)
+    te = {(e["source"], e["target"], e["type"]) for e in t["edges"]}
+    check("친구를 이야기 속 그 학교에 잇는다", ("kim", "hs_school", "studied_at") in te and ("park", "hs_school", "studied_at") in te, str(te))
+    check("만난 사람은 주인공과 잇는다 — 설명이 '친구'라 하니 friend_of",
+          ("person_1", "kim", "friend_of") in te and ("person_1", "park", "friend_of") in te, str(te))
+    check("연표의 친구 항목이 해를 얻어 선다 (나이 → 생년)",
+          [(x["event_id"], x["year"]) for x in t["timeline"]] == [("hs_entry", 1997), ("kim", 1997), ("park", 1998)], str(t["timeline"]))
+    check("두 번 돌려도 관계가 늘지 않는다", len(life_mod.refine(t)["edges"]) == len(te))
+    # 관계의 이름 (2026-09-08 사용자: "지금 그래프의 엣지 설명이 엉망이야. 친구들은
+    # 만남이 아니라 '친구'라고 표시해야. 그리고 '뒤', '동안' 이런 설명은 도대체 뭐야?")
+    # — 실측 그래프의 꼴 그대로: 주인공 → 자기 사건이 after·during, 친구 셋이 서로
+    # worked_with(0.5), 나형철이 양방향 met.
+    messy = {
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "confidence": 1.0},
+                  {"id": "mv", "type": "PersonalEvent", "name": "미국으로 이주", "start_date": "2005", "confidence": 1.0},
+                  {"id": "hs", "type": "PersonalEvent", "name": "잠실고등학교 입학", "start_date": "1997", "confidence": 1.0},
+                  {"id": "gr", "type": "PersonalEvent", "name": "성내중학교 졸업", "start_date": "1997", "confidence": 1.0},
+                  {"id": "fail", "type": "Failure", "name": "첫 창업 실패", "start_date": "2010", "confidence": 1.0},
+                  {"id": "sch", "type": "School", "name": "잠실고등학교", "confidence": 1.0},
+                  {"id": "major", "type": "Occupation", "name": "수학 전공", "confidence": 1.0},
+                  {"id": "usa", "type": "Location", "name": "미국", "confidence": 1.0},
+                  {"id": "kim", "type": "Person", "name": "김일권", "confidence": 1.0, "description": "잠실고등학교 1학년 때 만난 친구"},
+                  {"id": "park", "type": "Person", "name": "박준영", "confidence": 1.0, "description": "잠실고등학교 2학년 때 만난 친구"},
+                  {"id": "na", "type": "Person", "name": "나형철", "confidence": 1.0},
+                  {"id": "lee", "type": "Person", "name": "이대표", "confidence": 1.0, "description": "첫 회사 동료"}],
+        "edges": [{"source": "me", "target": "mv", "type": "after", "confidence": 1.0},
+                  {"source": "hs", "target": "me", "type": "during", "confidence": 1.0},
+                  {"source": "me", "target": "fail", "type": "after", "confidence": 1.0},
+                  {"source": "gr", "target": "hs", "type": "before", "confidence": 1.0},
+                  {"source": "hs", "target": "sch", "type": "studied_at", "confidence": 1.0},
+                  {"source": "hs", "target": "major", "type": "studied_at", "confidence": 1.0},
+                  {"source": "mv", "target": "usa", "type": "moved_to", "confidence": 1.0},
+                  {"source": "me", "target": "kim", "type": "met", "confidence": 0.8},
+                  {"source": "me", "target": "park", "type": "met", "confidence": 0.8},
+                  {"source": "me", "target": "lee", "type": "met", "confidence": 0.8},
+                  {"source": "kim", "target": "park", "type": "worked_with", "confidence": 0.5},
+                  {"source": "me", "target": "na", "type": "met", "confidence": 0.9},
+                  {"source": "na", "target": "me", "type": "met", "confidence": 0.9}],
+        "timeline": [], "historical_connections": [],
+    }
+    m, _ = life_mod.validate(messy)
+    mk = {(e["source"], e["target"]): e["type"] for e in m["edges"]}
+    check("주인공 → 자기 사건의 시간 관계는 참여(experienced)다 (뒤·동안이 아니다)", mk[("me", "mv")] == "experienced", str(mk))
+    check("사건 → 주인공으로 뒤집혀 온 것도 주인공 → 사건 experienced 로", mk.get(("me", "hs")) == "experienced" and ("hs", "me") not in mk, str(mk))
+    check("친구라고 적힌 만남은 friend_of, 동료는 worked_with, 아무 말 없으면 met 그대로",
+          mk[("me", "kim")] == "friend_of" and mk[("me", "lee")] == "worked_with" and mk[("me", "na")] == "met", str(mk))
+    check("일한 곳 없이 미룬 '함께 일함'은 같은 학교면 schoolmate (둘 다 그 학교에 이어진 뒤)", mk[("kim", "park")] == "schoolmate", str(mk))
+    check("양방향 met 은 하나만 남는다", ("na", "me") not in mk and ("me", "na") in mk)
+    check("사건 → 사건의 before 는 그대로 (사건 사이의 시간 관계)", mk[("gr", "hs")] == "before")
+    check("사건 → 학교·전공의 studied_at 은 재학이 아니라 그 곳(at)이다 — 온톨로지의 출발 갈래가 사람뿐",
+          mk[("hs", "sch")] == "at" and mk[("hs", "major")] == "at", str(mk))
+    mr = {(e["source"], e["target"]): e.get("role") for e in m["edges"]}
+    check("사람 → 사건의 역할은 사건 이름의 술어다 (이주·입학), 술어가 없으면 사건의 종류(실패)",
+          (mr[("me", "mv")], mr[("me", "hs")], mr[("me", "fail")]) == ("이주", "입학", "실패"), str(mr))
+    check("옮기면서 원래 타입이 말하던 것은 역할로 남는다 (studied_at → 전공 = '전공')", mr[("hs", "major")] == "전공", str(mr))
+    mn = {n["id"]: n["type"] for n in m["nodes"]}
+    lab = lambda a, b: life_mod.edge_label(mk[(a, b)], mn[a], mn[b], mr.get((a, b)))
+    got = (lab("me", "mv"), lab("me", "fail"), lab("hs", "sch"), lab("hs", "major"), lab("mv", "usa"), lab("gr", "hs"), lab("me", "kim"), lab("kim", "park"))
+    check("선 위의 말: 역할이 이기고, 없으면 양끝을 본다 — 이주 · 실패 · 학교 · 전공 · 이주지 · 다음 · 친구 · 같은 학교",
+          got == ("이주", "실패", "학교", "전공", "이주지", "다음", "친구", "같은 학교"), str(got))
+    check("사람 → 학교는 재학, 표에 없는 조합은 일반 이름", life_mod.edge_label("studied_at", "Person", "School") == "재학"
+          and life_mod.edge_label("led_to", "PersonalEvent", "PersonalEvent") == "이어짐")
+    check("화면에 '뒤'·'동안'·'수학'·'겪음'이 서지 않는다 — 실측 그래프의 모든 선",
+          not {lab(a, b) for a, b in mk} & {"뒤", "동안", "수학", "앞", "겪음"}, str({lab(a, b) for a, b in mk}))
+    check("술어 읽기: '스타트업 경력 시작' → '경력 시작', '30사단 훈련소 입소' → '입소', 술어 없는 개인 사건은 None",
+          (life_mod.deed_of({"name": "스타트업 경력 시작", "type": "PersonalEvent"}), life_mod.deed_of({"name": "30사단 훈련소 입소", "type": "PersonalEvent"}),
+           life_mod.deed_of({"name": "아버지 인쇄소 부도", "type": "PersonalEvent"})) == ("경력 시작", "입소", None))
+    # 온톨로지 관문 (한국사의 "모든 엣지 타입에 문장 규칙이 있다" 와 같은 자리)
+    check("이름표(EDGE_TYPE_KO)와 온톨로지(LIFE_EDGES)의 관계가 같고 일반 이름이 같다",
+          set(life_mod.EDGE_TYPE_KO) == set(life_mod.LIFE_EDGES)
+          and all(life_mod.EDGE_TYPE_KO[k] == v[0] for k, v in life_mod.LIFE_EDGES.items()),
+          str({k for k, v in life_mod.LIFE_EDGES.items() if life_mod.EDGE_TYPE_KO.get(k) != v[0]} | (set(life_mod.EDGE_TYPE_KO) ^ set(life_mod.LIFE_EDGES))))
+    def _relax_fits():
+        for (kind, sc, dc), moved in life_mod.RELAX.items():
+            if kind not in life_mod.LIFE_EDGES or moved not in life_mod.LIFE_EDGES:
+                return f"{kind}→{moved} 모르는 타입"
+            spec = life_mod.LIFE_EDGES[moved]
+            a, b = (dc, sc) if moved == "experienced" and sc == "event" else (sc, dc)
+            if a not in spec[1] or b not in spec[2]:
+                return f"{kind}({sc}→{dc}) → {moved} 가 표에 안 맞음"
+            if sc in life_mod.LIFE_EDGES[kind][1] and dc in life_mod.LIFE_EDGES[kind][2]:
+                return f"{kind}({sc}→{dc}) 는 이미 맞는데 RELAX 에 있음"
+        return ""
+    check("RELAX 의 결과는 전부 온톨로지에 맞고, 이미 맞는 짝은 옮기지 않는다", _relax_fits() == "", _relax_fits())
+    check("모든 노드 타입에 갈래가 있고 갈래는 캔버스의 여덟 색", set(life_mod.GRAPH_TYPE) == set(life_mod.NODE_TYPE_KO)
+          and set(life_mod.GRAPH_TYPE.values()) <= set(life_mod._ANY))
+    check("일반 이름은 전부 한글", all(re.search(r"[가-힣]", v[0]) for v in life_mod.LIFE_EDGES.values()))
+    check("표 밖 엣지는 버리지 않고 센다", life_mod.tidy_edges(
+        [{"id": "a", "type": "Book", "name": "책"}, {"id": "b", "type": "School", "name": "학교"}],
+        [{"source": "a", "target": "b", "type": "parent_of", "confidence": 1.0}], None) != []
+        and len(life_mod.tidy_edges([{"id": "a", "type": "Book", "name": "책"}, {"id": "b", "type": "School", "name": "학교"}],
+                                    (ee := [{"source": "a", "target": "b", "type": "parent_of", "confidence": 1.0}]), None)) == 1 and len(ee) == 1)
+    check("지시문이 주인공의 사건은 experienced, 친구는 friend_of 라 한다",
+          "experienced 로 잇는다" in life_mod.build_user("이야기", anchors=[]) and "friend_of" in life_mod.build_user("이야기", anchors=[]))
+    # 화면은 부팅 때 옛 자료를 POST /api/life/refine 으로 보내 같은 다듬기를 받는다
+    # (Handler.do_POST — 소켓이 필요해 여기서는 refine 만 잰다).
+    # 더하는 이야기 — 옛 그래프에 붙이지, 지우고 새로 만들지 않는다 (2026-09-08).
+    base = {
+        "nodes": [{"id": "person_1", "type": "Person", "name": "나", "start_date": "1985", "year": 1985, "confidence": 1.0},
+                  {"id": "ev_move", "type": "PersonalEvent", "name": "서울 이사", "year": 1998, "confidence": 1.0},
+                  {"id": "seoul", "type": "Residence", "name": "서울 관악구", "confidence": 1.0}],
+        "edges": [{"source": "person_1", "target": "seoul", "type": "lived_in", "confidence": 1.0}],
+        "timeline": [{"event_id": "ev_move", "life_stage": "중학교", "year": 1998, "previous_event": None, "next_event": None}],
+        "historical_connections": [], "turning_points": [{"event": "ev_move", "turning_point_score": 7, "reason": "…"}],
+        "impact_analysis": [], "counterfactual_analysis": [], "life_patterns": [],
+        "influence_ranking": {"items": []}, "family_analysis": {"members": []}, "follow_up_questions": ["옛 물음"],
+        "subject": {"id": "person_1", "name": "나", "birth_year": 1985},
+    }
+    add_raw = {
+        "nodes": [{"id": "father", "type": "Person", "name": "아버지", "confidence": 1.0},   # 첫 인물이 주인공이 아니다
+                  {"id": "me2", "type": "Person", "name": "사용자", "confidence": 1.0},        # 주인공을 딴 id 로 불렀다
+                  {"id": "ev_move2", "type": "PersonalEvent", "name": "서울 이사", "start_date": "1998-03", "confidence": 1.0},  # 이름이 같다
+                  {"id": "ev_univ", "type": "PersonalEvent", "name": "대학 입학", "start_date": "20살", "confidence": 1.0}],
+        "edges": [{"source": "father", "target": "me2", "type": "parent_of", "confidence": 1.0},
+                  {"source": "me2", "target": "seoul", "type": "lived_in", "confidence": 1.0},   # 이미 있는 관계
+                  {"source": "ev_move2", "target": "ev_univ", "type": "caused", "confidence": 0.8}],
+        "timeline": [{"event_id": "ev_univ", "life_stage": "대학", "age": 20}],
+        "historical_connections": [],
+        "turning_points": [{"event": "ev_move2", "turning_point_score": 8, "reason": "다시"}, {"event": "ev_univ", "turning_point_score": 6, "reason": "…"}],
+        "follow_up_questions": ["새 물음"],
+    }
+    prompt = life_mod.build_user("더하는 이야기", anchors=[], existing=life_mod.existing_summary(base))
+    check("더할 때는 있는 노드와 주인공 id 를 모델에게 보인다",
+          "ev_move · 개인 사건 · 서울 이사 · 1998" in prompt and "주인공은 id person_1" in prompt and "생년은 1985년" in prompt, prompt[-400:])
+    addv, _ = life_mod.validate(add_raw, subject=base["subject"])
+    check("더할 때 주인공은 첫 인물이 아니라 옛 주인공이다", addv["subject"]["id"] == "me2" and addv["subject"]["name"] == "나", str(addv["subject"]))
+    check("옛 주인공의 생년으로 나이를 푼다 (20살 → 2005)", addv["nodes"][3]["year"] == 2005, str(addv["nodes"][3]))
+    merged, added = life_mod.merge(base, addv)
+    ids = [n["id"] for n in merged["nodes"]]
+    check("있던 노드는 남고 새 것만 는다 (아버지·대학 입학)", ids == ["person_1", "ev_move", "seoul", "father", "ev_univ"] and added["nodes"] == 2, str(ids))
+    check("딴 id 로 부른 주인공은 옛 주인공에 잇는다",
+          any(e["source"] == "father" and e["target"] == "person_1" and e["type"] == "parent_of" for e in merged["edges"]), str(merged["edges"]))
+    check("같은 이름의 사건은 하나로 — 빈 칸만 채운다", merged["nodes"][1]["start_date"] == "1998-03" and merged["nodes"][1]["year"] == 1998)
+    check("이미 있는 관계는 두 번 세지 않는다", added["edges"] == 2 and sum(1 for e in merged["edges"] if e["type"] == "lived_in") == 1, str(merged["edges"]))
+    check("연표는 해 순으로 다시 서고 앞뒤가 이어진다",
+          [t["event_id"] for t in merged["timeline"]] == ["ev_move", "ev_univ"] and merged["timeline"][0]["next_event"] == "ev_univ"
+          and merged["timeline"][1]["previous_event"] == "ev_move", str(merged["timeline"]))
+    check("분석은 없던 것만 붙는다 (전환점 서울 이사는 옛 것 그대로)",
+          [(t["event"], t["turning_point_score"]) for t in merged["turning_points"]] == [("ev_move", 7), ("ev_univ", 6)], str(merged["turning_points"]))
+    check("물음은 새 것으로", merged["follow_up_questions"] == ["새 물음"])
+    check("주인공·생년은 옛 것", merged["subject"] == {"id": "person_1", "name": "나", "birth_year": 1985})
+    check("옛 그래프는 손대지 않는다 (복사본에 더한다)", len(base["nodes"]) == 3 and len(base["edges"]) == 1)
     st, ctx = _life_dispatch(api, "/api/context", {"from": ["1985"], "to": ["2026"]})
     check("/api/context 가 구간의 재위 띠와 사건을 준다",
           st == 200 and [r["label"] for r in ctx["reigns"]] == ["김대중"] and {a["id"] for a in ctx["anchors"]} == {"wd:IMF", "wd:COV"}, str(ctx))
     st, ctx = _life_dispatch(api, "/api/context", {"from": ["1900"], "to": ["1990"]})
     check("구간 밖의 재위·사건은 안 준다", ctx["reigns"] == [] and ctx["anchors"] == [])
     life_mod.LIFE_DIR, keep_dir = Path(tmp) / "life", life_mod.LIFE_DIR
+    # 서버는 폴더의 개인 파일을 화면에 주지 않는다 (2026-09-08 — 기본 자료 없음).
     st, body = _life_dispatch(api, "/api/life", {})
-    check("저장된 개인 역사가 없으면 404 를 한국어로", st == 404 and "없" in body["error"])
-    life_mod.save(payload, life_mod.LIFE_DIR / "나.json")
-    st, body = _life_dispatch(api, "/api/life", {})
-    check("저장하면 /api/life 가 그것을 준다", st == 200 and body["subject"]["name"] == "나" and body["_file"] == "나.json")
+    check("저장된 개인 그래프를 서버가 골라 주는 길은 없다", st == 404, str(st))
 
     # 화면의 '내 인생 입력하기' — 글을 받아 스레드에서 묻고, 화면이 물어 간다.
     # 모델은 부르지 않는다 (MLX 는 35GB 를 잡는다). 백엔드를 가짜로 바꿔 낀다.
@@ -5660,6 +5855,16 @@ with tempfile.TemporaryDirectory() as tmp:
         check("저장까지 한다 (data/life 밖으로 안 나간다)", (life_mod.LIFE_DIR / "시험.json").is_file()
               and (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기")
         check("모델에게 그래프의 사건 이름을 보인다", "대한민국의 IMF 구제금융 요청" in made.user)
+        check("있는 그래프를 주면 거기에 더한다", job.start(tapi, "더", name="시험", base=st["payload"]))
+        for _ in range(200):
+            if job.status()["state"] != "running":
+                break
+            time.sleep(0.02)
+        st2 = job.status()
+        check("더한 결과는 옛 주인공을 지키고 더한 수를 알린다",
+              st2["state"] == "done" and st2["added"] == {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0}
+              and st2["payload"]["subject"]["id"] == st["payload"]["subject"]["id"] and "그래프는 이미 있다" in made.user, str(st2)[:300])
+        check("원문은 파일에 이어 둔다", (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기\n\n더")
         st, body = _life_dispatch(api, "/api/life/job", {})
         check("/api/life/job 이 상태를 준다 (배포에서는 늘 idle)", st == 200 and "state" in body)
         class _Slow(_FakeLife):
@@ -5681,6 +5886,322 @@ with tempfile.TemporaryDirectory() as tmp:
 
     life_mod.LIFE_DIR = keep_dir
     check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
+
+
+print("\n[가입·로그인 — 세션·CSRF·열린 리다이렉트 (auth)]")
+# 네트워크도 DB 도 안 쓴다. 여기서 재는 것은 **틀리면 계정이 털리는 자리**다.
+import json as _js  # noqa: E402
+import os as _os  # noqa: E402
+import time as _tm  # noqa: E402
+
+import histgraph.auth as _auth  # noqa: E402
+import histgraph.neon as _neon  # noqa: E402
+import histgraph.neon as neon_mod  # noqa: E402
+
+_keep_env = {k: _os.environ.get(k) for k in
+             ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+              "HISTGRAPH_SESSION_SECRET", "DATABASE_URL", "HISTGRAPH_ADMIN_EMAILS")}
+try:
+    _os.environ["HISTGRAPH_SESSION_SECRET"] = "x" * 48
+
+    # --- 서명 ---------------------------------------------------------
+    signed = _auth._sign(b'{"s":"abc"}')
+    check("서명한 값을 되읽는다", _auth._unsign(signed) == b'{"s":"abc"}')
+    body, _, sig = signed.partition(".")
+    check("값을 바꾸면 서명이 안 맞는다",
+          _auth._unsign(_auth.b64u(b'{"s":"evil"}') + "." + sig) is None)
+    check("서명만 있고 값이 없으면 버린다", _auth._unsign(".abc") is None)
+    check("점이 없으면 버린다", _auth._unsign("abc") is None)
+    _os.environ["HISTGRAPH_SESSION_SECRET"] = "y" * 48
+    check("열쇠가 바뀌면 옛 서명은 죽는다", _auth._unsign(signed) is None)
+    _os.environ["HISTGRAPH_SESSION_SECRET"] = "x" * 48
+
+    # --- CSRF 표 ------------------------------------------------------
+    t1, t2 = "session-one", "session-two"
+    check("CSRF 표는 세션마다 다르다", _auth.csrf_token(t1) != _auth.csrf_token(t2))
+    check("같은 세션이면 같은 표", _auth.csrf_token(t1) == _auth.csrf_token(t1))
+
+    # --- 열린 리다이렉트 -------------------------------------------------
+    # 이걸 놓치면 우리 주소로 시작하는 피싱 링크가 만들어진다.
+    for bad in ("//evil.example", "https://evil.example", "/\\evil.example",
+                "evil.example", "/n/x\r\nSet-Cookie: a=b"):
+        check(f"바깥으로 나가는 next 를 막는다 ({bad[:22]})", _auth._safe_next(bad) == "/")
+    check("우리 안의 경로는 그대로 둔다", _auth._safe_next("/n/wd:Q1?a=1#b") == "/n/wd:Q1?a=1#b")
+
+    # --- Host 헤더를 믿지 않는다 ------------------------------------------
+    check("모르는 Host 는 배포 주소로 친다", _auth.origin_for("evil.example") == _auth.SITE)
+    check("Host 가 없어도 배포 주소", _auth.origin_for(None) == _auth.SITE)
+    check("로컬 되돌이 주소는 포트를 가리지 않는다",
+          _auth.origin_for("127.0.0.1:8100") == "http://127.0.0.1:8100"
+          and _auth.origin_for("localhost:5173") == "http://localhost:5173"
+          and _auth.origin_for("[::1]:8123") == "http://[::1]:8123")
+    _os.environ["VERCEL"] = "1"
+    check("배포에서는 Host 를 아예 보지 않는다",
+          _auth.origin_for("127.0.0.1:8100") == _auth.SITE)
+    _os.environ.pop("VERCEL", None)
+
+    # --- 쿠키 ----------------------------------------------------------
+    jar = _auth.parse_cookies('a=1; __Host-hg_session=tok=en; b="q"')
+    check("쿠키를 첫 = 에서만 자른다", jar["__Host-hg_session"] == "tok=en")
+    check("따옴표를 벗긴다", jar["b"] == "q")
+    made = _auth.set_cookie("__Host-hg_session", "v", secure=True, max_age=60)
+    check("세션 쿠키는 HttpOnly·Secure·SameSite 를 다 든다",
+          "HttpOnly" in made and "Secure" in made and "SameSite=Lax" in made
+          and "Path=/" in made, made)
+    check("http 에서는 Secure 를 붙이지 않는다 (개발)",
+          "Secure" not in _auth.set_cookie("hg_session", "v", secure=False, max_age=60))
+    check("https 에서는 __Host- 를 붙인다",
+          _auth.cookie_name("hg_session", True) == "__Host-hg_session"
+          and _auth.cookie_name("hg_session", False) == "hg_session")
+
+    # https 요청은 접두사 없는 쿠키를 **보지 않는다** — 하위 도메인이 심어 둔
+    # 것이 이기면 접두사를 붙인 뜻이 없어진다 (세션 고정).
+    req = _auth.Request("GET", "/api/me", {},
+                        {"Host": "www.histgraph.space", "Cookie": "hg_session=심은것"})
+    check("https 에서 접두사 없는 세션 쿠키는 무시한다", req.cookie(_auth.COOKIE_SESSION) == "")
+    req2 = _auth.Request("GET", "/api/me", {},
+                         {"Host": "www.histgraph.space", "Cookie": "__Host-hg_session=진짜"})
+    check("https 에서 __Host- 쿠키는 읽는다", req2.cookie(_auth.COOKIE_SESSION) == "진짜")
+
+    # --- 응답은 캐시에 재우지 않는다 ---------------------------------------
+    # 배포는 /api 를 엣지에 하루 재운다. 이게 뚫리면 한 사람의 신원이
+    # 다음 사람에게 배달된다.
+    heads = dict(_auth.Response.json({"user": None}).headers)
+    check("계정 응답은 no-store 다", heads["Cache-Control"] == "private, no-store", str(heads))
+    check("쿠키에 따라 갈린다고 적는다", heads.get("Vary") == "Cookie")
+    check("302 도 no-store 다",
+          dict(_auth.Response.redirect("/").headers)["Cache-Control"] == "private, no-store")
+    check("Location 에 줄바꿈을 싣지 않는다",
+          "\n" not in dict(_auth.Response.redirect("/a\r\nX: 1").headers)["Location"])
+
+    # --- ID 토큰의 주장 ---------------------------------------------------
+    _os.environ["GOOGLE_CLIENT_ID"] = "our-app.apps.googleusercontent.com"
+    good = {"iss": "https://accounts.google.com", "aud": "our-app.apps.googleusercontent.com",
+            "exp": _tm.time() + 600, "nonce": "n1", "sub": "1", "email": "a@b.c",
+            "email_verified": True}
+    _auth._check_claims(dict(good), "n1")     # 안 터지면 통과
+    check("바른 토큰은 지나간다", True)
+    for name, bad in (
+        ("남의 앱에 발급된 것", {**good, "aud": "other.apps.googleusercontent.com"}),
+        ("발급자가 구글이 아닌 것", {**good, "iss": "https://evil.example"}),
+        ("만료된 것", {**good, "exp": _tm.time() - 1}),
+        ("이번 요청의 것이 아닌 것(nonce)", {**good, "nonce": "n2"}),
+        ("확인되지 않은 이메일", {**good, "email_verified": False}),
+    ):
+        try:
+            _auth._check_claims(dict(bad), "n1")
+            check(f"{name}을 막는다", False, "지나갔다")
+        except _auth.AuthError:
+            check(f"{name}을 막는다", True)
+
+    made = _auth.decode_id_token(
+        _auth.b64u(b'{"alg":"RS256"}') + "." + _auth.b64u(b'{"sub":"9"}') + ".sig")
+    check("ID 토큰의 가운데 마디를 읽는다", made == {"sub": "9"})
+
+    # --- 표 --------------------------------------------------------------
+    check("로그아웃은 POST 만 (GET 링크 하나로 남을 로그아웃시킬 수 없다)",
+          _auth.ROUTES["/api/auth/logout"][0] == frozenset({"POST"}))
+    check("탈퇴는 DELETE /api/me", "DELETE" in _auth.ROUTES["/api/me"][0])
+
+    # --- 꺼져 있을 때 -----------------------------------------------------
+    for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DATABASE_URL"):
+        _os.environ.pop(k, None)
+    check("설정이 없으면 기능이 꺼진다", _auth.enabled() is False)
+    off = _auth.route(_auth.Request("GET", "/api/me", {}, {"Host": "x"}))
+    check("꺼져 있어도 /api/me 는 답한다 (화면이 단추를 안 세운다)",
+          off.status == 200 and _js.loads(off.body)["enabled"] is False)
+    off2 = _auth.route(_auth.Request("POST", "/api/auth/logout", {}, {"Host": "x"}))
+    check("꺼져 있으면 나머지는 503", off2.status == 503)
+    check("가입과 무관한 길은 넘긴다 (그래프 쪽으로)",
+          _auth.route(_auth.Request("GET", "/api/meta", {}, {"Host": "x"})) is None)
+
+    # --- Neon 주소 --------------------------------------------------------
+    check("연결 문자열에서 HTTP 질의 주소를 만든다",
+          _neon.sql_endpoint("postgresql://u:p@ep-cool-1.ap-northeast-2.aws.neon.tech/db")
+          == "https://api.ap-northeast-2.aws.neon.tech/sql")
+    check("-pooler 호스트도 같은 자리로",
+          _neon.sql_endpoint("postgresql://u:p@ep-cool-1-pooler.us-east-2.aws.neon.tech/db")
+          == "https://api.us-east-2.aws.neon.tech/sql")
+    check("오류 메시지에 비밀번호를 싣지 않는다",
+          "s3cret" not in _neon._scrub("postgres://u:s3cret@h/db 에 못 닿음"))
+finally:
+    for k, v in _keep_env.items():
+        if v is None:
+            _os.environ.pop(k, None)
+        else:
+            _os.environ[k] = v
+
+
+print("\n[가입·로그인 — 왕복 전체를 실제로 돌려 본다]")
+# 구글에 나가는 한 번(`_exchange`)만 가짜로 끼우고, 나머지는 **진짜 코드**다 —
+# 쿠키를 굽고 세션을 만들고 표에 적고 다시 읽는다. 표는 로컬 SQLite
+# (accounts.LocalStore) 라 계정도 네트워크도 필요 없다.
+import histgraph.accounts as _acct  # noqa: E402
+
+_keep2 = {k: _os.environ.get(k) for k in
+          ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "HISTGRAPH_SESSION_SECRET",
+           "DATABASE_URL", "HISTGRAPH_ADMIN_EMAILS", "HISTGRAPH_ACCOUNTS_DB", "VERCEL")}
+_tmp = tempfile.TemporaryDirectory()
+try:
+    _os.environ.pop("DATABASE_URL", None)
+    _os.environ.pop("VERCEL", None)
+    _os.environ["GOOGLE_CLIENT_ID"] = "our-app.apps.googleusercontent.com"
+    _os.environ["GOOGLE_CLIENT_SECRET"] = "s3cret"
+    _os.environ["HISTGRAPH_SESSION_SECRET"] = "z" * 48
+    _os.environ["HISTGRAPH_ADMIN_EMAILS"] = "boss@example.com"
+
+    store = _acct.LocalStore()
+    store.path = Path(_tmp.name) / "accounts.sqlite"
+    _acct.init_schema(store)
+    _auth._db = store
+    check("설정이 갖춰지면 켜진다 (표는 로컬 SQLite)", _auth.enabled() is True)
+
+    def req(method, path, q=None, cookies="", body=b"", extra=None):
+        head = {"Host": "127.0.0.1:8100", "Cookie": cookies}
+        head.update(extra or {})
+        return _auth.Request(method, path, q or {}, head, body)
+
+    # 1) 동의 화면으로 — 서명 쿠키에 state·검증자·nonce 가 담긴다
+    started = _auth.route(req("GET", "/api/auth/google", {"next": ["/n/wd:Q1"]}))
+    heads = dict(started.headers)
+    check("동의 화면으로 보낸다", started.status == 302
+          and heads["Location"].startswith(_auth.GOOGLE_AUTH)
+          and "code_challenge_method=S256" in heads["Location"])
+    tx_cookie = heads["Set-Cookie"].split(";")[0]
+    tx = _js.loads(_auth._unsign(tx_cookie.split("=", 1)[1]))
+
+    # 2) 구글이 돌려보낸 자리. 토큰 교환만 가로챈다.
+    seen = {}
+    def fake_exchange(code, verifier, redirect_uri):
+        seen.update(code=code, verifier=verifier, redirect_uri=redirect_uri)
+        return {"iss": "https://accounts.google.com",
+                "aud": "our-app.apps.googleusercontent.com",
+                "exp": _tm.time() + 600, "nonce": tx["n"], "sub": "google-sub-1",
+                "email": "Boss@Example.com", "email_verified": True,
+                "name": "홍길동", "picture": "https://lh3.example/photo"}
+    keep_exchange, _auth._exchange = _auth._exchange, fake_exchange
+    try:
+        done = _auth.route(req("GET", "/api/auth/callback",
+                               {"code": ["the-code"], "state": [tx["s"]]},
+                               cookies=tx_cookie))
+    finally:
+        _auth._exchange = keep_exchange
+
+    check("PKCE 검증자를 함께 보낸다", seen.get("verifier") == tx["v"])
+    check("redirect_uri 는 이 요청이 사는 주소다",
+          seen.get("redirect_uri") == "http://127.0.0.1:8100/api/auth/callback")
+    dh = [v for k, v in done.headers if k == "Set-Cookie"]
+    check("로그인을 마치면 원래 자리로 돌려보낸다",
+          done.status == 302 and dict(done.headers)["Location"] == "/n/wd:Q1")
+    session = next(c.split(";")[0].split("=", 1)[1] for c in dh if c.startswith("hg_session="))
+    csrf = next(c.split(";")[0].split("=", 1)[1] for c in dh if c.startswith("hg_csrf="))
+    check("왕복 쿠키는 지운다", any(c.startswith("hg_oauth=;") for c in dh), str(dh))
+    check("세션 쿠키는 자바스크립트가 못 읽는다",
+          all("HttpOnly" in c for c in dh if c.startswith("hg_session=")))
+    check("CSRF 표는 자바스크립트가 읽어야 한다",
+          all("HttpOnly" not in c for c in dh if c.startswith("hg_csrf=")))
+
+    # 쿠키 값 자체는 어디에도 안 적혀 있다 — 해시만.
+    rows = store.query("select token_hash from sessions", [])
+    check("세션은 해시로만 저장된다",
+          len(rows) == 1 and rows[0]["token_hash"] != session
+          and rows[0]["token_hash"] == _auth._hash_token(session))
+
+    # 3) 가입자 한 줄이 생겼다
+    user = store.one("select * from users", [])
+    check("가입자 한 줄이 생긴다 (이메일은 소문자로도 남는다)",
+          user["google_sub"] == "google-sub-1" and user["email"] == "Boss@Example.com"
+          and user["email_lower"] == "boss@example.com")
+
+    jar = f"hg_session={session}"
+    csrf_head = {"X-Histgraph-CSRF": csrf, "Origin": "http://127.0.0.1:8100"}
+
+    me = _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)
+    check("/api/me 가 나를 알아본다",
+          me["user"]["이름"] == "홍길동" and me["user"]["이메일"] == "Boss@Example.com")
+    check("관리자를 가려낸다 (대소문자 무관)", me["user"]["관리자"] is True)
+    check("프로필 사진을 그대로 준다", me["user"]["사진"] == "https://lh3.example/photo")
+    check("남의 쿠키로는 아무도 아니다",
+          _js.loads(_auth.route(req("GET", "/api/me", cookies="hg_session=지어낸값")).body)["user"] is None)
+
+    # 4) 즐겨찾기 — 담고, 읽고, 뺀다
+    _auth.route(req("POST", "/api/my/bookmarks", cookies=jar, extra=csrf_head,
+                    body=b'{"id":"wd:Q1","label":"\xec\x84\xb8\xec\xa2\x85","note":"\xeb\x82\x98\xec\xa4\x91\xec\x97\x90"}'))
+    got = _js.loads(_auth.route(req("GET", "/api/my/bookmarks", cookies=jar)).body)
+    check("즐겨찾기를 담고 읽는다",
+          got["목록"][0]["id"] == "wd:Q1" and got["목록"][0]["이름"] == "세종"
+          and got["목록"][0]["메모"] == "나중에", str(got))
+    _auth.route(req("DELETE", "/api/my/bookmarks", {"id": ["wd:Q1"]}, cookies=jar, extra=csrf_head))
+    check("빼면 없어진다",
+          _js.loads(_auth.route(req("GET", "/api/my/bookmarks", cookies=jar)).body)["목록"] == [])
+
+    # 5) 내 역사 — 올리고 내린다
+    _auth.route(req("PUT", "/api/my/life", cookies=jar, extra=csrf_head,
+                    body='{"doc":{"nodes":[{"id":"me","name":"나"}]}}'.encode()))
+    life = _js.loads(_auth.route(req("GET", "/api/my/life", cookies=jar)).body)
+    check("내 역사를 계정에 담고 되읽는다", life["doc"]["nodes"][0]["name"] == "나", str(life)[:120])
+
+    # 6) 로그아웃 — **서버에서** 지운다
+    out = _auth.route(req("POST", "/api/auth/logout", cookies=jar, extra=csrf_head))
+    check("로그아웃은 세션을 서버에서 지운다",
+          out.status == 200 and store.query("select 1 from sessions", []) == [])
+    check("지워진 세션으로는 못 들어온다",
+          _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)["user"] is None)
+
+    # 7) 회원 탈퇴 — 담아 둔 것까지 한 트랜잭션으로
+    started2 = _auth.route(req("GET", "/api/auth/google"))
+    tx2c = dict(started2.headers)["Set-Cookie"].split(";")[0]
+    tx2 = _js.loads(_auth._unsign(tx2c.split("=", 1)[1]))
+    def fake2(code, verifier, redirect_uri):
+        return {**fake_exchange(code, verifier, redirect_uri), "nonce": tx2["n"]}
+    keep_exchange, _auth._exchange = _auth._exchange, fake2
+    try:
+        done2 = _auth.route(req("GET", "/api/auth/callback",
+                                {"code": ["c"], "state": [tx2["s"]]}, cookies=tx2c))
+    finally:
+        _auth._exchange = keep_exchange
+    check("두 번째 로그인은 가입자를 새로 만들지 않는다 (sub 이 열쇠)",
+          len(store.query("select id from users", [])) == 1)
+    s2 = next(v.split(";")[0].split("=", 1)[1]
+              for k, v in done2.headers if k == "Set-Cookie" and v.startswith("hg_session="))
+    jar2 = f"hg_session={s2}"
+    head2 = {"X-Histgraph-CSRF": _auth.csrf_token(s2), "Origin": "http://127.0.0.1:8100"}
+    _auth.route(req("POST", "/api/my/bookmarks", cookies=jar2, extra=head2, body=b'{"id":"wd:Q2"}'))
+    gone = _auth.route(req("DELETE", "/api/me", cookies=jar2, extra=head2))
+    check("탈퇴하면 가입자·세션·담아 둔 것이 함께 사라진다",
+          gone.status == 200
+          and store.query("select 1 from users", []) == []
+          and store.query("select 1 from sessions", []) == []
+          and store.query("select 1 from bookmarks", []) == []
+          and store.query("select 1 from life_docs", []) == [])
+
+    # 로컬과 배포의 표가 어긋나면 로컬에서 되던 것이 배포에서 깨진다
+    import re as _re
+    def cols(ddl, table):
+        body = _re.search(rf"create table if not exists {table} \((.*?)\n\);", ddl, _re.S).group(1)
+        return {ln.strip().split()[0] for ln in body.strip().splitlines()
+                if ln.strip() and not ln.strip().startswith("primary key")}
+    for t in ("users", "sessions", "life_docs", "bookmarks"):
+        check(f"로컬 표와 Neon 표의 열이 같다 ({t})",
+              cols(_acct.SCHEMA, t) == cols(neon_mod.SCHEMA, t),
+              str(cols(_acct.SCHEMA, t) ^ cols(neon_mod.SCHEMA, t)))
+
+    # 배포에서는 파일로 물러나지 않는다 — 물러나면 가입자가 조용히 사라진다
+    _os.environ["VERCEL"] = "1"
+    check("배포에서 DATABASE_URL 이 없으면 꺼진다", _auth.enabled() is False)
+    try:
+        _acct.open_store()
+        check("배포에서는 SQLite 로 물러나지 않는다", False, "물러났다")
+    except _acct.StoreError:
+        check("배포에서는 SQLite 로 물러나지 않는다", True)
+finally:
+    _auth._db = None
+    _tmp.cleanup()
+    for k, v in _keep2.items():
+        if v is None:
+            _os.environ.pop(k, None)
+        else:
+            _os.environ[k] = v
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

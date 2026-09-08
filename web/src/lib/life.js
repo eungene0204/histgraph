@@ -33,10 +33,13 @@ export const EDGE_TYPE_KO = {
   parent_of: '부모', child_of: '자녀', grandparent_of: '조부모', ancestor_of: '조상', relative_of: '친척',
   influenced: '영향을 줌', inspired: '영감을 줌', helped: '도움', mentored_by: '스승',
   worked_with: '함께 일함', met: '만남',
+  // 아래 셋은 지시문에 없고 다듬기(tidyEdges · life.py tidy_edges)가 세운다 — 친구는
+  // '만남'이 아니고, 주인공과 자기 사건은 '뒤'·'동안'이 아니다 (2026-09-08 사용자 지적).
+  friend_of: '친구', experienced: '당사자', schoolmate: '같은 학교', at: '곳',
   caused: '원인', triggered: '촉발', led_to: '이어짐', changed: '바꿈', affected: '영향', resulted_in: '결과',
-  before: '앞', after: '뒤', during: '동안', overlapped: '겹침',
+  before: '다음', after: '이전', during: '동안', overlapped: '겹침',
   born_in: '출생지', lived_in: '거주', moved_to: '이주', visited: '방문', grew_up_in: '성장지',
-  studied_at: '수학', worked_at: '근무', member_of: '소속',
+  studied_at: '재학', worked_at: '근무', member_of: '소속',
   changed_by: '바뀜', inspired_by: '영감을 받음',
   read: '읽음', changed_belief: '생각을 바꿈', recommended_by: '추천받음', shared_with: '함께 나눔',
   listened_to: '들음', associated_with: '연관', reminds_of: '떠올림',
@@ -55,6 +58,146 @@ export const LIFE_STAGES = ['출생', '어린 시절', '초등학교', '중학�
 // 연표에 점으로 찍는 타입. 사람·장소·책은 이어지는 것이라 점이 아니다.
 export const EVENT_TYPES = new Set(['PersonalEvent', 'HistoricalEvent', 'TurningPoint', 'Crisis',
   'Achievement', 'Failure', 'Decision', 'Memory']);
+
+// --- 온톨로지: 관계마다 출발·도착 갈래 (life.py LIFE_EDGES 와 같은 표) ----------------
+// 한국사 그래프의 ontology.EDGE_TYPES 와 같은 꼴 — [일반 이름, 출발 갈래, 도착 갈래].
+// 갈래는 캔버스의 여덟 색(GRAPH_TYPE)이다. 어긋난 엣지는 버리지 않고 RELAX 가 뜻이
+// 남는 타입으로 옮긴다 (untangle.RELAX). 서버 없이 브라우저에 남은 옛 그래프도 여기서 고쳐진다.
+const P = ['person']; const E = ['event']; const O = ['org']; const L = ['place']; const T = ['period']; const R = ['role'];
+const W = ['artwork', 'media'];
+const ANY = ['person', 'event', 'org', 'place', 'artwork', 'media', 'period', 'role'];
+export const LIFE_EDGES = {
+  parent_of: ['부모', P, P], child_of: ['자녀', P, P], grandparent_of: ['조부모', P, P], ancestor_of: ['조상', P, P], relative_of: ['친척', P, P],
+  friend_of: ['친구', P, P], met: ['만남', P, P], worked_with: ['함께 일함', P, P], schoolmate: ['같은 학교', P, P],
+  mentored_by: ['스승', P, P], helped: ['도움', P, P],
+  influenced: ['영향을 줌', [...P, ...E, ...W, ...O], [...P, ...E]], inspired: ['영감을 줌', [...P, ...E, ...W, ...O], [...P, ...E]],
+  // 사건 참여 — 한국사의 participated_in. 사람 → 사건이고 역할(role)이 선의 이름이다.
+  experienced: ['당사자', P, [...E, ...T]],   // 도착에 period: 모델이 '출생'을 Time 으로 세운다
+  caused: ['원인', [...E, ...P, ...O, ...W], E], triggered: ['촉발', [...E, ...P, ...O, ...W], E],
+  led_to: ['이어짐', E, E], resulted_in: ['결과', E, E],
+  changed: ['바꿈', [...E, ...W, ...P], [...P, ...E, ...R]], affected: ['영향', [...E, ...W, ...P], [...P, ...E, ...R]],
+  before: ['다음', [...E, ...T], [...E, ...T]], after: ['이전', [...E, ...T], [...E, ...T]],
+  during: ['동안', E, [...E, ...T]], overlapped: ['겹침', [...E, ...T], [...E, ...T]],
+  // 사건이 일어난 곳 — 한국사의 occurred_at
+  at: ['곳', [...E, ...T], [...O, ...L, ...R]],
+  born_in: ['출생지', [...P, ...E, ...T], L], lived_in: ['거주', [...P, ...E], L], moved_to: ['이주', [...P, ...E], L],
+  visited: ['방문', [...P, ...E], L], grew_up_in: ['성장지', P, L],
+  studied_at: ['재학', P, [...O, ...R]], worked_at: ['근무', P, [...O, ...R]], member_of: ['소속', P, O],
+  read: ['읽음', P, W], watched: ['봄', P, W], listened_to: ['들음', P, W], played: ['함', P, W], used: ['사용', P, W],
+  learned: ['배움', P, [...W, ...R]], built_skill: ['기술을 익힘', [...P, ...W, ...E], R],
+  recommended_by: ['추천받음', [...P, ...W], P], shared_with: ['함께 나눔', [...P, ...W], P],
+  changed_belief: ['생각을 바꿈', [...W, ...E, ...P], P], changed_view: ['관점을 바꿈', [...W, ...E, ...P], P],
+  changed_life: ['삶을 바꿈', [...W, ...E, ...P, ...O], P], changed_by: ['바뀜', [...P, ...E], [...W, ...E, ...P]],
+  inspired_by: ['영감을 받음', [...P, ...E, ...W], [...W, ...P, ...E]],
+  shaped_interest: ['관심을 만듦', [...W, ...E, ...P], [...P, ...R]], shaped: ['형성', [...W, ...E, ...P, ...O], [...P, ...R]],
+  enabled: ['가능하게 함', [...W, ...E, ...P, ...O], [...E, ...P, ...O]],
+  created_memory: ['기억을 남김', [...W, ...E, ...P, ...L], [...E, ...P]], remembered_by: ['기억됨', ANY, P],
+  reminds_of: ['떠올림', [...W, ...L, ...E], ANY], associated_with: ['연관', ANY, ANY],
+  connected_to_event: ['사건과 연결', ANY, E], triggered_by: ['촉발됨', E, [...E, ...P, ...W, ...O]],
+  connected_to: ['연결', ANY, ANY], connected: ['연결', ANY, ANY],
+};
+export const MAX_TARGETS = { born_in: 1 };
+const TIME_EDGES = ['before', 'after', 'during', 'overlapped'];
+export const RELAX = new Map([
+  ...TIME_EDGES.map((t) => [`${t}|person|event`, 'experienced']),
+  ...TIME_EDGES.map((t) => [`${t}|event|person`, 'experienced']),
+  ['born_in|person|period', 'experienced'],
+  ...['studied_at', 'worked_at', 'member_of', 'during', 'lived_in'].flatMap((t) => [[`${t}|event|org`, 'at'], [`${t}|event|role`, 'at']]),
+  ...['studied_at', 'worked_at', 'member_of'].flatMap((t) => [[`${t}|period|org`, 'at'], [`${t}|period|role`, 'at']]),
+]);
+const RELAX_ROLE = { 'studied_at|role': '전공', 'worked_at|role': '직업', 'born_in|period': '출생' };
+const SYMMETRIC = new Set(['met', 'friend_of', 'worked_with', 'schoolmate', 'relative_of', 'shared_with', 'overlapped']);
+const FRIEND = /친구|벗|단짝|절친|죽마고우/;
+const COLLEAGUE = /동료|같이 일|함께 일|같은 회사|같은 팀/;
+// 사건 이름 꼬리의 술어 — 당사자가 그 사건에서 한 일 (한국사의 역할 머리말 '주도'·'지휘' 자리)
+const DEED = /(입학|졸업|수료|자퇴|휴학|복학|편입|전학|유학|이주|이사|이민|귀국|출국|귀화|창업|개업|폐업|입사|퇴사|이직|취업|취직|승진|발령|전근|파견|은퇴|입소|입대|전역|제대|소집해제|결혼|이혼|약혼|출생|출산|사망|합격|낙방|수상|당선|낙선|출마|입원|수술|데뷔|입양|이별|재회|시작|종료)\s*$/;
+const EVENT_KIND_ROLE = { TurningPoint: '전환점', Crisis: '위기', Achievement: '성취', Failure: '실패', Decision: '결정', Memory: '기억' };
+export const klass = (n) => (n ? GRAPH_TYPE[n.type] : undefined);
+export function deedOf(event) {
+  const name = String(event.name || '').trim();
+  const m = DEED.exec(name);
+  if (m && m[1] !== '시작' && m[1] !== '종료') return m[1];
+  if (m) {
+    const head = name.slice(0, m.index).split(/\s+/).filter(Boolean);
+    if (head.length) return `${head[head.length - 1]} ${m[1]}`;
+  }
+  return EVENT_KIND_ROLE[event.type] || null;
+}
+export function fits(kind, s, t) {
+  const spec = LIFE_EDGES[kind];
+  return !!spec && spec[1].includes(klass(s)) && spec[2].includes(klass(t));
+}
+
+// 모델이 고른 타입을 온톨로지와 증거로 고친다 — 서버의 life.py tidy_edges 와 같은 다섯 규칙.
+//   1. 출발·도착이 표에 어긋나면 RELAX 로 옮긴다 (없으면 그대로 두고 issues 에 센다)
+//   2. met 인데 설명이 '친구'라 하면 friend_of, '동료'면 worked_with
+//   3. 미룬(확신 < 1) worked_with 인데 둘 다 일한 곳이 없고 같은 학교면 schoolmate
+//   4. 사람 → 사건은 역할을 단다 — 당사자는 사건의 술어(입학·졸업), 남은 '함께'
+//   5. 대칭 관계의 역방향 중복은 하나만
+export function tidyEdges(nodes, edges, me, issues = []) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const schools = new Map();
+  const works = new Map();
+  const add = (m, k, v) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(v); };
+  for (const e of edges) {
+    const s = byId.get(e.source); const t = byId.get(e.target);
+    if (!s || !t || klass(s) !== 'person') continue;
+    if (e.type === 'studied_at' && (t.type === 'School' || t.type === 'University')) add(schools, s.id, t.id);
+    if (e.type === 'worked_at' || t.type === 'Company' || t.type === 'Business') add(works, s.id, t.id);
+  }
+  const out = [];
+  const seen = new Set();
+  const targets = new Map();
+  for (const raw of edges) {
+    const e = { ...raw };
+    let s = byId.get(e.source); let t = byId.get(e.target);
+    let kind = e.type;
+    let role = e.role || null;
+    if (s && t && LIFE_EDGES[kind]) {
+      if (!fits(kind, s, t)) {
+        const moved = RELAX.get(`${kind}|${klass(s)}|${klass(t)}`);
+        if (moved === 'experienced' && klass(s) === 'event') { [e.source, e.target, s, t] = [t.id, s.id, t, s]; }
+        if (moved) { role = role || RELAX_ROLE[`${kind}|${klass(t)}`] || null; kind = moved; }
+        else issues.push(`${kind}: ${s.name}(${klass(s)}) → ${t.name}(${klass(t)}) — 표 밖`);
+      }
+      if (kind === 'met') {
+        const text = [e.description, ...[s, t].filter((n) => n !== me).map((n) => n.description)].filter(Boolean).join(' ');
+        if (FRIEND.test(text)) kind = 'friend_of';
+        else if (COLLEAGUE.test(text)) kind = 'worked_with';
+      }
+      if (kind === 'worked_with' && (e.confidence ?? 1) < 1 && !works.has(s.id) && !works.has(t.id)
+        && [...(schools.get(s.id) || [])].some((id) => schools.get(t.id)?.has(id))) kind = 'schoolmate';
+      if (kind === 'experienced' && !role) role = (!me || s === me) ? deedOf(t) : '함께';
+    }
+    const key = SYMMETRIC.has(kind) ? `${[e.source, e.target].sort().join('|')}|${kind}` : `${e.source}>${e.target}|${kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (MAX_TARGETS[kind]) {
+      const k = `${e.source}|${kind}`;
+      add(targets, k, e.target);
+      if (targets.get(k).size > MAX_TARGETS[kind]) issues.push(`${kind}: ${s?.name} 의 도착이 ${targets.get(k).size}개`);
+    }
+    e.type = kind;
+    if (role) e.role = role; else delete e.role;
+    out.push(e);
+  }
+  return out;
+}
+
+// 선 위에 적는 말. 역할이 있으면 그것이 타입 이름을 이긴다 (한국사의 LABEL_HEADS — '주도'가
+// '참여'보다 정확하다). 없으면 양끝을 본다: 사건이 일어난 곳(at)은 도착이 학교면 '학교',
+// 전공이면 '전공'이고, 사건 → 장소의 moved_to 는 '이주지'다. 그것도 없으면 타입의 일반 이름.
+const AT_LABEL = { School: '학교', University: '학교', Company: '회사', Business: '회사', Organization: '단체', Community: '단체',
+  Project: '프로젝트', Investment: '투자', Occupation: '직업', Skill: '기술', Hobby: '취미',
+  Location: '장소', BirthPlace: '장소', Residence: '장소', TravelLocation: '장소' };
+const EVENT_TO = { moved_to: '이주지', visited: '방문지', lived_in: '거주지', born_in: '출생지' };
+export function edgeLabel(kind, srcType, dstType, role = null) {
+  if (role) return role;
+  if (kind === 'at') return AT_LABEL[dstType] || '곳';
+  const sc = GRAPH_TYPE[srcType];
+  if ((sc === 'event' || sc === 'period') && EVENT_TO[kind]) return EVENT_TO[kind];
+  return LIFE_EDGES[kind]?.[0] || EDGE_TYPE_KO[kind] || kind;
+}
 
 // --- 그래프 --------------------------------------------------------------
 // 개인 그래프는 역사 그래프와 **같은 캔버스**(graph-view.js GraphView)에 선다.
@@ -95,8 +238,9 @@ export function graphPayload(life, center = null) {
     return { id: n.id, label: n.name, type, group: GRAPH_GROUP[type], degree: degree.get(n.id) || 0,
       kind: n.type, kind_label: NODE_TYPE_KO[n.type] };
   });
+  const kindOf = new Map(life.nodes.map((n) => [n.id, n.type]));
   const edges = life.edges.map((e) => ({
-    s: e.source, t: e.target, type: e.type, label: EDGE_TYPE_KO[e.type], conf: e.confidence ?? 1,
+    s: e.source, t: e.target, type: e.type, label: edgeLabel(e.type, kindOf.get(e.source), kindOf.get(e.target), e.role), conf: e.confidence ?? 1,
   }));
   return { center: center && nodes.some((n) => n.id === center) ? center : (life.subject?.id || nodes[0]?.id), nodes, edges };
 }
@@ -112,7 +256,7 @@ export function graphMeta(life) {
   }
   const edgeTypes = {};
   for (const e of pay.edges) {
-    const t = (edgeTypes[e.type] ||= { label: e.label, count: 0 });
+    const t = (edgeTypes[e.type] ||= { label: EDGE_TYPE_KO[e.type] || e.label, count: 0 });
     t.count++;
   }
   const seeds = [...pay.nodes].sort((a, b) => b.degree - a.degree).slice(0, 8);
@@ -175,13 +319,26 @@ export function parseWhen(text, birthYear = null) {
     }
     return { year: birthYear + n, end: birthYear + n, precision: 'age' };
   }
+  // '고등학교 2학년'·'고2' — 학년은 해다. 생년에서 센다 (초1 = 생년+7, 중1 = +13,
+  // 고1 = +16, 대1 = +19). 입학 해에서 세는 더 나은 길은 서버(life.school_year)에 있다.
+  m = /(초등학교|국민학교|초등|중학교|고등학교|고교|대학교|대학)\s*(\d)\s*학년/.exec(s)
+    || /(?<![가-힣\d])(초|중|고|대)\s?(\d)(?![\d학년-])/.exec(s);
+  if (m) {
+    if (birthYear == null) return { year: null, end: null, precision: 'age' };
+    const level = m[1][0];
+    const y = birthYear + SCHOOL_ENTRY_AGE[level] + (+m[2]) - 1;
+    return { year: y, end: y, precision: 'age' };
+  }
   return { year: null, end: null, precision: '' };
 }
+const SCHOOL_ENTRY_AGE = { '초': 7, '국': 7, '중': 13, '고': 16, '대': 19 };
 
 // --- 정규화 ----------------------------------------------------------------
 // 서버(`histgraph life`)를 거친 JSON 은 이미 이 꼴이다. 화면에 바로 붙여 넣은
 // 모델 답은 여기서 같은 꼴이 된다: 모르는 타입·관계는 버리고, 날짜를 해로
 // 풀고, 연표 항목이 해를 안 적었으면 노드의 해를 쓴다.
+const SELF_NAMES = new Set(['사용자', '본인', '화자', '주인공', '나 (사용자)', '사용자 (나)', 'user', 'me', 'self']);
+
 export function normalize(raw) {
   const out = { ...raw };
   const nodes = [];
@@ -192,6 +349,9 @@ export function normalize(raw) {
     nodes.push({ ...n, confidence: clamp(+n.confidence || 1, 0, 1) });
   }
   const me = nodes.find((n) => n.type === 'Person') || null;
+  // 지시문이 화자를 '사용자'라 부르니 모델도 그 이름을 적는다. 화면에서는 '나'다
+  // (2026-09-08). 서버를 안 거친 자료(브라우저·계정에 남은 것)도 여기서 고쳐진다.
+  if (me && SELF_NAMES.has(me.name.trim().toLowerCase())) me.name = '나';
   const birth = me ? parseWhen(me.start_date).year : null;
   for (const n of nodes) {
     if (n.year !== undefined && n.precision !== undefined) continue;   // 서버가 이미 풀었다
@@ -202,9 +362,13 @@ export function normalize(raw) {
     n.precision = w.precision;
   }
   out.nodes = nodes;
-  out.subject = raw.subject || (me ? { id: me.id, name: me.name, birth_year: birth } : null);
+  out.subject = raw.subject
+    ? { ...raw.subject, name: (me && raw.subject.id === me.id) ? me.name : raw.subject.name }
+    : (me ? { id: me.id, name: me.name, birth_year: birth } : null);
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  out.edges = (raw.edges || []).filter((e) => e && EDGE_TYPE_KO[e.type] && byId.has(e.source) && byId.has(e.target));
+  out.edges = tidyEdges(nodes,
+    (raw.edges || []).filter((e) => e && EDGE_TYPE_KO[e.type] && byId.has(e.source) && byId.has(e.target)),
+    out.subject ? byId.get(out.subject.id) || me : me);
   const timeline = [];
   for (const t of raw.timeline || []) {
     if (!t || !byId.has(t.event_id)) continue;
@@ -236,6 +400,54 @@ export function normalize(raw) {
   out.family_analysis = raw.family_analysis || { members: [] };
   out.follow_up_questions = (raw.follow_up_questions || []).slice(0, 5);
   return out;
+}
+
+// --- 지우기 ----------------------------------------------------------------
+// 상세 패널의 '삭제' — 노드 하나와 그것을 가리키던 것을 함께 뺀다 (2026-09-08
+// 사용자: "삭제 버튼을 누르면 해당 노드를 지워서 그래프와 연표에서 삭제").
+//
+// 고치는 것은 **날것의 문서**다. 화면이 쥔 것(normalize 를 지난 것)만 고치면
+// 브라우저·계정에 남은 자료가 그대로라 새로고침에 되살아난다.
+//
+// **가리키던 것을 두고 가지 않는다.** 엣지는 normalize 가 알아서 버리지만
+// (한쪽 끝이 없다), 분석 묶음('전환점'·'영향'·'만약 없었다면'·'가장 크게
+// 영향을 준 것'·가족)은 이름만 들고 있어 그대로 두면 지운 사건이 그 자리에
+// 유령으로 선다. 분석 쪽은 아이디 대신 **이름**을 적어 두기도 하므로(모델이
+// 그렇게 답한다) 이름으로도 재되, 같은 이름의 노드가 또 남아 있으면 이름으로는
+// 재지 않는다 — 이름만으로는 아무것도 단정하지 않는다.
+export function removeNode(raw, id) {
+  const doc = { ...raw };
+  const node = (raw.nodes || []).find((n) => n && n.id === id) || null;
+  doc.nodes = (raw.nodes || []).filter((n) => n && n.id !== id);
+  const label = node && !doc.nodes.some((n) => norm(n.name) === norm(node.name)) ? norm(node.name) : '';
+  const hit = (v) => v === id || (label !== '' && typeof v === 'string' && norm(v) === label);
+
+  doc.edges = (raw.edges || []).filter((e) => e && e.source !== id && e.target !== id);
+  // 연표에서 뺀 자리는 앞뒤를 이어 붙인다 — 사슬에 구멍을 내지 않는다.
+  const gap = (raw.timeline || []).find((t) => t && t.event_id === id) || null;
+  doc.timeline = (raw.timeline || []).filter((t) => t && t.event_id !== id).map((t) => (
+    t.previous_event !== id && t.next_event !== id ? t : {
+      ...t,
+      previous_event: t.previous_event === id ? (gap?.previous_event ?? null) : t.previous_event,
+      next_event: t.next_event === id ? (gap?.next_event ?? null) : t.next_event,
+    }
+  ));
+  doc.historical_connections = (raw.historical_connections || []).filter((c) => c && c.personal_event !== id);
+  for (const key of ['turning_points', 'impact_analysis', 'counterfactual_analysis']) {
+    if (raw[key]) doc[key] = raw[key].filter((it) => !(it && hit(it.event)));
+  }
+  const ranking = raw.influence_ranking;
+  const items = Array.isArray(ranking) ? ranking : (Array.isArray(ranking?.items) ? ranking.items : null);
+  if (items) {
+    const kept = items.filter((it) => !(it && hit(it.node)));
+    doc.influence_ranking = Array.isArray(ranking) ? kept : { ...ranking, items: kept };
+  }
+  if (raw.family_analysis && Array.isArray(raw.family_analysis.members)) {
+    doc.family_analysis = { ...raw.family_analysis, members: raw.family_analysis.members.filter((m) => m && m.node_id !== id) };
+  }
+  // 주인공을 지웠으면 자리를 비운다 — normalize 가 남은 인물에서 다시 고른다.
+  if (raw.subject && raw.subject.id === id) doc.subject = null;
+  return doc;
 }
 
 // --- 무엇이 서는가 ---------------------------------------------------------

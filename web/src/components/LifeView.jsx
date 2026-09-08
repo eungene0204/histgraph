@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { auth } from '../lib/auth.js';
+import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, graphPayload, graphMeta, boardWidth, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, graphPayload, graphMeta, boardWidth, edgeLabel, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
 // 사건의 상세와 분석(가족 뿌리·전환점·패턴·영향·가상 역사·물음)을 읽는다.
 //
-// 자료는 셋 중 하나에서 온다: (1) 로컬 서버가 저장한 것(/api/life —
-// `histgraph life` 가 만든다), (2) **이 화면에 이야기를 적어 로컬 모델에게
-// 물은 것**(POST /api/life/analyze — 몇 분 걸리므로 띄워 두고 /api/life/job
-// 으로 물어본다), (3) 예시. 역사 쪽 자료(재위 띠·큰 사건)는 언제나
-// 서버(/api/context)다.
+// 자료는 둘 중 하나에서 온다: (1) **이 화면에 이야기를 적어 모델에게 물은
+// 것**(POST /api/life/analyze — 몇 분 걸리므로 띄워 두고 /api/life/job 으로
+// 물어본다), (2) 로그인한 사람이 계정에 올려 둔 것. 역사 쪽 자료(재위 띠·큰
+// 사건)는 언제나 서버(/api/context)다.
+//
+// **기본으로 보여 주던 자료는 없다** (2026-09-08 사용자: "디폴트로 넣었던 내
+// 역사 데이터는 지워. 사용자가 로그인 해서 직접 입력 할거야"). 서버가 폴더의
+// 개인 파일을 골라 주던 길(/api/life)과 지어낸 예시('예시로 먼저 보기')를 뺐다.
+// 빈 화면에서 시작해 자기 이야기를 적는다.
 //
 // **머리에는 '내 역사 입력하기' 하나만 둔다** (2026-09-08 사용자: "'JSON 파일
 // 열기', '붙여넣기', '연표접기' 버튼 모두 삭제해줘"). 붙여 넣기·파일 열기는
@@ -24,10 +30,14 @@ const STORY_KEY = 'life-story'; // 적다 만 이야기 (분석은 몇 분이라
 
 // 입력 상자의 보기글. 무엇을 적어야 하는지는 설명보다 예가 빠르다 —
 // **해와 곳, 가족, 이사, 학교, 일, 만남, 그때의 마음.** 지어낸 사람이다.
-const STORY_EXAMPLE = `나는 1982년 서울에서 태어나 2살 무렵부터 강동구 성내동에서 10년 정도 살았다. 아버지는 작은 인쇄소를 하셨고 어머니는 시장에서 옷 가게를 했다.
-1989년에 성내국민학교에 들어갔고, 1995년 아버지 일 때문에 분당으로 이사하면서 전학을 갔다. 친구를 다 잃은 기분이었던 게 아직도 기억난다.
-1997년 겨울 외환위기로 인쇄소가 문을 닫았다. 그때부터 어머니가 식당 일을 나갔고, 나는 처음으로 돈이 무엇인지 알았다.
-2001년에 대학에 들어가 컴퓨터를 전공했다. 2003년에 읽은 책 한 권이 진로를 바꿨고, 2008년 첫 직장에 들어갔다. 2014년에 지금의 아내를 만났다.`;
+// 앞에 '예:' 를 달고 색을 더 흐리게 두어 **예문이지 내 글이 아니라는 것**이
+// 보이게 한다 (2026-09-08 사용자). 지명은 실제 있는 곳이되, 학교·회사·가게
+// 이름은 **이 세상에 없는 것**이다 — 실재하는 곳의 이름을 남의 삶에 붙이지 않는다.
+// (처음 지은 다섯 중 셋이 검색하니 실재하는 회사·사진관이었다. 지금 것은 검색해 없는 것을 확인했다.)
+const STORY_EXAMPLE = `예: 나는 1979년 전북 익산에서 태어났다. 아버지는 익산역 근처에서 '노을결사진관'이라는 작은 사진관을 하셨고, 어머니는 집에서 한복 삯바느질을 하셨다. 외할머니는 김제에서 벼농사를 지으셨는데, 방학마다 거기서 지냈다.
+1986년 익산의 '샛별뫼초등학교'에 들어갔다. 1991년 아버지가 사진관을 접고 인천 부평으로 올라오면서 전학을 갔다. 말투 때문에 놀림을 받았던 것이 아직 기억난다.
+1997년 겨울 외환위기 때 아버지가 다니던 '온새미전자'가 문을 닫았고, 그 뒤로 어머니가 부평시장에서 반찬 가게를 시작했다. 나는 그해 처음으로 아르바이트를 했다.
+1998년 '바람결대학교' 기계공학과에 들어갔다. 2002년 월드컵 때 광장에서 만난 선배 덕에 2004년 '별무리정밀'에 첫 직장을 얻었고, 2011년 지금의 남편을 만났다. 2020년 코로나 때 회사가 재택으로 바뀌면서 부평을 떠나 강원 원주로 이사했다.`;
 
 // 개인 그래프의 선 범례. 역사 그래프의 '구조화 소스/산문 추출' 대신 —
 // 실선은 본인이 말한 것, 점선은 말한 것에서 미룬 것(confidence < 1).
@@ -74,9 +84,8 @@ export default function LifeView() {
   const [life, setLife] = useState(null);
   const [context, setContext] = useState(null);
   // 자료가 어디서 왔는지는 **화면에 적지 않는다** (2026-09-08 사용자: "'로컬
-  // 서버에 저장된 자료' 문구도 삭제해"). 서버가 쥔 자료는 화면이 지울 수 없으니
-  // '지우기' 를 낼지 정하는 데만 쓴다.
-  const [source, setSource] = useState('');       // 'server' | 'local' | 'sample'
+  // 서버에 저장된 자료' 문구도 삭제해"). '계정에서 지우기' 를 낼지 정하는 데만 쓴다.
+  const [source, setSource] = useState('');       // 'local' | 'account'
   // 주소의 #사건id 가 고른 사건이다 — 새로고침해도 자리를 잃지 않고 "이거 봐" 하고 줄 수 있다.
   const [selected, setSelected] = useState(() => (typeof location !== 'undefined' && location.hash ? decodeURIComponent(location.hash.slice(1)) : null));
   const [tab, setTab] = useState('event');
@@ -103,6 +112,52 @@ export default function LifeView() {
   const viewRef = useRef(null);
   const meta = useMemo(() => (life ? graphMeta(life) : null), [life]);
 
+  // --- 내 계정에 두기 -----------------------------------------------------
+  // 로그인한 사람의 분석 결과는 **끝나는 대로 계정에 올라간다** (2026-09-08 사용자:
+  // "사용자가 로그인 해서 직접 입력 할거야" — 그리고 실측: 09-07 에 계정에 올린 옛
+  // 그래프가 부팅 때 먼저 읽혀, 뒤에 분석해 브라우저에만 남은 새 그래프(친구 셋)를
+  // 가렸다. "새로고침 해도 친구들이 안 보이는데?"). 부팅이 계정을 먼저 읽으므로
+  // 계정이 늘 최신이어야 한다. 로그인이 안 된 자리(로컬)는 전처럼 브라우저에만.
+  // 단추 '내 계정에 저장' 은 남긴다 — 브라우저에만 있는 것을 올리는 길.
+  const rawRef = useRef(null);          // adopt 를 지나간 날것 — 그대로 올린다
+  const [account, setAccount] = useState({ enabled: false, user: null });
+  const accountRef = useRef(account);
+  accountRef.current = account;
+  // 방금 한 일을 한국어로 적는 팝업. **잠깐 보이고 사라진다** (2026-09-08 사용자:
+  // "저장후 잠깐 보여주고 사라져야 해. 팝업 띄워서 저장 했다고 알려줘") — 된 것은
+  // 2.5초, 안 된 것은 읽을 시간을 더 준다. '올리는 중' 은 결과가 올 때까지.
+  const [kept, setKept] = useState('');
+  const keptTimer = useRef(null);
+  const toast = useCallback((msg, ms = 2500) => {
+    if (keptTimer.current) clearTimeout(keptTimer.current);
+    setKept(msg);
+    keptTimer.current = ms ? setTimeout(() => setKept(''), ms) : null;
+  }, []);
+  useEffect(() => () => { if (keptTimer.current) clearTimeout(keptTimer.current); }, []);
+
+  useEffect(() => { auth.me().then(setAccount); }, []);
+
+  const saveToAccount = useCallback(async () => {
+    if (!rawRef.current) return;
+    toast('올리는 중입니다…', 0);
+    try {
+      await auth.life.save(rawRef.current);
+      toast('내 계정에 저장했습니다');
+    } catch (err) {
+      toast(err.message, 6000);
+    }
+  }, [toast]);
+
+  const dropFromAccount = useCallback(async () => {
+    toast('지우는 중입니다…', 0);
+    try {
+      await auth.life.remove();
+      toast('내 계정에서 지웠습니다');
+    } catch (err) {
+      toast(err.message, 6000);
+    }
+  }, [toast]);
+
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
   const adopt = useCallback(async (raw, from) => {
     let norm;
@@ -111,6 +166,7 @@ export default function LifeView() {
     setLife(norm);
     setSource(from);
     setSelected((cur) => (cur && norm.nodes.some((n) => n.id === cur) ? cur : null));
+    rawRef.current = raw;
     if (from === 'local') {
       try { localStorage.setItem(STORE_KEY, JSON.stringify(raw)); } catch { /* 저장 못 해도 본다 */ }
     }
@@ -124,11 +180,6 @@ export default function LifeView() {
     }
     return true;
   }, []);
-
-  const loadSample = useCallback(async () => {
-    const raw = await getJson('/life-sample.json').catch(() => null);
-    if (raw) adopt(raw, 'sample');
-  }, [adopt]);
 
   // --- 이야기 → 개인 그래프 (로컬 서버의 모델) --------------------------
   // 모델은 몇 분을 돈다. 답을 기다리는 요청 하나에 매달면 브라우저가 먼저
@@ -144,13 +195,28 @@ export default function LifeView() {
       if (st.state === 'running') return;
       clearInterval(pollRef.current);
       pollRef.current = null;
-      if (st.state === 'done' && st.payload) await adopt(st.payload, 'server');
+      // 브라우저에 남긴다 — 서버는 더 이상 저장된 파일을 화면에 주지 않으므로
+      // 새로고침 뒤에도 보이려면 여기 있어야 한다. 로그인해 두었으면 계정에도.
+      if (st.state === 'done' && st.payload) {
+        await adopt(st.payload, 'local');
+        if (accountRef.current.user) {
+          try {
+            await auth.life.save(st.payload);
+            setSource('account');
+            toast('내 계정에 저장했습니다');
+          } catch (err) {
+            toast(err.message, 6000);
+          }
+        }
+      }
     }, 2000);
-  }, [adopt]);
+  }, [adopt, toast]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // 화면이 이미 그래프를 쥐고 있으면 **그것을 같이 보내 거기에 더한다** (서버의
+  // life.merge). 지우고 새로 만들지 않는다 (2026-09-08 사용자).
   const onStory = useCallback(async (text, name) => {
-    const r = await postJson('/api/life/analyze', { text, name });
+    const r = await postJson('/api/life/analyze', { text, name, base: rawRef.current || undefined });
     if (r.ok || r.status === 409) {   // 409 는 이미 돌고 있다는 뜻이라 같이 지켜본다
       setJob({ state: 'running', step: '모델에게 묻는 중', elapsed: 0 });
       watchJob();
@@ -161,16 +227,27 @@ export default function LifeView() {
       || '로컬 서버에 닿지 못했습니다. 이 컴퓨터에서 띄운 화면에서만 분석할 수 있습니다.' });
   }, [watchJob]);
 
-  // 부팅: 서버 → 브라우저에 남긴 것 → 빈 화면
+  // 부팅: 계정에 올려 둔 것 → 이 브라우저에 남긴 것 → 빈 화면.
+  // 서버 폴더의 파일은 읽지 않는다 — 누구의 것인지 모르는 자료가 기본으로
+  // 서면 안 된다.
   useEffect(() => {
     let alive = true;
     (async () => {
-      const server = await getJson('/api/life').catch(() => null);
+      // 로그인해 두었고 계정에 올려 둔 것이 있으면 그것을 읽는다. 없으면
+      // 조용히 지나간다 — 로그인이 아직 열리지 않은 자리에서는 조건이 아니다.
+      // 옛 자료는 서버에게 다듬어 달라고 한다 (POST /api/life/refine — 모델 없이
+      // 규칙만: 생년·학년의 해·만난 곳과의 연결). 규칙이 늘면 옛 그래프도 따라온다.
+      // 서버가 없는 자리에서는 그대로 쓴다.
+      const refined = async (doc) => {
+        const r = await postJson('/api/life/refine', doc);
+        return r.ok && r.payload?.nodes ? r.payload : doc;
+      };
+      const mine = await auth.me().then((s) => (s.user ? auth.life.load() : null)).catch(() => null);
       if (!alive) return;
-      if (server && await adopt(server, 'server')) return;
+      if (mine?.doc && await adopt(await refined(mine.doc), 'account')) return;
       let kept = null;
       try { kept = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { /* 비었다 */ }
-      if (kept && await adopt(kept, 'local')) return;
+      if (kept && await adopt(await refined(kept), 'local')) return;
     })();
     // 창을 닫았다 다시 열어도 돌던 분석은 서버에서 계속 돈다.
     (async () => {
@@ -225,7 +302,64 @@ export default function LifeView() {
     setLife(null); setContext(null); setSource(''); setSelected(null);
   };
 
+  // --- 노드 하나를 지운다 --------------------------------------------------
+  // 상세 패널 아래의 '삭제' (2026-09-08 사용자: "'지우기' 버튼을 지우고 …
+  // 섹션 하단에 '삭제' 버튼을 만들어서 … 해당 노드를 지워서 그래프와 연표에서
+  // 삭제"). 머리 줄에 있던 '지우기'(통째로 버리기)를 뺀 자리다 — 틀린 것 하나를
+  // 지우려고 삶 전체를 다시 넣게 하지 않는다.
+  //
+  // 지우는 것은 **날것의 문서**이고(lib/life.js removeNode), 지운 자리는 브라우저와
+  // — 로그인했으면 — 계정에도 남는다. 계정을 안 고치면 부팅이 계정을 먼저 읽으므로
+  // 새로고침에 지운 노드가 되살아난다 (09-07 에 겪은 그 순서다).
+  const dropNode = useCallback(async (id) => {
+    const raw = rawRef.current;
+    if (!id || !raw) return;
+    const gone = lifeRef.current?.nodes.find((n) => n.id === id)?.name || '';
+    const next = removeNode(raw, id);
+    setSelected(null);
+    if (!(next.nodes || []).length) {   // 마지막 하나를 지웠다 — 빈 화면으로 돌아간다
+      forget();
+      rawRef.current = null;
+      if (accountRef.current.user) { try { await auth.life.remove(); } catch { /* 계정에 없을 수 있다 */ } }
+      toast('마지막 노드를 지웠습니다 · 빈 화면으로 돌아갑니다');
+      return;
+    }
+    await adopt(next, 'local');
+    toast(gone ? `지웠습니다 · ${gone}` : '지웠습니다');
+    if (accountRef.current.user) {
+      try { await auth.life.save(next); setSource('account'); } catch (err) { toast(err.message, 6000); }
+    }
+  }, [adopt, toast]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const name = life?.subject?.name || '나';
+
+  // **주소로 곧장 들어와도 같은 문을 지난다.** 머리 줄의 '내 역사'만 막으면
+  // /life.html 을 치는 것으로 그냥 넘어간다 (2026-09-08 사용자: "로그인을 하게
+  // 강제해"). 자료를 그리기 전에 세우므로 남의 연표가 뒷배경으로 비치지 않는다.
+  //
+  // **로그인이 아직 열리지 않았으면(`enabled:false`) 막지 않는다.** 지금이
+  // 그 상태다 — 여기서 막으면 이 컴퓨터에서 내 역사를 아예 못 쓴다. 설정 넷이
+  // 들어오는 순간부터 문이 닫힌다.
+  if (account.enabled && !account.user) {
+    return (
+      <>
+        <header className="top life-top">
+          <div className="brand">
+            <span className="mark" />
+            <h1>histgraph</h1>
+            <a className="era" href="/">한국사 그래프</a>
+            <span className="era life-here">내 역사</span>
+          </div>
+        </header>
+        <LoginModal
+          next="/life.html"
+          dismissible={false}
+          title="내 역사는 로그인이 필요합니다"
+          why="내 역사는 사람마다 다릅니다. 누구의 연표인지 알아야 다음에 다시 열어 드릴 수 있어서, 이 장에서만 로그인을 여쭙니다. 그래프를 보고 검색하는 데에는 로그인이 필요하지 않습니다."
+        />
+      </>
+    );
+  }
 
   return (
     <>
@@ -241,10 +375,19 @@ export default function LifeView() {
           <button type="button" className="life-btn" onClick={() => setWriting((v) => !v)} aria-pressed={writing}>
             {job?.state === 'running' ? `내 역사 읽는 중 · ${job.elapsed ?? 0}초` : '내 역사 입력하기'}
           </button>
-          {life && source !== 'server' && <button type="button" className="life-btn" onClick={forget}>지우기</button>}
+          {/* 계정에 두는 것은 **누를 때만** 일어난다 (위 saveToAccount 머리글). */}
+          {account.user && life && (
+            <button type="button" className="life-btn" onClick={saveToAccount}
+                    title="이 개인 역사를 내 계정에 저장합니다">내 계정에 저장</button>
+          )}
+          {account.user && source === 'account' && (
+            <button type="button" className="life-btn" onClick={dropFromAccount}
+                    title="계정에 올려 둔 개인 역사를 지웁니다">계정에서 지우기</button>
+          )}
         </div>
         <ThemeToggle onChange={() => boardRef.current?.layout()} />
       </header>
+      {kept && <div className="life-toast" role="status" aria-live="polite">{kept}</div>}
 
       {writing && <StoryBox job={job} local={local} onSubmit={onStory} onClose={() => setWriting(false)} />}
 
@@ -257,7 +400,7 @@ export default function LifeView() {
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
           <div className="life-body">
-            {!life && <Empty offline={offline} local={local} onSample={loadSample} onWrite={() => setWriting(true)} />}
+            {!life && <Empty offline={offline} local={local} onWrite={() => setWriting(true)} />}
           </div>
         </section>
         {life && (
@@ -292,7 +435,7 @@ export default function LifeView() {
               <button type="button" className={tab === 'analysis' ? 'on' : ''} onClick={() => setTab('analysis')}>분석</button>
               <button type="button" className={tab === 'people' ? 'on' : ''} onClick={() => setTab('people')}>사람 · 문화</button>
             </div>
-            {tab === 'event' && <EventDetail life={life} id={selected} onPick={setSelected} />}
+            {tab === 'event' && <EventDetail life={life} id={selected} onPick={setSelected} onDrop={dropNode} />}
             {tab === 'analysis' && <Analysis life={life} onPick={(id) => { setSelected(id); setTab('event'); }} />}
             {tab === 'people' && <Things life={life} />}
           </aside>
@@ -308,26 +451,46 @@ export default function LifeView() {
   );
 }
 
-function Empty({ offline, local, onSample, onWrite }) {
+function Empty({ offline, local, onWrite }) {
   return (
     <div className="life-empty">
       <h2>내 삶을 한국사 옆에 세웁니다</h2>
-      <p>왼쪽에 왕과 대통령의 재위, 가운데에 그 무렵의 큰 사건, 오른쪽에 내 사건이 같은 해에 같은 높이로 섭니다.</p>
       <ol>
         <li><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
           잊히지 않는 책·영화·음악·게임.</li>
         <li>{local
           ? '이 컴퓨터의 모델이 그 글을 읽어 사건과 인과로 옮깁니다. 몇 분 걸립니다. 글도 결과도 이 컴퓨터 밖으로 나가지 않습니다.'
-          : '모델이 그 글을 읽어 사건과 인과로 옮깁니다. 1~2분 걸립니다. 읽는 모델이 인터넷 너머에 있어 글이 그리로 갑니다 — 결과는 이 컴퓨터에 남습니다.'}</li>
+          : '모델이 그 글을 읽어 사건과 인과로 옮깁니다. 1~2분 걸립니다.'}</li>
         <li>사건을 누르면 오른쪽에 원인과 결과, 그 해의 한국사, 전환점 점수가 나옵니다.</li>
       </ol>
       <div className="life-empty-row">
         <button type="button" className="life-btn big on" onClick={onWrite}>내 역사 입력하기</button>
-        <button type="button" className="life-btn big" onClick={onSample}>예시로 먼저 보기</button>
       </div>
       {offline && <p className="tl-hint">자료 서버에 닿지 못해 왕·대통령과 한국사 열이 비어 있습니다.</p>}
     </div>
   );
+}
+
+// 진행 띠. 모델이 언제 답할지는 아무도 모르므로 **단계가 자리를, 지난 시간이
+// 그 안의 길이를** 정한다 (2026-09-08 사용자: "진행 상황을 텍스트로 알려주고
+// progress bar 같은걸 보여줘"). 가장 긴 단계(모델이 읽는 중)는 기대 시간에
+// 가까워질수록 천천히 차서 끝에 닿지 않는다 — 100% 는 서버가 끝났다고 할 때만.
+const STEP_SPAN = {
+  '모델을 올리는 중': [0, 12], '모델에게 묻는 중': [0, 8],
+  '이야기를 읽는 중': [8, 86], '답을 검증하는 중': [86, 92],
+  '한국사 사건에 잇는 중': [92, 96], '저장하는 중': [96, 99],
+};
+// 기대 시간(초). 밖의 무료 모델은 1~2분, 로컬 MLX 는 모델을 올리는 데만 몇 분.
+const EXPECT_SEC = { openrouter: 90, anthropic: 60, mlx: 360 };
+function progressOf(job, local) {
+  if (!job) return 0;
+  if (job.state === 'done') return 100;
+  if (job.state !== 'running') return 0;
+  const [lo, hi] = STEP_SPAN[job.step] || [8, 86];
+  const expect = EXPECT_SEC[job.backend] || (local ? 360 : 90);
+  const t = job.elapsed ?? 0;
+  // 지수로 차오른다 — 기대 시간에 약 63%, 두 배에 86%. 끝에는 안 닿는다.
+  return Math.round(lo + (hi - lo) * (1 - Math.exp(-t / expect)));
 }
 
 // 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
@@ -338,35 +501,65 @@ function StoryBox({ job, local, onSubmit, onClose }) {
     try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
   });
   const running = job?.state === 'running';
+  // 다 되면 칸을 비운다 — 다음에 적는 것은 **더하는** 이야기라 옛 글이 남아 있으면
+  // 같은 것을 두 번 보내게 된다. 원문은 서버가 파일에 이어 둔다.
+  useEffect(() => {
+    if (job?.state !== 'done') return;
+    setText('');
+    try { localStorage.removeItem(STORY_KEY); } catch { /* 없다 */ }
+  }, [job?.state]);
   const change = (v) => {
     setText(v);
     try { localStorage.setItem(STORY_KEY, v); } catch { /* 저장 못 해도 적을 수 있다 */ }
   };
+  const done = job?.state === 'done';
+  const pct = progressOf(job, local);
+  const made = done && job.payload ? job.payload : null;
   return (
     <div className="life-paste life-story">
       <textarea value={text} onChange={(e) => change(e.target.value)} disabled={running}
                 placeholder={STORY_EXAMPLE} spellCheck={false} />
+      {(running || done) && (
+        <div className="life-progress-row" role="status" aria-live="polite">
+          <div className="life-progress" aria-hidden="true"><i style={{ width: `${pct}%` }} /></div>
+          <span className="tl-hint">
+            {running
+              ? `${job.step || '읽는 중'} · ${job.elapsed ?? 0}초 · ${pct}%`
+              : job.added
+                ? `있는 역사에 더했습니다 · 새 사건과 사람 ${job.added.nodes} · 새 관계 ${job.added.edges}${job.took != null ? ` · ${job.took}초 걸렸습니다` : ''}`
+                : made
+                  ? `다 만들었습니다 · 사건과 사람 ${made.nodes?.length ?? 0} · 관계 ${made.edges?.length ?? 0}${job.took != null ? ` · ${job.took}초 걸렸습니다` : ''}`
+                  : '다 만들었습니다'}
+          </span>
+        </div>
+      )}
       <div className="life-paste-row">
         {running ? (
-          <span className="tl-hint">{job.step || '읽는 중'} · {job.elapsed ?? 0}초 — 몇 분 걸립니다. 창을 닫아도 계속 돕니다.</span>
+          <span className="tl-hint">창을 닫아도 계속 돕니다.</span>
         ) : job?.state === 'error' ? (
           <span className="tl-hint life-warn">{job.error}</span>
         ) : (
-          <span className="tl-hint">{local
-            ? '이 컴퓨터의 모델이 읽습니다. 글은 어디로도 보내지 않습니다.'
-            : '인터넷 너머의 모델이 읽습니다. 적은 글이 그 모델로 갑니다.'}</span>
+          /* 밖의 모델일 때는 아무 말도 안 한다 (2026-09-08 사용자). 빈 칸은
+             단추를 오른쪽에 붙여 두는 자리다. */
+          <span className="tl-hint">{local ? '이 컴퓨터의 모델이 읽습니다. 글은 어디로도 보내지 않습니다.' : ''}</span>
         )}
         <button type="button" className="life-btn" onClick={onClose}>닫기</button>
-        <button type="button" className="life-btn on" disabled={running || text.trim().length < 40}
-                onClick={() => onSubmit(text, '나')}>{running ? '읽는 중' : '세우기'}</button>
+        {/* 글이 한 자라도 있으면 누를 수 있다. 전에는 40자 미만이면 말없이 잠겨
+            있어 "입력해도 버튼이 활성화가 안 돼"(2026-09-08) — 문턱은 두지 않는다. */}
+        <button type="button" className="life-btn go" disabled={running || !text.trim()}
+                onClick={() => onSubmit(text, '나')}>{running ? '읽는 중' : '입력'}</button>
       </div>
     </div>
   );
 }
 
 // --- 사건 상세 ------------------------------------------------------------
-function EventDetail({ life, id, onPick }) {
+function EventDetail({ life, id, onPick, onDrop }) {
   const byId = useMemo(() => new Map(life.nodes.map((n) => [n.id, n])), [life]);
+  // 지우기 전에 한 번 묻는다 — 되돌리는 길이 없다. 브라우저가 띄우는 상자는
+  // 단추 글자가 우리 것이 아니므로(화면에 영어) 패널 안에서 묻는다.
+  const [ask, setAsk] = useState(false);
+  useEffect(() => { setAsk(false); }, [id]);
   const node = id ? byId.get(id) : null;
   if (!node) {
     return <p className="life-hint">오른쪽 열의 사건을 누르면 여기에 원인·결과와 그 해의 한국사가 나옵니다.</p>;
@@ -415,7 +608,7 @@ function EventDetail({ life, id, onPick }) {
         <section className="life-sec">
           <h3>관련</h3>
           <ul>{others.map((e, i) => (
-            <li key={i}><span className="tl-rel">{EDGE_TYPE_KO[e.type]}</span> {e.source === id ? nameOf(e.target) : nameOf(e.source)}{e.description ? <p>{e.description}</p> : null}</li>
+            <li key={i}><span className="tl-rel">{edgeLabel(e.type, byId.get(e.source)?.type, byId.get(e.target)?.type, e.role)}</span> {e.source === id ? nameOf(e.target) : nameOf(e.source)}{e.description ? <p>{e.description}</p> : null}</li>
           ))}</ul>
         </section>
       )}
@@ -427,6 +620,23 @@ function EventDetail({ life, id, onPick }) {
           ))}
           <p className="tl-hint">가능성일 뿐 단정이 아닙니다.</p>
         </section>
+      )}
+      {/* 상세의 맨 아래 — 이 노드를 지운다. 함께 사라지는 것(관계·연표 자리)을
+          먼저 세어 보여 준다. 지운 뒤에는 되돌릴 길이 없으므로 두 번 누르게 한다. */}
+      {onDrop && (
+        <div className="life-del">
+          {ask ? (
+            <>
+              <span className="tl-hint">
+                {`정말 지울까요? 관계 ${ins.length + outs.length}건이 함께 사라집니다`}{t ? ' · 연표에서도 내려갑니다' : ''}
+              </span>
+              <button type="button" className="life-btn" onClick={() => setAsk(false)}>그만두기</button>
+              <button type="button" className="life-btn danger" onClick={() => { setAsk(false); onDrop(id); }}>지웁니다</button>
+            </>
+          ) : (
+            <button type="button" className="life-btn danger" onClick={() => setAsk(true)}>삭제</button>
+          )}
+        </div>
       )}
     </div>
   );
