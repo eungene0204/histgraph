@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   normalize, removeNode, nodeYears, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
+  splitStories, joinStories, appendDraft,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
 } from '../src/lib/life.js';
 import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
@@ -377,6 +378,27 @@ console.log('\n개인 역사 — 노드를 지운다');
   ], edges: [], timeline: [], turning_points: [{ event: '이사', turning_point_score: 7, reason: '두 번째 이사' }] };
   ok('이름이 겹치면 이름으로 지우지 않는다', removeNode(twins, 'a').turning_points.length === 1);
   ok('이름 하나뿐이면 이름으로 적힌 것도 지운다', removeNode(removeNode(twins, 'a'), 'b').turning_points.length === 0);
+}
+
+console.log('\n개인 역사 — 내가 적은 이야기');
+{
+  // 옛 문서에는 기록 열이 없다 — 서버에 남은 원문을 빈 줄로 가른다.
+  // (server.LifeAnalysis._run 이 이어 붙일 때 넣는 그 빈 줄이다.)
+  const raw = '잠실고딩학교 1학넌때 친구 김일권을 만났고\n\n\n잠실고등학교 1학년때 김일권을 만났고\n\n2002년 3월에 30사단 입대';
+  const got = splitStories(raw);
+  ok('원문을 적어 넣은 덩어리로 가른다', got.length === 3 && got[2].text === '2002년 3월에 30사단 입대');
+  ok('적은 날을 모르면 지어내지 않는다', got.every((g) => g.at === ''));
+  ok('빈 글은 덩어리가 되지 않는다', splitStories('\n\n   \n\n').length === 0);
+  // 고쳐서 다시 읽을 때 서버가 받는 글 — 이어 붙인 꼴이 원문과 같다.
+  ok('다시 한 편으로 이어 붙인다', joinStories(got) === '잠실고딩학교 1학넌때 친구 김일권을 만났고\n\n잠실고등학교 1학년때 김일권을 만났고\n\n2002년 3월에 30사단 입대');
+  ok('지운 덩어리는 빠진다', joinStories(got.filter((g, i) => i !== 0)) === '잠실고등학교 1학년때 김일권을 만났고\n\n2002년 3월에 30사단 입대');
+  ok('다 지우면 빈 글이다', joinStories([{ at: '', text: '  ' }]) === '');
+  // 줄을 눌러 입력창으로 옮길 때 — 적다 만 글은 삼키지 않고 아래에 붙인다.
+  ok('빈 입력창에는 그대로 들어간다', appendDraft('', '1993년 부터') === '1993년 부터');
+  ok('적다 만 글 아래에 붙는다', appendDraft('쓰던 글', '옛 글') === '쓰던 글\n\n옛 글');
+  // 이미 있는 글이어도 붙인다 — 눌렀는데 아무 일도 없으면 고장으로 보인다.
+  ok('이미 있는 글이어도 붙인다', appendDraft('옛 글', '옛 글') === '옛 글\n\n옛 글');
+  ok('빈 글은 붙이지 않는다', appendDraft('쓰던 글', '   ') === '쓰던 글');
 }
 
 console.log('\n개인 역사 — 아직 배포하지 않는다');

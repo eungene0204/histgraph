@@ -4,7 +4,7 @@ import { auth } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -21,12 +21,23 @@ import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, gr
 // 빈 화면에서 시작해 자기 이야기를 적는다.
 //
 // **머리에는 '내 역사 입력하기' 하나만 둔다** (2026-09-08 사용자: "'JSON 파일
-// 열기', '붙여넣기', '연표접기' 버튼 모두 삭제해줘"). 붙여 넣기·파일 열기는
-// 사람이 모델과 따로 대화해 받은 JSON 을 넣던 길이고, 이제 화면이 직접
-// 물어본다. 연표는 늘 펴 둔다.
+// 열기', '붙여넣기', '연표접기' 버튼 모두 삭제해줘" · 같은 날 "'내 계정에 저장',
+// '계정에서 지우기' 버튼을 지워조"). 붙여 넣기·파일 열기는 사람이 모델과 따로
+// 대화해 받은 JSON 을 넣던 길이고, 이제 화면이 직접 물어본다. 계정에 두는
+// 것은 사람이 청하지 않아도 저절로 일어난다. 연표는 늘 펴 둔다.
+
+// 오늘 — 이야기를 적어 넣은 날. 이 컴퓨터의 달력으로 잰다 (세계표준시로 재면
+// 저녁에 적은 것이 내일이 된다).
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 const STORE_KEY = 'life-json';  // 옛 화면이 브라우저에 남긴 자료 (지금도 읽는다)
 const STORY_KEY = 'life-story'; // 적다 만 이야기 (분석은 몇 분이라 새로고침해도 글은 남긴다)
+// 분석이 끝나면 문서에 적어 둘 이야기 기록. 도는 동안 새로고침해도 잃지 않게
+// 브라우저에도 둔다 — 이것이 없으면 방금 적은 문단이 기록에서 빠진다.
+const NEXT_KEY = 'life-stories-next';
 
 // 입력 상자의 보기글. 무엇을 적어야 하는지는 설명보다 예가 빠르다 —
 // **해와 곳, 가족, 이사, 학교, 일, 만남, 그때의 마음.** 지어낸 사람이다.
@@ -84,12 +95,17 @@ export default function LifeView() {
   const [life, setLife] = useState(null);
   const [context, setContext] = useState(null);
   // 자료가 어디서 왔는지는 **화면에 적지 않는다** (2026-09-08 사용자: "'로컬
-  // 서버에 저장된 자료' 문구도 삭제해"). '계정에서 지우기' 를 낼지 정하는 데만 쓴다.
-  const [source, setSource] = useState('');       // 'local' | 'account'
+  // 서버에 저장된 자료' 문구도 삭제해"). 어디서 왔든 하는 일이 같아졌으므로
+  // (계정에 두는 것이 자동이다 — 아래 keepInAccount) 상태로도 들고 있지 않는다.
   // 주소의 #사건id 가 고른 사건이다 — 새로고침해도 자리를 잃지 않고 "이거 봐" 하고 줄 수 있다.
   const [selected, setSelected] = useState(() => (typeof location !== 'undefined' && location.hash ? decodeURIComponent(location.hash.slice(1)) : null));
   const [tab, setTab] = useState('event');
   const [writing, setWriting] = useState(false);   // 이야기 상자를 폈나
+  const [logOpen, setLogOpen] = useState(false);   // '내가 적은 이야기' 를 폈나
+  // 사람이 한 번씩 적어 넣은 이야기 덩어리 — 문서가 `stories` 로 들고 다닌다.
+  const [stories, setStories] = useState([]);
+  const storiesRef = useRef(stories);
+  storiesRef.current = stories;
   const [job, setJob] = useState(null);   // 분석 상태 (running·done·error)
   // 이야기를 읽는 모델이 이 컴퓨터에 있는가. 서버가 `/api/life/job` 에 적어
   // 준다 — 밖의 무료 모델로 읽으면 글이 이 컴퓨터를 나가므로 **그렇게 적는다.**
@@ -113,12 +129,14 @@ export default function LifeView() {
   const meta = useMemo(() => (life ? graphMeta(life) : null), [life]);
 
   // --- 내 계정에 두기 -----------------------------------------------------
-  // 로그인한 사람의 분석 결과는 **끝나는 대로 계정에 올라간다** (2026-09-08 사용자:
-  // "사용자가 로그인 해서 직접 입력 할거야" — 그리고 실측: 09-07 에 계정에 올린 옛
-  // 그래프가 부팅 때 먼저 읽혀, 뒤에 분석해 브라우저에만 남은 새 그래프(친구 셋)를
-  // 가렸다. "새로고침 해도 친구들이 안 보이는데?"). 부팅이 계정을 먼저 읽으므로
-  // 계정이 늘 최신이어야 한다. 로그인이 안 된 자리(로컬)는 전처럼 브라우저에만.
-  // 단추 '내 계정에 저장' 은 남긴다 — 브라우저에만 있는 것을 올리는 길.
+  // **누르는 단추가 없다** (2026-09-08 사용자: "'내 계정에 저장', '계정에서
+  // 지우기' 버튼을 지워조. 저장 버튼을 누르지 않아도 사용자가 '입력' 버턴을
+  // 누르면 자동으로 저장해줘"). 그래서 자료가 바뀌는 자리마다 이 한 길을
+  // 지난다 — '입력' 을 누를 때 · 분석이 끝났을 때 · 노드를 지웠을 때 · 부팅이
+  // 브라우저에만 있는 것을 찾았을 때. 부팅이 계정을 먼저 읽으므로 계정이 늘
+  // 최신이어야 한다 (실측: 09-07 에 계정에 올린 옛 그래프가 뒤에 분석해
+  // 브라우저에만 남은 새 그래프를 가렸다 — "새로고침 해도 친구들이 안 보이는데?").
+  // 로그인이 안 된 자리는 전처럼 브라우저에만 남는다.
   const rawRef = useRef(null);          // adopt 를 지나간 날것 — 그대로 올린다
   const [account, setAccount] = useState({ enabled: false, user: null });
   const accountRef = useRef(account);
@@ -137,26 +155,52 @@ export default function LifeView() {
 
   useEffect(() => { auth.me().then(setAccount); }, []);
 
-  const saveToAccount = useCallback(async () => {
-    if (!rawRef.current) return;
-    toast('올리는 중입니다…', 0);
+  // 로그인이 안 된 자리에서는 아무 일도 안 한다. 말(`msg`)을 주면 된 뒤에
+  // 팝업으로 알리고, 안 주면 조용히 올린다 (부팅·'입력' 처럼 사람이 저장을
+  // 청한 것이 아닌 자리). 안 된 것은 늘 말한다 — 계정에 없는 채로 두면
+  // 다른 컴퓨터에서 못 본다.
+  // 분석이 끝났을 때 문서에 실을 이야기 기록. '입력' 을 누를 때 여기에 적어
+  // 두었다가 결과가 오면 그 문서에 넣는다. 브라우저에도 한 벌 두는 것은 분석이
+  // 도는 몇 분 사이에 새로고침을 해도 방금 적은 문단을 잃지 않기 위해서다.
+  const nextRef = useRef(null);
+  const rememberStories = useCallback((list) => {
+    nextRef.current = list;
+    try { localStorage.setItem(NEXT_KEY, JSON.stringify(list)); } catch { /* 없어도 돈다 */ }
+  }, []);
+  const takeStories = useCallback(() => {
+    let list = nextRef.current;
+    if (!list) {
+      try { list = JSON.parse(localStorage.getItem(NEXT_KEY) || 'null'); } catch { list = null; }
+    }
+    nextRef.current = null;
+    try { localStorage.removeItem(NEXT_KEY); } catch { /* 없다 */ }
+    return Array.isArray(list) && list.length ? list : null;
+  }, []);
+
+  const keepInAccount = useCallback(async (doc, msg) => {
+    if (!doc || !accountRef.current.user) return;
     try {
-      await auth.life.save(rawRef.current);
-      toast('내 계정에 저장했습니다');
+      await auth.life.save(doc);
+      if (msg) toast(msg);
     } catch (err) {
       toast(err.message, 6000);
     }
   }, [toast]);
 
-  const dropFromAccount = useCallback(async () => {
-    toast('지우는 중입니다…', 0);
-    try {
-      await auth.life.remove();
-      toast('내 계정에서 지웠습니다');
-    } catch (err) {
-      toast(err.message, 6000);
-    }
-  }, [toast]);
+  // --- 입력창에 글을 놓는다 ------------------------------------------------
+  const [draftStamp, setDraftStamp] = useState(0);
+  // 입력창에 글을 놓고 상자를 새로 세운다. 모달에서 옮겨 올 때와, **보냈는데
+  // 안 간 글을 되돌릴 때** 같은 길을 쓴다 — 상자는 보내면서 칸을 비우므로
+  // (StoryBox send) 실패한 글을 여기서 안 돌려주면 사람이 다시 적어야 한다.
+  const putDraft = useCallback((text) => {
+    let cur = '';
+    try { cur = localStorage.getItem(STORY_KEY) || ''; } catch { /* 없다 */ }
+    const next = appendDraft(cur, text);
+    try { localStorage.setItem(STORY_KEY, next); } catch { /* 못 남겨도 상자는 받는다 */ }
+    setDraftStamp((n) => n + 1);
+    setWriting(true);
+  }, []);
+  const sentRef = useRef('');
 
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
   const adopt = useCallback(async (raw, from) => {
@@ -164,8 +208,8 @@ export default function LifeView() {
     try { norm = normalize(raw); } catch { return false; }
     if (!norm.nodes.length) return false;
     setLife(norm);
-    setSource(from);
     setSelected((cur) => (cur && norm.nodes.some((n) => n.id === cur) ? cur : null));
+    setStories(Array.isArray(raw.stories) ? raw.stories : []);
     rawRef.current = raw;
     if (from === 'local') {
       try { localStorage.setItem(STORE_KEY, JSON.stringify(raw)); } catch { /* 저장 못 해도 본다 */ }
@@ -195,29 +239,32 @@ export default function LifeView() {
       if (st.state === 'running') return;
       clearInterval(pollRef.current);
       pollRef.current = null;
+      // 모델이 답을 못 준 글도 칸에 돌려놓는다 — 다시 적게 하지 않는다.
+      if (st.state === 'error' && sentRef.current) { putDraft(sentRef.current); sentRef.current = ''; }
       // 브라우저에 남긴다 — 서버는 더 이상 저장된 파일을 화면에 주지 않으므로
       // 새로고침 뒤에도 보이려면 여기 있어야 한다. 로그인해 두었으면 계정에도.
       if (st.state === 'done' && st.payload) {
-        await adopt(st.payload, 'local');
-        if (accountRef.current.user) {
-          try {
-            await auth.life.save(st.payload);
-            setSource('account');
-            toast('내 계정에 저장했습니다');
-          } catch (err) {
-            toast(err.message, 6000);
-          }
-        }
+        // 방금 읽은 이야기를 문서에 실어 둔다 — 그래야 다음에 열어 고칠 수 있다.
+        const said = takeStories();
+        sentRef.current = '';
+        const doc = said ? { ...st.payload, stories: said } : st.payload;
+        await adopt(doc, 'local');
+        await keepInAccount(doc, '내 계정에 저장했습니다');
       }
     }, 2000);
-  }, [adopt, toast]);
+  }, [adopt, keepInAccount, takeStories, putDraft]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   // 화면이 이미 그래프를 쥐고 있으면 **그것을 같이 보내 거기에 더한다** (서버의
   // life.merge). 지우고 새로 만들지 않는다 (2026-09-08 사용자).
   const onStory = useCallback(async (text, name) => {
+    sentRef.current = text;
+    // 누르자마자 지금 화면에 있는 것을 계정에 둔다. 분석은 몇 분을 도는데
+    // 그 사이에 창을 닫아도 여태 만든 것은 남아 있어야 한다.
+    keepInAccount(rawRef.current);
     const r = await postJson('/api/life/analyze', { text, name, base: rawRef.current || undefined });
     if (r.ok || r.status === 409) {   // 409 는 이미 돌고 있다는 뜻이라 같이 지켜본다
+      rememberStories([...storiesRef.current, { at: today(), text: text.trim() }]);
       setJob({ state: 'running', step: '모델에게 묻는 중', elapsed: 0 });
       watchJob();
       return;
@@ -225,7 +272,39 @@ export default function LifeView() {
     // 화면 글자에 영어를 두지 않는다 (CLAUDE.md §1) — 명령 이름도 적지 않는다.
     setJob({ state: 'error', error: r.payload?.error
       || '로컬 서버에 닿지 못했습니다. 이 컴퓨터에서 띄운 화면에서만 분석할 수 있습니다.' });
-  }, [watchJob]);
+    putDraft(text);            // 못 보낸 글을 칸에 돌려놓는다
+    sentRef.current = '';
+  }, [watchJob, keepInAccount, rememberStories, putDraft]);
+
+  // 예전에 적은 글을 입력창으로 옮긴다 (2026-09-08 사용자: "예전 입력을 클릭하면
+  // 우리 인생 입력창에 자동으로 복사해줘"). 상자는 브라우저에 남긴 글을 읽고
+  // 서므로 (STORY_KEY) 거기에 적고 상자를 새로 세운다. 적다 만 글은 아래에
+  // 붙인다 — 쓰던 것을 삼키지 않는다 (`life.js appendDraft`).
+  const pickStory = useCallback((text) => {
+    putDraft(text);
+    setLogOpen(false);
+    // **팝업을 띄우지 않는다** (2026-09-08 사용자: "이 알림을 보여주지마. 필요
+    // 없는 거야"). 상자가 열리며 그 글이 거기 서는 것이 이미 답이다 — 한 일이
+    // 눈앞에 보이는데 글로 또 말하는 것은 군더더기다.
+  }, [putDraft]);
+
+  // --- 기록에서 한 줄 지운다 ----------------------------------------------
+  // **그래프는 건드리지 않는다.** 지우는 것은 '내가 적은 글' 목록이고, 거기서
+  // 나온 노드는 그대로 선다 (2026-09-08 사용자: 남은 글로 처음부터 다시 짓던
+  // '고쳐서 다시 읽기' 를 뺐다 — 그래프를 버리고 몇 분을 기다리는 길이었다).
+  // 노드가 틀렸으면 상세 패널의 '삭제' 가, 글이 틀렸으면 그 줄을 입력창으로
+  // 옮겨 고쳐 넣는 길이 있다.
+  //
+  // 지운 자리는 브라우저와 계정에 바로 남긴다 — 안 그러면 새로고침에 되살아난다.
+  const dropStory = useCallback(async (i) => {
+    const list = storiesRef.current.filter((_, k) => k !== i);
+    setStories(list);
+    if (!rawRef.current) return;
+    const doc = { ...rawRef.current, stories: list };
+    rawRef.current = doc;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch { /* 못 남겨도 본다 */ }
+    await keepInAccount(doc);
+  }, [keepInAccount]);
 
   // 부팅: 계정에 올려 둔 것 → 이 브라우저에 남긴 것 → 빈 화면.
   // 서버 폴더의 파일은 읽지 않는다 — 누구의 것인지 모르는 자료가 기본으로
@@ -242,12 +321,22 @@ export default function LifeView() {
         const r = await postJson('/api/life/refine', doc);
         return r.ok && r.payload?.nodes ? r.payload : doc;
       };
-      const mine = await auth.me().then((s) => (s.user ? auth.life.load() : null)).catch(() => null);
+      // 계정을 못 읽은 것(네트워크)과 계정이 빈 것을 가른다 — 못 읽었는데
+      // 브라우저의 옛 자료를 올리면 계정에 있던 새 것을 덮는다.
+      const me = await auth.me();
+      let mine = null, read = false;
+      if (me.user) {
+        try { mine = await auth.life.load(); read = true; } catch { /* 못 읽었다 */ }
+      }
       if (!alive) return;
       if (mine?.doc && await adopt(await refined(mine.doc), 'account')) return;
       let kept = null;
       try { kept = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { /* 비었다 */ }
-      if (kept && await adopt(await refined(kept), 'local')) return;
+      if (kept && await adopt(await refined(kept), 'local')) {
+        // 브라우저에만 있던 것을 계정으로 옮기는 길. 단추가 하던 일이다.
+        if (me.user && read) await keepInAccount(rawRef.current);
+        return;
+      }
     })();
     // 창을 닫았다 다시 열어도 돌던 분석은 서버에서 계속 돈다.
     (async () => {
@@ -258,7 +347,29 @@ export default function LifeView() {
       setJob(st); setWriting(true); watchJob();
     })();
     return () => { alive = false; };
-  }, [adopt, watchJob]);
+  }, [adopt, watchJob, keepInAccount]);
+
+  // 이야기 기록이 없는 옛 문서(이 열이 생기기 전에 만든 것)를 위해, 이 컴퓨터에
+  // 남은 원문을 한 번 묻는다 (`/api/life/story` → data/life/나.txt). 빈 줄로 갈라
+  // 덩어리를 세운다. 다른 컴퓨터·배포에서는 빈 글이 와 아무 일도 없다.
+  const askedRef = useRef(false);
+  useEffect(() => {
+    if (!life || stories.length || askedRef.current) return;
+    askedRef.current = true;
+    (async () => {
+      const r = await getJson('/api/life/story').catch(() => null);
+      const list = splitStories(r?.text || '');
+      if (!list.length) return;
+      setStories(list);
+      if (!rawRef.current) return;
+      rawRef.current.stories = list;
+      // **찾자마자 계정에 올린다.** 다음 저장까지 미루면, 그 사이에 아무것도
+      // 안 한 사람의 계정에는 이야기가 없다 — 다른 컴퓨터에서 열면 빈 목록이다.
+      // 브라우저에도 같이 남긴다 (부팅이 계정 다음으로 읽는 자리).
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(rawRef.current)); } catch { /* 못 남겨도 본다 */ }
+      await keepInAccount(rawRef.current);
+    })();
+  }, [life, stories.length, keepInAccount]);
 
   // 판 — DOM 을 직접 그리는 쪽
   useEffect(() => {
@@ -299,7 +410,7 @@ export default function LifeView() {
 
   const forget = () => {
     try { localStorage.removeItem(STORE_KEY); } catch { /* 없다 */ }
-    setLife(null); setContext(null); setSource(''); setSelected(null);
+    setLife(null); setContext(null); setSelected(null);
   };
 
   // --- 노드 하나를 지운다 --------------------------------------------------
@@ -326,10 +437,8 @@ export default function LifeView() {
     }
     await adopt(next, 'local');
     toast(gone ? `지웠습니다 · ${gone}` : '지웠습니다');
-    if (accountRef.current.user) {
-      try { await auth.life.save(next); setSource('account'); } catch (err) { toast(err.message, 6000); }
-    }
-  }, [adopt, toast]);   // eslint-disable-line react-hooks/exhaustive-deps
+    await keepInAccount(next);
+  }, [adopt, toast, keepInAccount]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const name = life?.subject?.name || '나';
 
@@ -372,24 +481,31 @@ export default function LifeView() {
         </div>
         <div className="life-tools">
           {/* 상자를 닫아도 분석은 계속 돈다 — 단추가 그것을 말한다. */}
-          <button type="button" className="life-btn" onClick={() => setWriting((v) => !v)} aria-pressed={writing}>
+          <button type="button" className="life-btn" aria-pressed={writing}
+                  onClick={() => { setWriting((v) => !v); setLogOpen(false); }}>
             {job?.state === 'running' ? `내 역사 읽는 중 · ${job.elapsed ?? 0}초` : '내 역사 입력하기'}
           </button>
-          {/* 계정에 두는 것은 **누를 때만** 일어난다 (위 saveToAccount 머리글). */}
-          {account.user && life && (
-            <button type="button" className="life-btn" onClick={saveToAccount}
-                    title="이 개인 역사를 내 계정에 저장합니다">내 계정에 저장</button>
+          {/* 내가 적은 이야기 — 그래프의 원본이다. 아이콘 하나로 펴고 접는다
+              (2026-09-08 사용자: "'내 역사 입력하기' 오른쪽에 아이콘 하나 만들어서
+              누르면 사용자가 입력한 사용자의 역사 히스토리를 보여줘"). */}
+          {life && (
+            <button type="button" className="clickable-icon life-log-btn" aria-pressed={logOpen}
+                    onClick={() => { setLogOpen((v) => !v); setWriting(false); }} aria-label="내가 적은 이야기"
+                    title="내가 적은 이야기 — 잘못 적은 것을 고칩니다">
+              <StoryLogIcon />
+            </button>
           )}
-          {account.user && source === 'account' && (
-            <button type="button" className="life-btn" onClick={dropFromAccount}
-                    title="계정에 올려 둔 개인 역사를 지웁니다">계정에서 지우기</button>
-          )}
+          {/* 계정에 두는 단추는 없다 — 저절로 올라간다 (위 keepInAccount 머리글). */}
         </div>
         <ThemeToggle onChange={() => boardRef.current?.layout()} />
       </header>
       {kept && <div className="life-toast" role="status" aria-live="polite">{kept}</div>}
 
-      {writing && <StoryBox job={job} local={local} onSubmit={onStory} onClose={() => setWriting(false)} />}
+      {writing && <StoryBox key={draftStamp} job={job} local={local} onSubmit={onStory}
+                            onClose={() => setWriting(false)} />}
+      {logOpen && <StoryLog stories={stories} running={job?.state === 'running'}
+                            onPick={pickStory} onDrop={dropStory}
+                            onClose={() => setLogOpen(false)} />}
 
       <div className="layout life-layout">
         {/* 연표 판은 늘 붙어 있다(LifeBoard 가 DOM 을 쥔다). 자료가 없으면 빈
@@ -501,23 +617,37 @@ function StoryBox({ job, local, onSubmit, onClose }) {
     try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
   });
   const running = job?.state === 'running';
-  // 다 되면 칸을 비운다 — 다음에 적는 것은 **더하는** 이야기라 옛 글이 남아 있으면
-  // 같은 것을 두 번 보내게 된다. 원문은 서버가 파일에 이어 둔다.
-  useEffect(() => {
-    if (job?.state !== 'done') return;
-    setText('');
-    try { localStorage.removeItem(STORY_KEY); } catch { /* 없다 */ }
-  }, [job?.state]);
+  // 칸을 비우는 것은 **보낼 때**다. 전에는 '분석이 끝났으면' 비웠는데, 그 효과가
+  // **세워질 때마다** 돌았다 — 모달에서 예전 글을 눌러 옮기면 상자가 새로 서고
+  // (key={draftStamp}) 그 자리에서 방금 옮긴 글이 지워졌다 (2026-09-08 사용자:
+  // "입력을 클릭해도 입력창에 복사가 안 되는 경우가 있어"). 한 번 분석을 끝낸
+  // 뒤에만 그랬으므로 '경우가 있어' 였다. 보낸 글은 못 보내면 화면이 되돌린다
+  // (LifeView restoreDraft).
   const change = (v) => {
     setText(v);
     try { localStorage.setItem(STORY_KEY, v); } catch { /* 저장 못 해도 적을 수 있다 */ }
+  };
+  // 옮겨 온 글은 **끝에 커서를 두고** 보여 준다 — 긴 글이면 어디에 붙었는지
+  // 안 보이면 옮겨진 줄 모른다.
+  const areaRef = useRef(null);
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el || el.disabled) return;
+    el.focus();
+    el.selectionStart = el.selectionEnd = el.value.length;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+  const send = () => {
+    onSubmit(text, '나');
+    setText('');
+    try { localStorage.removeItem(STORY_KEY); } catch { /* 없다 */ }
   };
   const done = job?.state === 'done';
   const pct = progressOf(job, local);
   const made = done && job.payload ? job.payload : null;
   return (
     <div className="life-paste life-story">
-      <textarea value={text} onChange={(e) => change(e.target.value)} disabled={running}
+      <textarea ref={areaRef} value={text} onChange={(e) => change(e.target.value)} disabled={running}
                 placeholder={STORY_EXAMPLE} spellCheck={false} />
       {(running || done) && (
         <div className="life-progress-row" role="status" aria-live="polite">
@@ -547,9 +677,85 @@ function StoryBox({ job, local, onSubmit, onClose }) {
         {/* 글이 한 자라도 있으면 누를 수 있다. 전에는 40자 미만이면 말없이 잠겨
             있어 "입력해도 버튼이 활성화가 안 돼"(2026-09-08) — 문턱은 두지 않는다. */}
         <button type="button" className="life-btn go" disabled={running || !text.trim()}
-                onClick={() => onSubmit(text, '나')}>{running ? '읽는 중' : '입력'}</button>
+                onClick={send}>{running ? '읽는 중' : '입력'}</button>
       </div>
     </div>
+  );
+}
+
+// --- 내가 적은 이야기 (모달) ----------------------------------------------
+// 그래프는 사람이 적은 글에서 나온다. 그 글을 다시 볼 수 있어야 고칠 수 있다
+// (2026-09-08 사용자: "잘못된 입력을 고칠 수 있게 해줘" — 실제로 원문에
+// '잠실고딩학교 1학넌때'가 남아 있고 다시 적은 문단이 그 옆에 있었다).
+//
+// **머리 아래로 펴지는 상자가 아니라 모달이다** (같은 날: "히스토리 아이콘 누르면
+// 히스토리 내역을 모달창으로 보여주고"). 여기서 하는 일은 둘뿐이다:
+//
+//  - **줄을 누르면 입력창으로 옮긴다** ("예전 입력을 클릭하면 우리 인생 입력창에
+//    자동으로 복사해줘"). 거기서 고쳐 '입력' 하면 있는 그래프에 더해진다.
+//  - **삭제는 그 줄을 기록에서 뺀다.** 그래프는 그대로다 — 남은 글로 처음부터
+//    다시 짓던 '고쳐서 다시 읽기' 는 뺐다 (2026-09-08 사용자).
+//
+// 새로 적은 것이 맨 위다. 자리만 뒤집고 **글의 차례는 그대로 둔다** — 뒤에 적은
+// 문단이 앞의 것을 고치는 말이라 이어 붙일 때 뒤집으면 뜻이 달라진다.
+// 설명 문단은 두지 않는다 (2026-09-08 사용자: "이 문장을 삭제해줘") — 무엇을 하는
+// 자리인지는 눌러 보면 알고, 단추의 title 로만 남긴다.
+export function StoryLog({ stories, running, onPick, onDrop, onClose }) {
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+  // 날을 아는 것이 하나도 없으면 그 칸을 세우지 않는다 — 빈 칸만 남기면 글이
+  // 까닭 없이 오른쪽으로 밀린다. 하나라도 알면 줄을 맞추려고 다 세운다.
+  const anyWhen = stories.some((r) => whenText(r.at));
+  return (
+    <div className="scrim" role="presentation"
+         onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
+      <div className="life-log-box" role="dialog" aria-modal="true" aria-label="내가 적은 이야기">
+        <h2>내가 적은 이야기</h2>
+        {stories.length === 0 && (
+          <p className="tl-hint">아직 적은 이야기가 없습니다. ‘내 역사 입력하기’ 로 적으면 여기에 남습니다.</p>
+        )}
+        <ul className="life-log-list">
+          {stories.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => (
+            <li key={i}>
+              <button type="button" className="life-log-item" onClick={() => onPick?.(r.text)}
+                      title="이 글을 입력창으로 옮깁니다">
+                {anyWhen && <span className="life-log-when">{whenText(r.at)}</span>}
+                <span className="life-log-text">{r.text}</span>
+              </button>
+              <button type="button" className="life-btn danger" disabled={running}
+                      onClick={() => onDrop?.(i)}
+                      title="이 글을 기록에서 지웁니다 (그래프는 그대로)">삭제</button>
+            </li>
+          ))}
+        </ul>
+        <div className="life-log-foot">
+          <span className="tl-hint">{running ? '지금 읽는 중입니다. 끝나면 지울 수 있습니다.' : ''}</span>
+          <button type="button" className="life-btn" onClick={onClose}>닫기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 적은 날. 이 열이 생기기 전에 적은 것은 날을 모르는데, **모른다고 적지도
+// 않는다** (2026-09-08 사용자: "'적은 날을 모릅니다' 문장을 삭제해"). 빈 칸을
+// 그대로 두어 글 칸의 왼쪽 줄만 맞춘다.
+function whenText(at) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(at || ''));
+  return m ? `${m[1]}년 ${+m[2]}월 ${+m[3]}일` : '';
+}
+
+// lucide 의 scroll-text — 사람이 적은 글 뭉치.
+function StoryLogIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 12h-5M15 8h-5M19 17V5a2 2 0 0 0-2-2H4" />
+      <path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />
+    </svg>
   );
 }
 

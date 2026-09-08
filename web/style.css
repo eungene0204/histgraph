@@ -922,6 +922,39 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .life-progress { flex: 1; height: 6px; border-radius: 3px; overflow: hidden; background: var(--background-modifier-border); }
 .life-progress i { display: block; height: 100%; background: var(--mark-actor); transition: width .8s ease-out; }
 .life-progress-row .tl-hint { white-space: nowrap; }
+/* 내가 적은 이야기 — 그래프의 원본이 되는 글. 머리 아래로 펴지는 상자가
+   아니라 모달이다 (2026-09-08 사용자). 겉(.scrim)은 로그인 상자와 같은 것을
+   쓰고, 안쪽만 이 화면의 것이다. */
+.life-log-box {
+  display: flex; flex-direction: column;
+  width: 100%; max-width: 760px; max-height: 78vh; padding: 22px 24px 18px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l); box-shadow: var(--shadow-l);
+}
+.life-log-box h2 { margin: 0 0 8px; font-size: var(--font-ui-larger); font-weight: 600; }
+.life-log-box > p { margin: 0 0 14px; font-size: var(--font-ui-small); color: var(--text-muted); line-height: 1.8; }
+.life-log-box > p b { color: var(--text-normal); font-weight: 600; }
+/* 목록이 길어지면 상자 안에서 훑는다 — 아래 단추 줄은 늘 보인다. */
+.life-log-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0 0 14px; padding: 0; list-style: none; }
+.life-log-list li { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+/* 한 줄이 통째로 누르는 자리다 — 누르면 입력창으로 옮겨 간다. */
+.life-log-item {
+  flex: 1; min-width: 0; display: flex; gap: 12px; text-align: left;
+  padding: 9px 12px; border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m); background: var(--background-secondary);
+  color: var(--text-normal); font: inherit; font-size: var(--font-ui-small);
+  line-height: 1.7; cursor: pointer;
+}
+.life-log-item:hover { border-color: var(--tag-border); background: var(--background-modifier-hover); }
+.life-log-when { flex: none; width: 96px; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.life-log-text { flex: 1; min-width: 0; white-space: pre-wrap; }
+.life-log-list .life-btn { flex: none; margin-top: 4px; }
+.life-log-foot { display: flex; align-items: center; gap: 8px; }
+.life-log-foot .tl-hint { margin: 0 auto 0 0; }
+/* 지운 것이 없으면 '고쳐서 다시 읽기' 는 눌리지 않는다 — 그렇게 보여야 한다. */
+.life-log-foot .life-btn:disabled { opacity: 0.45; cursor: default; }
+
 /* 안 된 것은 눈에 띄어야 한다 — 팔레트에 빨강이 없어 본문색으로 세운다. */
 .life-warn { color: var(--text-normal); }
 .life-empty-row { display: flex; gap: 8px; align-items: center; }

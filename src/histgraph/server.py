@@ -1291,6 +1291,13 @@ def dispatch(
     # 배포에서는 이 자리가 늘 'idle' 이다 — 화면이 그것을 보고 물러난다.
     if path == "/api/life/job":
         return 200, LIFE_JOBS.status()
+    # 이 컴퓨터에 남은 이야기 원문. 화면의 '내가 적은 이야기' 상자가 **옛
+    # 그래프를 위해** 한 번 묻는다 (2026-09-08 사용자: "누르면 사용자가 입력한
+    # 사용자의 역사 히스토리를 보여줘. 그래서 잘못된 입력을 고칠 수 있게 해줘").
+    # 앞으로 적는 것은 문서가 `stories` 로 들고 다니므로 여기를 안 지난다.
+    # 배포에는 이 파일이 없다 — 빈 글이 온다.
+    if path == "/api/life/story":
+        return 200, {"text": _life_story({"subject": {"name": one("name", "나")}}) or ""}
     if path == "/api/context":
         return 200, api.context(int(one("from", "0")), int(one("to", "0")))
     if path.startswith("/api/node/"):

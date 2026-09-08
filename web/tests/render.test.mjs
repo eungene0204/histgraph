@@ -36,7 +36,8 @@ import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
 import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
 import { LoginModal } from './src/components/LoginModal.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal };
+import { StoryLog } from './src/components/LifeView.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog };
 `;
 
 await build({
@@ -53,7 +54,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -383,6 +384,58 @@ let detailHtml = '';
      /!mine\?\.user.*preventDefault/s.test(appSrc) && appSrc.includes('setAskLogin(true)'));
   ok('주소로 곧장 들어와도 같은 문을 지난다',
      /if \(account\.enabled && !account\.user\)/.test(lifeSrc) && lifeSrc.includes('dismissible={false}'));
+}
+
+// --- 내가 적은 이야기 -----------------------------------------------------
+// 2026-09-08 사용자: "'내 역사 입력하기' 오른쪽에 아이콘 하나 만들어서 누르면
+// 사용자가 입력한 사용자의 역사 히스토리를 보여줘. 그래서 잘못된 입력을 고칠
+// 수 있게 해줘."
+{
+  const box = plain(renderToString(h(StoryLog, {
+    stories: [{ at: '', text: '잠실고딩학교 1학넌때 친구 김일권을 만났고' },
+              { at: '2026-09-08', text: '2002년 3월에 30사단 입대' }],
+    running: false, onPick: () => {}, onDrop: () => {}, onClose: () => {},
+  })));
+  ok('모달로 서고, 적은 글이 누를 수 있는 줄이 된다',
+     box.includes('role="dialog"') && box.includes('aria-modal="true"')
+     && (box.match(/class="life-log-item"/g) || []).length === 2
+     && box.includes('잠실고딩학교 1학넌때'), box.slice(0, 240));
+  // 2026-09-08 사용자: "최신 입력한 내용이 가장 위에 있어야해" · "'적은 날을
+  // 모릅니다' 문장을 삭제해". 뒤에 적은 것이 위에 서되 글의 차례는 그대로다.
+  ok('새로 적은 것이 맨 위에 선다',
+     box.indexOf('30사단 입대') < box.indexOf('잠실고딩학교'), box.slice(0, 200));
+  ok('적은 날을 적고, 모르면 아무 말도 안 한다',
+     box.includes('2026년 9월 8일') && !box.includes('모릅니다'));
+  // 2026-09-08 사용자: 설명 문단도, '고쳐서 다시 읽기' 도 뺐다. 남는 것은
+  // 제목 · 누를 수 있는 줄 · 줄마다 '삭제' · '닫기' 뿐이다.
+  ok('설명 문단도 다시 읽기 단추도 없다',
+     !box.includes('이 글에서 그래프가 나옵니다') && !box.includes('다시 읽기')
+     && box.includes('내가 적은 이야기') && box.includes('삭제') && box.includes('닫기'));
+  const none = plain(renderToString(h(StoryLog, { stories: [], running: false, onPick: () => {}, onDrop: () => {}, onClose: () => {} })));
+  ok('적은 것이 없으면 그렇게 적는다', none.includes('아직 적은 이야기가 없습니다'));
+  // 머리 줄의 아이콘 — 그림만 서고 글자는 title·aria 로 말한다.
+  const lifeSrc2 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
+  ok("아이콘이 '내 역사 입력하기' 오른쪽에 선다",
+     /내 역사 입력하기[\s\S]{0,900}life-log-btn/.test(lifeSrc2) && lifeSrc2.includes('aria-label="내가 적은 이야기"'));
+  // 지우는 것은 기록 한 줄이다 — 그래프는 그대로고, 지운 자리는 브라우저와
+  // 계정에 바로 남는다 (안 남기면 새로고침에 되살아난다).
+  ok('삭제는 기록에서 빼고 바로 남긴다',
+     /const dropStory = useCallback/.test(lifeSrc2)
+     && /stories: list[\s\S]{0,400}keepInAccount\(doc\)/.test(lifeSrc2));
+  // 누른 글은 입력창으로 간다 — 상자는 브라우저에 남긴 글을 읽고 서므로
+  // 거기에 적고 상자를 새로 세운다 (key 가 바뀐다).
+  ok('누른 글이 입력창으로 옮겨 간다',
+     lifeSrc2.includes('appendDraft(cur, text)') && lifeSrc2.includes('localStorage.setItem(STORY_KEY, next)')
+     && /<StoryBox key=\{draftStamp\}/.test(lifeSrc2));
+  // 2026-09-08 사용자: "입력을 클릭해도 입력창에 복사가 안 되는 경우가 있어."
+  // 상자가 **세워질 때** 칸을 비우던 효과가 방금 옮긴 글을 지웠다. 비우는 것은
+  // 보낼 때 한 번이고, 못 보낸 글은 되돌린다.
+  ok('상자는 세워질 때 칸을 비우지 않는다',
+     !/job\?\.state !== 'done'\)\s*return;/.test(lifeSrc2)
+     && /const send = \(\) => \{[\s\S]{0,200}removeItem\(STORY_KEY\)/.test(lifeSrc2));
+  ok('못 보낸 글은 칸에 되돌린다',
+     /putDraft\(text\);\s+\/\/ 못 보낸 글/.test(lifeSrc2)
+     && /st\.state === 'error' && sentRef\.current/.test(lifeSrc2));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------
