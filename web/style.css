@@ -955,8 +955,8 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 /* 지운 것이 없으면 '고쳐서 다시 읽기' 는 눌리지 않는다 — 그렇게 보여야 한다. */
 .life-log-foot .life-btn:disabled { opacity: 0.45; cursor: default; }
 
-/* 안 된 것은 눈에 띄어야 한다 — 팔레트에 빨강이 없어 본문색으로 세운다. */
-.life-warn { color: var(--text-normal); }
+/* 안 된 것은 눈에 띄어야 한다 — 빨강으로 세운다 (밝은·어두운 바탕 모두 대비를 잰 --text-danger). */
+.life-warn { color: var(--text-danger); }
 .life-empty-row { display: flex; gap: 8px; align-items: center; }
 
 /* 오른쪽 상세를 접으면 드로어가 화면 밖(오른쪽)으로 미끄러진다 — 넘친 만큼
