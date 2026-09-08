@@ -88,15 +88,35 @@ let appHtml = '';
     const html = readFileSync(join(WEB, file), 'utf-8');
     ok(`${name} 페이지가 있다`, html.includes('<h1>') && html.length > 1000);
     // 본문이 스크립트에 기대면 안 된다 — 광고 심사와 검색 로봇이 빈 페이지를
-    // 본다. 예외는 둘: 광고를 부르는 한 줄, 테마(라이트/다크)를 첫 그림 전에
-    // 박는 한 줄. 둘 다 없어도 본문은 그대로 읽힌다 (테마는 어두운 기본값).
+    // 본다. 예외는 셋: 광고를 부르는 한 줄, 테마(라이트/다크)를 첫 그림 전에
+    // 박는 한 줄, 방문 통계 한 줄. 셋 다 없어도 본문은 그대로 읽힌다
+    // (테마는 어두운 기본값).
     const scripts = html.match(/<script[^>]*>/g) || [];
     ok(`${name} 은 본문이 스크립트에 기대지 않는다`,
-       scripts.every((tag) => tag.includes('adsbygoogle.js') || tag.includes('/theme-boot.js')), scripts.join(' '));
+       scripts.every((tag) => tag.includes('adsbygoogle.js') || tag.includes('/theme-boot.js')
+                     || tag.includes('/analytics.js')), scripts.join(' '));
     ok(`${name} 이 테마 설정을 따른다`, html.includes('src="/theme-boot.js"'));
     ok(`${name} 이 광고를 부른다`, html.includes('adsbygoogle.js?client=ca-pub-'));
     ok(`${name} 에 그래프로 돌아가는 길이 있다`, html.includes('href="/"'));
   }
+}
+
+// --- 방문 통계: 측정 ID 는 한 곳에만 있다 -------------------------------
+// 광고 번호(ca-pub-)가 네 장에 따로 박혀 있어 하나만 고치면 조용히 어긋난다.
+// 방문 통계는 같은 실수를 못 하도록 파일 하나만 부르게 했고, 그 약속을 여기서
+// 지킨다 — 어느 장이든 <script> 를 새로 박으면 걸린다.
+{
+  const files = ['index.html', 'life.html', 'privacy.html', 'terms.html'];
+  for (const f of files) {
+    ok(`${f} 이 방문 통계를 부른다`,
+       readFileSync(join(WEB, f), 'utf-8').includes('src="/analytics.js"'));
+  }
+  const js = readFileSync(join(WEB, 'public/analytics.js'), 'utf-8');
+  ok('측정 ID 자리는 한 줄뿐이다', (js.match(/var ID = /g) || []).length === 1, js.slice(0, 80));
+  ok('ID 가 비어 있으면 아무 요청도 나가지 않는다', js.includes('if (!ID) return;'));
+  const others = [...files.map((f) => join(WEB, f)), join(WEB, '..', 'src', 'histgraph', 'pages.py')];
+  const stray = others.filter((f) => /G-[A-Z0-9]{6,}/.test(readFileSync(f, 'utf-8')));
+  ok('측정 ID 가 다른 파일에 박혀 있지 않다', stray.length === 0, stray.join(' '));
 }
 
 // --- 범례: CSS 가 기대하는 평평한 목록인가 -------------------------------

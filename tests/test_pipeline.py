@@ -4604,6 +4604,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("정본 주소를 스스로 말한다",
           '<link rel="canonical" href="https://www.histgraph.space/n/wd%3AS">' in body)
     check("광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
+    # 방문 통계는 화면 네 장과 이 장이 **같은 파일 하나**를 부른다. 측정 ID 를
+    # 여기 박으면 화면과 어긋나므로, 부르는 것은 주소뿐이다
+    # (web/public/analytics.js · web/tests/render.test.mjs 가 나머지를 잰다).
+    check("방문 통계도 같은 파일 하나를 부른다",
+          '<script async src="/analytics.js"></script>' in body
+          and not _re.search(r"G-[A-Z0-9]{6,}", Path(pages.__file__).read_text()),
+          body[:400])
     check("방침·약관으로 이어진다",
           '/privacy.html' in body and '/terms.html' in body)
     check("사람이 읽는 글자에 영어가 없다",

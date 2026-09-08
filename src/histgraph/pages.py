@@ -371,6 +371,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 <meta property="og:locale" content="ko_KR">
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={ADS_CLIENT}"
         crossorigin="anonymous"></script>
+<script async src="/analytics.js"></script>
 <style>{STYLE}</style>
 </head>
 <body>
