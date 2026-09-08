@@ -371,7 +371,7 @@ let detailHtml = '';
   ok('약관과 방침으로 가는 길이 있다',
      box.includes('/terms.html') && box.includes('/privacy.html'));
   ok('닫을 수 없는 상자에는 돌아갈 자리를 준다',
-     box.includes('한국사 그래프로 돌아가기') && !box.includes('나중에'));
+     box.includes('한국사로 돌아가기') && !box.includes('나중에'));
   ok('아직 열리지 않았으면 누를 수 없는 단추를 세우지 않는다',
      !plain(renderToString(h(LoginModal, { title: 'ㄱ', why: 'ㄴ', ready: false })))
        .includes('class="login-go"'));

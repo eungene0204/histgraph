@@ -216,7 +216,7 @@ button, input, select { font-family: inherit; }
   background: none; cursor: pointer;
 }
 .era:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도 탭처럼 보인다 */
+a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼 보인다 */
 
 .search { position: relative; grid-column: 2; width: 100%; }
 /* 머리 줄 오른쪽 끝 — 화면 밝기와 계정이 나란히 선다. */

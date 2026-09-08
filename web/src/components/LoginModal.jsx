@@ -48,7 +48,7 @@ export function LoginModal({ next = '/', title, why, dismissible = true, onClose
 
         {dismissible
           ? <button className="login-back" type="button" onClick={onClose}>나중에</button>
-          : <a className="login-back" href="/">한국사 그래프로 돌아가기</a>}
+          : <a className="login-back" href="/">한국사로 돌아가기</a>}
       </div>
     </div>
   );

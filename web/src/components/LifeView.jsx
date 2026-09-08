@@ -467,7 +467,7 @@ export default function LifeView() {
           <div className="brand">
             <span className="mark" />
             <h1>histgraph</h1>
-            <a className="era" href="/">한국사 그래프</a>
+            <a className="era" href="/">한국사</a>
             <span className="era life-here">내 역사</span>
           </div>
         </header>
@@ -487,7 +487,7 @@ export default function LifeView() {
         <div className="brand">
           <span className="mark" />
           <h1>histgraph</h1>
-          <a className="era" href="/">한국사 그래프</a>
+          <a className="era" href="/">한국사</a>
           <span className="era life-here">내 역사</span>
         </div>
         <div className="life-tools">
