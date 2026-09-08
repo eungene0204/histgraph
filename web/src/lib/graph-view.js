@@ -100,6 +100,22 @@ export function nodeColor(type, group) {
   return T[type] || G[group] || G.thing;
 }
 
+// **서로 같은 것을 뜻하는 관계.** 두 가지가 여기서 따라 나온다.
+//   1. 화살촉을 붙이지 않는다. 화살촉은 '누가 누구에게'를 말하는 부호인데, 방향이
+//      없는 자리에 붙이면 없는 방향을 지어낸다 — 신사임당 → 이원수와 이원수 →
+//      신사임당은 같은 말이다.
+//   2. 선은 한 줄이다. 두 방향이 다 오면 같은 자리에 두 번 겹쳐 그려진다 (실측
+//      2026-09-08: 배우자 네 쌍이 여덟 줄이었다 — 가리켰을 때 이름이 두 번 뜨고,
+//      파선은 위상이 겹쳐 실선처럼 진해진다). 상세 패널은 이미 카드 한 장으로
+//      접는다 (`relations.js SYMMETRIC`) — 캔버스만 안 접고 있었다.
+// 한국사는 `spouse_of`, 개인 역사는 만남·친구·동료·같은 학교·함께 나눔·겹침
+// (`life.SYMMETRIC`). same_as 는 관계가 아니라 이음이라 예전부터 화살촉이 없다.
+// **`relative_of` 는 뺐다** — 대칭이지만 선 이름이 도착 쪽을 부르는 말이라
+// ('나 → 나형철 · 형' = 나형철이 나의 형) 화살촉이 그 말의 주어를 정한다.
+// `related_to` 도 뺐다 — 라벨이 '다음'이면 앞뒤가 있다 (`LABEL_DIR_HEAD`).
+export const MUTUAL = new Set(['same_as', 'spouse_of',
+  'met', 'friend_of', 'worked_with', 'schoolmate', 'shared_with', 'overlapped']);
+
 // Obsidian 의 그래프 뷰를 따른다 (design.md §3). 바탕은 --background-primary,
 // 선은 --graph-line (회색 한 가지), 가리킨 노드의 선과 테두리만 강조색.
 // 선에 타입 색을 입히던 것을 걷어냈다 — 색은 점에만 있고 선은 조용하다.
@@ -273,7 +289,7 @@ export class GraphView {
     const seen = new Map(this.edges.map((e) => [edgeKey(e), e]));
     for (const e of payload.edges) {
       if (!this.byId.has(e.s) || !this.byId.has(e.t)) continue;
-      const key = `${e.s}|${e.t}|${e.type}`;
+      const key = pairKey(e.s, e.t, e.type);
       const have = seen.get(key);
       if (have) {
         // 사슬이 주는 인과의 종류(배경·계기·영향)가 '원인'보다 구체적이다
@@ -286,7 +302,7 @@ export class GraphView {
     }
     for (const s of payload.same_as || []) {
       if (!this.byId.has(s.a) || !this.byId.has(s.b)) continue;
-      const key = `${s.a}|${s.b}|same_as`;
+      const key = pairKey(s.a, s.b, 'same_as');
       if (seen.has(key)) continue;
       // seen 은 Map 이다. 여기서 .add 를 불러 same_as 가 하나라도 있는 화면은
       // setData 가 중간에 죽었다 — 노드는 이미 실렸는데 center·selected 가
@@ -596,7 +612,7 @@ export class GraphView {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      if (this.display.arrows && e.kind !== 'same_as' && (!spot || active)) {
+      if (this.display.arrows && e.kind !== 'same_as' && !MUTUAL.has(e.type) && (!spot || active)) {
         drawArrow(ctx, a, b, ctx.strokeStyle);
       }
       if (active && showEdgeLabels) {
@@ -1153,6 +1169,10 @@ function drawArrow(ctx, a, b, color) {
   ctx.fill();
 }
 
+// 서로 같은 것을 뜻하는 관계는 **방향을 키에서 뺀다** — 두 방향이 다 와도 선은 한 줄이다.
 function edgeKey(e) {
-  return `${e.s}|${e.t}|${e.type}`;
+  return pairKey(e.s, e.t, e.type);
+}
+function pairKey(s, t, type) {
+  return MUTUAL.has(type) ? `${[s, t].sort().join('|')}|${type}` : `${s}|${t}|${type}`;
 }

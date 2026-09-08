@@ -7,7 +7,7 @@
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
 import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
-import { causalReach, causalLayout, GraphView } from '../src/lib/graph-view.js';
+import { causalReach, causalLayout, GraphView, MUTUAL } from '../src/lib/graph-view.js';
 
 let pass = 0;
 let fail = 0;
@@ -566,6 +566,69 @@ console.log('\n배율(dpr)');
     ok('변환이 배율 그대로', t && t[1] === 2 && t[4] === 2, JSON.stringify(t));
     const clear = calls.find((c) => c[0] === 'clearRect');
     ok('지우는 자리가 캔버스 전체', clear && clear[3] * view.dpr >= canvas.width && clear[4] * view.dpr >= canvas.height, JSON.stringify(clear));
+    view.destroy();
+  } finally {
+    globalThis.ResizeObserver = saved.RO;
+    globalThis.requestAnimationFrame = saved.raf;
+    globalThis.cancelAnimationFrame = saved.caf;
+    if (saved.win === undefined) delete globalThis.window; else globalThis.window = saved.win;
+  }
+}
+
+// --- 대칭 관계에는 화살촉이 없다 -------------------------------------------
+// 화살촉은 '누가 누구에게'를 말하는 부호다. 서로 같은 것을 뜻하는 관계(배우자,
+// 개인 역사의 친구·같은 학교)에 붙이면 없는 방향을 지어낸다. `closePath` 를 부르는
+// 곳은 drawArrow 하나뿐이라 그 횟수가 곧 그려진 화살촉 수다.
+console.log('\n화살촉 (대칭 관계)');
+{
+  const noop = () => {};
+  const calls = [];
+  const ctx = new Proxy({}, {
+    get: (_t, k) => (...args) => {
+      calls.push([k, ...args]);
+      return k === 'measureText' ? { width: String(args[0] ?? '').length * 7 } : undefined;
+    },
+    set: () => true,
+  });
+  const canvas = {
+    getContext: () => ctx, clientWidth: 800, clientHeight: 600, width: 0, height: 0,
+    style: {}, parentElement: {}, addEventListener: noop,
+    setPointerCapture: noop, releasePointerCapture: noop,
+  };
+  const saved = { RO: globalThis.ResizeObserver, raf: globalThis.requestAnimationFrame,
+                  caf: globalThis.cancelAnimationFrame, win: globalThis.window };
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  globalThis.requestAnimationFrame = () => 0;
+  globalThis.cancelAnimationFrame = noop;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const view = new GraphView(canvas);
+    view.setData({
+      center: 'me',
+      nodes: [{ id: 'me', label: '나', type: 'person', group: 'actor', degree: 3 },
+        { id: 'kim', label: '김일권', type: 'person', group: 'actor', degree: 2 },
+        { id: 'ev', label: '메탈리카 공연', type: 'event', group: 'event', degree: 1 }],
+      // 친구는 두 방향이 다 왔다 — 선은 한 줄이어야 한다.
+      edges: [{ s: 'me', t: 'ev', type: 'experienced', label: '관람', conf: 1 },
+        { s: 'me', t: 'kim', type: 'friend_of', label: '친구', conf: 1 },
+        { s: 'kim', t: 'me', type: 'friend_of', label: '친구', conf: 1 },
+        { s: 'kim', t: 'ev', type: 'experienced', label: '함께', conf: 0.8 }],
+    });
+    calls.length = 0;
+    view._draw();
+    const heads = calls.filter((c) => c[0] === 'closePath').length;
+    ok('방향이 있는 선에만 화살촉이 선다 (친구 빼고 둘)', heads === 2, `화살촉 ${heads}`);
+    // 두 방향이 다 와도 선은 한 줄이다 — 실측: 배우자 네 쌍이 여덟 줄로 겹쳐 있었다.
+    ok('대칭 관계는 두 방향이 와도 선 한 줄', view.edges.filter((e) => e.type === 'friend_of').length === 1,
+      String(view.edges.filter((e) => e.type === 'friend_of').length));
+    ok('대칭 표에 개인 역사의 상호 관계가 다 들어 있다',
+      ['met', 'friend_of', 'worked_with', 'schoolmate', 'shared_with', 'overlapped', 'spouse_of', 'same_as']
+        .every((t) => MUTUAL.has(t)));
+    // 대칭이지만 선 이름이 도착 쪽을 부르는 말이라('나 → 나형철 · 형') 방향에 뜻이 있다.
+    // 라벨이 '다음'인 related_to 도 앞뒤가 있다 (LABEL_DIR_HEAD).
+    ok('역할이 도착을 부르는 관계와 인과는 화살촉을 지킨다',
+      !MUTUAL.has('relative_of') && !MUTUAL.has('related_to') && !MUTUAL.has('caused')
+      && !MUTUAL.has('participated_in') && !MUTUAL.has('experienced'));
     view.destroy();
   } finally {
     globalThis.ResizeObserver = saved.RO;
