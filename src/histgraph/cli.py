@@ -2287,6 +2287,7 @@ def cmd_life(args: argparse.Namespace) -> int:
         uv run histgraph life data/life/나.txt --backend mlx    # 로컬 모델로 (열쇠 없이)
         uv run histgraph life --json data/life/나.json         # 이미 받은 JSON 을 검증·연결만
         uv run histgraph life data/life/나.txt --dry-run       # 프롬프트만 찍는다
+        uv run histgraph life 더.txt --base data/life/나.json  # 있는 그래프에 더한다 (life.merge)
 
     모델은 `.env` 에 OpenRouter 열쇠가 있으면 **openrouter**(무료 모델,
     남의 GPU)이고 없으면 MLX 다. MLX 는 35GB 를 잡는다 — `extract`·`roles`·
@@ -2302,6 +2303,8 @@ def cmd_life(args: argparse.Namespace) -> int:
         return 2
     db = ROOT / "data" / f"{args.era}.sqlite"
     api = GraphAPI(db, era=args.era, readonly=True) if db.exists() else None
+    base = life_mod.load(Path(args.base)) if args.base else None
+    existing = life_mod.existing_summary(base) if base else None
     if args.json is not None:
         raw = life_mod.load(Path(args.json))
         name = args.name or Path(args.json).stem
@@ -2316,17 +2319,24 @@ def cmd_life(args: argparse.Namespace) -> int:
         if args.dry_run:
             print(life_mod.system_prompt())
             print("\n" + "=" * 46 + "\n")
-            print(life_mod.build_user(text, anchors=anchors))
+            print(life_mod.build_user(text, anchors=anchors, existing=existing))
             return 0
         backend = build_backend(args.backend or default_life_backend(), args.model)
         print(f"  모델: {backend.name} · {backend.model}")
-        raw = life_mod.analyze(text, backend, anchors=anchors)
+        raw = life_mod.analyze(text, backend, anchors=anchors, existing=existing)
         if raw is None:
             print("  모델이 JSON 을 돌려주지 않았습니다.", file=sys.stderr)
             return 1
         raw["_model"] = backend.model
-    payload, notes = life_mod.validate(raw)
+    payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"))
     linked = life_mod.link(payload, api) if api is not None else 0
+    if base:
+        payload, added = life_mod.merge(base, payload)
+        notes = payload.get("notes") or notes
+        print(f"  있는 그래프에 더함: 노드 {added['nodes']} · 관계 {added['edges']}"
+              f" · 연표 {added['timeline']} · 역사 연결 {added['connections']}")
+        if not args.out and not args.name:
+            name = Path(args.base).stem
     out = Path(args.out) if args.out else life_mod.LIFE_DIR / f"{name}.json"
     life_mod.save(payload, out)
     lo, hi = life_mod.span(payload)
@@ -2350,6 +2360,61 @@ def cmd_show(args: argparse.Namespace) -> int:
     with GraphStore(args.db) as store:
         sub = store.neighbors(args.node_id, depth=args.depth)
         print(json.dumps(sub, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def neon_env() -> str:
+    from . import neon
+    return neon.ENV_URL
+
+
+def cmd_accounts(args: argparse.Namespace) -> int:
+    """가입자 표를 세운다·본다. 그래프 DB 와는 다른 곳에 산다 (Neon).
+
+    `--init` 은 여러 번 돌려도 안전하다 (전부 `if not exists`). 배포에
+    스키마를 늘렸으면 그냥 다시 돌린다."""
+    from . import accounts, auth
+
+    if not accounts.configured():
+        print(f"  ✗ 배포에서는 {neon_env()} 가 반드시 있어야 합니다.")
+        return 1
+    try:
+        db = accounts.open_store()
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        return 1
+    print(f"  가입자 표: {accounts.where()}")
+    if args.init:
+        print(f"  ✓ 표를 세웠습니다 — {accounts.init_schema(db)}"
+              " (users · sessions · life_docs · bookmarks)")
+
+    missing = [
+        name for name in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+                          "HISTGRAPH_SESSION_SECRET")
+        if not os.environ.get(name, "").strip()
+    ]
+    if missing:
+        print("  ⚠ 아직 없는 환경변수: " + ", ".join(missing))
+        print("    (하나라도 없으면 로그인 단추는 서 있되 '아직 준비 중'이라고 답합니다)")
+    elif len(os.environ.get("HISTGRAPH_SESSION_SECRET", "")) < 32:
+        print("  ⚠ HISTGRAPH_SESSION_SECRET 이 32자보다 짧습니다.")
+    else:
+        print(f"  ✓ 로그인 설정이 갖춰졌습니다 (관리자 {len(auth.admins())}명)")
+
+    try:
+        rows = db.query(
+            "select id, email, name, created_at, last_login_at, disabled "
+            "from users order by created_at desc limit $1", [args.limit])
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        print("    표가 아직 없다면:  uv run histgraph accounts --init")
+        return 1
+    total = db.one("select count(*) as n from users")
+    print(f"\n  가입자 {int(total['n']):,}명" + (f" (최근 {len(rows)}명)" if rows else ""))
+    for r in rows:
+        mark = " (중지)" if r.get("disabled") else ""
+        print(f"    {str(r.get('created_at') or '')[:10]}  {r['email']}"
+              f"  {r.get('name') or ''}{mark}")
     return 0
 
 
@@ -2727,6 +2792,7 @@ def main(argv: list[str] | None = None) -> int:
     p_lf.add_argument("--json", help="이미 받은 그래프 JSON 을 검증·연결만 한다")
     p_lf.add_argument("--name", help="저장 이름 (기본: 파일 이름)")
     p_lf.add_argument("--out", help="저장 경로 (기본: data/life/{이름}.json)")
+    p_lf.add_argument("--base", help="있는 그래프 JSON — 새 이야기를 거기에 더한다 (지우지 않는다)")
     p_lf.add_argument("--era", default="korea", help="역사 사건을 이을 그래프 (data/{era}.sqlite)")
     p_lf.add_argument("--from-year", type=int, default=1940,
                       help="모델에게 보일 그래프 사건 목록의 시작 해 (생년보다 앞이면 된다)")
@@ -2737,6 +2803,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="모델 이름 (openrouter 는 .env 의 OPENROUTER_MODEL 이 기본)")
     p_lf.add_argument("--dry-run", action="store_true", help="프롬프트만 찍고 모델은 안 부른다")
     p_lf.set_defaults(func=cmd_life)
+
+    p_ac = sub.add_parser("accounts", help="가입자 표 (Neon) — 세우고 세어 본다")
+    p_ac.add_argument("--init", action="store_true", help="표를 만든다 (없을 때만)")
+    p_ac.add_argument("--limit", type=int, default=20, help="최근 몇 명까지 찍을지")
+    p_ac.set_defaults(func=cmd_accounts)
 
     sub.add_parser("stats", help="그래프 통계").set_defaults(func=cmd_stats)
 

@@ -14,6 +14,8 @@ data/raw/
 data/cache/
 # 개인 역사 (histgraph life). 한 사람의 삶이라 저장소에 두지 않는다.
 data/life/
+# 가입자 표 (로컬 개발용 — 배포는 Neon). 남의 이메일이라 저장소에 두지 않는다.
+data/accounts.sqlite
 *.sqlite
 # 화면이 띄우는 시대 그래프만 예외로 저장소에 둔다. 이게 없으면 Vercel 이
 # 클론해서 빌드할 때 DB 가 없어 /api 가 전부 죽는다 — push 자동배포의 조건이다.

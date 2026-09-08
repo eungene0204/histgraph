@@ -4,33 +4,18 @@
 // 터미널 하나면 된다:  npm run dev   (API 까지 함께 뜬다)
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 
 // **개인 역사(life.html)는 아직 배포하지 않는다** (2026-09-07 사용자: "이건 아직
 // 배포 하면 안돼. 로컬에서 개발하고 테스트 해야 함"). Vercel 이 빌드할 때는
-// (VERCEL 환경변수) 그 장·예시 자료·머리의 링크를 빼고, 로컬 빌드에만 넣는다.
+// (VERCEL 환경변수) 그 장과 머리의 링크를 빼고, 로컬 빌드에만 넣는다.
 // 켜고 끄는 자리는 여기 하나다 — 화면 코드는 `import.meta.env.VITE_LIFE` 만 본다.
 export const LIFE_PAGE = !process.env.VERCEL;
 
-// Vite 는 public/ 을 통째로 복사한다. 배포 빌드에서는 예시 자료를 도로 뺀다.
-function stripLife() {
-  return {
-    name: 'strip-life',
-    closeBundle() {
-      if (LIFE_PAGE) return;
-      const { rmSync } = require('node:fs');
-      rmSync(here('dist/life-sample.json'), { force: true });
-    },
-  };
-}
-
 export default {
   root: '.',
-  plugins: [react(), stripLife()],
+  plugins: [react()],
   define: { 'import.meta.env.VITE_LIFE': JSON.stringify(LIFE_PAGE ? '1' : '') },
   server: {
     // 기본값(localhost)은 이 맥에서 IPv6 [::1] 에만 붙어, 127.0.0.1:5173 이

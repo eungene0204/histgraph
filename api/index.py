@@ -1,7 +1,8 @@
 """배포된 화면이 /api 로 부르는 곳 — Vercel 서버리스 함수 진입점.
 
-**로컬과 같은 코드를 부른다.** 엔드포인트 표는 histgraph.server.dispatch 하나뿐이고
-여기서는 HTTP 껍데기만 씌운다. 로컬(`histgraph serve`)과 다른 점은 둘이다.
+**로컬과 같은 코드를 부른다.** 엔드포인트 표는 histgraph.server.dispatch 와
+histgraph.auth.ROUTES 둘뿐이고 여기서는 HTTP 껍데기만 씌운다. 로컬
+(`histgraph serve`)과 다른 점은 둘이다.
 
 1. 정적 파일을 내주지 않는다. 화면(web/dist)은 Vercel 이 CDN 에서 바로 내주고,
    이 함수는 /api 만 맡는다.
@@ -10,6 +11,11 @@
 
 경로를 __p 로 받는 이유는 vercel.json 의 rewrite 때문이다. 파일 하나(api/index.py)
 가 /api 전부를 맡아야 번들(21MB DB 포함)이 엔드포인트 수만큼 복제되지 않는다.
+
+**가입·계정 응답은 절대 엣지에 재우지 않는다.** 그래프 응답은 배포 사이에
+바뀌지 않으므로 하루 재우지만, 그 규칙이 `/api/me` 에 닿으면 한 사람의
+신원이 다음 사람에게 배달된다. auth 쪽 응답은 스스로 헤더를 들고 오므로
+(`auth.Response`) 여기서는 그것을 **그대로** 쓴다 — 캐시 헤더를 덧붙이지 않는다.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from histgraph import pages  # noqa: E402
+from histgraph import auth, pages  # noqa: E402
 from histgraph.server import GraphAPI, dispatch  # noqa: E402
 
 # 화면이 띄우는 것은 시대 그래프다 — 전체 그래프(38,654 노드)가 아니라
@@ -54,9 +60,53 @@ def _path(url) -> str:
 class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
     server_version = "histgraph"
 
+    # --- 가입·계정 ------------------------------------------------------
+
+    def _read_body(self) -> bytes:
+        size = int(self.headers.get("Content-Length") or 0)
+        if size <= 0:
+            return b""
+        if size > auth.MAX_BODY:
+            return b""      # 큰 것은 읽지 않는다. auth 가 400 으로 답한다.
+        return self.rfile.read(size)
+
+    def _try_auth(self, body: bytes = b"") -> bool:
+        url = urlparse(self.path)
+        req = auth.Request(self.command, _path(url), parse_qs(url.query),
+                           dict(self.headers.items()), body)
+        resp = auth.route(req)
+        if resp is None:
+            return False
+        self.send_response(resp.status)
+        for name, value in resp.headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(resp.body)))
+        self.end_headers()
+        self.wfile.write(resp.body)
+        return True
+
+    def _auth_only(self) -> None:
+        """그래프 쪽에는 GET 밖에 없다 — 나머지 메서드는 가입 경로뿐이다."""
+        if self._try_auth(self._read_body()):
+            return
+        self._json(405, {"error": "허용되지 않는 방법입니다."})
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._auth_only()
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._auth_only()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._auth_only()
+
+    # --- 그래프 ---------------------------------------------------------
+
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
         try:
+            if self._try_auth():
+                return
             # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`). rewrite 가 `/api/n/…`
             # 으로 바꿔 넘기므로 같은 표(pages.route)가 양쪽을 다 받는다.
             page = pages.route(api, _path(url))
@@ -67,13 +117,20 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         except (ValueError, KeyError) as err:
             status, payload = 400, {"error": f"{type(err).__name__}: {err}"}
 
+        self._json(status, payload, cache=True)
+
+    def _json(self, status: int, payload: object, *, cache: bool = False) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         # 그래프는 배포 사이에 바뀌지 않는다. 엣지에 재워 두면 같은 노드를
-        # 다시 펼칠 때 함수를 깨우지 않는다.
-        self.send_header("Cache-Control", "public, max-age=0, s-maxage=86400")
+        # 다시 펼칠 때 함수를 깨우지 않는다. **사람마다 다른 응답은 아니다** —
+        # 그래서 cache 는 그래프 쪽에서만 켠다.
+        self.send_header(
+            "Cache-Control",
+            "public, max-age=0, s-maxage=86400" if cache else "private, no-store",
+        )
         self.end_headers()
         self.wfile.write(body)
 

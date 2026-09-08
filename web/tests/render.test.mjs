@@ -35,7 +35,8 @@ import { SidePanel } from './src/components/SidePanel.jsx';
 import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
 import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView };
+import { LoginModal } from './src/components/LoginModal.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal };
 `;
 
 await build({
@@ -52,7 +53,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -324,9 +325,25 @@ let detailHtml = '';
 // --- 라이트/다크 --------------------------------------------------------
 // 진실은 <html data-theme> 하나다. CSS 는 선택자로, 캔버스는 isLight() 로 읽는다.
 {
-  ok('머리 줄 오른쪽에 테마 단추가 있다',
-     appHtml.includes('class="clickable-icon theme-toggle"') && appHtml.includes('밝은 화면으로'),
+  // 로그인 단추는 **언제나** 머리 줄 오른쪽에 있다 (2026-09-08 사용자: "그냥
+  // 로그인 버튼이 항상 보이게 해줘"). 서버 렌더에는 효과가 안 돌아 /api/me 를
+  // 물어보기 전 상태인데, 그때도 서 있어야 한다 — 설정이 없으면 사라지던
+  // 예전 동작으로 되돌아가면 여기서 잡힌다.
+  ok('로그인 단추는 설정이 없어도 머리 줄에 선다',
+     appHtml.includes('class="account-login"') && appHtml.includes('로그인'),
+     appHtml.slice(appHtml.indexOf('top-right')).slice(0, 300));
+
+  // 2026-09-08 사용자: "삭제하지 말고 안 보이게 해줘 나중에 필요하면 보이게 하자."
+  // 그래서 재는 것이 뒤집혔다 — 지금은 **안 보이는 것**이 맞고, 대신 되살릴
+  // 스위치가 그 자리에 남아 있는지를 잰다. 지워 버리면 이 관문이 잡는다.
+  const toggleSrc = readFileSync(join(WEB, 'src/components/ThemeToggle.jsx'), 'utf-8');
+  ok('테마 단추는 감춰 두었다 (지운 것이 아니다)',
+     !appHtml.includes('class="clickable-icon theme-toggle"')
+     && /export const THEME_TOGGLE = (true|false)/.test(toggleSrc)
+     && toggleSrc.includes('밝은 화면으로'),
      appHtml.slice(appHtml.indexOf('<header')).slice(0, 400));
+  ok('스위치 하나를 켜면 되살아난다',
+     /if \(!THEME_TOGGLE\) return null;/.test(toggleSrc));
   const css = readFileSync(join(WEB, 'style.css'), 'utf-8');
   ok('style.css 에 라이트 토큰이 있다', /:root\[data-theme="light"\]\s*\{[^}]*--color-base-00:\s*#ffffff/.test(css));
   ok('doc.css 에도 라이트 토큰이 있다',
@@ -336,6 +353,36 @@ let detailHtml = '';
      boot.includes("getItem('theme')") && boot.includes('prefers-color-scheme') && boot.includes('dataset.theme'));
   ok('index.html 이 첫 그림 전에 테마를 박는다',
      readFileSync(join(WEB, 'index.html'), 'utf-8').includes('src="/theme-boot.js"'));
+}
+
+// --- 내 역사는 로그인을 묻는다 -------------------------------------------
+// 2026-09-08 사용자: "'내 역사' 버튼을 눌렀을때 로그인 안 돼쓰면 로그인 모달을
+// 보여줘서 로그인을 하게 강제해. 내 역사는 개인별로 다 다르니깐."
+{
+  const box = plain(renderToString(h(LoginModal, {
+    next: '/life.html', title: '내 역사는 로그인이 필요합니다',
+    why: '내 역사는 사람마다 다릅니다.', dismissible: false,
+  })));
+  ok('로그인 상자가 왜 묻는지를 먼저 적는다',
+     box.includes('내 역사는 로그인이 필요합니다') && box.includes('사람마다 다릅니다'), box.slice(0, 200));
+  ok('구글로 들어가는 단추가 있다',
+     box.includes('class="login-go"') && box.includes('구글 계정으로 로그인'));
+  ok('약관과 방침으로 가는 길이 있다',
+     box.includes('/terms.html') && box.includes('/privacy.html'));
+  ok('닫을 수 없는 상자에는 돌아갈 자리를 준다',
+     box.includes('한국사 그래프로 돌아가기') && !box.includes('나중에'));
+  ok('아직 열리지 않았으면 누를 수 없는 단추를 세우지 않는다',
+     !plain(renderToString(h(LoginModal, { title: 'ㄱ', why: 'ㄴ', ready: false })))
+       .includes('class="login-go"'));
+
+  // 머리 줄의 '내 역사'와 장 자체가 **둘 다** 막아야 한다 — 하나만 막으면
+  // 주소를 치는 것으로 넘어간다.
+  const appSrc = readFileSync(join(WEB, 'src/App.jsx'), 'utf-8');
+  const lifeSrc = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
+  ok("머리 줄의 '내 역사'가 로그인 전이면 옮겨가지 않는다",
+     /!mine\?\.user.*preventDefault/s.test(appSrc) && appSrc.includes('setAskLogin(true)'));
+  ok('주소로 곧장 들어와도 같은 문을 지난다',
+     /if \(account\.enabled && !account\.user\)/.test(lifeSrc) && lifeSrc.includes('dismissible={false}'));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------

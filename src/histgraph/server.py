@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import pages, summaries
+from . import auth, pages, summaries
 from .labels import screen_alias
 from .ontology import EDGE_TYPES, NODE_TYPES
 from .provenance import desc_origin
@@ -1066,19 +1066,6 @@ class GraphAPI:
         return {"axis": {"from": year_from, "to": year_to},
                 "reigns": reigns, "anchors": anchors}
 
-    def life(self, name: str | None = None) -> dict | None:
-        """저장된 개인 그래프 (`histgraph life` 가 만든 data/life/*.json).
-
-        배포에는 없다 — 개인 자료는 저장소 밖이다. 그때 화면은 사람이 붙여
-        넣은 JSON 을 쓴다."""
-        from . import life as life_mod
-
-        path = life_mod.find(name)
-        if path is None:
-            return None
-        payload = life_mod.load(path)
-        payload["_file"] = path.name
-        return payload
 
 
 # --- 개인 역사 분석 (로컬 전용) --------------------------------------------
@@ -1131,7 +1118,7 @@ class LifeAnalysis:
         return st
 
     def start(self, api: GraphAPI, text: str, name: str = "나",
-              backend: str = "") -> bool:
+              backend: str = "", base: dict | None = None) -> bool:
         """분석을 띄운다. 이미 돌고 있으면 False.
 
         백엔드를 안 주면 `.env` 를 보고 고른다 — 열쇠가 있으면 OpenRouter
@@ -1145,7 +1132,7 @@ class LifeAnalysis:
                 return False
             self._state = {"state": "running", "started": time.time(), "backend": kind,
                            "step": FIRST_STEP.get(kind, "모델에게 묻는 중")}
-        threading.Thread(target=self._run, args=(api, text, name, kind),
+        threading.Thread(target=self._run, args=(api, text, name, kind, base),
                          name="life-analyze", daemon=True).start()
         return True
 
@@ -1158,35 +1145,52 @@ class LifeAnalysis:
         with self._lock:
             self._state = state
 
-    def _run(self, api: GraphAPI, text: str, name: str, backend_kind: str) -> None:
+    def _run(self, api: GraphAPI, text: str, name: str, backend_kind: str,
+             base: dict | None = None) -> None:
+        """`base` 가 있으면 **그 그래프에 더한다** — 화면이 쥔 것을 보내 준다.
+        없으면 새로 만든다 (life.merge 머리글)."""
         from . import life as life_mod
         from .backends import build_backend
 
+        started = time.time()
         try:
             # 이야기가 걸칠 만한 구간의 사건 이름을 모델에게 보인다. 생년은
             # 아직 모르니 LIFE_FROM_YEAR 부터 오늘까지다 (cli.cmd_life 와 같다).
             anchors = api.context(LIFE_FROM_YEAR, datetime.date.today().year)["anchors"]
             backend = build_backend(backend_kind)
             self._step("이야기를 읽는 중")
-            raw = life_mod.analyze(text, backend, anchors=anchors)
+            existing = life_mod.existing_summary(base) if base else None
+            raw = life_mod.analyze(text, backend, anchors=anchors, existing=existing)
             if raw is None:
                 self._done({"state": "error", "error": "모델이 답을 돌려주지 않았습니다."})
                 return
             raw["_model"] = getattr(backend, "model", backend_kind)
             self._step("답을 검증하는 중")
-            payload, notes = life_mod.validate(raw)
+            payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"))
+            self._step("한국사 사건에 잇는 중")
             life_mod.link(payload, api)
+            added = None
+            if base:
+                self._step("있는 역사에 더하는 중")
+                payload, added = life_mod.merge(base, payload)
+                notes = payload.get("notes") or notes
+            self._step("저장하는 중")
             out = life_mod.LIFE_DIR / f"{_life_name(name)}.json"
             try:
                 life_mod.save(payload, out)
                 # 이야기 원문도 옆에 둔다 — 고쳐 쓰고 `histgraph life` 로
-                # 다시 돌릴 수 있게. 여기도 저장소 밖이다.
-                out.with_suffix(".txt").write_text(text, encoding="utf-8")
+                # 다시 돌릴 수 있게. 여기도 저장소 밖이다. 더한 이야기는 뒤에 잇는다.
+                txt = out.with_suffix(".txt")
+                if base and txt.is_file():
+                    txt.write_text(txt.read_text(encoding="utf-8").rstrip() + "\n\n" + text, encoding="utf-8")
+                else:
+                    txt.write_text(text, encoding="utf-8")
             except OSError as err:
                 notes = [*notes, f"저장하지 못했습니다: {err}"]
                 out = None
             self._done({"state": "done", "payload": payload, "notes": notes,
-                        "file": out.name if out else None})
+                        "file": out.name if out else None, "added": added,
+                        "took": int(time.time() - started)})
         except Exception as err:  # 모델이 없는·메모리가 없는 자리에서도 화면은 살아야 한다
             log.exception("개인 역사 분석 실패")
             self._done({"state": "error", "error": f"{type(err).__name__}: {err}"})
@@ -1257,10 +1261,9 @@ def dispatch(
     if path == "/api/timeline":
         tl = api.timeline(one("id"))
         return (200, tl) if tl else (404, {"error": "not found"})
-    # 개인 역사 (web/life.html). 저장된 개인 그래프와, 그 구간의 재위 띠·큰 사건.
-    if path == "/api/life":
-        got = api.life(one("name") or None)
-        return (200, got) if got else (404, {"error": "저장된 개인 역사가 없습니다"})
+    # 개인 역사 (web/life.html). 그 구간의 재위 띠·큰 사건. 저장된 개인 그래프를
+    # 서버가 골라 주던 `/api/life` 는 뺐다 (2026-09-08) — 기본으로 서는 자료는
+    # 없고, 사람이 로그인해 직접 적는다.
     # 분석이 도는 중인지. 글을 보내는 쪽은 POST 라 로컬에만 있고(Handler.do_POST),
     # 배포에서는 이 자리가 늘 'idle' 이다 — 화면이 그것을 보고 물러난다.
     if path == "/api/life/job":
@@ -1312,27 +1315,87 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    # --- 가입·계정 ------------------------------------------------------
+    # 표는 auth.ROUTES 하나다. 여기서는 껍데기만 씌운다 — 배포(api/index.py)
+    # 도 같은 표를 읽으므로 한쪽에만 생기는 엔드포인트가 없다.
+
+    def _read_body(self) -> bytes:
+        size = int(self.headers.get("Content-Length") or 0)
+        if size <= 0:
+            return b""
+        if size > auth.MAX_BODY:
+            return b""      # 큰 것은 읽지 않는다. auth 가 400 으로 답한다.
+        return self.rfile.read(size)
+
+    def _try_auth(self, body: bytes = b"") -> bool:
+        """가입·계정의 길이면 여기서 답하고 True. 아니면 False.
+
+        본문은 **부르는 쪽이 한 번만 읽어** 넘긴다 — 여기서 읽으면
+        가입 경로가 아닐 때(`/api/life/analyze`) 그쪽이 빈 몸을 받는다."""
+        url = urlparse(self.path)
+        req = auth.Request(self.command, url.path, parse_qs(url.query),
+                           dict(self.headers.items()), body)
+        resp = auth.route(req)
+        if resp is None:
+            return False
+        self.send_response(resp.status)
+        for name, value in resp.headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(resp.body)))
+        self.end_headers()
+        self.wfile.write(resp.body)
+        return True
+
+    def do_PUT(self) -> None:  # noqa: N802
+        if not self._try_auth(self._read_body()):
+            self._json({"error": "unknown endpoint", "path": self.path}, 404)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._try_auth(self._read_body()):
+            self._json({"error": "unknown endpoint", "path": self.path}, 404)
+
     def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
         """이야기를 받아 개인 역사 분석을 띄운다 — 로컬 서버에만 있는 길.
 
         답을 기다리지 않는다. 띄웠다는 것만 알리고 화면이 /api/life/job 으로
         물어본다 (LifeAnalysis)."""
+        raw = self._read_body()
+        if self._try_auth(raw):
+            return
         url = urlparse(self.path)
+        # 이미 있는 그래프를 모델 없이 다듬기만 한다 (life.refine) — 화면이 브라우저·
+        # 계정에서 읽은 옛 자료를 부팅 때 보내, 규칙이 는 만큼 해·연결을 채운다.
+        if url.path == "/api/life/refine":
+            try:
+                body = json.loads(raw or b"{}")
+            except (ValueError, UnicodeDecodeError):
+                self._json({"error": "JSON 이 아닙니다"}, 400)
+                return
+            if not (isinstance(body, dict) and isinstance(body.get("nodes"), list)):
+                self._json({"error": "그래프가 아닙니다"}, 400)
+                return
+            from . import life as life_mod
+            self._json(life_mod.refine(body), 200)
+            return
         if url.path != "/api/life/analyze":
             self._json({"error": "unknown endpoint", "path": url.path}, 404)
             return
         try:
-            size = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(size) or b"{}")
+            body = json.loads(raw or b"{}")
         except (ValueError, UnicodeDecodeError):
             self._json({"error": "JSON 이 아닙니다"}, 400)
             return
         text = str(body.get("text") or "").strip()
-        if len(text) < 40:
-            self._json({"error": "이야기가 너무 짧습니다 — 몇 문장이라도 적어 주세요."}, 400)
+        # 길이 문턱은 없다 — 화면의 '입력' 도 글이 있으면 누를 수 있다 (2026-09-08).
+        if not text:
+            self._json({"error": "이야기가 비어 있습니다."}, 400)
             return
+        # 화면이 이미 쥔 그래프를 같이 보내면 거기에 더한다 (life.merge).
+        base = body.get("base")
+        if not (isinstance(base, dict) and isinstance(base.get("nodes"), list) and base["nodes"]):
+            base = None
         if not LIFE_JOBS.start(self.api, text, str(body.get("name") or "나"),
-                               str(body.get("backend") or "")):
+                               str(body.get("backend") or ""), base=base):
             self._json({"error": "이미 분석 중입니다."}, 409)
             return
         self._json(LIFE_JOBS.status(), 202)
@@ -1340,6 +1403,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
         url = urlparse(self.path)
         try:
+            if self._try_auth():
+                return
             # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`)이 먼저다. 정적 파일보다
             # 앞에 둬야 web/public 에 같은 이름이 생겨도 이쪽이 이긴다.
             page = pages.route(self.api, url.path)

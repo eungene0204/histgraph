@@ -26,6 +26,8 @@
      남색(003049)을 글자가 읽히도록 밝힌 것. 인물 노드가 빨강이 된 뒤로 노드
      색과는 무관하다. */
   --color-blue: #4f93bf;
+  /* 되돌릴 수 없는 것(회원 탈퇴)에만 쓰는 빨강. 어두운 바탕 4.6:1. */
+  --text-danger: #e5695f;
 
   /* --- 뜻을 가진 이름 --- */
   --background-primary:       var(--color-base-00);   /* 본문·캔버스 */
@@ -128,6 +130,7 @@
   --color-accent-1: hsl(var(--accent-h) var(--accent-s) 62%);
   --color-accent-2: hsl(var(--accent-h) var(--accent-s) 68%);
   --color-blue: #2a6a9a;             /* 흰 바탕에서 읽히는 같은 계열 파랑 (4.9:1) */
+  --text-danger: #c0362c;            /* 흰 바탕 5.4:1 */
   --background-modifier-hover:  rgba(0, 0, 0, .06);
   --background-modifier-subtle: rgba(0, 0, 0, .04);
   --scrollbar-thumb:       rgba(0, 0, 0, .18);
@@ -216,9 +219,11 @@ button, input, select { font-family: inherit; }
 a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도 탭처럼 보인다 */
 
 .search { position: relative; grid-column: 2; width: 100%; }
-/* 라이트/다크 단추 — 격자 셋째 칸의 오른쪽 끝. 아이콘은 '지금 누르면 되는 것'
+/* 머리 줄 오른쪽 끝 — 화면 밝기와 계정이 나란히 선다. */
+.top-right { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 6px; }
+/* 라이트/다크 단추. 아이콘은 '지금 누르면 되는 것'
    (어두운 화면에서는 해, 밝은 화면에서는 달)을 그린다. */
-.theme-toggle { grid-column: 3; justify-self: end; width: 32px; height: 32px; }
+.theme-toggle { width: 32px; height: 32px; }
 .theme-toggle svg { width: 18px; height: 18px; }
 .search input {
   width: 100%;
@@ -259,6 +264,130 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .results li:hover, .results li[aria-selected="true"] { background: var(--background-modifier-hover); }
 .results li[aria-selected="true"] { color: var(--text-accent); }
 .results .meta { margin-left: auto; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
+/* --- 로그인 상자 (내 역사가 세운다) -------------------------------------
+   화면을 덮는 판은 이것 하나다. 검색 결과·계정 메뉴와 달리 **뒤를 막는다** —
+   여기서는 무엇을 정하기 전에는 다음으로 갈 수 없다는 뜻이라서다. */
+.scrim {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, .55);
+}
+.login-box {
+  width: 100%; max-width: 380px; padding: 24px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+}
+.login-box h2 { margin: 0 0 10px; font-size: var(--font-ui-larger); font-weight: 600; }
+.login-box > p { margin: 0 0 18px; font-size: var(--font-ui-small); color: var(--text-muted); line-height: 1.8; }
+
+/* 들어가는 단추. 이 화면에서 할 일이 하나뿐이라 폭을 다 쓴다. */
+.login-go {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 40px; margin-bottom: 14px;
+  font-size: var(--font-ui-medium); color: var(--text-normal);
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--input-radius);
+  cursor: pointer;
+}
+.login-go:hover { border-color: var(--color-accent); background: var(--background-modifier-hover); }
+.login-wait {
+  margin: 0 0 14px; padding: 12px 14px; border-radius: var(--radius-m);
+  background: var(--background-modifier-subtle);
+  font-size: var(--font-ui-small); color: var(--text-muted); line-height: 1.8;
+}
+.login-fine { margin: 0 0 16px; font-size: var(--font-ui-smaller); color: var(--text-faint); line-height: 1.8; }
+.login-fine a { color: var(--text-muted); }
+/* 물러날 자리. 막다른 곳에 세워 두지 않는다. */
+.login-back {
+  display: inline-block; padding: 0; border: none; background: none;
+  font-size: var(--font-ui-small); color: var(--text-muted);
+  text-decoration: none; cursor: pointer;
+}
+.login-back:hover { color: var(--text-normal); }
+
+/* --- 계정 (머리 줄 오른쪽 끝) ---------------------------------------------
+   로그아웃 상태에서는 구글 표식이 달린 '로그인' 하나, 로그인하면 사진(또는
+   이니셜) 하나. 이름·이메일은 펼친 메뉴 안에서만 보인다 (AccountMenu 머리글).
+   메뉴는 검색 결과(.results)와 같은 카드다 — 화면에 뜨는 판이 둘뿐이라야
+   읽는 사람이 어디를 보는지 헷갈리지 않는다. */
+.account-login {
+  display: flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 11px 0 9px;
+  font-size: var(--font-ui-small); color: var(--text-normal);
+  background: none; cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--input-radius);
+}
+.account-login:hover { border-color: var(--background-modifier-border-hover); background: var(--background-modifier-hover); }
+
+.account { position: relative; display: flex; }
+.account-face {
+  width: 30px; height: 30px; padding: 0;
+  border: 1px solid var(--background-modifier-border); border-radius: 50%;
+  background: var(--background-primary); cursor: pointer; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.account-face:hover, .account-face[aria-expanded="true"] { border-color: var(--color-accent); }
+.account-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.account-initial { font-size: var(--font-ui-small); font-weight: 600; color: var(--text-muted); }
+
+.account-menu {
+  position: absolute; z-index: 30; top: calc(100% + 8px); right: 0;
+  width: 268px; padding: 12px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+  font-size: var(--font-ui-small);
+}
+/* 아직 열리지 않았을 때 단추 아래로 뜨는 쪽지. 메뉴와 같은 카드다. */
+.account-wait { line-height: 1.7; }
+.account-wait b { display: block; margin-bottom: 6px; font-size: var(--font-ui-medium); font-weight: 600; }
+.account-wait p { margin: 0 0 6px; color: var(--text-muted); }
+.account-wait p:last-child { margin-bottom: 0; }
+
+.account-who { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; }
+.account-who b { font-size: var(--font-ui-medium); font-weight: 600; }
+/* 이메일은 길고 자를 자리가 없다 — 넘치면 말줄임으로 접는다. */
+.account-mail { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-since { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.account-admin {
+  margin-left: 6px; padding: 1px 5px; border-radius: var(--radius-s);
+  font-style: normal; color: var(--text-accent);
+  background: var(--tag-background); border: 1px solid var(--tag-border);
+}
+
+.account-marks { border-top: 1px solid var(--background-modifier-border); padding: 10px 0; }
+.account-marks h4 { margin: 0 0 6px; font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-muted); }
+.account-marks ul { margin: 0; padding: 0; list-style: none; max-height: 168px; overflow-y: auto; }
+.account-marks li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
+.account-marks a { color: var(--text-normal); text-decoration: none; }
+.account-marks a:hover { color: var(--text-accent); }
+.account-note { color: var(--text-faint); font-size: var(--font-ui-smaller);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-none { margin: 0; color: var(--text-faint); line-height: 1.6; }
+
+.account-error { margin: 0 0 8px; color: var(--text-danger); line-height: 1.6; }
+
+.account-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  border-top: 1px solid var(--background-modifier-border); padding-top: 10px; }
+.account-acts button {
+  padding: 4px 9px; border-radius: var(--radius-s); cursor: pointer;
+  font-size: var(--font-ui-small); color: var(--text-normal);
+  background: none; border: 1px solid var(--background-modifier-border);
+}
+.account-acts button:hover:not(:disabled) { background: var(--background-modifier-hover); }
+.account-acts button:disabled { opacity: .5; cursor: default; }
+.account-acts .account-danger { color: var(--text-danger); }
+/* 되묻는 자리. 무엇이 지워지는지 먼저 적고 단추는 그 아래에 둔다 —
+   '지웁니다'가 문장보다 먼저 눈에 띄면 읽지 않고 누른다. */
+.account-confirm { display: flex; flex-direction: column; gap: 8px; line-height: 1.6; color: var(--text-muted); }
+.account-confirm > span { display: flex; gap: 8px; }
+
 .results .empty-row { color: var(--text-faint); cursor: default; }
 
 /* --- 배치 --- */
@@ -528,6 +657,9 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
   position: relative;
 }
 .detail .close { position: absolute; top: 8px; right: 8px; z-index: 3; }
+/* 즐겨찾기 별 — 닫기 왼쪽. 담긴 것은 강조색으로 채워 둔다. */
+.detail .d-star { position: absolute; top: 8px; right: 38px; z-index: 3; }
+.detail .d-star[aria-pressed="true"] { color: var(--text-accent); }
 
 /* 관계를 타고 깊이 들어가면 어디서 왔는지 잊는다 — 되돌아갈 자리를 이름째
    들고 있는다. 스크롤을 내려도 사라지면 안 되므로 위에 붙여 둔다. */
@@ -730,6 +862,17 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .life-top .brand .era { text-decoration: none; }
 .life-here { color: var(--text-normal); background: var(--background-modifier-hover); cursor: default; }
 .life-tools { display: flex; align-items: center; gap: 6px; grid-column: 2; }
+/* 계정에 저장하고 나서 무슨 일이 있었는지 — 머리 아래 가운데에 잠깐 떠 있다
+   사라지는 팝업. 자리를 차지하지 않아 단추 줄이 흔들리지 않는다. */
+.life-toast {
+  position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 30;
+  padding: 8px 14px; border-radius: var(--radius-m);
+  background: var(--background-primary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); box-shadow: var(--shadow-s);
+  font-size: var(--font-ui-small); pointer-events: none;
+  animation: life-toast-in .18s ease-out;
+}
+@keyframes life-toast-in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .life-btn {
   display: inline-flex; align-items: center; padding: 4px 10px;
   border: 1px solid var(--background-modifier-border); border-radius: var(--pill-radius);
@@ -738,6 +881,20 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 .life-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 .life-btn.on, .life-btn[aria-pressed="true"] { color: var(--text-accent); border-color: var(--tag-border); background: var(--tag-background); }
 .life-btn.big { font-size: var(--font-ui-small); padding: 8px 16px; margin-top: 14px; }
+/* 이야기 상자의 '입력' — 보라(강조색)가 아니라 파랑이다 (2026-09-08 사용자:
+   "'입력' 버튼을 지금 purple에서 blue 변경해"). 파랑은 인물 노드·재위 띠의
+   그 파랑(--mark-actor) 하나다 — 팔레트가 바뀌어도 이 값은 안 건드린다. */
+.life-btn.go { color: var(--mark-actor); border-color: rgba(61, 132, 245, .3); background: rgba(61, 132, 245, .12); }
+.life-btn.go:hover:not(:disabled) { color: var(--mark-actor); background: rgba(61, 132, 245, .22); }
+/* 상세 패널 맨 아래의 '삭제' — 지우는 단추는 눈에 띄되 먼저 눌리지 않게
+   테두리만 붉다 (2026-09-08 사용자: 머리 줄의 '지우기' 대신 여기로 왔다). */
+.life-btn.danger { color: var(--text-danger); }
+.life-btn.danger:hover { color: var(--text-danger); border-color: var(--text-danger); background: var(--background-modifier-hover); }
+.life-del {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 18px 0 4px; padding-top: 12px; border-top: 1px solid var(--background-modifier-border);
+}
+.life-del .tl-hint { flex: 1 1 100%; margin: 0 0 2px; }
 
 /* 머리 아래로 펴지는 입력 상자 — 이제 이야기 상자 하나가 쓴다. */
 .life-paste { padding: 10px 12px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); }
@@ -754,9 +911,17 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사 그래프)도
 /* 이야기 상자는 JSON 상자와 달리 사람이 읽고 쓰는 글이다 — 고정폭이 아니라
    본문 글꼴로, 보기글이 네 줄이라 넉넉히 편다. */
 .life-story textarea { height: 190px; font-family: inherit; font-size: var(--font-ui-small); line-height: 1.7; }
-/* 글은 한 줄이 너무 길면 안 읽힌다 — 넓은 화면에서도 폭을 묶는다. */
-.life-story textarea, .life-story .life-paste-row { max-width: 900px; }
-.life-story textarea::placeholder { color: var(--text-faint); }
+/* 글은 한 줄이 너무 길면 안 읽힌다 — 넓은 화면에서도 폭을 묶고, 묶은 상자는
+   가운데 세운다 (2026-09-08 사용자: "입력창을 가운데 정렬 해줘"). 단추 줄도
+   같은 폭이라 상자 오른쪽 끝에 붙는다. */
+.life-story textarea, .life-story .life-paste-row { max-width: 900px; margin-left: auto; margin-right: auto; }
+.life-story textarea { display: block; }
+.life-story textarea::placeholder { color: var(--text-faint); opacity: 0.55; }
+/* 진행 띠 — 글 칸과 단추 줄 사이, 같은 폭. 색은 '입력' 단추와 같은 파랑. */
+.life-progress-row { display: flex; align-items: center; gap: 10px; max-width: 900px; margin: 8px auto 0; }
+.life-progress { flex: 1; height: 6px; border-radius: 3px; overflow: hidden; background: var(--background-modifier-border); }
+.life-progress i { display: block; height: 100%; background: var(--mark-actor); transition: width .8s ease-out; }
+.life-progress-row .tl-hint { white-space: nowrap; }
 /* 안 된 것은 눈에 띄어야 한다 — 팔레트에 빨강이 없어 본문색으로 세운다. */
 .life-warn { color: var(--text-normal); }
 .life-empty-row { display: flex; gap: 8px; align-items: center; }
