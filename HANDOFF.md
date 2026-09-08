@@ -67,13 +67,37 @@
   "창을 닫아도 계속 돕니다" 대신 "이 창을 열어 둔 채로 기다려 주세요" 라고 적는다.
   `postJson` 이 CSRF 표와 쿠키를 함께 싣는다.
 
-**사람이 해야 하는 것** — Vercel 환경변수. 이것이 없으면 배포된 내 역사는 503 이다:
-`GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` · `HISTGRAPH_SESSION_SECRET`(32자 이상) ·
-`DATABASE_URL`(Neon — 배포는 SQLite 로 안 물러난다) · `OPENROUTER_API_KEY`. 그리고
-구글 콘솔의 승인된 리디렉션 URI 에 `https://www.histgraph.space/api/auth/callback`,
-표를 한 번 세우기(`uv run histgraph accounts --init`).
+**배포에서 세 번 헛짚은 것** — 화면을 올린 뒤 실제로 이야기를 보내 보니 500 이었다:
+`FileNotFoundError: /var/task/src/histgraph/life_prompt.md`. 원인이 겹쳐 있었다.
 
-테스트 1,370 (배포 몸통·문 여덟 줄 추가) · 화면 84.
+1. `vercel.json` 의 `excludeFiles` 가 문서를 빼려고 적은 `*.md` 가 **패키지가 읽는
+   프롬프트까지** 걷어냈다. 뺄 문서는 이름으로 적는다.
+2. 파이썬 런타임은 **임포트를 따라간 `.py` 만 담는다.** 그 밖의 파일은
+   `includeFiles` 로 이름을 대야 실린다.
+3. **진짜 범인은 `.vercelignore` 의 `*.md`** 였다. 그 파일 첫 줄에 "CLI 로 올릴
+   때만 쓰인다. Git 연동 배포는 이 파일을 보지 않는다"고 적혀 있어서 두 번을
+   헛짚었다 — **본다.** 주석을 사실로 고쳤다.
+
+관문이 두 자리를 다 읽는다: `src/` 의 비-파이썬 파일이 `excludeFiles` 나
+`.vercelignore` 의 어느 줄에 걸리면 실패하고, `includeFiles` 가 안 덮어도 실패한다.
+
+**사람이 해야 하는 것 (2026-09-09 에 다 됐다)** — Vercel 환경변수 다섯. 이것이
+없으면 배포된 내 역사는 503 이다: `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` ·
+`HISTGRAPH_SESSION_SECRET`(32자 이상) · `DATABASE_URL` · `OPENROUTER_API_KEY`.
+`DATABASE_URL` 은 Vercel 대시보드의 Storage → Neon 통합으로 붙였다 (접두사를
+`DATABASE` 로 줘야 이름이 맞는다. 리전 us-east-1). 표는 `uv run histgraph accounts
+--init` 으로 한 번 세웠다. 구글 콘솔 리디렉션 URI 는 이미 등록돼 있었다.
+
+**끝까지 확인한 것** (임시 계정으로 배포에 실제 요청):
+
+```
+/life.html                       200
+/api/me                          enabled: true
+POST /api/life/analyze  비로그인  401
+POST /api/life/analyze  로그인    200 · 41초 · state=done · 파일 None
+```
+
+테스트 1,374 · 화면 84.
 
 ## 2026-09-09 — 개인정보처리방침·이용약관 제3판 (‘내 역사’ · 외부 모델 국외 이전)
 
