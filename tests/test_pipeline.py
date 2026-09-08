@@ -5630,7 +5630,10 @@ with tempfile.TemporaryDirectory() as tmp:
     got = {n["id"]: (n.get("start_date"), n.get("year")) for n in gated["nodes"]}
     check("주인공의 생일은 이야기가 말한 만큼만 (1982-01-01 → 1982)", got["me"] == ("1982", 1982), str(got))
     check("이야기가 그 사람에 대해 말한 생년은 남는다", got["dad"] == ("1955-03-02", 1955), str(got))
-    check("이야기가 말하지 않은 남의 생년은 비운다", got["kim"] == (None, None), str(got))
+    # 생년은 비우되 **그 사람이 내 삶에 들어온 해**는 남는다 (year) — 이야기가
+    # '1997년 … 1학년 때 김일권을 만났다' 고 말했다. 화면은 이 해를 생년으로 읽지
+    # 않는다: 날짜 줄도 연표도 start_date 를 본다 (life.js dateSaid).
+    check("이야기가 말하지 않은 남의 생년은 비운다", got["kim"] == (None, 1997), str(got))
     check("뺀 것을 적어 준다", any("김일권" in n for n in gnotes), str(gnotes))
     check("생년이 없어진 사람은 연표에서도 내린다 (그 자리가 곧 '0세 · 출생'이다)",
           [t["event_id"] for t in gated["timeline"]] == ["dad"], str(gated["timeline"]))
@@ -5644,7 +5647,88 @@ with tempfile.TemporaryDirectory() as tmp:
         n["year"], n["precision"] = life_mod.parse_when(n["start_date"])[0], "exact"
     refined = life_mod.refine(old_doc, text=story)
     kim = next(n for n in refined["nodes"] if n["id"] == "kim")
-    check("refine 도 원문을 알면 지어낸 생년을 뺀다", (kim["start_date"], kim["year"]) == (None, None), str(kim))
+    check("refine 도 원문을 알면 지어낸 생년을 뺀다", (kim["start_date"], kim["year"]) == (None, 1997), str(kim))
+
+    # 해를 안 말한 만남 — 나이와 시절로 셈해서 **사건으로 세운다** (2026-09-09 사용자:
+    # "'만20세', '공익생활'이라고 언급 했으면 이미 존재하는 역사를 보면 충분히 유추 할
+    # 수 있었는데 그걸 못했어"). 실측한 모델 답 그대로다: 사람 노드 하나와, 옛 그래프의
+    # 공익근무 사건을 가리키는 관계.
+    met_base = {
+        "subject": {"id": "me", "name": "나", "birth_year": 1982},
+        "nodes": [
+            {"id": "me", "type": "Person", "name": "나", "start_date": "1982-02-27",
+             "year": 1982, "precision": "exact", "confidence": 1.0},
+            {"id": "duty", "type": "PersonalEvent", "name": "천호3동 사무소 공익요원 근무 시작",
+             "start_date": "2002-04", "year": 2002, "precision": "year", "confidence": 1.0},
+            {"id": "out", "type": "PersonalEvent", "name": "소집해제", "start_date": "2004",
+             "year": 2004, "precision": "year", "confidence": 1.0},
+        ],
+        "edges": [{"source": "me", "target": "duty", "type": "experienced", "confidence": 1.0},
+                  {"source": "me", "target": "out", "type": "experienced", "confidence": 1.0}],
+        "timeline": [{"event_id": "duty", "life_stage": "군복무", "year": 2002, "age": 20},
+                     {"event_id": "out", "life_stage": "군복무", "year": 2004, "age": 22}],
+        "historical_connections": [], "stories": [],
+    }
+    met_text = "공익생활을 하던 시절 만20살때 여자친구를 만났고, 이름은 정혜림 이었다."
+    met_raw = {
+        "nodes": [{"id": "gf", "type": "Person", "name": "정혜림", "start_date": "2002-01-01",
+                   "confidence": 0.7}],
+        "edges": [{"source": "me", "target": "gf", "type": "met", "confidence": 1.0},
+                  {"source": "gf", "target": "duty", "type": "met", "confidence": 1.0}],
+        "timeline": [{"event_id": "duty", "life_stage": "군복무", "age": 20}],
+    }
+    check("'공익생활'도 군복무로 읽는다 (2026-09-09)", bool(life_mod.MILITARY.search("공익생활을 하던 시절")))
+    check("이야기의 '만20살때' 를 생년으로 셈한다",
+          life_mod.year_from_story(met_text, "정혜림", 1982, {}) == (2002, "age"),
+          str(life_mod.year_from_story(met_text, "정혜림", 1982, {})))
+    check("이야기가 그 사람을 안 부르면 셈하지 않는다",
+          life_mod.year_from_story(met_text, "김일권", 1982, {}) == (None, ""))
+    met_val, met_notes = life_mod.validate(met_raw, subject=met_base["subject"], text=met_text,
+                                           known=life_mod.known_ids(met_base))
+    check("옛 그래프의 id 를 관계의 끝으로 받는다 (없으면 '양끝이 없다'고 버려졌다)",
+          {(e["source"], e["target"]) for e in met_val["edges"]} >= {("gf", "duty")},
+          str(met_val["edges"]) + str(met_notes))
+    met_out, met_stats = life_mod.merge(met_base, met_val, met_text)
+    ev = next((n for n in met_out["nodes"] if n["id"] == "met_gf"), None)
+    check("만난 일이 사건으로 선다 — 사람은 연표의 점이 아니다",
+          ev is not None and (ev["type"], ev["name"], ev["year"]) == ("PersonalEvent", "정혜림을 만남", 2002),
+          str(ev))
+    check("만남의 설명은 이야기가 그 사람을 부른 문장 그대로다",
+          ev is not None and "만20살때" in str(ev.get("description")), str(ev))
+    check("만남은 나와 그 사람 둘 다에 이어진다",
+          {(e["source"], e["target"], e.get("role")) for e in met_out["edges"]}
+          >= {("me", "met_gf", "만남"), ("gf", "met_gf", "함께")}, str(met_out["edges"]))
+    check("'그 시절에 만났다' 는 그 사건을 겪은 것이 아니라 그 사이의 일이다 (during)",
+          {(e["source"], e["target"], e["type"]) for e in met_out["edges"]}
+          >= {("met_gf", "duty", "during")}
+          and not any(e["source"] == "gf" and e["target"] == "duty" for e in met_out["edges"]),
+          str(met_out["edges"]))
+    met_tl = {t["event_id"]: t for t in met_out["timeline"]}
+    check("만남이 연표에 서고 단계는 앞뒤에서 온다 (공익 시절의 만남은 '군복무')",
+          "met_gf" in met_tl and (met_tl["met_gf"]["year"], met_tl["met_gf"]["age"],
+                                  met_tl["met_gf"]["life_stage"]) == (2002, 20, "군복무"),
+          str(met_tl.get("met_gf")))
+    check("사람은 연표에 서지 않는다 (그 자리가 곧 생년이 된다)", "gf" not in met_tl, str(list(met_tl)))
+    check("refine 이 세운 것도 '더한 수'에 센다", met_stats["nodes"] >= 1, str(met_stats))
+    check("두 번 돌려도 만남은 하나다",
+          len([n for n in life_mod.refine(met_out, met_text)["nodes"] if n["id"] == "met_gf"]) == 1)
+
+    # 단계는 뒤로 가지 않는다 — 스무 살에 '초등학교'인 삶은 없다. 모델은 사람 노드의
+    # 연표 항목에 단계를 아무렇게나 적는다 (실측: 2002년 항목이 '초등학교').
+    back = life_mod.refine({
+        "subject": {"id": "me", "name": "나", "birth_year": 1982},
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                  {"id": "a", "type": "PersonalEvent", "name": "대학 입학", "year": 2000},
+                  {"id": "b", "type": "PersonalEvent", "name": "첫 출근", "year": 2006},
+                  {"id": "c", "type": "PersonalEvent", "name": "이사", "year": 2008}],
+        "edges": [], "timeline": [
+            {"event_id": "a", "life_stage": "대학", "year": 2000},
+            {"event_id": "b", "life_stage": "초등학교", "year": 2006},
+            {"event_id": "c", "life_stage": None, "year": 2008}]})
+    back_tl = {t["event_id"]: t["life_stage"] for t in back["timeline"]}
+    check("뒤로 간 단계는 앞 단계로 되돌린다", back_tl["b"] == "대학", str(back_tl))
+    check("뒤가 없으면 빈 단계는 채우지 않는다 (앞만 보고 이으면 십 년 뒤가 '초등학교')",
+          back_tl["c"] is None, str(back_tl))
 
     # 주인공의 생일 — '출생' 사건이 든 날짜가 이긴다 (2026-09-08 사용자: "2월 27일에
     # 태어 났다고 했는데, 왜 헷갈리게 '1982-01-01 · 0세 · 출생' 이라고 써있지").

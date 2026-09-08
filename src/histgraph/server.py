@@ -1281,7 +1281,8 @@ def run_analysis(api: GraphAPI, text: str, name: str = "나", backend_kind: str 
             return {"state": "error", "error": model_silence(why), "detail": why[:300]}
         raw["_model"] = getattr(backend, "model", backend_kind)
         say("답을 검증하는 중")
-        payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text)
+        payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text,
+                                   known=life_mod.known_ids(base))
         say("한국사 사건에 잇는 중")
         life_mod.link(payload, api)
         # 이야기가 부르지 않은 역사는 잇지 않는다 (2026-09-08 "세월호 사건과

@@ -2333,7 +2333,8 @@ def cmd_life(args: argparse.Namespace) -> int:
             print("  모델이 JSON 을 돌려주지 않았습니다.", file=sys.stderr)
             return 1
         raw["_model"] = backend.model
-    payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text)
+    payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text,
+                                   known=life_mod.known_ids(base))
     linked = life_mod.link(payload, api) if api is not None else 0
     # 역사 연결의 관문 — 이야기가 부르지 않은 사건은 잇지 않는다 (2026-09-08).
     # 더할 때는 옛 이야기(base 옆의 .txt)까지 합쳐 옛 연결도 다시 잰다.

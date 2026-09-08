@@ -59,7 +59,12 @@ export const LIFE_STAGES = ['출생', '어린 시절', '초등학교', '중학�
 // 사회복무요원·상근예비역·방위병·의무경찰도 병역이고, 훈련소 입소부터 소집해제까지가
 // 그 기간이다 (2026-09-08 사용자: "공익근무는 군복무 기간이야. 훈련소, 공익근무 역시
 // 군복무로 인식할 수 있게 해줘"). 모델이 '사회생활'로 적어 와도 이 표가 이긴다.
-export const MILITARY = /군복무|군 복무|병역|입대|입영|훈련소|신병교육|\d+\s*사단|공익근무|공익요원|사회복무요원|상근예비역|방위병|의무경찰|의경대|카투사|해병대|현역|전역|소집해제|(?<![가-힣])제대(?!로)/;
+export const MILITARY = /군복무|군 복무|병역|입대|입영|훈련소|신병교육|\d+\s*사단|공익\s*(?:근무|요원|생활|복무)|사회복무요원|상근예비역|방위병|의무경찰|의경대|카투사|해병대|현역|전역|소집해제|(?<![가-힣])제대(?!로)/;
+// 단계에는 **차례**가 있다 (life.py STAGE_ORDER·ONE_WAY_STAGES 와 같다). 출생부터
+// 군복무까지는 뒤로 돌아가지 않는다 — 스무 살에 '초등학교'인 삶은 없다. 창업·가족
+// 형성·현재는 오갈 수 있으므로 이 자에서 뺀다.
+export const STAGE_ORDER = new Map(LIFE_STAGES.map((s, i) => [s, i]));
+export const ONE_WAY_STAGES = new Set(LIFE_STAGES.slice(0, LIFE_STAGES.indexOf('군복무') + 1));
 // 그 단계를 **끝내는** 사건 — 띠를 여기서 닫는다. 없으면 띠는 다음 단계가 시작할
 // 때까지 이어져 2년 복무가 4년으로 칠해진다.
 export const STAGE_END = { 군복무: /전역|소집해제|(?<![가-힣])제대(?!로)|만기/ };
@@ -747,6 +752,21 @@ export function normalize(raw) {
     timeline.push(item);
   }
   timeline.sort((a, b) => (a.year == null) - (b.year == null) || (a.year || 0) - (b.year || 0));
+  // 단계는 뒤로 가지 않고(ONE_WAY_STAGES), 안 적은 단계는 **앞뒤가 같을 때만** 잇는다
+  // (life.py refine 4 와 같다). 앞만 보고 이으면 십 년 뒤의 일이 '초등학교'가 된다.
+  let cur = null;
+  for (const t of timeline) {
+    const stage = STAGE_ORDER.has(t.life_stage) ? t.life_stage : null;
+    if (stage == null) continue;
+    if (cur != null && ONE_WAY_STAGES.has(stage) && STAGE_ORDER.get(stage) < STAGE_ORDER.get(cur)) t.life_stage = cur;
+    else cur = stage;
+  }
+  timeline.forEach((t, i) => {
+    if (STAGE_ORDER.has(t.life_stage)) return;
+    const before = timeline.slice(0, i).reverse().find((x) => STAGE_ORDER.has(x.life_stage))?.life_stage ?? null;
+    const after = timeline.slice(i + 1).find((x) => STAGE_ORDER.has(x.life_stage))?.life_stage ?? null;
+    t.life_stage = before != null && before === after ? before : null;
+  });
   // 해가 같으면 학제가 차례다 — 초등 졸업이 중학 입학보다 먼저다 (`ladder` 머리글).
   out.timeline = orderByLadder(timeline, (t) => byId.get(t.event_id), (t) => t.year);
   out.historical_connections = (raw.historical_connections || []).filter(Boolean)

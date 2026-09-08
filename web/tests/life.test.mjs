@@ -11,7 +11,7 @@ import {
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
   linkPeople, kinIn, markYs,
-  NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
+  NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY,
 } from '../src/lib/life.js';
 import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
 
@@ -160,6 +160,25 @@ console.log('\n개인 역사 — 세 열이 한 자');
   const as = Object.fromEntries(army.timeline.map((t) => [t.event_id, t.life_stage]));
   ok('훈련소·공익근무·소집해제는 군복무다', as.a1 === '군복무' && as.a2 === '군복무' && as.a3 === '군복무', JSON.stringify(as));
   ok('병역이 아닌 것은 그대로', as.col === '대학' && as.mv === '사회생활', JSON.stringify(as));
+  // 단계는 뒤로 가지 않는다 (2026-09-09 실측: 공익 시절에 만난 사람의 항목이 '초등학교').
+  // 서버가 세운 만남 사건은 단계를 안 달고 오고, 그 단계는 앞뒤가 같을 때만 잇는다.
+  const stages = normalize({
+    nodes: [{ id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'a2', type: 'PersonalEvent', name: '천호3동 사무소 공익요원 근무 시작', start_date: '2002-04', confidence: 1 },
+      { id: 'gf', type: 'PersonalEvent', name: '정혜림을 만남', start_date: '2002', confidence: 0.9 },
+      { id: 'a3', type: 'PersonalEvent', name: '소집해제', start_date: '2004', confidence: 1 },
+      { id: 'mv', type: 'PersonalEvent', name: '미국으로 이주', start_date: '2006', confidence: 1 }],
+    edges: [],
+    timeline: [{ event_id: 'a2', life_stage: '군복무', year: 2002 },
+      { event_id: 'gf', life_stage: '초등학교', year: 2002 },
+      { event_id: 'a3', life_stage: '군복무', year: 2004 },
+      { event_id: 'mv', life_stage: null, year: 2006 }],
+  });
+  const ss = Object.fromEntries(stages.timeline.map((t) => [t.event_id, t.life_stage]));
+  ok('스무 살의 항목이 초등학교로 되돌아가지 않는다', ss.gf === '군복무', JSON.stringify(ss));
+  ok('뒤가 없으면 빈 단계는 채우지 않는다', ss.mv === null, JSON.stringify(ss));
+  ok("'공익생활'도 군복무로 읽는다", MILITARY.test('공익생활을 하던 시절'));
+
   const ab = stageBands(army, 2026).map((b) => `${b.stage} ${b.start}~${b.end}`);
   ok('띠는 소집해제한 해에 닫는다 (2년 복무가 4년이 되지 않게)',
     ab.includes('군복무 2002~2004') && ab.includes('사회생활 2006~2026'), ab.join(' · '));
