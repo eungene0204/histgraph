@@ -360,7 +360,29 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   background: var(--tag-background); border: 1px solid var(--tag-border);
 }
 
-.account-marks { border-top: 1px solid var(--background-modifier-border); padding: 10px 0; }
+/* 안쪽 장(설정·즐겨찾기)의 머리 줄. 뒤로 가는 화살표와 그 장의 이름뿐이다. */
+.account-head { display: flex; align-items: center; gap: 6px; padding-bottom: 10px; }
+.account-head b { font-size: var(--font-ui-medium); font-weight: 600; }
+.account-back {
+  width: 22px; height: 22px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--font-ui-medium); color: var(--text-muted);
+  background: none; border: none; border-radius: var(--radius-s); cursor: pointer;
+}
+.account-back:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+
+/* 한 층 들어가는 줄. 오른쪽 꺾쇠가 '여기 더 있다'를 말한다. */
+.account-nav { border-top: 1px solid var(--background-modifier-border); padding-top: 6px; }
+.account-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 7px 8px; margin: 0 -8px;
+  font-size: var(--font-ui-small); color: var(--text-normal); text-align: left;
+  background: none; border: none; border-radius: var(--radius-s); cursor: pointer;
+}
+.account-row:hover { background: var(--background-modifier-hover); }
+.account-more { color: var(--text-faint); }
+
+.account-marks { padding: 4px 0 0; }
 .account-marks h4 { margin: 0 0 6px; font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-muted); }
 .account-marks ul { margin: 0; padding: 0; list-style: none; max-height: 168px; overflow-y: auto; }
 .account-marks li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
