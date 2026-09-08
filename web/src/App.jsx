@@ -283,7 +283,7 @@ export default function App() {
               하나만 막는다. 로그인 전이면 옮겨가지 않고 상자를 세운다 — 빈
               화면을 보여 준 뒤에 묻는 것보다 낫다. */}
           {LIFE_PAGE && (
-            <a className="era" href="/life.html" title="내 삶을 한국사 옆에 세웁니다"
+            <a className="era" href="/life.html" title="내 삶을 세상의 역사와 나란히 봅니다"
                onClick={(e) => { if (!mine?.user) { e.preventDefault(); setAskLogin(true); } }}>
               내 역사
             </a>

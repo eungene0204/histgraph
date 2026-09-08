@@ -648,7 +648,7 @@ export default function LifeView() {
 function Empty({ offline, onWrite }) {
   return (
     <div className="life-empty">
-      <h2>내 삶을 한국사 옆에 세웁니다</h2>
+      <h2>내 삶을 세상의 역사와 나란히 봅니다</h2>
       <p><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
         잊히지 않는 책·영화·음악·게임.</p>
       <div className="life-empty-row">
