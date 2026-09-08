@@ -502,6 +502,16 @@ let detailHtml = '';
   // 자취(머리글)만 잰다. 기계가 실재를 물어볼 수는 없다.
   ok('지어낸 이름이라고 머리글에 적어 두었다',
      /이 세상에 없는 것[\s\S]{0,300}검색해 없는 것을 확인했다/.test(lifeSrc2));
+
+  // 도는 동안 칸은 보낸 글을 보여 준다 (2026-09-09 사용자: "분석하는 동안
+  // 입력창에는 예문을 보여주지말고 사용자가 입력한 내용을 보여줘"). 보기글은
+  // 아직 아무것도 안 보낸 칸의 것이다.
+  ok('읽는 동안 칸에 보낸 글이 선다',
+     /value=\{running && sent \? sent : text\}/.test(lifeSrc2)
+     && /const onStory = useCallback\(async \(text, name\) => \{[\s\S]{0,120}setSent\(text\)/.test(lifeSrc2));
+  ok('끝나면 칸을 사람에게 돌려준다', /st\.state !== 'running'\) setSent\(''\)/.test(lifeSrc2));
+  ok('새로고침해도 읽히는 글을 되찾는다',
+     /setJob\(st\); setSent\(last\); setWriting\(true\); watchJob\(\)/.test(lifeSrc2));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------

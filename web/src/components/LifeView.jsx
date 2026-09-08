@@ -271,6 +271,11 @@ export default function LifeView() {
     setWriting(true);
   }, []);
   const sentRef = useRef('');
+  // 모델이 지금 읽고 있는 글. **칸이 이것을 보여 준다** (2026-09-09 사용자:
+  // "분석하는 동안 입력창에는 예문을 보여주지말고 사용자가 입력한 내용을
+  // 보여줘") — 보낸 뒤 칸이 비면 보기글이 서서, 몇 분을 기다리는 사람이
+  // 자기가 무엇을 보냈는지 화면 어디에서도 못 본다. 끝나면 비운다.
+  const [sent, setSent] = useState('');
 
   // --- 못 보낸 글 ----------------------------------------------------------
   // 보낸 글은 칸에서 지운다. 모델이 답을 못 주면 **칸에 도로 넣지 않고** 여기에
@@ -322,6 +327,7 @@ export default function LifeView() {
     setJob(st);
     // 모델이 답을 못 준 글은 잃지 않는다 — 칸이 아니라 '되돌리기' 에 둔다.
     if (st.state === 'error' && sentRef.current) { keepFailed(sentRef.current); sentRef.current = ''; }
+    if (st.state !== 'running') setSent('');   // 끝났으면 칸은 다시 사람의 것이다
     // 브라우저에 남긴다 — 서버는 더 이상 저장된 파일을 화면에 주지 않으므로
     // 새로고침 뒤에도 보이려면 여기 있어야 한다. 로그인해 두었으면 계정에도.
     if (st.state === 'done' && st.payload) {
@@ -369,6 +375,7 @@ export default function LifeView() {
   // life.merge). 지우고 새로 만들지 않는다 (2026-09-08 사용자).
   const onStory = useCallback(async (text, name) => {
     sentRef.current = text;
+    setSent(text);
     // 누르자마자 지금 화면에 있는 것을 계정에 둔다. 분석은 몇 분을 도는데
     // 그 사이에 창을 닫아도 여태 만든 것은 남아 있어야 한다.
     keepInAccount(rawRef.current);
@@ -396,6 +403,7 @@ export default function LifeView() {
       || '자료 서버에 닿지 못했습니다. 잠시 뒤에 다시 해 주세요.' });
     keepFailed(text);          // 못 보낸 글은 '되돌리기' 에 둔다
     sentRef.current = '';
+    setSent('');
   }, [watchJob, finish, keepInAccount, rememberStories, keepFailed, startTick, stopTick]);
 
   // 못 보낸 글을 사람이 부를 때. 칸으로 옮기고 '되돌리기' 는 걷는다.
@@ -482,7 +490,14 @@ export default function LifeView() {
       blockingRef.current = !!st.blocking;
       setBlocking(!!st.blocking);
       if (st.state !== 'running') return;
-      setJob(st); setWriting(true); watchJob();
+      // 새로고침해도 읽히고 있는 글을 칸에 되돌린다 — 보낼 때 기록으로
+      // 남겨 둔 마지막 문단이 그것이다 (rememberStories).
+      let last = '';
+      try {
+        const list = JSON.parse(localStorage.getItem(NEXT_KEY) || 'null');
+        if (Array.isArray(list) && list.length) last = list[list.length - 1]?.text || '';
+      } catch { /* 없으면 칸은 빈 채로 돈다 */ }
+      setJob(st); setSent(last); setWriting(true); watchJob();
     })();
     return () => { alive = false; };
   }, [adopt, watchJob, keepInAccount]);
@@ -639,7 +654,7 @@ export default function LifeView() {
       {kept && <div className="life-toast" role="status" aria-live="polite">{kept}</div>}
 
       {writing && <StoryBox key={draftStamp} job={job} local={local} blocking={blocking} onSubmit={onStory}
-                            failed={failed} onRestore={restoreFailed}
+                            sent={sent} failed={failed} onRestore={restoreFailed}
                             onClose={() => setWriting(false)} />}
       {logOpen && <StoryLog stories={stories} running={job?.state === 'running'}
                             onPick={pickStory} onDrop={dropStory}
@@ -769,7 +784,7 @@ function progressOf(job, local) {
 // 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
 // 빈 칸에 '자유롭게 적으세요' 라고 쓰면 아무도 첫 줄을 못 적는다.
 // 적다 만 글은 브라우저에 남긴다. 분석이 몇 분이라 그동안 창을 닫는다.
-function StoryBox({ job, local, blocking, failed, onRestore, onSubmit, onClose }) {
+function StoryBox({ job, local, blocking, sent, failed, onRestore, onSubmit, onClose }) {
   const [text, setText] = useState(() => {
     try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
   });
@@ -810,8 +825,11 @@ function StoryBox({ job, local, blocking, failed, onRestore, onSubmit, onClose }
   const made = done && job.payload ? job.payload : null;
   return (
     <div className="life-paste life-story">
-      <textarea ref={areaRef} value={text} onChange={(e) => change(e.target.value)} disabled={running}
-                placeholder={example} spellCheck={false} />
+      {/* 도는 동안은 **보낸 글**이 선다 (2026-09-09 사용자). 칸이 비어 보기글이
+          서면, 몇 분을 기다리는 사람이 자기가 무엇을 보냈는지 못 본다. 그동안
+          칸은 잠겨 있으므로 값만 갈아 끼우면 된다 — 고치는 것은 끝난 뒤다. */}
+      <textarea ref={areaRef} value={running && sent ? sent : text} onChange={(e) => change(e.target.value)}
+                disabled={running} placeholder={example} spellCheck={false} />
       {(running || done) && (
         <div className="life-progress-row" role="status" aria-live="polite">
           <div className="life-progress" aria-hidden="true"><i style={{ width: `${pct}%` }} /></div>
