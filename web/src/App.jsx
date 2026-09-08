@@ -6,6 +6,9 @@ import { SidePanel } from './components/SidePanel.jsx';
 import { DetailPanel } from './components/DetailPanel.jsx';
 import { Search } from './components/Search.jsx';
 import { ThemeToggle } from './components/ThemeToggle.jsx';
+import { AccountMenu } from './components/AccountMenu.jsx';
+import { LoginModal } from './components/LoginModal.jsx';
+import { auth } from './lib/auth.js';
 
 // 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
 // 더할 때마다 두 곳을 고쳐야 하고, 빠뜨린 하나가 화면에 영어로 뜬다.
@@ -14,6 +17,10 @@ import { ThemeToggle } from './components/ThemeToggle.jsx';
 // 꺼두자." 켜면 노드를 눌렀을 때 캔버스가 그 노드의 인과 도면이 된다
 // (design.md §4 '인과 도면'). 꺼져 있으면 전처럼 그 노드의 주변 관계를 편다.
 export const CAUSAL_DIAGRAM = false;
+
+// 개인 역사 장이 이 빌드에 있는가. 배포(Vercel)에서는 비어 온다 — vite.config.js.
+// 서버 렌더 테스트(esbuild)에는 import.meta.env 가 없으므로 없는 것으로 친다.
+const LIFE_PAGE = Boolean(import.meta.env?.VITE_LIFE);
 
 function hashId() {
   return location.hash ? decodeURIComponent(location.hash.slice(1)) : '';
@@ -42,6 +49,11 @@ export default function App() {
   // 올라간다. 그래프나 연표에서 고른 노드는 여기 쌓이지 않는다 — 그건
   // 이어서 파고든 걸음이 아니라 새로 시작한 걸음이다.
   const [trail, setTrail] = useState([]);
+
+  // 내 역사로 들어가려면 로그인이 필요하다 — 누가 보고 있는지만 알면 된다.
+  // (`null` = 아직 안 물어봤다. 그동안 눌러도 상자가 뜨는 쪽이 안전하다.)
+  const [mine, setMine] = useState(null);
+  const [askLogin, setAskLogin] = useState(false);
 
   const viewRef = useRef(null);
   const railRef = useRef(null);
@@ -246,6 +258,9 @@ export default function App() {
     });
   }, [load, showTimeline]);
 
+  // 내 역사 장이 있는 빌드에서만 묻는다 (배포에는 그 장이 없다).
+  useEffect(() => { if (LIFE_PAGE) auth.me().then(setMine); }, []);
+
   const era = meta?.era_label || '전체';
   const prev = trail[trail.length - 1] || null;
 
@@ -261,14 +276,43 @@ export default function App() {
                   onClick={() => meta?.root && load(meta.root)}>
             {era}
           </button>
+          {/* 개인 역사 — 내 삶을 왕·대통령의 띠와 한국사 옆에 세우는 장 (life.html).
+              아직 배포하지 않는다 — 로컬 빌드에만 있다 (vite.config.js LIFE_PAGE).
+
+              **여기만 로그인을 묻는다** (2026-09-08 사용자: "내 역사는 개인별로
+              다 다르니깐"). 그래프는 로그인 없이 다 보이고, 사람마다 다른 것
+              하나만 막는다. 로그인 전이면 옮겨가지 않고 상자를 세운다 — 빈
+              화면을 보여 준 뒤에 묻는 것보다 낫다. */}
+          {LIFE_PAGE && (
+            <a className="era" href="/life.html" title="내 삶을 한국사 옆에 세웁니다"
+               onClick={(e) => { if (!mine?.user) { e.preventDefault(); setAskLogin(true); } }}>
+              내 역사
+            </a>
+          )}
         </div>
 
         {/* 검색으로 찾은 노드는 그래프만이 아니라 오른쪽 상세도 바로 연다 */}
         <Search nodeTypes={meta?.node_types} onPick={(id) => { load(id); showDetail(id); }} />
-        {/* 연표는 색을 문자열로 박아 두므로(SVG) 테마가 바뀌면 다시 그려 준다.
-            캔버스는 매 프레임 그리니 스스로 따라온다. */}
-        <ThemeToggle onChange={() => railRef.current?.layout({ keepView: true })} />
+        {/* 머리 줄 오른쪽 끝. 계정이 바깥쪽(가장 끝)이고 화면 밝기가 안쪽이다 —
+            누르는 빈도는 밝기가 높지만, 계정은 '지금 누구로 보고 있나'라서
+            눈이 먼저 가는 자리에 둔다. 가입이 꺼져 있으면 계정은 서지 않는다. */}
+        <div className="top-right">
+          {/* 연표는 색을 문자열로 박아 두므로(SVG) 테마가 바뀌면 다시 그려 준다.
+              캔버스는 매 프레임 그리니 스스로 따라온다. */}
+          <ThemeToggle onChange={() => railRef.current?.layout({ keepView: true })} />
+          <AccountMenu />
+        </div>
       </header>
+
+      {askLogin && (
+        <LoginModal
+          next="/life.html"
+          ready={Boolean(mine?.enabled)}
+          title="내 역사는 로그인이 필요합니다"
+          why="내 역사는 사람마다 다릅니다. 누구의 연표인지 알아야 다음에 다시 열어 드릴 수 있어서, 이 장에서만 로그인을 여쭙니다. 그래프를 보고 검색하는 데에는 로그인이 필요하지 않습니다."
+          onClose={() => setAskLogin(false)}
+        />
+      )}
 
       <div className="layout">
         <TimelinePanel railRef={railRef} data={timeline} onPick={visit} />

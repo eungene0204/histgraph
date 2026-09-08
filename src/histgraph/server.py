@@ -20,11 +20,12 @@ import logging
 import mimetypes
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import pages, summaries
+from . import auth, pages, summaries
 from .labels import screen_alias
 from .ontology import EDGE_TYPES, NODE_TYPES
 from .provenance import desc_origin
@@ -865,6 +866,38 @@ class GraphAPI:
         self._local.reigns = out
         return out
 
+    def _mark_causes(self, marks: list[dict]) -> list[list[str]]:
+        """연표에 함께 선 마크들 사이의 인과 — [원인 id, 결과 id].
+
+        같은 해의 쌍만 준다. 화면은 해가 다른 두 마크를 축으로 이미
+        갈라 놓으므로 그 쌍은 차례를 다툴 일이 없고, 뼈대를 통째로
+        보내는 연표에서는 쌍의 수가 마크 수만큼 늘어나 봐야 소용이 없다.
+
+        질의는 마크 아이디를 400개씩 끊어 몇 번으로 끝낸다 (뼈대가 수백
+        이라 한 번에 넣으면 SQLite 의 변수 한도에 걸린다)."""
+        year_of: dict[str, int] = {}
+        for m in marks:
+            year_of.setdefault(m["id"], m["year"])
+        ids = list(year_of)
+        if not ids:
+            return []
+        pairs: set[tuple[str, str]] = set()
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            holes = ",".join("?" * len(chunk))
+            for r in self.store.conn.execute(
+                f"""SELECT DISTINCT src, dst FROM edges
+                     WHERE type = 'caused' AND src IN ({holes})""",
+                chunk,
+            ).fetchall():
+                src, dst = r["src"], r["dst"]
+                if src == dst or dst not in year_of:
+                    continue
+                if year_of[src] != year_of[dst]:
+                    continue
+                pairs.add((src, dst))
+        return [[s, d] for s, d in sorted(pairs)]
+
     def timeline(self, node_id: str) -> dict | None:
         """이 노드가 몇 년쯤의 일이고, 그 앞뒤에 무엇이 있었나.
 
@@ -1002,6 +1035,17 @@ class GraphAPI:
 
         marks.sort(key=lambda m: (m["year"], m["label"]))
 
+        # **같은 해 안의 인과.** 연표의 차례는 곧 시간 순으로 읽히므로
+        # 원인이 결과보다 위에 서야 한다 (CLAUDE.md 1-5). 화면은 지금까지
+        # 고른 노드와 그 이웃 사이의 인과(`rel`)만 알아서, 둘 다 뼈대인
+        # 쌍은 날짜 문자열 순으로만 섰다 — 한일병합과 무단통치는 같은 날
+        # (1910-08-29)이라 가나다로 갈렸고, 을사조약(1905-11-17)은 그
+        # 결과인 애국계몽운동(1905) 아래에 섰다 (2026-09-08 지적).
+        # 마크들 **사이의** caused 엣지를 함께 보내 화면이 차례를 세운다.
+        # 다른 해의 쌍은 축이 이미 갈라 놓으므로 보내지 않는다.
+        # 보내는 것은 아이디 쌍뿐이다 — 화면에 새 글자가 서지 않는다.
+        causes = self._mark_causes(marks)
+
         # 자리를 무엇에 기대어 잡았는지. 화면이 단정할 수 있는 범위가
         # 여기서 갈린다.
         basis = "self" if start is not None else "near" if near else "era"
@@ -1041,9 +1085,186 @@ class GraphAPI:
             # 이 연표가 담은 처음과 끝 해. 화면의 훑기 막대가 쓰는 눈금이다.
             "axis": {"from": axis_from, "to": axis_to},
             "marks": marks,
+            # [원인 id, 결과 id] — 같은 해에 함께 선 마크들 사이의 인과.
+            "causes": causes,
             # 왕의 재위 띠. 고른 노드와 무관하게 늘 같은 자를 세운다.
             "reigns": reigns,
         }
+
+
+    # --- 개인 역사 -----------------------------------------------------
+    def context(self, year_from: int, year_to: int) -> dict:
+        """어느 구간의 왕·대통령 재위 띠와 큰 사건 — 개인 연표의 왼쪽과 가운데.
+
+        개인 연표는 한 사람의 일생(수십 년)이라 시대 전체의 뼈대를 다 보낼
+        이유가 없다. 구간에 걸치는 재위(끝이 시작보다 뒤, 시작이 끝보다 앞)와
+        그 안의 사건만 준다. 사건은 `_anchors` 와 같은 규칙으로 고른 것이라
+        시대 연표와 개인 연표가 같은 사건을 세운다."""
+        if year_to < year_from:
+            year_from, year_to = year_to, year_from
+        # 구간을 재는 것은 재위이지 몰년이 아니다 — 윤보선(재위 1960~62, 몰
+        # 1990)이 1985년생의 축에 서면 안 된다. 띠 안의 몰년 꼬리는 화면이 긋는다.
+        reigns = [r for r in self._reigns()
+                  if r["start"] <= year_to and r["end"] >= year_from]
+        anchors = [dict(a, kind="anchor") for a in self._anchors()
+                   if year_from <= a["year"] <= year_to]
+        return {"axis": {"from": year_from, "to": year_to},
+                "reigns": reigns, "anchors": anchors}
+
+
+
+# --- 개인 역사 분석 (로컬 전용) --------------------------------------------
+# 화면의 '내 인생 입력하기' 가 글을 보내면 여기서 모델에게 묻는다. CLI 의
+# `histgraph life 이야기.txt` 와 같은 길을 지난다 (analyze → validate → link
+# → save) — 사람이 파일을 만들고 터미널을 열지 않아도 되게 한 것뿐이다.
+#
+# **응답에 매달아 두지 않는다.** MLX 는 35GB 를 잡고 몇 분을 돈다. 요청
+# 하나를 그동안 붙들고 있으면 브라우저가 먼저 끊고, 끊긴 뒤에도 모델은
+# 계속 돈다. 그래서 스레드에 맡기고 화면이 `/api/life/job` 으로 물어본다.
+# **한 번에 하나만** 돈다 — 두 개를 띄우면 자리가 없어 커널이 죽인다.
+#
+# 배포에는 없는 길이다. 개인 자료는 저장소 밖(`data/life/`)이고 이 화면은
+# 아직 로컬에만 있다 — 서버리스 함수는 do_POST 를 갖지 않는다. 모델은
+# 이제 둘이다: 로컬 MLX 와 OpenRouter 의 무료 모델. 어느 쪽인지는 `.env` 의
+# 열쇠가 정한다 (`backends.default_life_backend`).
+# 모델에게 보일 그래프 사건 목록의 시작 해. CLI 는 1940 을 기본으로 물어보지만
+# 화면은 생년을 묻지 않으므로 조금 앞에서 시작한다 (1900~오늘 = 사건 221건).
+LIFE_FROM_YEAR = 1900
+# 기다리는 사람에게 무엇을 기다리는지 적는다. 로컬 모델은 35GB 를 읽느라
+# 첫 몇 분이 조용하고, OpenRouter 는 남의 GPU 라 그 줄이 없다.
+FIRST_STEP = {"mlx": "모델을 올리는 중", "openrouter": "모델에게 묻는 중",
+              "anthropic": "모델에게 묻는 중"}
+
+
+def _life_name(name: str) -> str:
+    """저장 파일 이름. 화면이 준 이름이 경로가 되지 않게 한다."""
+    safe = re.sub(r"[^\w가-힣 .-]", "", (name or "").strip()).strip(". ")
+    return safe[:40] or "나"
+
+
+def _life_story(doc: dict) -> str | None:
+    """이 그래프를 만든 이야기 원문 (data/life/<이름>.txt). 없으면 None.
+
+    인물의 생몰년을 여기에 대 본다 — 이야기가 말하지 않은 생년은 화면에 세우지
+    않는다 (2026-09-08 사용자). 이 컴퓨터에 원문이 없으면 재지 않는다."""
+    from . import life as life_mod
+
+    name = ((doc.get("subject") or {}).get("name") or "").strip()
+    if not name:
+        return None
+    path = life_mod.LIFE_DIR / f"{_life_name(name)}.txt"
+    try:
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+    except OSError:
+        return None
+
+
+class LifeAnalysis:
+    """이야기 → 개인 그래프. 한 번에 하나, 상태는 화면이 물어 간다."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state: dict = {"state": "idle"}
+
+    def status(self) -> dict:
+        """지금 상태. **어느 모델로 읽는지도 같이 준다** — 화면이 '글이 이
+        컴퓨터 밖으로 나가지 않는다'고 적어도 되는지가 그것으로 갈린다."""
+        from .backends import default_life_backend
+
+        with self._lock:
+            st = dict(self._state)
+        started = st.pop("started", None)
+        if st.get("state") == "running" and started is not None:
+            st["elapsed"] = int(time.time() - started)
+        st.setdefault("backend", default_life_backend())
+        return st
+
+    def start(self, api: GraphAPI, text: str, name: str = "나",
+              backend: str = "", base: dict | None = None) -> bool:
+        """분석을 띄운다. 이미 돌고 있으면 False.
+
+        백엔드를 안 주면 `.env` 를 보고 고른다 — 열쇠가 있으면 OpenRouter
+        (무료 모델), 없으면 로컬 MLX (`backends.default_life_backend`).
+        화면은 어느 쪽인지 묻지 않는다."""
+        from .backends import default_life_backend
+
+        kind = backend or default_life_backend()
+        with self._lock:
+            if self._state.get("state") == "running":
+                return False
+            self._state = {"state": "running", "started": time.time(), "backend": kind,
+                           "step": FIRST_STEP.get(kind, "모델에게 묻는 중")}
+        threading.Thread(target=self._run, args=(api, text, name, kind, base),
+                         name="life-analyze", daemon=True).start()
+        return True
+
+    def _step(self, step: str) -> None:
+        with self._lock:
+            if self._state.get("state") == "running":
+                self._state["step"] = step
+
+    def _done(self, state: dict) -> None:
+        with self._lock:
+            self._state = state
+
+    def _run(self, api: GraphAPI, text: str, name: str, backend_kind: str,
+             base: dict | None = None) -> None:
+        """`base` 가 있으면 **그 그래프에 더한다** — 화면이 쥔 것을 보내 준다.
+        없으면 새로 만든다 (life.merge 머리글)."""
+        from . import life as life_mod
+        from .backends import build_backend
+
+        started = time.time()
+        try:
+            # 이야기가 걸칠 만한 구간의 사건 이름을 모델에게 보인다. 생년은
+            # 아직 모르니 LIFE_FROM_YEAR 부터 오늘까지다 (cli.cmd_life 와 같다).
+            anchors = api.context(LIFE_FROM_YEAR, datetime.date.today().year)["anchors"]
+            backend = build_backend(backend_kind)
+            self._step("이야기를 읽는 중")
+            existing = life_mod.existing_summary(base) if base else None
+            raw = life_mod.analyze(text, backend, anchors=anchors, existing=existing)
+            if raw is None:
+                self._done({"state": "error", "error": "모델이 답을 돌려주지 않았습니다."})
+                return
+            raw["_model"] = getattr(backend, "model", backend_kind)
+            self._step("답을 검증하는 중")
+            payload, notes = life_mod.validate(raw, subject=(base or {}).get("subject"), text=text)
+            self._step("한국사 사건에 잇는 중")
+            life_mod.link(payload, api)
+            # 이야기가 부르지 않은 역사는 잇지 않는다 (2026-09-08 "세월호 사건과
+            # 퍼듀대학교 졸업은 도대체 무슨 상관이지?"). 더할 때는 옛 이야기까지
+            # 합쳐 옛 연결도 다시 잰다.
+            life_mod.gate_connections(payload, text)
+            added = None
+            out = life_mod.LIFE_DIR / f"{_life_name(name)}.json"
+            if base:
+                self._step("있는 역사에 더하는 중")
+                payload, added = life_mod.merge(base, payload, text)
+                whole = _life_story(base) or ""
+                life_mod.gate_connections(payload, "\n".join(x for x in (whole, text) if x) or None)
+                notes = payload.get("notes") or notes
+            self._step("저장하는 중")
+            try:
+                life_mod.save(payload, out)
+                # 이야기 원문도 옆에 둔다 — 고쳐 쓰고 `histgraph life` 로
+                # 다시 돌릴 수 있게. 여기도 저장소 밖이다. 더한 이야기는 뒤에 잇는다.
+                txt = out.with_suffix(".txt")
+                if base and txt.is_file():
+                    txt.write_text(txt.read_text(encoding="utf-8").rstrip() + "\n\n" + text, encoding="utf-8")
+                else:
+                    txt.write_text(text, encoding="utf-8")
+            except OSError as err:
+                notes = [*notes, f"저장하지 못했습니다: {err}"]
+                out = None
+            self._done({"state": "done", "payload": payload, "notes": notes,
+                        "file": out.name if out else None, "added": added,
+                        "took": int(time.time() - started)})
+        except Exception as err:  # 모델이 없는·메모리가 없는 자리에서도 화면은 살아야 한다
+            log.exception("개인 역사 분석 실패")
+            self._done({"state": "error", "error": f"{type(err).__name__}: {err}"})
+
+
+LIFE_JOBS = LifeAnalysis()
 
 
 def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
@@ -1108,6 +1329,22 @@ def dispatch(
     if path == "/api/timeline":
         tl = api.timeline(one("id"))
         return (200, tl) if tl else (404, {"error": "not found"})
+    # 개인 역사 (web/life.html). 그 구간의 재위 띠·큰 사건. 저장된 개인 그래프를
+    # 서버가 골라 주던 `/api/life` 는 뺐다 (2026-09-08) — 기본으로 서는 자료는
+    # 없고, 사람이 로그인해 직접 적는다.
+    # 분석이 도는 중인지. 글을 보내는 쪽은 POST 라 로컬에만 있고(Handler.do_POST),
+    # 배포에서는 이 자리가 늘 'idle' 이다 — 화면이 그것을 보고 물러난다.
+    if path == "/api/life/job":
+        return 200, LIFE_JOBS.status()
+    # 이 컴퓨터에 남은 이야기 원문. 화면의 '내가 적은 이야기' 상자가 **옛
+    # 그래프를 위해** 한 번 묻는다 (2026-09-08 사용자: "누르면 사용자가 입력한
+    # 사용자의 역사 히스토리를 보여줘. 그래서 잘못된 입력을 고칠 수 있게 해줘").
+    # 앞으로 적는 것은 문서가 `stories` 로 들고 다니므로 여기를 안 지난다.
+    # 배포에는 이 파일이 없다 — 빈 글이 온다.
+    if path == "/api/life/story":
+        return 200, {"text": _life_story({"subject": {"name": one("name", "나")}}) or ""}
+    if path == "/api/context":
+        return 200, api.context(int(one("from", "0")), int(one("to", "0")))
     if path.startswith("/api/node/"):
         node = api.node(unquote(path[len("/api/node/"):]))
         return (200, node) if node else (404, {"error": "not found"})
@@ -1153,9 +1390,98 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    # --- 가입·계정 ------------------------------------------------------
+    # 표는 auth.ROUTES 하나다. 여기서는 껍데기만 씌운다 — 배포(api/index.py)
+    # 도 같은 표를 읽으므로 한쪽에만 생기는 엔드포인트가 없다.
+
+    def _read_body(self) -> bytes:
+        size = int(self.headers.get("Content-Length") or 0)
+        if size <= 0:
+            return b""
+        if size > auth.MAX_BODY:
+            return b""      # 큰 것은 읽지 않는다. auth 가 400 으로 답한다.
+        return self.rfile.read(size)
+
+    def _try_auth(self, body: bytes = b"") -> bool:
+        """가입·계정의 길이면 여기서 답하고 True. 아니면 False.
+
+        본문은 **부르는 쪽이 한 번만 읽어** 넘긴다 — 여기서 읽으면
+        가입 경로가 아닐 때(`/api/life/analyze`) 그쪽이 빈 몸을 받는다."""
+        url = urlparse(self.path)
+        req = auth.Request(self.command, url.path, parse_qs(url.query),
+                           dict(self.headers.items()), body)
+        resp = auth.route(req)
+        if resp is None:
+            return False
+        self.send_response(resp.status)
+        for name, value in resp.headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(resp.body)))
+        self.end_headers()
+        self.wfile.write(resp.body)
+        return True
+
+    def do_PUT(self) -> None:  # noqa: N802
+        if not self._try_auth(self._read_body()):
+            self._json({"error": "unknown endpoint", "path": self.path}, 404)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._try_auth(self._read_body()):
+            self._json({"error": "unknown endpoint", "path": self.path}, 404)
+
+    def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
+        """이야기를 받아 개인 역사 분석을 띄운다 — 로컬 서버에만 있는 길.
+
+        답을 기다리지 않는다. 띄웠다는 것만 알리고 화면이 /api/life/job 으로
+        물어본다 (LifeAnalysis)."""
+        raw = self._read_body()
+        if self._try_auth(raw):
+            return
+        url = urlparse(self.path)
+        # 이미 있는 그래프를 모델 없이 다듬기만 한다 (life.refine) — 화면이 브라우저·
+        # 계정에서 읽은 옛 자료를 부팅 때 보내, 규칙이 는 만큼 해·연결을 채운다.
+        if url.path == "/api/life/refine":
+            try:
+                body = json.loads(raw or b"{}")
+            except (ValueError, UnicodeDecodeError):
+                self._json({"error": "JSON 이 아닙니다"}, 400)
+                return
+            if not (isinstance(body, dict) and isinstance(body.get("nodes"), list)):
+                self._json({"error": "그래프가 아닙니다"}, 400)
+                return
+            from . import life as life_mod
+            # 이야기 원문이 옆에 있으면 같이 준다 — 인물의 생몌년을 원문에 대 본다
+            # (life.gate_person_dates). 없으면 재지 않는다.
+            self._json(life_mod.refine(body, text=_life_story(body)), 200)
+            return
+        if url.path != "/api/life/analyze":
+            self._json({"error": "unknown endpoint", "path": url.path}, 404)
+            return
+        try:
+            body = json.loads(raw or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            self._json({"error": "JSON 이 아닙니다"}, 400)
+            return
+        text = str(body.get("text") or "").strip()
+        # 길이 문턱은 없다 — 화면의 '입력' 도 글이 있으면 누를 수 있다 (2026-09-08).
+        if not text:
+            self._json({"error": "이야기가 비어 있습니다."}, 400)
+            return
+        # 화면이 이미 쥔 그래프를 같이 보내면 거기에 더한다 (life.merge).
+        base = body.get("base")
+        if not (isinstance(base, dict) and isinstance(base.get("nodes"), list) and base["nodes"]):
+            base = None
+        if not LIFE_JOBS.start(self.api, text, str(body.get("name") or "나"),
+                               str(body.get("backend") or ""), base=base):
+            self._json({"error": "이미 분석 중입니다."}, 409)
+            return
+        self._json(LIFE_JOBS.status(), 202)
+
     def do_GET(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
         url = urlparse(self.path)
         try:
+            if self._try_auth():
+                return
             # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`)이 먼저다. 정적 파일보다
             # 앞에 둬야 web/public 에 같은 이름이 생겨도 이쪽이 이긴다.
             page = pages.route(self.api, url.path)

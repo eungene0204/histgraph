@@ -4,13 +4,18 @@ import { GraphView } from '../lib/graph-view.js';
 // 캔버스는 React 가 그리지 않는다. 초당 60번 다시 그려지는 곳이라 가상
 // DOM 을 통과시킬 이유가 없다 — React 는 자리를 잡아주고 GraphView 의
 // 수명만 관리한다.
-export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, settings, note, empty, offline }) {
+// `onReady(view)` 는 GraphView 를 **만들 때마다** 부른다. 개발 모드의 StrictMode 가
+// 마운트 직후 한 번 떼었다 다시 붙이는데, 그때 새로 만든 캔버스는 비어 있다 —
+// 부모가 효과 한 번으로 setData 를 실어 두면 그 자료는 떼어진 첫 캔버스에 남고
+// 화면의 캔버스는 빈 채다 (실측 2026-09-07: 개인 역사 그래프가 5173 에서만 안
+// 보였다). 자료를 든 쪽이 이 신호로 다시 싣는다.
+export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, onReady, settings, note, empty, offline }) {
   const canvasRef = useRef(null);
   // **콜백을 ref 에 담아 넘긴다.** 그냥 넘기면 onSelect 가 바뀔 때마다
   // GraphView 를 새로 만들어야 하고, 그러면 매번 배치가 처음부터 다시
   // 튄다. 안에서는 늘 최신 것을 부르되 인스턴스는 하나로 둔다.
-  const handlers = useRef({ onSelect, onExpand, onCausalExit });
-  handlers.current = { onSelect, onExpand, onCausalExit };
+  const handlers = useRef({ onSelect, onExpand, onCausalExit, onReady });
+  handlers.current = { onSelect, onExpand, onCausalExit, onReady };
 
   useEffect(() => {
     const view = new GraphView(canvasRef.current, {
@@ -21,6 +26,7 @@ export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, setting
     viewRef.current = view;
     // 헤드리스 크롬(CDP)으로 화면을 검증할 때 붙잡을 손잡이. 화면 코드는 쓰지 않는다.
     window.__histgraphView = view;
+    handlers.current.onReady?.(view);
     return () => {
       view.destroy();
       if (viewRef.current === view) viewRef.current = null;

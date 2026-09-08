@@ -7,9 +7,16 @@ import { fileURLToPath } from 'node:url';
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 
+// **개인 역사(life.html)는 아직 배포하지 않는다** (2026-09-07 사용자: "이건 아직
+// 배포 하면 안돼. 로컬에서 개발하고 테스트 해야 함"). Vercel 이 빌드할 때는
+// (VERCEL 환경변수) 그 장과 머리의 링크를 빼고, 로컬 빌드에만 넣는다.
+// 켜고 끄는 자리는 여기 하나다 — 화면 코드는 `import.meta.env.VITE_LIFE` 만 본다.
+export const LIFE_PAGE = !process.env.VERCEL;
+
 export default {
   root: '.',
   plugins: [react()],
+  define: { 'import.meta.env.VITE_LIFE': JSON.stringify(LIFE_PAGE ? '1' : '') },
   server: {
     // 기본값(localhost)은 이 맥에서 IPv6 [::1] 에만 붙어, 127.0.0.1:5173 이
     // 연결 거부로 떨어졌다. API 는 127.0.0.1:8100 이라 둘이 갈리면 주소를
@@ -34,6 +41,8 @@ export default {
         main: here('index.html'),
         privacy: here('privacy.html'),
         terms: here('terms.html'),
+        // 개인 역사 — 그래프와 다른 앱(React 뿌리)이라 장을 따로 낸다. 로컬만.
+        ...(LIFE_PAGE ? { life: here('life.html') } : {}),
       },
     },
   },

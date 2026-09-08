@@ -76,7 +76,9 @@ function Slider({ label, value, min, max, step, onChange, fmt = (v) => v.toFixed
 // 옮긴 것이다 — Obsidian 그래프에 없어서 그 플러그인이 덧붙인 것이
 // "관계 종류로 선을 거르기"였다. 우리 그래프는 관계에 종류가 있으니
 // 검색 연산자 대신 체크 목록으로 둔다.
-export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, onPick }) {
+// `lines` 로 선 범례를 바꿔 줄 수 있고, `whole` 이면 그래프를 통째로 그리는 화면
+// (개인 역사)이라 펼침 깊이·최대 노드·연도 포함·연표 스위치를 감춘다.
+export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, onPick, lines = LINE_KINDS, whole = false }) {
   const {
     depth, limit, includePeriod, hiddenEdges = [],
     showLabels, showRail, arrows = true, textFade = 0.3, nodeScale = 1, lineScale = 1,
@@ -110,7 +112,7 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
         <details open>
           <summary>시작점</summary>
           <section>
-            <p className="hint">가장 많이 연결된 개체부터. 클릭하면 그 주변을 펼칩니다.</p>
+            <p className="hint">{whole ? '가장 많이 연결된 것부터. 클릭하면 그리로 옮깁니다.' : '가장 많이 연결된 개체부터. 클릭하면 그 주변을 펼칩니다.'}</p>
             <ul className="seeds">
               {seeds.map((s) => (
                 <li key={s.id} onClick={() => onPick(s.id)}>
@@ -126,6 +128,7 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
         <details>
           <summary>필터</summary>
           <section>
+            {!whole && (<>
             <label className="row"><span>펼침 깊이</span>
               <select value={depth} onChange={(e) => onSettings({ depth: +e.target.value })}>
                 <option value="1">1단계</option>
@@ -144,6 +147,7 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
                      onChange={(e) => onSettings({ includePeriod: e.target.checked })} />
               {' '}연도·시대 노드 포함
             </label>
+            </>)}
             {edgeTypes.length > 0 && (
               <>
                 <p className="gc-sub">관계 종류</p>
@@ -169,7 +173,7 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
           <section>
             <Legend nodeTypes={meta?.node_types} />
             <ul className="legend lines">
-              {LINE_KINDS.map(({ dash, width, color, label }) => (
+              {lines.map(({ dash, width, color, label }) => (
                 <li key={label}>
                   <svg width="26" height="10" aria-hidden="true">
                     <line x1="1" y1="5" x2="25" y2="5" stroke={color || 'currentColor'}
@@ -196,18 +200,19 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
               {' '}이름표 보이기
             </label>
             {/* 연표는 화면 폭을 250px 먹는다. 관계망만 크게 보고 싶을 때가 있다. */}
+            {!whole && (
             <label className="check">
               <input type="checkbox" checked={showRail}
                      onChange={(e) => onSettings({ showRail: e.target.checked })} />
               {' '}왼쪽 연표 보이기
-            </label>
+            </label>)}
             <Slider label="이름표 흐림 문턱" value={textFade} min={0} max={1} step={0.05}
                     onChange={(v) => onSettings({ textFade: v })} />
             <Slider label="노드 크기" value={nodeScale} min={0.5} max={2} step={0.1}
                     onChange={(v) => onSettings({ nodeScale: v })} />
             <Slider label="선 굵기" value={lineScale} min={0.5} max={3} step={0.1}
                     onChange={(v) => onSettings({ lineScale: v })} />
-            <p className="hint">노드 클릭 = 상세 + 주변 펼치기 · 드래그 = 고정 · 휠 = 확대</p>
+            <p className="hint">{whole ? '노드 클릭 = 상세 · 드래그 = 고정 · 휠 = 확대' : '노드 클릭 = 상세 + 주변 펼치기 · 드래그 = 고정 · 휠 = 확대'}</p>
           </section>
         </details>
 

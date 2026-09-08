@@ -35,7 +35,9 @@ import { SidePanel } from './src/components/SidePanel.jsx';
 import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
 import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView };
+import { LoginModal } from './src/components/LoginModal.jsx';
+import { StoryLog } from './src/components/LifeView.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog };
 `;
 
 await build({
@@ -52,7 +54,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -324,9 +326,25 @@ let detailHtml = '';
 // --- 라이트/다크 --------------------------------------------------------
 // 진실은 <html data-theme> 하나다. CSS 는 선택자로, 캔버스는 isLight() 로 읽는다.
 {
-  ok('머리 줄 오른쪽에 테마 단추가 있다',
-     appHtml.includes('class="clickable-icon theme-toggle"') && appHtml.includes('밝은 화면으로'),
+  // 로그인 단추는 **언제나** 머리 줄 오른쪽에 있다 (2026-09-08 사용자: "그냥
+  // 로그인 버튼이 항상 보이게 해줘"). 서버 렌더에는 효과가 안 돌아 /api/me 를
+  // 물어보기 전 상태인데, 그때도 서 있어야 한다 — 설정이 없으면 사라지던
+  // 예전 동작으로 되돌아가면 여기서 잡힌다.
+  ok('로그인 단추는 설정이 없어도 머리 줄에 선다',
+     appHtml.includes('class="account-login"') && appHtml.includes('로그인'),
+     appHtml.slice(appHtml.indexOf('top-right')).slice(0, 300));
+
+  // 2026-09-08 사용자: "삭제하지 말고 안 보이게 해줘 나중에 필요하면 보이게 하자."
+  // 그래서 재는 것이 뒤집혔다 — 지금은 **안 보이는 것**이 맞고, 대신 되살릴
+  // 스위치가 그 자리에 남아 있는지를 잰다. 지워 버리면 이 관문이 잡는다.
+  const toggleSrc = readFileSync(join(WEB, 'src/components/ThemeToggle.jsx'), 'utf-8');
+  ok('테마 단추는 감춰 두었다 (지운 것이 아니다)',
+     !appHtml.includes('class="clickable-icon theme-toggle"')
+     && /export const THEME_TOGGLE = (true|false)/.test(toggleSrc)
+     && toggleSrc.includes('밝은 화면으로'),
      appHtml.slice(appHtml.indexOf('<header')).slice(0, 400));
+  ok('스위치 하나를 켜면 되살아난다',
+     /if \(!THEME_TOGGLE\) return null;/.test(toggleSrc));
   const css = readFileSync(join(WEB, 'style.css'), 'utf-8');
   ok('style.css 에 라이트 토큰이 있다', /:root\[data-theme="light"\]\s*\{[^}]*--color-base-00:\s*#ffffff/.test(css));
   ok('doc.css 에도 라이트 토큰이 있다',
@@ -336,6 +354,88 @@ let detailHtml = '';
      boot.includes("getItem('theme')") && boot.includes('prefers-color-scheme') && boot.includes('dataset.theme'));
   ok('index.html 이 첫 그림 전에 테마를 박는다',
      readFileSync(join(WEB, 'index.html'), 'utf-8').includes('src="/theme-boot.js"'));
+}
+
+// --- 내 역사는 로그인을 묻는다 -------------------------------------------
+// 2026-09-08 사용자: "'내 역사' 버튼을 눌렀을때 로그인 안 돼쓰면 로그인 모달을
+// 보여줘서 로그인을 하게 강제해. 내 역사는 개인별로 다 다르니깐."
+{
+  const box = plain(renderToString(h(LoginModal, {
+    next: '/life.html', title: '내 역사는 로그인이 필요합니다',
+    why: '내 역사는 사람마다 다릅니다.', dismissible: false,
+  })));
+  ok('로그인 상자가 왜 묻는지를 먼저 적는다',
+     box.includes('내 역사는 로그인이 필요합니다') && box.includes('사람마다 다릅니다'), box.slice(0, 200));
+  ok('구글로 들어가는 단추가 있다',
+     box.includes('class="login-go"') && box.includes('구글 계정으로 로그인'));
+  ok('약관과 방침으로 가는 길이 있다',
+     box.includes('/terms.html') && box.includes('/privacy.html'));
+  ok('닫을 수 없는 상자에는 돌아갈 자리를 준다',
+     box.includes('한국사로 돌아가기') && !box.includes('나중에'));
+  ok('아직 열리지 않았으면 누를 수 없는 단추를 세우지 않는다',
+     !plain(renderToString(h(LoginModal, { title: 'ㄱ', why: 'ㄴ', ready: false })))
+       .includes('class="login-go"'));
+
+  // 머리 줄의 '내 역사'와 장 자체가 **둘 다** 막아야 한다 — 하나만 막으면
+  // 주소를 치는 것으로 넘어간다.
+  const appSrc = readFileSync(join(WEB, 'src/App.jsx'), 'utf-8');
+  const lifeSrc = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
+  ok("머리 줄의 '내 역사'가 로그인 전이면 옮겨가지 않는다",
+     /!mine\?\.user.*preventDefault/s.test(appSrc) && appSrc.includes('setAskLogin(true)'));
+  ok('주소로 곧장 들어와도 같은 문을 지난다',
+     /if \(account\.enabled && !account\.user\)/.test(lifeSrc) && lifeSrc.includes('dismissible={false}'));
+}
+
+// --- 내가 적은 이야기 -----------------------------------------------------
+// 2026-09-08 사용자: "'내 역사 입력하기' 오른쪽에 아이콘 하나 만들어서 누르면
+// 사용자가 입력한 사용자의 역사 히스토리를 보여줘. 그래서 잘못된 입력을 고칠
+// 수 있게 해줘."
+{
+  const box = plain(renderToString(h(StoryLog, {
+    stories: [{ at: '', text: '잠실고딩학교 1학넌때 친구 김일권을 만났고' },
+              { at: '2026-09-08', text: '2002년 3월에 30사단 입대' }],
+    running: false, onPick: () => {}, onDrop: () => {}, onClose: () => {},
+  })));
+  ok('모달로 서고, 적은 글이 누를 수 있는 줄이 된다',
+     box.includes('role="dialog"') && box.includes('aria-modal="true"')
+     && (box.match(/class="life-log-item"/g) || []).length === 2
+     && box.includes('잠실고딩학교 1학넌때'), box.slice(0, 240));
+  // 2026-09-08 사용자: "최신 입력한 내용이 가장 위에 있어야해" · "'적은 날을
+  // 모릅니다' 문장을 삭제해". 뒤에 적은 것이 위에 서되 글의 차례는 그대로다.
+  ok('새로 적은 것이 맨 위에 선다',
+     box.indexOf('30사단 입대') < box.indexOf('잠실고딩학교'), box.slice(0, 200));
+  ok('적은 날을 적고, 모르면 아무 말도 안 한다',
+     box.includes('2026년 9월 8일') && !box.includes('모릅니다'));
+  // 2026-09-08 사용자: 설명 문단도, '고쳐서 다시 읽기' 도 뺐다. 남는 것은
+  // 제목 · 누를 수 있는 줄 · 줄마다 '삭제' · '닫기' 뿐이다.
+  ok('설명 문단도 다시 읽기 단추도 없다',
+     !box.includes('이 글에서 그래프가 나옵니다') && !box.includes('다시 읽기')
+     && box.includes('내가 적은 이야기') && box.includes('삭제') && box.includes('닫기'));
+  const none = plain(renderToString(h(StoryLog, { stories: [], running: false, onPick: () => {}, onDrop: () => {}, onClose: () => {} })));
+  ok('적은 것이 없으면 그렇게 적는다', none.includes('아직 적은 이야기가 없습니다'));
+  // 머리 줄의 아이콘 — 그림만 서고 글자는 title·aria 로 말한다.
+  const lifeSrc2 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
+  ok("아이콘이 '내 역사 입력하기' 오른쪽에 선다",
+     /내 역사 입력하기[\s\S]{0,900}life-log-btn/.test(lifeSrc2) && lifeSrc2.includes('aria-label="내가 적은 이야기"'));
+  // 지우는 것은 기록 한 줄이다 — 그래프는 그대로고, 지운 자리는 브라우저와
+  // 계정에 바로 남는다 (안 남기면 새로고침에 되살아난다).
+  ok('삭제는 기록에서 빼고 바로 남긴다',
+     /const dropStory = useCallback/.test(lifeSrc2)
+     && /stories: list[\s\S]{0,400}keepInAccount\(doc\)/.test(lifeSrc2));
+  // 누른 글은 입력창으로 간다 — 상자는 브라우저에 남긴 글을 읽고 서므로
+  // 거기에 적고 상자를 새로 세운다 (key 가 바뀐다).
+  ok('누른 글이 입력창으로 옮겨 간다',
+     lifeSrc2.includes('appendDraft(cur, text)') && lifeSrc2.includes('localStorage.setItem(STORY_KEY, next)')
+     && /<StoryBox key=\{draftStamp\}/.test(lifeSrc2));
+  // 2026-09-08 사용자: "입력을 클릭해도 입력창에 복사가 안 되는 경우가 있어."
+  // 상자가 **세워질 때** 칸을 비우던 효과가 방금 옮긴 글을 지웠다. 비우는 것은
+  // 보낼 때 한 번이고, 못 보낸 글은 되돌린다.
+  ok('상자는 세워질 때 칸을 비우지 않는다',
+     !/job\?\.state !== 'done'\)\s*return;/.test(lifeSrc2)
+     && /const send = \(\) => \{[\s\S]{0,200}removeItem\(STORY_KEY\)/.test(lifeSrc2));
+  ok('못 보낸 글은 칸에 되돌린다',
+     /putDraft\(text\);\s+\/\/ 못 보낸 글/.test(lifeSrc2)
+     && /st\.state === 'error' && sentRef\.current/.test(lifeSrc2));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------

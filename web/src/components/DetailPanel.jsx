@@ -3,6 +3,7 @@ import { nodeColor } from '../lib/graph-view.js';
 import {
   groupRelations, cardsFor, sentence, whyEmpty, fmtDate, LONG_DESC,
 } from '../lib/relations.js';
+import { auth } from '../lib/auth.js';
 import { Glyph } from './Glyph.jsx';
 import { ChainPanel } from './ChainPanel.jsx';
 
@@ -67,6 +68,55 @@ function Description({ d }) {
   );
 }
 
+// 즐겨찾기 별 — 로그인한 사람에게만 보인다. 로그인하지 않았다면 **아무것도
+// 그리지 않는다**: 눌러도 안 되는 단추를 세워 두면 그 자리를 두 번 누르게 된다.
+//
+// 담긴 것들의 id 는 화면 전체가 한 번만 받아 들고 있다 (auth.bookmarks.ids) —
+// 노드를 옮길 때마다 묻지 않는다.
+function BookmarkStar({ node }) {
+  const [on, setOn] = useState(null);     // null = 로그인 전이거나 아직 모른다
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    auth.me().then((s) => {
+      if (!s.user) return null;
+      return auth.bookmarks.ids();
+    }).then((ids) => {
+      if (alive && ids) setOn(ids.has(node.id));
+    }).catch(() => { /* 못 물어봤으면 안 그린다 */ });
+    return () => { alive = false; };
+  }, [node.id]);
+
+  if (on === null) return null;
+
+  const flip = async () => {
+    setBusy(true);
+    // 먼저 뒤집어 그리고, 서버가 거절하면 되돌린다 — 별은 누른 순간
+    // 반응해야 눌렸는지 알 수 있다.
+    setOn(!on);
+    try {
+      if (on) await auth.bookmarks.remove(node.id);
+      else await auth.bookmarks.add(node.id, node.label || node.id);
+    } catch {
+      setOn(on);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const label = on ? '즐겨찾기에서 빼기' : '즐겨찾기에 담기';
+  return (
+    <button className="clickable-icon d-star" type="button" onClick={flip}
+            disabled={busy} aria-pressed={on} aria-label={label} title={label}>
+      <svg viewBox="0 0 24 24" fill={on ? 'currentColor' : 'none'} stroke="currentColor"
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5L2.6 9.8l6.5-.9Z" />
+      </svg>
+    </button>
+  );
+}
+
 function Evidence({ text, shared = false }) {
   return <div className={shared ? 'rel-ev shared' : 'rel-ev'}>“{text}”</div>;
 }
@@ -90,6 +140,7 @@ export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
 
   return (
     <aside className="detail" ref={boxRef}>
+      <BookmarkStar node={d} />
       <button className="clickable-icon close" aria-label="닫기" onClick={onClose}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
              strokeLinecap="round" aria-hidden="true">

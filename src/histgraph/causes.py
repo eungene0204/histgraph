@@ -841,7 +841,8 @@ def ingest_answers(store: GraphStore, corpus, items: list[dict], model: str) -> 
 
 def reresolve(store: GraphStore, corpus, scope: set[str] | None = None) -> dict[str, Any]:
     """저장된 답을 모델 없이 다시 판정한다. 이미 있는 엣지는 더 확실한 것만
-    바뀌고(`write`), 새로 풀린 이름이 엣지를 더한다."""
+    바뀌고(`write`), 새로 풀린 이름이 엣지를 더한다. 수집이 지운 `causes_model`
+    표식도 여기서 되붙는다 — 답이 있는 문서를 다시 묻지 않기 위해서다."""
     store.conn.execute(ANSWERS_DDL)
     rows = store.conn.execute(
         """SELECT a.node_id, a.model, a.answers, n.label, n.type, n.start_date, n.end_date, n.props
@@ -863,6 +864,11 @@ def reresolve(store: GraphStore, corpus, scope: set[str] | None = None) -> dict[
         counts["문서"] += 1
         edges, why, missing = accept(store, doc, json.loads(r["answers"]), passages, r["model"])
         counts["엣지"] += write(store, edges)
+        # 답이 있으면 표식도 있어야 한다 — `ingest` 가 props 를 덮으면 표식만 사라져
+        # 이미 답한 문서를 모델에게 다시 묻게 된다 (문서당 30초 넘게 든다).
+        if not doc["props"].get("causes_model"):
+            mark(store, doc, r["model"])
+            counts["표식"] = counts.get("표식", 0) + 1
         store.conn.commit()
         for k, v in why.items():
             dropped[k] = dropped.get(k, 0) + v

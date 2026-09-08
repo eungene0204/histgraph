@@ -110,3 +110,12 @@ a:hover { color: var(--color-accent-2); }
 .doc-foot a { color: var(--text-faint); text-decoration: none; }
 .doc-foot a:hover { color: var(--color-accent); }
 .doc-foot span { margin: 0 7px; }
+
+/* 방침의 표 (국외 이전 항목 · 보유 기간). 좁은 화면에서는 표가 제 칸 안에서
+   가로로 밀린다 — 본문은 가로로 밀리지 않는다. */
+.doc-table { overflow-x: auto; margin: 0 0 16px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--background-modifier-border, rgba(128,128,128,.25)); }
+th { color: var(--text-normal); font-weight: 600; white-space: nowrap; }
+ol { margin: 0 0 12px; padding-left: 22px; }
+h3 { color: var(--text-normal); font-size: 1em; font-weight: 600; margin: 20px 0 6px; }
