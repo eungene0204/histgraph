@@ -649,8 +649,8 @@ function Empty({ offline, onWrite }) {
   return (
     <div className="life-empty">
       <h2>내 삶을 세상의 역사와 나란히 봅니다</h2>
-      <p><b>내 역사 입력하기</b>를 눌러 자기 이야기를 적습니다 — 태어난 해와 곳, 가족, 이사, 학교, 일, 만남,
-        잊히지 않는 책·영화·음악·게임.</p>
+      <p><b>‘내 역사 입력하기’</b>를 눌러 당신의 역사를 기록하세요. 태어난 순간부터 가족, 학교, 일,
+        소중한 만남, 그리고 기억에 남는 책·영화·음악·작품까지.</p>
       <div className="life-empty-row">
         <button type="button" className="life-btn big on" onClick={onWrite}>내 역사 입력하기</button>
       </div>
