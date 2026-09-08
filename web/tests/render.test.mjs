@@ -479,6 +479,29 @@ let detailHtml = '';
      /\{failed && !running && \(/.test(lifeSrc2) && lifeSrc2.includes('적은 글 되돌리기')
      && /const restoreFailed = useCallback\(\(\) => \{[\s\S]{0,120}putDraft\(failed\);\s+keepFailed\(''\)/.test(lifeSrc2));
   ok('답이 온 글은 되돌릴 것이 없다', /takeStories\(\);[\s\S]{0,120}keepFailed\(''\)/.test(lifeSrc2));
+
+  // 보기글은 여럿이고 열 때마다 하나가 선다 (2026-09-09 사용자: "연령, 성별,
+  // 직종을 다르게 해서 여러개 만들어서 랜덤으로 보여주게 해줘"). 예가 하나면
+  // 그 한 사람의 삶이 '이렇게 적어야 하는 것'이 된다.
+  const examples = [...lifeSrc2.matchAll(/`예: ([\s\S]*?)`,/g)].map((m) => m[1]);
+  ok(`보기글이 여럿이다 (${examples.length})`, examples.length >= 5);
+  const born = examples.map((t) => Number((/(\d{4})년 [^.]*태어났다/.exec(t) || [])[1]));
+  ok('예문마다 태어난 해가 다르다', born.every(Boolean) && new Set(born).size === born.length, born.join(','));
+  ok('세대가 1950~2000년대에 걸쳐 있다', Math.max(...born) - Math.min(...born) >= 40, `${Math.min(...born)}~${Math.max(...born)}`);
+  // 성별은 말로 적지 않고 관계로 드러난다 — 남편·아내·아들·딸이 갈린다.
+  ok('남편이 나오는 예문과 아내가 나오는 예문이 다 있다',
+     examples.some((t) => t.includes('남편')) && examples.some((t) => t.includes('아내')));
+  // 직종: 한 예문의 일이 다른 예문에 없다 (농사·미용·간호·요리·앱)
+  const jobs = ['농사', '머리방', '간호', '주방', '앱'];
+  ok('직종이 갈린다', jobs.every((j) => examples.filter((t) => t.includes(j)).length >= 1), jobs.join('·'));
+  ok('상자는 세울 때 한 번 뽑는다',
+     /const \[example\] = useState\(anExample\)/.test(lifeSrc2) && /placeholder=\{example\}/.test(lifeSrc2)
+     && /Math\.floor\(Math\.random\(\) \* STORY_EXAMPLES\.length\)/.test(lifeSrc2));
+  // 예문 안의 학교·회사·가게 이름은 지어낸 것이라야 한다 — 실재하는 곳의
+  // 이름을 남의 삶에 붙이지 않는다. 여기서는 '적어 두고 검색해 확인했다'는
+  // 자취(머리글)만 잰다. 기계가 실재를 물어볼 수는 없다.
+  ok('지어낸 이름이라고 머리글에 적어 두었다',
+     /이 세상에 없는 것[\s\S]{0,300}검색해 없는 것을 확인했다/.test(lifeSrc2));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------
