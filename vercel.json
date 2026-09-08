@@ -6,6 +6,7 @@
   "functions": {
     "api/index.py": {
       "excludeFiles": "{web/**,tools/**,tests/**,.venv/**,node_modules/**,**/__pycache__/**,data/cache/**,data/raw/**,data/histgraph.sqlite,.claude/**,README.md,HANDOFF.md,CLAUDE.md,design.md,concept.md,ToDo.md}",
+      "includeFiles": "src/histgraph/*.md",
       "maxDuration": 300
     }
   },
