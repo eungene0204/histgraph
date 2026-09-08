@@ -575,8 +575,9 @@ function EventDetail({ life, id, onPick, onDrop }) {
   const turning = life.turning_points.find((p) => p.event === id);
   const cf = life.counterfactual_analysis.filter((c) => c.event === id);
   // 날짜 줄도 같은 규칙이다 — 이야기가 말하지 않은 인물의 생년은 적지 않는다.
+  // '세'는 만 나이다 (2026-09-08 사용자: "나이 앞에 '만'이라고 써줘").
   const when = [t?.date_text || (dateSaid(node) ? node.start_date : null),
-    t?.age != null ? `${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
+    t?.age != null ? `만 ${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
   const nameOf = (nid) => byId.get(nid)?.name || nid;
   return (
     <div className="life-event">

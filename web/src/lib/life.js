@@ -786,7 +786,9 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
 
   const pItems = layout.personal.map(({ m, ty }, i) => {
     const cell = yearText(m, i ? layout.personal[i - 1].m : null);
-    const age = m.age != null ? `<span class="tl-rel">${m.age}세</span>` : '';
+    // '세'는 만 나이다 (2026-09-08 사용자: "나이 앞에 '만'이라고 써줘") — 이야기가
+    // 준 나이를 그대로 세는 것이라 한국 나이(세는 나이)로 헷갈릴 수 있다.
+    const age = m.age != null ? `<span class="tl-rel">만 ${m.age}세</span>` : '';
     const rough = m.precision === 'decade' || m.precision === 'age' ? '<span class="tl-rel">어림</span>' : '';
     return `<button type="button" class="tl-mark life-p${m.id === selected ? ' k-self' : ''}" data-id="${esc(m.id)}"
       style="left:${xP}px; width:${PW - 28}px; top:${ty.toFixed(1)}px" title="${esc(m.label)} · ${m.year}년">
