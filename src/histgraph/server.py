@@ -1194,7 +1194,7 @@ class LifeAnalysis:
             out = life_mod.LIFE_DIR / f"{_life_name(name)}.json"
             if base:
                 self._step("있는 역사에 더하는 중")
-                payload, added = life_mod.merge(base, payload)
+                payload, added = life_mod.merge(base, payload, text)
                 whole = _life_story(base) or ""
                 life_mod.gate_connections(payload, "\n".join(x for x in (whole, text) if x) or None)
                 notes = payload.get("notes") or notes

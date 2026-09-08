@@ -68,6 +68,51 @@ export const EVENT_TYPES = new Set(['PersonalEvent', 'HistoricalEvent', 'Turning
   'Achievement', 'Failure', 'Decision', 'Memory']);
 // 사람 갈래 (life.py PERSON_TYPES 와 같다).
 export const PERSON_TYPES = new Set(['Person', 'FamilyMember', 'Ancestor', 'Relationship']);
+// 삶의 사다리 (life.py `ladder` 머리글과 같다). 학제는 정해져 있다 — 층(초1·중2·고3·
+// 대4·대학원5)과 그 안의 자리(들어감 0·다님 1·나옴 2)를 한 줄로 세운다: 초등 입학 10 ·
+// 초등 졸업 12 · 중학 입학 20 … 대학 졸업 42. 달을 모르는 두 사건의 차례는 모델에게
+// 물을 것이 아니다 (2026-09-08 사용자: "초등학교 졸업을 해야 중학교 입학을 하지").
+const LADDER_WORDS = [['대학원', 5], ['석사', 5], ['박사', 5], ['대학교', 4], ['대학', 4],
+  ['전문대', 4], ['고등학교', 3], ['고교', 3], ['중학교', 2], ['초등학교', 1], ['국민학교', 1]];
+const LADDER_IN = /입학|진학|편입|복학|전학|들어갔|들어감/;
+const LADDER_OUT = /졸업|수료|자퇴|중퇴|퇴학|마쳤|마침/;
+
+function rung(text) {
+  for (const [word, level] of LADDER_WORDS) {
+    if (text.includes(word)) {
+      return level * 10 + (LADDER_OUT.test(text) ? 2 : LADDER_IN.test(text) ? 0 : 1);
+    }
+  }
+  return null;
+}
+
+// 이름이 먼저다 — 설명은 앞뒤를 같이 말하곤 해서('초등학교를 졸업하고 중학교에 입학함')
+// 자리를 뒤집는다. 이름이 층을 말하지 않을 때만 설명을 본다.
+export function ladder(node) {
+  if (!node || !EVENT_TYPES.has(node.type)) return null;
+  return rung(String(node.name || '')) ?? rung(String(node.description || ''));
+}
+
+// 해가 같은 칸끼리 사다리 순으로 다시 세운다. **사다리에 없는 항목은 제자리에 둔다** —
+// 자리만 맞바꾼다 (life.py order_by_ladder 와 같다). 목록은 이미 해 순이다.
+export function orderByLadder(items, nodeOf, yearOf) {
+  const rank = items.map((it) => ladder(nodeOf(it)));
+  for (let i = 0; i < items.length;) {
+    let j = i;
+    while (j < items.length && yearOf(items[j]) === yearOf(items[i])) j += 1;
+    if (yearOf(items[i]) != null) {
+      const spots = [];
+      for (let k = i; k < j; k += 1) if (rank[k] != null) spots.push(k);
+      if (spots.length > 1) {
+        const sorted = spots.map((k) => [items[k], rank[k]])
+          .sort((a, b) => a[1] - b[1]).map(([it]) => it);
+        spots.forEach((k, n) => { items[k] = sorted[n]; });
+      }
+    }
+    i = j;
+  }
+  return items;
+}
 
 // 이름 옆에 세우는 해. **인물은 이야기가 말한 날짜가 있을 때만 세운다**
 // (2026-09-08 사용자: "인물들의 출생연도 나이는 사용자가 입력하지 않은 이상 추측해서
@@ -487,7 +532,8 @@ export function normalize(raw) {
     timeline.push(item);
   }
   timeline.sort((a, b) => (a.year == null) - (b.year == null) || (a.year || 0) - (b.year || 0));
-  out.timeline = timeline;
+  // 해가 같으면 학제가 차례다 — 초등 졸업이 중학 입학보다 먼저다 (`ladder` 머리글).
+  out.timeline = orderByLadder(timeline, (t) => byId.get(t.event_id), (t) => t.year);
   out.historical_connections = (raw.historical_connections || []).filter(Boolean)
     .map((c) => ({ ...c, impact_type: IMPACT_KO[c.impact_type] ? c.impact_type : 'possible' }));
   let ranking = raw.influence_ranking || {};
@@ -601,7 +647,8 @@ export function joinStories(stories) {
 // **같은 해 안의 차례는 연표의 차례다.** 날짜 문자열로 세우면 '1998'(전학)이
 // '1998-03'(이사)보다 앞에 서서 결과가 원인 위에 온다 — 시대 연표가 겪은
 // 같은 함정이다 (CLAUDE.md §1-5). 연표 항목은 모델이 앞뒤(previous_event·
-// next_event)를 잡아 준 차례이므로 해만 같으면 그 차례를 지킨다.
+// next_event)를 잡아 준 차례이므로 해만 같으면 그 차례를 지킨다. **학제만 예외다** —
+// 초등 졸업과 중학 입학처럼 뒤집힐 수 없는 차례는 이야기의 차례를 이긴다 (orderByLadder).
 export function personalMarks(life) {
   const byId = new Map(life.nodes.map((n) => [n.id, n]));
   const marks = [];
@@ -618,7 +665,11 @@ export function personalMarks(life) {
     if (seen.has(n.id) || !EVENT_TYPES.has(n.type) || n.year == null) continue;
     marks.push(mark(n, n.year, null));
   }
-  return marks.map((m, i) => [m, i]).sort((a, b) => a[0].year - b[0].year || a[1] - b[1]).map(([m]) => m);
+  const ordered = marks.map((m, i) => [m, i])
+    .sort((a, b) => a[0].year - b[0].year || a[1] - b[1]).map(([m]) => m);
+  // 그러고도 해가 같으면 학제가 차례다 (`ladder` 머리글). 연표에 없던 사건도 여기서
+  // 제자리를 찾는다 — 서버가 세운 차례(life.py refine 3)와 같은 규칙이다.
+  return orderByLadder(ordered, (m) => byId.get(m.id), (m) => m.year);
 }
 
 function mark(n, year, t) {

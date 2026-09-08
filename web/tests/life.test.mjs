@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   normalize, removeNode, nodeYears, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
+  ladder,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS,
@@ -344,6 +345,40 @@ console.log('\n개인 역사 — 남의 생년은 짐작해 세우지 않는다'
   // 화면이 그 규칙을 쓰는지 — '사람 · 문화' 탭이 nodeYears 로 해를 세운다
   const view = readFileSync(here('../src/components/LifeView.jsx'), 'utf8');
   ok('사람 · 문화 탭이 이 규칙으로 해를 세운다', /nodeYears\(n\)/.test(view) && !/\{n\.year\}/.test(view));
+}
+
+console.log('\n개인 역사 — 학제의 차례는 이야기의 차례를 이긴다 (2026-09-08 "초등학교 졸업을 해야 중학교 입학을 하지")');
+{
+  ok('사다리 — 초등 입학 10 · 초등 졸업 12 · 중학 입학 20 · 대학 졸업 42',
+    ladder({ type: 'PersonalEvent', name: '성일초등학교 입학' }) === 10
+    && ladder({ type: 'PersonalEvent', name: '성내초등학교 졸업' }) === 12
+    && ladder({ type: 'PersonalEvent', name: '성내중학교 입학' }) === 20
+    && ladder({ type: 'PersonalEvent', name: '퍼듀대학교 졸업' }) === 42
+    && ladder({ type: 'PersonalEvent', name: '대학원 입학' }) === 50);
+  ok('학제와 무관한 사건·사람은 사다리에 없다',
+    ladder({ type: 'PersonalEvent', name: '미국으로 이주' }) === null
+    && ladder({ type: 'School', name: '성내중학교' }) === null);
+  ok('이름이 층을 말하면 설명은 안 본다 (설명은 앞뒤를 같이 말한다)',
+    ladder({ type: 'PersonalEvent', name: '성내중학교 입학', description: '성내초등학교를 졸업하고 성내중학교에 입학함' }) === 20);
+  // 달을 모르는 같은 해 — 이야기가 중학교 입학을 먼저 말했어도 졸업이 먼저 선다
+  const school = normalize({
+    nodes: [
+      { id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'ms_in', type: 'PersonalEvent', name: '성내중학교 입학', start_date: '1994', confidence: 1 },
+      { id: 'es_out', type: 'PersonalEvent', name: '성내초등학교 졸업', start_date: '1994', confidence: 1 },
+      { id: 'move', type: 'PersonalEvent', name: '이사', start_date: '1994', confidence: 1 },
+    ],
+    edges: [],
+    timeline: [{ event_id: 'ms_in', life_stage: '중학교', year: 1994 },
+      { event_id: 'move', life_stage: '어린 시절', year: 1994 },
+      { event_id: 'es_out', life_stage: '초등학교', year: 1994 }],
+    subject: { id: 'me', name: '나', birth_year: 1982 },
+  });
+  const order = personalMarks(school).map((m) => m.id);
+  ok('같은 해면 초등 졸업이 중학 입학보다 먼저 선다', order.indexOf('es_out') < order.indexOf('ms_in'), order.join(','));
+  ok('사다리에 없는 사건은 제자리에 남는다 (자리만 맞바꾼다)', order[1] === 'move', order.join(','));
+  ok('연표의 차례도 같이 선다', school.timeline.map((t) => t.event_id).join(',') === 'es_out,move,ms_in',
+    school.timeline.map((t) => t.event_id).join(','));
 }
 
 console.log('\n개인 역사 — 노드를 지운다');

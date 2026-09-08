@@ -2339,7 +2339,7 @@ def cmd_life(args: argparse.Namespace) -> int:
     # 더할 때는 옛 이야기(base 옆의 .txt)까지 합쳐 옛 연결도 다시 잰다.
     dropped = life_mod.gate_connections(payload, text)
     if base:
-        payload, added = life_mod.merge(base, payload)
+        payload, added = life_mod.merge(base, payload, text)
         old_story = Path(args.base).with_suffix(".txt")
         whole = old_story.read_text(encoding="utf-8") if old_story.is_file() else ""
         whole = "\n".join(x for x in (whole, text) if x) or None

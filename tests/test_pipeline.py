@@ -6050,6 +6050,72 @@ with tempfile.TemporaryDirectory() as tmp:
         _backends.build_backend = keep_build
     check("이름이 경로가 되지 않는다", "/" not in _life_name("../../etc/passwd") and _life_name("") == "나")
 
+    # --- 학제의 차례 (2026-09-08 사용자: "초등학교 졸업을 해야 중학교 입학을 하지.
+    # 같은 연도에 일어난 일이지만 월을 입력 하지 않아서 … 논리상 초등학교 졸업이
+    # 무조건 먼저 일어나야 하잖아?") — 달을 모르는 차례는 모델이 아니라 규칙이 정한다.
+    ev = lambda name, desc=None: {"type": "PersonalEvent", "name": name, "description": desc}
+    check("사다리 — 초등 입학 10 · 초등 졸업 12 · 중학 입학 20 · 대학 졸업 42 · 대학원 50",
+          [life_mod.ladder(ev(x)) for x in ("성일초등학교 입학", "성내초등학교 졸업", "성내중학교 입학",
+                                            "퍼듀대학교 졸업", "대학원 입학")] == [10, 12, 20, 42, 50])
+    check("학제와 무관한 것은 사다리에 없다",
+          life_mod.ladder(ev("미국으로 이주")) is None
+          and life_mod.ladder({"type": "School", "name": "성내중학교"}) is None)
+    check("이름이 층을 말하면 설명은 안 본다 (설명은 앞뒤를 같이 말한다)",
+          life_mod.ladder(ev("성내중학교 입학", "성내초등학교를 졸업하고 성내중학교에 입학함")) == 20)
+    ordered = life_mod.refine({
+        "subject": {"id": "me", "birth_year": 1982},
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                  {"id": "ms_in", "type": "PersonalEvent", "name": "성내중학교 입학", "year": 1994},
+                  {"id": "move", "type": "PersonalEvent", "name": "이사", "year": 1994},
+                  {"id": "es_out", "type": "PersonalEvent", "name": "성내초등학교 졸업", "year": 1994}],
+        "edges": [],
+        "timeline": [{"event_id": "ms_in", "life_stage": "중학교", "year": 1994},
+                     {"event_id": "move", "life_stage": "어린 시절", "year": 1994},
+                     {"event_id": "es_out", "life_stage": "초등학교", "year": 1994}],
+    })
+    check("같은 해면 초등 졸업이 중학 입학보다 먼저 선다 (사다리에 없는 것은 제자리)",
+          [t["event_id"] for t in ordered["timeline"]] == ["es_out", "move", "ms_in"],
+          str([t["event_id"] for t in ordered["timeline"]]))
+    check("앞뒤도 다시 이어 준다", ordered["timeline"][0]["next_event"] == "move"
+          and ordered["timeline"][2]["previous_event"] == "move")
+    crossed = life_mod.refine({
+        "subject": {"id": "me", "birth_year": 1982},
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                  {"id": "ms_in", "type": "PersonalEvent", "name": "성내중학교 입학", "year": 1993},
+                  {"id": "es_out", "type": "PersonalEvent", "name": "성내초등학교 졸업", "year": 1994}],
+        "edges": [],
+        "timeline": [{"event_id": "ms_in", "life_stage": "중학교", "year": 1993},
+                     {"event_id": "es_out", "life_stage": "초등학교", "year": 1994}],
+    })
+    check("해가 사다리를 어기면 해가 틀린 것이라 알린다 (연표는 해의 축 위에 선다)",
+          any("차례가 어긋난다" in n and "성내중학교 입학(1993)" in n for n in crossed.get("notes") or []),
+          str(crossed.get("notes")))
+
+    # --- 정정 — 나중에 한 말이 앞서 한 말을 이긴다 (실측: 고쳐 말했는데 1993 이 남았다)
+    base_g = {"subject": {"id": "me", "birth_year": 1982},
+              "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                        {"id": "ms_in", "type": "PersonalEvent", "name": "성내중학교 입학",
+                         "start_date": "1993-03-01", "year": 1993, "precision": "exact"}],
+              "edges": [], "timeline": [{"event_id": "ms_in", "life_stage": "중학교",
+                                         "date_text": "1993-03-01", "age": 11, "year": 1993}]}
+    add_g = {"nodes": [{"id": "ms_entry_1994", "type": "PersonalEvent", "name": "성내중학교 입학",
+                        "start_date": "1994", "year": 1994, "precision": "year"}],
+             "edges": [], "timeline": []}
+    said = "성내중학교 입학년도를 잘못 말했어 1994년에 입학해서 1997년에 졸업했어."
+    fixed_g, _ = life_mod.merge(base_g, add_g, said)
+    node_g = {n["id"]: n for n in fixed_g["nodes"]}["ms_in"]
+    check("고쳐 말한 해가 앞서 든 해를 이긴다 (노드도 연표도)",
+          node_g["year"] == 1994 and node_g["start_date"] == "1994"
+          and fixed_g["timeline"][0]["year"] == 1994 and fixed_g["timeline"][0]["age"] == 12, str(node_g))
+    check("무엇을 고쳤는지 적는다", any("이야기가 고쳐 말했다" in n for n in fixed_g.get("notes") or []),
+          str(fixed_g.get("notes")))
+    kept_g, _ = life_mod.merge(base_g, {"nodes": [dict(add_g["nodes"][0], start_date="1995", year=1995)],
+                                        "edges": [], "timeline": []}, said)
+    check("이야기에 없는 해로는 덮지 않는다 (모델이 흐릿하게 되뇐 것)",
+          {n["id"]: n for n in kept_g["nodes"]}["ms_in"]["year"] == 1993)
+    kept2_g, _ = life_mod.merge(base_g, add_g, None)
+    check("이야기를 모르면 고치지 않는다", {n["id"]: n for n in kept2_g["nodes"]}["ms_in"]["year"] == 1993)
+
     life_mod.LIFE_DIR = keep_dir
     check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
 

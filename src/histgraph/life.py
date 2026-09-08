@@ -295,6 +295,10 @@ def build_user(text: str, today: datetime.date | None = None,
             " 새 id 를 만들지 말고 아래 id 를 그대로 쓴다. 아래에 있는 것을 다시 만들지"
             " 않는다 — 위 이야기가 새로 말하는 것만 만든다. 새 사건이 아래의 사건과"
             " 이어지면(원인·다음) 그 id 로 관계를 적는다. 연표·분석도 새 것만 적는다."
+            # 정정 — 나중에 한 말이 앞서 한 말을 이긴다 (life.correct 머리글).
+            " 다만 이야기가 앞서 말한 것을 **고치는** 말이면('잘못 말했어'·'아니라 …야')"
+            " 그 노드를 아래와 **똑같은 이름으로** 다시 적고 고친 날짜를 적는다 —"
+            " 이름을 바꾸면 같은 일이 두 개가 된다."
             f"{who}\n{rows}"
         )
     return (
@@ -575,6 +579,10 @@ def refine(payload: dict, text: str | None = None) -> dict:
                 and MILITARY.search(f"{node.get('name') or ''} {node.get('description') or ''}"):
             t["life_stage"] = "군복무"
     timeline.sort(key=lambda t: (t.get("year") is None, t.get("year") or 0))
+    # 해가 같으면 학제가 차례다 — 초등 졸업이 중학 입학보다 먼저다 (`ladder` 머리글).
+    for note in order_by_ladder(timeline, by_id):
+        if note not in (payload.get("notes") or []):
+            payload["notes"] = list(payload.get("notes") or []) + [note]
     for i, t in enumerate(timeline):
         t["previous_event"] = timeline[i - 1]["event_id"] if i else None
         t["next_event"] = timeline[i + 1]["event_id"] if i + 1 < len(timeline) else None
@@ -937,6 +945,82 @@ def school_year(text: str | None, entries: dict[str, int]) -> int | None:
     return entries[ref[0]] + ref[1] - 1
 
 
+# --- 삶의 사다리 — 뒤집히지 않는 차례 ---------------------------------------------
+# 2026-09-08 사용자: "초등학교 졸업을 해야 중학교 입학을 하지 … 같은 연도에 일어난
+# 일이지만 월을 입력 하지 않아서 사실 우리 서비스도 뭐가 먼저 일어난 일인지 정확하게
+# 몰라. 하지만 논리상 초등학교 졸업이 무조건 먼저 일어나야 하잖아?"
+#
+# 달을 모르는 두 사건의 차례는 **모델에게 물을 것이 아니다.** 학제는 정해져 있다 —
+# 층(초1·중2·고3·대4·대학원5)과 그 층 안의 자리(들어감 0·다님 1·나옴 2)를 한 줄로
+# 세운다: 초등 입학 10 · 초등 졸업 12 · 중학 입학 20 … 대학 졸업 42.
+#
+#   - 해가 같으면 이 수가 차례다 (refine 3). 달을 모르는 자리를 규칙이 메운다.
+#   - 해가 이 수를 어기면 **해가 틀린 것**이다. 연표는 해의 축 위에 서므로 코드가
+#     해를 넘어 옮길 수는 없다 — 세어서 알리고(notes), 고치는 것은 이야기다
+#     (`merge` 의 정정: 나중에 한 말이 앞서 한 말을 이긴다).
+_LADDER_WORDS = (("대학원", 5), ("석사", 5), ("박사", 5),
+                 ("대학교", 4), ("대학", 4), ("전문대", 4),
+                 ("고등학교", 3), ("고교", 3),
+                 ("중학교", 2),
+                 ("초등학교", 1), ("국민학교", 1))
+_LADDER_IN = re.compile(r"입학|진학|편입|복학|전학|들어갔|들어감")
+_LADDER_OUT = re.compile(r"졸업|수료|자퇴|중퇴|퇴학|마쳤|마침")
+
+
+def _rung(text: str) -> int | None:
+    for word, level in _LADDER_WORDS:
+        if word in text:
+            return level * 10 + (2 if _LADDER_OUT.search(text) else 0 if _LADDER_IN.search(text) else 1)
+    return None
+
+
+def ladder(node: dict | None) -> int | None:
+    """이 사건이 학제의 몇 째 칸인가. 학제와 무관한 사건은 None (차례를 안 건다).
+
+    이름이 먼저다 — 설명은 앞뒤를 같이 말하곤 해서('초등학교를 졸업하고 중학교에
+    입학함') 자리를 뒤집는다. 이름이 층을 말하지 않을 때만 설명을 본다.
+    """
+    if not node or node.get("type") not in EVENT_TYPES:
+        return None
+    return _rung(str(node.get("name") or "")) or _rung(str(node.get("description") or ""))
+
+
+def order_by_ladder(timeline: list[dict], by_id: dict[str, dict]) -> list[str]:
+    """해가 같은 칸끼리 사다리 순으로 다시 세운다. 해가 사다리를 어긴 것은 알린다.
+
+    **사다리에 없는 항목은 제자리에 둔다** — 자리만 맞바꾼다. 이야기가 준 차례를
+    학제와 상관없는 사건에까지 들이대지 않는다. `timeline` 은 이미 해 순이다.
+    """
+    rank = {id(t): ladder(by_id.get(t.get("event_id"))) for t in timeline}
+    i = 0
+    while i < len(timeline):
+        j = i
+        while j < len(timeline) and timeline[j].get("year") == timeline[i].get("year"):
+            j += 1
+        if timeline[i].get("year") is not None:
+            spots = [k for k in range(i, j) if rank[id(timeline[k])] is not None]
+            if len(spots) > 1:
+                for spot, t in zip(spots, sorted((timeline[k] for k in spots), key=lambda t: rank[id(t)])):
+                    timeline[spot] = t
+        i = j
+    notes = []
+    ranked = [(t, rank[id(t)], t["year"]) for t in timeline
+              if rank[id(t)] is not None and t.get("year") is not None]
+    for t, r, y in ranked:
+        worse = [(t2, y2) for t2, r2, y2 in ranked if r2 < r and y2 > y]
+        if not worse:
+            continue
+        t2, y2 = max(worse, key=lambda p: p[1])
+        name = lambda x: (by_id.get(x.get("event_id")) or {}).get("name") or x.get("event_id")
+        notes.append(f"차례가 어긋난다 — {name(t)}({y})은 {name(t2)}({y2}) 뒤여야 한다. 해가 틀렸다.")
+    return notes
+
+def month_year(date: str | None) -> int | None:
+    """달까지 아는 날짜의 해. 'YYYY-MM' 부터가 달을 아는 것이다 ('YYYY' 는 None)."""
+    m = re.match(r"(-?\d{1,4})-(\d{2})", str(date or ""))
+    return int(m.group(1)) if m else None
+
+
 def parse_when(text: str | None, birth_year: int | None = None) -> tuple[int | None, int | None, str]:
     """'언제'를 (시작 해, 끝 해, 정밀도) 로.
 
@@ -1186,8 +1270,41 @@ def _fill(old: dict, new: dict) -> None:
             old[k] = new[k]
 
 
-def merge(base: dict, add: dict) -> tuple[dict, dict]:
-    """옛 그래프 `base` 에 새 답 `add` 를 더한다. (합친 것, 더한 수) 를 준다."""
+# --- 정정 — 나중에 한 말이 앞서 한 말을 이긴다 -----------------------------------
+# 2026-09-08 실측: 이야기가 "성내중학교 입학년도를 잘못 말했어 1994년에 입학해서"라고
+# 고쳐 말했는데 화면에는 1993년이 그대로 서 있었다. 모델은 고친 해를 제대로 답했다
+# (새 id `ms_entry_1994`, 같은 이름 '성내중학교 입학'). 버린 것은 `merge` 다 — `_fill`
+# 은 **빈 칸만 채우므로** 이미 든 1993 을 이기지 못한다. 그래서 더할 때는 채우기 전에
+# 한 번 잰다: 새 답이 **다른 해**를 말하고, 그 해가 **이번 이야기 글에 그대로 있고**,
+# 그 이야기가 이 노드를 부르면(grounded) 새 해가 이긴다. 셋이 다 맞아야 고친다 —
+# 모델이 옛 사건을 흐릿하게 되뇐 것으로 정확한 날짜를 덮지 않는다.
+def correct(old: dict, new: dict, text: str | None) -> list[str]:
+    """`old` 의 날짜를 `new` 의 것으로 고친다. 고친 사유를 돌려준다 (안 고치면 빈 목록)."""
+    notes: list[str] = []
+    if not text:
+        return notes
+    for key, ykey, pkey in (("start_date", "year", "precision"), ("end_date", "end_year", None)):
+        was, now = old.get(key), new.get(key)
+        if not was or not now or str(was) == str(now):
+            continue
+        y0, y1 = parse_when(str(was))[0], parse_when(str(now))[0]
+        if y0 is None or y1 is None or y0 == y1:
+            continue
+        if not re.search(rf"(?<!\d){y1}(?!\d)", text) or not grounded(text, old.get("name"), new.get("name")):
+            continue
+        old[key] = now
+        old[ykey] = new.get(ykey) if new.get(ykey) is not None else y1
+        if pkey:
+            old[pkey] = new.get(pkey) or parse_when(str(now))[2]
+        notes.append(f"이야기가 고쳐 말했다: {old.get('name')} {was} → {now}")
+    return notes
+
+
+def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
+    """옛 그래프 `base` 에 새 답 `add` 를 더한다. (합친 것, 더한 수) 를 준다.
+
+    `text` 는 **이번에 더하는 이야기**다 — 앞서 한 말을 고치는 말이 여기 있다
+    (`correct` 머리글). 안 주면 고치지 않고 빈 칸만 채운다."""
     import copy
 
     out = copy.deepcopy(base)
@@ -1199,22 +1316,33 @@ def merge(base: dict, add: dict) -> tuple[dict, dict]:
     stats = {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0}
 
     remap: dict[str, str] = {}
+    fixed: list[str] = []
+    corrected: set[str] = set()
+
+    def _same(old_node: dict, new_node: dict) -> None:
+        """이미 있던 노드에 새 답을 얹는다 — 고칠 것은 고치고 빈 칸은 채운다."""
+        said = correct(old_node, new_node, text)
+        if said:
+            fixed.extend(said)
+            corrected.add(old_node["id"])
+        _fill(old_node, new_node)
+
     for n in add.get("nodes") or []:
         nid = n["id"]
         if nid in by_id:
             remap[nid] = nid
-            _fill(by_id[nid], n)
+            _same(by_id[nid], n)
             continue
         name = str(n.get("name") or "")
         if subj_id and n.get("type") == "Person" and (
                 name.strip().lower() in SELF_NAMES or name == "나" or name == by_id[subj_id].get("name")):
             remap[nid] = subj_id
-            _fill(by_id[subj_id], n)
+            _same(by_id[subj_id], n)
             continue
         key = (n.get("type"), _norm_label(name))
         if key in by_key:
             remap[nid] = by_key[key]
-            _fill(by_id[by_key[key]], n)
+            _same(by_id[by_key[key]], n)
             continue
         node = dict(n)
         nodes.append(node)
@@ -1249,6 +1377,16 @@ def merge(base: dict, add: dict) -> tuple[dict, dict]:
         on_line.add(eid)
         timeline.append(dict(t, event_id=eid))
         stats["timeline"] += 1
+    # 고친 날짜는 연표 항목도 따라간다 — 항목이 옛 해를 들고 있으면 refine 이 그것을
+    # 그대로 쓴다 (항목의 해가 노드의 해를 이긴다). 나이는 비워 다시 세게 한다.
+    for t in timeline:
+        node = by_id.get(t.get("event_id"))
+        if node is None or node["id"] not in corrected or node.get("year") is None:
+            continue
+        if t.get("year") != node["year"]:
+            t["year"], t["age"] = node["year"], None
+            if t.get("date_text") and parse_when(str(t["date_text"]))[0] != node["year"]:
+                t["date_text"] = None
     # 해 순으로 다시 세우고 앞뒤를 다시 잇는다 — 새 사건이 옛 사건 사이에 낄 수 있다.
     timeline.sort(key=lambda t: (t.get("year") is None, t.get("year") or 0))
     for i, t in enumerate(timeline):
@@ -1327,7 +1465,10 @@ def merge(base: dict, add: dict) -> tuple[dict, dict]:
         out["subject"] = dict(subject, birth_year=add["subject"]["birth_year"])
     if add.get("_model"):
         out["_model"] = add["_model"]
-    out["notes"] = list(add.get("notes") or [])
+    out["notes"] = list(add.get("notes") or []) + fixed
+    # refine 에는 이야기를 주지 않는다 — 여기 있는 것은 **이번에 더한 토막**이라
+    # 옛 이야기가 부른 역사 연결이 통째로 걸린다 (부르는 쪽이 옛 이야기까지 합쳐
+    # gate_connections 를 한 번 더 돈다: server._run · cli.cmd_life).
     refine(out)   # 옛 그래프에 비어 있던 해·연결도 이 김에 채운다 (사유는 notes 뒤에 잇는다)
     return out, stats
 
