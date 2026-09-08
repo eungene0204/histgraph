@@ -1437,7 +1437,7 @@ def _find_node(store: GraphStore, text: str) -> str | None:
 
 
 def cmd_chain(args: argparse.Namespace) -> int:
-    """인과 사슬을 글로 읽는다. `--to` 를 주면 두 노드 사이의 최단 경로."""
+    """인과 체인을 글로 읽는다. `--to` 를 주면 두 노드 사이의 최단 경로."""
     from . import causes as causes_mod
 
     with GraphStore(args.db) as store:
@@ -2740,7 +2740,7 @@ def main(argv: list[str] | None = None) -> int:
                       help="사람이 문서를 읽고 적은 인과 (JSON). 모델 답과 같은 관문을 지난다")
     p_ca.set_defaults(func=cmd_causes)
 
-    p_ch = sub.add_parser("chain", help="인과 사슬을 글로 읽는다 (--to 를 주면 두 노드 사이의 경로)")
+    p_ch = sub.add_parser("chain", help="인과 체인을 글로 읽는다 (--to 를 주면 두 노드 사이의 경로)")
     p_ch.add_argument("node", help="노드 id 또는 이름")
     p_ch.add_argument("--to", default=None, help="이 노드까지의 최단 인과 경로")
     p_ch.add_argument("--depth", type=int, default=4)

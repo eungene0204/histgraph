@@ -233,7 +233,7 @@ export function ChainPanel({ node, onVisit }) {
   if (!node || !data || !(data.causes?.length || data.effects?.length)) return null;
   return (
     <>
-      <div className="d-section-title">인과 사슬</div>
+      <div className="d-section-title">인과 체인</div>
       <ChainTree data={data} onVisit={onVisit} />
       <PathFinder from={node} onVisit={onVisit} />
     </>
