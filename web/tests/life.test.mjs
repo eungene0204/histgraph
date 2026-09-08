@@ -218,23 +218,26 @@ console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만�
   ok('주인공 → 자기 사건의 시간 관계는 참여(experienced) — 뒤·동안이 아니다', mk.get('me>mv') === 'experienced' && mk.get('me>hs') === 'experienced' && !mk.has('hs>me'));
   ok('친구라 적힌 만남은 friend_of · 동료는 worked_with · 말 없으면 met', mk.get('me>kim') === 'friend_of' && mk.get('me>lee') === 'worked_with' && mk.get('me>na') === 'met');
   ok('일한 곳 없이 미룬 함께 일함은 같은 학교면 schoolmate', mk.get('kim>park') === 'schoolmate');
-  ok('양방향 met 은 하나만', !mk.has('na>me') && messy.edges.length === 15);
+  ok('양방향 met 은 하나만', !mk.has('na>me') && messy.edges.length === 14);
   // 섬 — '성내중학교 졸업'은 다른 사건하고만 이어져 있었다 (2026-09-08 사용자:
   // "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜 따로 떼어둔거지?")
   ok('떨어진 사건은 주인공이 겪은 것으로 잇고 이름도 단다',
     mk.get('me>gr') === 'experienced' && mr.get('me>gr') === '졸업', mk.get('me>gr'));
-  ok('사건 → 사건의 before 는 그대로', mk.get('gr>hs') === 'before');
+  // 차례만 말하는 엣지는 세우지 않는다 (2026-09-08 사용자: "다음 이라는 메뉴는 뭐야?
+  // 별 정보값이 없는데 그냥 삭제해") — 그 차례는 연표가 이미 연도로 그린다. 옮길 데가
+  // 있는 것(주인공 → 자기 사건의 after)은 참여로 남으므로 버리는 것은 사건 → 사건뿐이다.
+  ok('사건 → 사건의 before 는 세우지 않는다 (차례는 연표가 그린다)', !mk.has('gr>hs'));
   ok('사건 → 학교·전공의 studied_at 은 그 곳(at)으로 옮긴다', mk.get('hs>sch') === 'at' && mk.get('hs>major') === 'at');
   ok('사람 → 사건의 역할은 사건 이름의 술어 (이주·입학), 없으면 사건의 종류(실패); 옮긴 전공은 역할 "전공"',
     [mr.get('me>mv'), mr.get('me>hs'), mr.get('me>fail'), mr.get('hs>major')].join(',') === '이주,입학,실패,전공', [...mr].join(' '));
   const pay = graphPayload(messy, 'me');
   const lab = (a, b) => pay.edges.find((e) => e.s === a && e.t === b)?.label;
-  ok('선 위의 말: 역할이 이기고 없으면 양끝 — 이주 · 실패 · 학교 · 전공 · 이주지 · 다음 · 친구 · 같은 학교',
-    [lab('me', 'mv'), lab('me', 'fail'), lab('hs', 'sch'), lab('hs', 'major'), lab('mv', 'usa'), lab('gr', 'hs'), lab('me', 'kim'), lab('kim', 'park')].join(',')
-      === '이주,실패,학교,전공,이주지,다음,친구,같은 학교',
+  ok('선 위의 말: 역할이 이기고 없으면 양끝 — 이주 · 실패 · 학교 · 전공 · 이주지 · 친구 · 같은 학교',
+    [lab('me', 'mv'), lab('me', 'fail'), lab('hs', 'sch'), lab('hs', 'major'), lab('mv', 'usa'), lab('me', 'kim'), lab('kim', 'park')].join(',')
+      === '이주,실패,학교,전공,이주지,친구,같은 학교',
     pay.edges.map((e) => `${e.s}>${e.t}:${e.label}`).join(' '));
   ok('사람 → 학교는 재학', lab('kim', 'sch') === '재학' && edgeLabel('studied_at', 'Person', 'School') === '재학');
-  ok("화면에 '뒤'·'동안'·'수학'·'앞'·'겪음'이 서지 않는다", !pay.edges.some((e) => ['뒤', '동안', '수학', '앞', '겪음'].includes(e.label)));
+  ok("화면에 '뒤'·'동안'·'다음'·'수학'·'앞'·'겪음'이 서지 않는다", !pay.edges.some((e) => ['뒤', '동안', '다음', '이전', '수학', '앞', '겪음'].includes(e.label)));
   const meta = graphMeta(messy);
   ok('관계 종류 필터는 타입의 일반 이름 (당사자 · 재학 · 친구 · 곳)', meta.edge_types.experienced.label === '당사자' && meta.edge_types.studied_at.label === '재학' && meta.edge_types.friend_of.label === '친구' && meta.edge_types.at.label === '곳');
   ok('두 번 다듬어도 그대로', tidyEdges(messy.nodes, messy.edges, messy.nodes[0]).length === messy.edges.length);

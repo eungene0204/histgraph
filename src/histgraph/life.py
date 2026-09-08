@@ -89,6 +89,14 @@ EDGE_TYPE_KO: dict[str, str] = {
     "remembered_by": "기억됨", "connected_to": "연결", "triggered_by": "촉발됨",
     "shaped": "형성", "connected": "연결",
 }
+# 화면에 세우지 않는 관계. `before`('다음')·`after`('이전')는 사건과 사건의 **차례**만
+# 말하는데 그 차례는 연표가 이미 연도로 그린다 (2026-09-08 사용자, '성일초등학교 입학'
+# 상세의 `다음 성내초등학교 전학` 을 보고: "다음 이라는 메뉴는 뭐야? 별 정보값이 없는데
+# 그냥 삭제해"). 모델이 답하는 것까지 막지는 않는다 — 주인공 → 자기 사건을 `after` 로
+# 답하기도 하고 그것은 참여(experienced)라 뜻이 있다. 그래서 버리는 자리는 `tidy_edges`
+# 의 RELAX **뒤**, 옮길 데 없이 사건 → 사건으로 남은 것뿐이다. `during`·`overlapped` 는
+# 차례가 아니라 포함·겹침이라 남는다.
+SEQUENCE_ONLY = frozenset({"before", "after"})
 # 사건 관계 가운데 **원인 → 결과**로 읽는 것. 화면이 개인 연표에서 인과 선으로 긋는다.
 CAUSAL_EDGES = frozenset({"caused", "triggered", "led_to", "resulted_in"})
 IMPACT_KO = {"direct": "직접", "indirect": "간접", "possible": "가능성"}
@@ -1072,7 +1080,8 @@ def tidy_edges(nodes: list[dict], edges: list[dict], me: dict | None) -> list[st
       2. met 인데 설명이 '친구'라 하면 friend_of, '동료'면 worked_with.
       3. 미룬(확신 < 1) worked_with 인데 둘 다 일한 곳이 없고 같은 학교면 schoolmate.
       4. 사람 → 사건은 역할을 단다 — 당사자는 사건의 술어(입학·졸업), 남은 '함께'.
-      5. 대칭 관계의 역방향 중복은 하나만."""
+      5. 옮길 데 없이 차례만 남은 것(SEQUENCE_ONLY)은 버린다 — 연표가 이미 그린다.
+      6. 대칭 관계의 역방향 중복은 하나만."""
     by_id = {n["id"]: n for n in nodes}
     schools: dict[str, set[str]] = {}
     works: dict[str, set[str]] = {}
@@ -1119,7 +1128,11 @@ def tidy_edges(nodes: list[dict], edges: list[dict], me: dict | None) -> list[st
             # 4. 역할
             if kind == "experienced" and not role:
                 role = deed_of(t) if (me is None or s is me) else "함께"
-        # 5. 중복
+        # 5. 차례만 남은 것은 버린다 — RELAX 가 옮길 데가 있었으면 이미 옮겼고(주인공 →
+        #    자기 사건은 참여), 사건 → 사건으로 남았으면 연표가 이미 그리는 차례다.
+        if kind in SEQUENCE_ONLY:
+            continue
+        # 6. 중복
         a, b = e.get("source"), e.get("target")
         key = (frozenset((a, b)), kind) if kind in _SYMMETRIC else (a, b, kind)
         if key in seen:

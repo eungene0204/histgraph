@@ -6043,7 +6043,10 @@ with tempfile.TemporaryDirectory() as tmp:
           mk[("me", "kim")] == "friend_of" and mk[("me", "lee")] == "worked_with" and mk[("me", "na")] == "met", str(mk))
     check("일한 곳 없이 미룬 '함께 일함'은 같은 학교면 schoolmate (둘 다 그 학교에 이어진 뒤)", mk[("kim", "park")] == "schoolmate", str(mk))
     check("양방향 met 은 하나만 남는다", ("na", "me") not in mk and ("me", "na") in mk)
-    check("사건 → 사건의 before 는 그대로 (사건 사이의 시간 관계)", mk[("gr", "hs")] == "before")
+    # 차례만 말하는 엣지는 세우지 않는다 (2026-09-08 사용자: "다음 이라는 메뉴는 뭐야?
+    # 별 정보값이 없는데 그냥 삭제해") — 그 차례는 연표가 이미 연도로 그린다. 옮길 데가
+    # 있는 것(주인공 → 자기 사건의 after)은 위에서 참여로 남으므로 버리는 것은 사건 → 사건뿐.
+    check("사건 → 사건의 before 는 세우지 않는다 (차례는 연표가 그린다)", ("gr", "hs") not in mk, str(mk))
     check("사건 → 학교·전공의 studied_at 은 재학이 아니라 그 곳(at)이다 — 온톨로지의 출발 갈래가 사람뿐",
           mk[("hs", "sch")] == "at" and mk[("hs", "major")] == "at", str(mk))
     mr = {(e["source"], e["target"]): e.get("role") for e in m["edges"]}
@@ -6052,13 +6055,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("옮기면서 원래 타입이 말하던 것은 역할로 남는다 (studied_at → 전공 = '전공')", mr[("hs", "major")] == "전공", str(mr))
     mn = {n["id"]: n["type"] for n in m["nodes"]}
     lab = lambda a, b: life_mod.edge_label(mk[(a, b)], mn[a], mn[b], mr.get((a, b)))
-    got = (lab("me", "mv"), lab("me", "fail"), lab("hs", "sch"), lab("hs", "major"), lab("mv", "usa"), lab("gr", "hs"), lab("me", "kim"), lab("kim", "park"))
-    check("선 위의 말: 역할이 이기고, 없으면 양끝을 본다 — 이주 · 실패 · 학교 · 전공 · 이주지 · 다음 · 친구 · 같은 학교",
-          got == ("이주", "실패", "학교", "전공", "이주지", "다음", "친구", "같은 학교"), str(got))
+    got = (lab("me", "mv"), lab("me", "fail"), lab("hs", "sch"), lab("hs", "major"), lab("mv", "usa"), lab("me", "kim"), lab("kim", "park"))
+    check("선 위의 말: 역할이 이기고, 없으면 양끝을 본다 — 이주 · 실패 · 학교 · 전공 · 이주지 · 친구 · 같은 학교",
+          got == ("이주", "실패", "학교", "전공", "이주지", "친구", "같은 학교"), str(got))
     check("사람 → 학교는 재학, 표에 없는 조합은 일반 이름", life_mod.edge_label("studied_at", "Person", "School") == "재학"
           and life_mod.edge_label("led_to", "PersonalEvent", "PersonalEvent") == "이어짐")
-    check("화면에 '뒤'·'동안'·'수학'·'겪음'이 서지 않는다 — 실측 그래프의 모든 선",
-          not {lab(a, b) for a, b in mk} & {"뒤", "동안", "수학", "앞", "겪음"}, str({lab(a, b) for a, b in mk}))
+    check("화면에 '뒤'·'동안'·'다음'·'수학'·'겪음'이 서지 않는다 — 실측 그래프의 모든 선",
+          not {lab(a, b) for a, b in mk} & {"뒤", "동안", "다음", "이전", "수학", "앞", "겪음"}, str({lab(a, b) for a, b in mk}))
     check("술어 읽기: '스타트업 경력 시작' → '경력 시작', '30사단 훈련소 입소' → '입소', 술어 없는 개인 사건은 None",
           (life_mod.deed_of({"name": "스타트업 경력 시작", "type": "PersonalEvent"}), life_mod.deed_of({"name": "30사단 훈련소 입소", "type": "PersonalEvent"}),
            life_mod.deed_of({"name": "아버지 인쇄소 부도", "type": "PersonalEvent"})) == ("경력 시작", "입소", None))

@@ -204,6 +204,13 @@ export const LIFE_EDGES = {
   connected_to: ['연결', ANY, ANY], connected: ['연결', ANY, ANY],
 };
 export const MAX_TARGETS = { born_in: 1 };
+// 화면에 세우지 않는 관계 — life.py SEQUENCE_ONLY 와 같은 표. `before`('다음')·`after`
+// ('이전')는 사건 사이의 **차례**만 말하는데 그 차례는 연표가 이미 연도로 그린다
+// (2026-09-08 사용자: "다음 이라는 메뉴는 뭐야? 별 정보값이 없는데 그냥 삭제해").
+// 모델이 답하는 것은 막지 않는다 — 주인공 → 자기 사건을 after 로 답하기도 하고 그것은
+// 참여라 뜻이 있다. 버리는 자리는 RELAX **뒤** 한 곳이라 계정·브라우저에 남은 옛
+// 그래프도 새로고침으로 여기서 사라진다.
+export const SEQUENCE_ONLY = new Set(['before', 'after']);
 const TIME_EDGES = ['before', 'after', 'during', 'overlapped'];
 export const RELAX = new Map([
   ...TIME_EDGES.map((t) => [`${t}|person|event`, 'experienced']),
@@ -240,7 +247,8 @@ export function fits(kind, s, t) {
 //   2. met 인데 설명이 '친구'라 하면 friend_of, '동료'면 worked_with
 //   3. 미룬(확신 < 1) worked_with 인데 둘 다 일한 곳이 없고 같은 학교면 schoolmate
 //   4. 사람 → 사건은 역할을 단다 — 당사자는 사건의 술어(입학·졸업), 남은 '함께'
-//   5. 대칭 관계의 역방향 중복은 하나만
+//   5. 옮길 데 없이 차례만 남은 것(SEQUENCE_ONLY)은 버린다 — 연표가 이미 그린다
+//   6. 대칭 관계의 역방향 중복은 하나만
 // 주인공과 떨어져 뜬 섬을 잇는다 (life.py link_orphans 와 같은 규칙). 모델은 한 번에
 // 준 이야기 안에서는 주인공 → 사건을 잇지만, 더하기로 뒤에 붙인 토막에서는 사건끼리만
 // 이어 놓는다 (2026-09-08 사용자: "'나'와의 연결이 없이 떨어진 그래프들이 보이는데 왜
@@ -493,6 +501,9 @@ export function tidyEdges(nodes, edges, me, issues = []) {
         && [...(schools.get(s.id) || [])].some((id) => schools.get(t.id)?.has(id))) kind = 'schoolmate';
       if (kind === 'experienced' && !role) role = (!me || s === me) ? deedOf(t) : '함께';
     }
+    // 5. 차례만 남은 것은 버린다 — RELAX 가 옮길 데가 있었으면 이미 옮겼고(주인공 →
+    //    자기 사건은 참여), 사건 → 사건으로 남았으면 연표가 이미 그리는 차례다.
+    if (SEQUENCE_ONLY.has(kind)) continue;
     const key = SYMMETRIC.has(kind) ? `${[e.source, e.target].sort().join('|')}|${kind}` : `${e.source}>${e.target}|${kind}`;
     if (seen.has(key)) continue;
     seen.add(key);
