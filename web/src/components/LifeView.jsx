@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from './ThemeToggle.jsx';
-import { auth } from '../lib/auth.js';
+import { auth, csrf } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
@@ -63,13 +63,18 @@ async function getJson(path) {
   return res.json();
 }
 
-// 이야기를 로컬 서버에 보낸다. 서버가 없는 자리(배포·정적 파일)에서는
-// fetch 자체가 실패하므로 상태 0 으로 돌려주고 화면이 그렇게 말한다.
+// 이야기를 서버에 보낸다. 서버가 없는 자리(정적 파일)에서는 fetch 자체가
+// 실패하므로 상태 0 으로 돌려주고 화면이 그렇게 말한다.
+//
+// **표와 쿠키를 함께 싣는다.** 배포에서는 이 길이 로그인한 사람의 것만 받고
+// (`api/index.py _life_gate`), 표가 없는 요청은 남의 사이트가 이 브라우저로
+// 모델을 부르는 길이 되므로 서버가 막는다 (`auth.check_write`).
 async function postJson(path, body) {
   try {
     const res = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Histgraph-CSRF': csrf() },
+      credentials: 'same-origin',
       body: JSON.stringify(body),
     });
     let payload = null;
@@ -121,6 +126,11 @@ export default function LifeView() {
   // 이야기를 읽는 모델이 이 컴퓨터에 있는가. 서버가 `/api/life/job` 에 적어
   // 준다 — 밖의 무료 모델로 읽으면 글이 이 컴퓨터를 나가므로 **그렇게 적는다.**
   const [local, setLocal] = useState(true);
+  // 답이 한 번에 오는가(배포) 띄워 두고 물어 가는가(로컬 서버). 같은 자리에
+  // 서버가 적어 준다 — **창을 닫아도 되는지**가 그것으로 갈린다.
+  const [blocking, setBlocking] = useState(false);
+  const blockingRef = useRef(false);
+  const backendRef = useRef('');
   const [offline, setOffline] = useState(false);
   const rootRef = useRef(null);
   const boardRef = useRef(null);
@@ -236,10 +246,31 @@ export default function LifeView() {
     return true;
   }, []);
 
-  // --- 이야기 → 개인 그래프 (로컬 서버의 모델) --------------------------
-  // 모델은 몇 분을 돈다. 답을 기다리는 요청 하나에 매달면 브라우저가 먼저
-  // 끊으므로, 서버는 띄우기만 하고(POST /api/life/analyze) 여기서 2초마다
-  // 물어본다. 새로고침해도 돌던 것을 다시 붙잡는다 (부팅 효과).
+  // --- 이야기 → 개인 그래프 --------------------------------------------
+  // **답이 오는 길이 둘이다.** 로컬 서버는 띄우기만 하고(202) 여기서 2초마다
+  // 물어본다 — MLX 는 몇 분이라 요청 하나에 매달면 브라우저가 먼저 끊는다.
+  // 배포(서버리스)는 그 길이 아예 없어서(다음 요청까지 사는 스레드가 없다)
+  // 답이 POST 하나에 실려 온다. 가르는 것은 **몸**이다 — `state` 가 `done`·
+  // `error` 면 다 온 것이고, 아니면 물어본다 (`server.life_post`).
+
+  // 끝난 상태 하나를 받아 화면과 저장을 마무리한다. 두 길이 여기서 만난다.
+  const finish = useCallback(async (st) => {
+    setJob(st);
+    // 모델이 답을 못 준 글도 칸에 돌려놓는다 — 다시 적게 하지 않는다.
+    if (st.state === 'error' && sentRef.current) { putDraft(sentRef.current); sentRef.current = ''; }
+    // 브라우저에 남긴다 — 서버는 더 이상 저장된 파일을 화면에 주지 않으므로
+    // 새로고침 뒤에도 보이려면 여기 있어야 한다. 로그인해 두었으면 계정에도.
+    if (st.state === 'done' && st.payload) {
+      // 방금 읽은 이야기를 문서에 실어 둔다 — 그래야 다음에 열어 고칠 수 있다.
+      const said = takeStories();
+      sentRef.current = '';
+      const doc = said ? { ...st.payload, stories: said } : st.payload;
+      await adopt(doc, 'local');
+      await keepInAccount(doc, '내 계정에 저장했습니다');
+    }
+  }, [adopt, keepInAccount, takeStories, putDraft]);
+
+  // 새로고침해도 돌던 것을 다시 붙잡는다 (부팅 효과). 로컬 서버에만 있는 길이다.
   const pollRef = useRef(null);
   const watchJob = useCallback(() => {
     if (pollRef.current) return;
@@ -250,21 +281,24 @@ export default function LifeView() {
       if (st.state === 'running') return;
       clearInterval(pollRef.current);
       pollRef.current = null;
-      // 모델이 답을 못 준 글도 칸에 돌려놓는다 — 다시 적게 하지 않는다.
-      if (st.state === 'error' && sentRef.current) { putDraft(sentRef.current); sentRef.current = ''; }
-      // 브라우저에 남긴다 — 서버는 더 이상 저장된 파일을 화면에 주지 않으므로
-      // 새로고침 뒤에도 보이려면 여기 있어야 한다. 로그인해 두었으면 계정에도.
-      if (st.state === 'done' && st.payload) {
-        // 방금 읽은 이야기를 문서에 실어 둔다 — 그래야 다음에 열어 고칠 수 있다.
-        const said = takeStories();
-        sentRef.current = '';
-        const doc = said ? { ...st.payload, stories: said } : st.payload;
-        await adopt(doc, 'local');
-        await keepInAccount(doc, '내 계정에 저장했습니다');
-      }
+      await finish(st);
     }, 2000);
-  }, [adopt, keepInAccount, takeStories, putDraft]);
+  }, [finish]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // 답이 한 번에 오는 자리에서는 **서버가 초를 세어 주지 않는다.** 진행 띠가
+  // 멈춰 있으면 멎은 화면이므로 여기서 센다 (progressOf 가 elapsed 를 읽는다).
+  const tickRef = useRef(null);
+  const stopTick = useCallback(() => { clearInterval(tickRef.current); tickRef.current = null; }, []);
+  const startTick = useCallback(() => {
+    const from = Date.now();
+    stopTick();
+    tickRef.current = setInterval(() => {
+      setJob((j) => (j?.state === 'running'
+        ? { ...j, elapsed: Math.round((Date.now() - from) / 1000) } : j));
+    }, 1000);
+  }, [stopTick]);
+  useEffect(() => stopTick, [stopTick]);
 
   // 화면이 이미 그래프를 쥐고 있으면 **그것을 같이 보내 거기에 더한다** (서버의
   // life.merge). 지우고 새로 만들지 않는다 (2026-09-08 사용자).
@@ -273,19 +307,31 @@ export default function LifeView() {
     // 누르자마자 지금 화면에 있는 것을 계정에 둔다. 분석은 몇 분을 도는데
     // 그 사이에 창을 닫아도 여태 만든 것은 남아 있어야 한다.
     keepInAccount(rawRef.current);
+    // 답을 기다리는 동안 띠가 선다. 한 번에 오는 자리에서는 단계가 안 오므로
+    // 실제로 하고 있는 일('이야기를 읽는 중')을 미리 적는다 — 8%에 멈춘 띠를
+    // 90초 동안 보여 주지 않는다.
+    setJob({ state: 'running', elapsed: 0, backend: backendRef.current,
+             step: blockingRef.current ? '이야기를 읽는 중' : '모델에게 묻는 중' });
+    startTick();
     const r = await postJson('/api/life/analyze', { text, name, base: rawRef.current || undefined });
+    const st = r.payload;
+    stopTick();
+    if (st && (st.state === 'done' || st.state === 'error')) {   // 배포 — 다 돌고 왔다
+      if (st.state === 'done') rememberStories([...storiesRef.current, { at: today(), text: text.trim() }]);
+      await finish(st);
+      return;
+    }
     if (r.ok || r.status === 409) {   // 409 는 이미 돌고 있다는 뜻이라 같이 지켜본다
       rememberStories([...storiesRef.current, { at: today(), text: text.trim() }]);
-      setJob({ state: 'running', step: '모델에게 묻는 중', elapsed: 0 });
       watchJob();
       return;
     }
     // 화면 글자에 영어를 두지 않는다 (CLAUDE.md §1) — 명령 이름도 적지 않는다.
     setJob({ state: 'error', error: r.payload?.error
-      || '로컬 서버에 닿지 못했습니다. 이 컴퓨터에서 띄운 화면에서만 분석할 수 있습니다.' });
+      || '자료 서버에 닿지 못했습니다. 잠시 뒤에 다시 해 주세요.' });
     putDraft(text);            // 못 보낸 글을 칸에 돌려놓는다
     sentRef.current = '';
-  }, [watchJob, keepInAccount, rememberStories, putDraft]);
+  }, [watchJob, finish, keepInAccount, rememberStories, putDraft, startTick, stopTick]);
 
   // 예전에 적은 글을 입력창으로 옮긴다 (2026-09-08 사용자: "예전 입력을 클릭하면
   // 우리 인생 입력창에 자동으로 복사해줘"). 상자는 브라우저에 남긴 글을 읽고
@@ -354,6 +400,9 @@ export default function LifeView() {
       const st = await getJson('/api/life/job').catch(() => null);
       if (!alive || !st) return;
       setLocal(st.backend !== 'openrouter' && st.backend !== 'anthropic');
+      backendRef.current = st.backend || '';
+      blockingRef.current = !!st.blocking;
+      setBlocking(!!st.blocking);
       if (st.state !== 'running') return;
       setJob(st); setWriting(true); watchJob();
     })();
@@ -512,7 +561,7 @@ export default function LifeView() {
       </header>
       {kept && <div className="life-toast" role="status" aria-live="polite">{kept}</div>}
 
-      {writing && <StoryBox key={draftStamp} job={job} local={local} onSubmit={onStory}
+      {writing && <StoryBox key={draftStamp} job={job} local={local} blocking={blocking} onSubmit={onStory}
                             onClose={() => setWriting(false)} />}
       {logOpen && <StoryLog stories={stories} running={job?.state === 'running'}
                             onPick={pickStory} onDrop={dropStory}
@@ -644,7 +693,7 @@ function progressOf(job, local) {
 // 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
 // 빈 칸에 '자유롭게 적으세요' 라고 쓰면 아무도 첫 줄을 못 적는다.
 // 적다 만 글은 브라우저에 남긴다. 분석이 몇 분이라 그동안 창을 닫는다.
-function StoryBox({ job, local, onSubmit, onClose }) {
+function StoryBox({ job, local, blocking, onSubmit, onClose }) {
   const [text, setText] = useState(() => {
     try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
   });
@@ -697,7 +746,11 @@ function StoryBox({ job, local, onSubmit, onClose }) {
       )}
       <div className="life-paste-row">
         {running ? (
-          <span className="tl-hint">창을 닫아도 계속 돕니다.</span>
+          /* 로컬 서버는 띄워 두고 도므로 창을 닫아도 된다. 배포는 이 요청이
+             모델을 붙들고 있어서 창을 닫으면 답이 오다 만다 — 그대로 적는다. */
+          <span className="tl-hint">{blocking
+            ? '이 창을 열어 둔 채로 기다려 주세요.'
+            : '창을 닫아도 계속 돕니다.'}</span>
         ) : job?.state === 'error' ? (
           <span className="tl-hint life-warn">{job.error}</span>
         ) : (

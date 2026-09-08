@@ -5,7 +5,8 @@
   "outputDirectory": "web/dist",
   "functions": {
     "api/index.py": {
-      "excludeFiles": "{web/**,tools/**,tests/**,.venv/**,node_modules/**,**/__pycache__/**,data/cache/**,data/raw/**,data/histgraph.sqlite,*.md}"
+      "excludeFiles": "{web/**,tools/**,tests/**,.venv/**,node_modules/**,**/__pycache__/**,data/cache/**,data/raw/**,data/histgraph.sqlite,*.md}",
+      "maxDuration": 300
     }
   },
   "rewrites": [
