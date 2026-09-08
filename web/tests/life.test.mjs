@@ -576,6 +576,24 @@ console.log('\n개인 역사 — 내가 적은 이야기');
   ok('빈 글은 붙이지 않는다', appendDraft('쓰던 글', '   ') === '쓰던 글');
 }
 
+console.log('\n개인 역사 — 오른쪽 상세는 접힌다');
+{
+  // 2026-09-08 사용자: "이 오른쪽 DRAWER를 다시 접을수 있게 버튼을 만들어서
+  // 오른쪽으로 들어 갈 수 있게 해 줘". 접는 것보다 **되돌아가는 길**이 관문이다 —
+  // 접고 나서 펼 손잡이가 없으면 화면을 잃는다.
+  const view = readFileSync(here('../src/components/LifeView.jsx'), 'utf8');
+  const css = readFileSync(here('../style.css'), 'utf8');
+  ok('탭 줄에 접는 단추가 있다', /life-detail-fold/.test(view) && /setDetailOpen\(false\)/.test(view));
+  ok('접은 뒤 펼 손잡이가 남는다',
+    /!detailOpen && \(/.test(view) && /life-detail-peek[\s\S]{0,200}setDetailOpen\(true\)/.test(view),
+    '접으면 되돌아갈 길이 없다');
+  ok('노드를 고르면 저절로 펴진다', /const pick = useCallback\([\s\S]{0,160}setDetailOpen\(true\)/.test(view));
+  ok('접힌 동안은 탭에 걸리지 않는다', /inert=\{!detailOpen\}/.test(view));
+  ok('오른쪽으로 미끄러져 들어간다', /\.life-detail\.is-folded[^}]*translateX\(100%\)/.test(css));
+  ok('되찾은 폭을 가운데가 쓴다', /\.life-detail\.is-folded[^}]*margin-right: calc\(-1 \* var\(--fold-w\)\)/.test(css));
+  ok('손잡이 글자가 한국어다', /aria-label="상세 펼치기"/.test(view) && /<span>상세<\/span>/.test(view));
+}
+
 console.log('\n개인 역사 — 아직 배포하지 않는다');
 {
   // 사용자 결정(2026-09-07): 로컬에서만 개발·테스트한다. Vercel 빌드에는 장이 없어야 한다.

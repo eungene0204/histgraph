@@ -100,6 +100,17 @@ export default function LifeView() {
   // 주소의 #사건id 가 고른 사건이다 — 새로고침해도 자리를 잃지 않고 "이거 봐" 하고 줄 수 있다.
   const [selected, setSelected] = useState(() => (typeof location !== 'undefined' && location.hash ? decodeURIComponent(location.hash.slice(1)) : null));
   const [tab, setTab] = useState('event');
+  // 오른쪽 상세를 폈나 (2026-09-08 사용자: "이 오른쪽 DRAWER를 다시 접을수 있게
+  // 버튼을 만들어서 오른쪽으로 들어 갈 수 있게 해 줘"). 접으면 드로어가 오른쪽
+  // 으로 미끄러져 들어가고 그 폭(348px)을 가운데 그래프가 되찾는다.
+  //
+  // **브라우저에 남기지 않는다** — 노드를 고르면 저절로 펴지므로(아래 pick)
+  // 접힌 채로 저장해 두면 다음에 열 때만 한 번 어긋나 보인다. 접은 것은
+  // '지금 넓게 보고 싶다'는 그때의 뜻이지 이 사람의 설정이 아니다.
+  const [detailOpen, setDetailOpen] = useState(true);
+  // 노드를 고르는 것은 "이것을 보겠다"는 뜻이라, 접혀 있으면 편다 — 접어 둔 채로
+  // 두면 연표·그래프를 눌러도 아무 일이 없는 화면이 된다.
+  const pick = useCallback((id, to = 'event') => { setSelected(id); setTab(to); setDetailOpen(true); }, []);
   const [writing, setWriting] = useState(false);   // 이야기 상자를 폈나
   const [logOpen, setLogOpen] = useState(false);   // '내가 적은 이야기' 를 폈나
   // 사람이 한 번씩 적어 넣은 이야기 덩어리 — 문서가 `stories` 로 들고 다닌다.
@@ -373,10 +384,10 @@ export default function LifeView() {
 
   // 판 — DOM 을 직접 그리는 쪽
   useEffect(() => {
-    const board = new LifeBoard(rootRef.current, { onPick: (id) => { setSelected(id); setTab('event'); } });
+    const board = new LifeBoard(rootRef.current, { onPick: (id) => pick(id) });
     boardRef.current = board;
     return () => board.destroy();
-  }, []);
+  }, [pick]);
   useEffect(() => {
     if (life && context) boardRef.current?.show({ life, context, selected });
   }, [life, context]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -527,8 +538,8 @@ export default function LifeView() {
               note={<>{name}의 관계망 · 노드 {life.nodes.length} · 관계 {life.edges.length}</>}
               empty={false}
               offline={false}
-              onSelect={(node) => { setSelected(node.id); setTab('event'); }}
-              onExpand={(node) => { setSelected(node.id); setTab('event'); }}
+              onSelect={(node) => pick(node.id)}
+              onExpand={(node) => pick(node.id)}
               onReady={loadGraph}
             />
             <SidePanel
@@ -538,23 +549,42 @@ export default function LifeView() {
               seeds={meta.seeds}
               settings={settings}
               onSettings={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
-              onPick={(id) => { setSelected(id); setTab('event'); }}
+              onPick={(id) => pick(id)}
               lines={LIFE_LINES}
               whole
             />
           </div>
         )}
+        {/* 접혀도 DOM 에서 빼지 않는다 — 빼면 미끄러질 것이 없어 그냥 사라진다.
+            대신 화면 밖에 있는 동안은 탭에 걸리지 않게 inert 로 재운다. */}
         {life && (
-          <aside className="detail life-detail">
+          <aside className={`detail life-detail${detailOpen ? '' : ' is-folded'}`}
+                 inert={!detailOpen} aria-hidden={!detailOpen}>
             <div className="life-tabs">
               <button type="button" className={tab === 'event' ? 'on' : ''} onClick={() => setTab('event')}>사건</button>
               <button type="button" className={tab === 'analysis' ? 'on' : ''} onClick={() => setTab('analysis')}>분석</button>
               <button type="button" className={tab === 'people' ? 'on' : ''} onClick={() => setTab('people')}>사람 · 문화</button>
+              {/* 탭 줄 끝의 접기 — 화살표가 어느 쪽으로 들어가는지 말하고, 글은
+                  aria·title 로만 둔다 (탭 세 칸의 너비를 뺏지 않는다). */}
+              <button type="button" className="clickable-icon life-detail-fold" onClick={() => setDetailOpen(false)}
+                      aria-label="상세 접기" title="상세 접기 — 오른쪽으로 밀어 넣습니다">
+                <ChevronIcon to="right" />
+              </button>
             </div>
-            {tab === 'event' && <EventDetail life={life} id={selected} onPick={setSelected} onDrop={dropNode} />}
-            {tab === 'analysis' && <Analysis life={life} onPick={(id) => { setSelected(id); setTab('event'); }} />}
+            {tab === 'event' && <EventDetail life={life} id={selected} onPick={pick} onDrop={dropNode} />}
+            {tab === 'analysis' && <Analysis life={life} onPick={(id) => pick(id)} />}
             {tab === 'people' && <Things life={life} />}
           </aside>
+        )}
+        {/* 접은 뒤에도 되돌아갈 손잡이가 오른쪽 가장자리에 남는다 — 접고 나서 펼
+            길이 없으면 안 된다. 화살표만 두지 않고 '상세'라고 적는다 (부호 하나로만
+            말하지 않는다). */}
+        {life && !detailOpen && (
+          <button type="button" className="life-detail-peek" onClick={() => setDetailOpen(true)}
+                  aria-label="상세 펼치기" title="상세 펼치기">
+            <ChevronIcon to="left" />
+            <span>상세</span>
+          </button>
         )}
       </div>
 
@@ -746,6 +776,16 @@ export function StoryLog({ stories, running, onPick, onDrop, onClose }) {
 function whenText(at) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(at || ''));
   return m ? `${m[1]}년 ${+m[2]}월 ${+m[3]}일` : '';
+}
+
+// lucide 의 chevron-left / chevron-right — 드로어가 어느 쪽으로 미끄러지는지.
+function ChevronIcon({ to }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={to === 'left' ? 'm15 18-6-6 6-6' : 'm9 18 6-6-6-6'} />
+    </svg>
+  );
 }
 
 // lucide 의 scroll-text — 사람이 적은 글 뭉치.
