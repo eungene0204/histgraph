@@ -38,6 +38,11 @@ const STORY_KEY = 'life-story'; // 적다 만 이야기 (분석은 몇 분이라
 // 분석이 끝나면 문서에 적어 둘 이야기 기록. 도는 동안 새로고침해도 잃지 않게
 // 브라우저에도 둔다 — 이것이 없으면 방금 적은 문단이 기록에서 빠진다.
 const NEXT_KEY = 'life-stories-next';
+// 보냈는데 모델이 못 읽은 글. **입력창이 아니라 여기에 둔다** (2026-09-09 사용자:
+// "'입력' 버튼을 누르면 해당 내용은 입력창에서 삭제 해줘") — 누른 글이 칸에 도로
+// 서 있으면 보낸 것인지 아닌지 알 수가 없다. 잃지는 않으므로 상자가 '되돌리기'
+// 단추로 내어 준다. 새로고침해도 남게 브라우저에 둔다.
+const FAIL_KEY = 'life-failed';
 
 // 입력 상자의 보기글. 무엇을 적어야 하는지는 설명보다 예가 빠르다 —
 // **해와 곳, 가족, 이사, 학교, 일, 만남, 그때의 마음.** 지어낸 사람이다.
@@ -216,9 +221,8 @@ export default function LifeView() {
 
   // --- 입력창에 글을 놓는다 ------------------------------------------------
   const [draftStamp, setDraftStamp] = useState(0);
-  // 입력창에 글을 놓고 상자를 새로 세운다. 모달에서 옮겨 올 때와, **보냈는데
-  // 안 간 글을 되돌릴 때** 같은 길을 쓴다 — 상자는 보내면서 칸을 비우므로
-  // (StoryBox send) 실패한 글을 여기서 안 돌려주면 사람이 다시 적어야 한다.
+  // 입력창에 글을 놓고 상자를 새로 세운다. 모달에서 옛 글을 옮겨 올 때와,
+  // 못 보낸 글을 사람이 '되돌리기' 로 부를 때 같은 길을 쓴다.
   const putDraft = useCallback((text) => {
     let cur = '';
     try { cur = localStorage.getItem(STORY_KEY) || ''; } catch { /* 없다 */ }
@@ -228,6 +232,21 @@ export default function LifeView() {
     setWriting(true);
   }, []);
   const sentRef = useRef('');
+
+  // --- 못 보낸 글 ----------------------------------------------------------
+  // 보낸 글은 칸에서 지운다. 모델이 답을 못 주면 **칸에 도로 넣지 않고** 여기에
+  // 둔다 — 상자가 오류 옆에 '적은 글 되돌리기' 를 세우고, 누르면 그때 칸으로
+  // 간다. 답이 온 자리에서는 비운다 (그 글은 이미 기록에 들었다).
+  const [failed, setFailed] = useState(() => {
+    try { return localStorage.getItem(FAIL_KEY) || ''; } catch { return ''; }
+  });
+  const keepFailed = useCallback((text) => {
+    setFailed(text || '');
+    try {
+      if (text) localStorage.setItem(FAIL_KEY, text);
+      else localStorage.removeItem(FAIL_KEY);
+    } catch { /* 못 남겨도 이번 자리에서는 되돌릴 수 있다 */ }
+  }, []);
 
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
   const adopt = useCallback(async (raw, from) => {
@@ -262,19 +281,20 @@ export default function LifeView() {
   // 끝난 상태 하나를 받아 화면과 저장을 마무리한다. 두 길이 여기서 만난다.
   const finish = useCallback(async (st) => {
     setJob(st);
-    // 모델이 답을 못 준 글도 칸에 돌려놓는다 — 다시 적게 하지 않는다.
-    if (st.state === 'error' && sentRef.current) { putDraft(sentRef.current); sentRef.current = ''; }
+    // 모델이 답을 못 준 글은 잃지 않는다 — 칸이 아니라 '되돌리기' 에 둔다.
+    if (st.state === 'error' && sentRef.current) { keepFailed(sentRef.current); sentRef.current = ''; }
     // 브라우저에 남긴다 — 서버는 더 이상 저장된 파일을 화면에 주지 않으므로
     // 새로고침 뒤에도 보이려면 여기 있어야 한다. 로그인해 두었으면 계정에도.
     if (st.state === 'done' && st.payload) {
       // 방금 읽은 이야기를 문서에 실어 둔다 — 그래야 다음에 열어 고칠 수 있다.
       const said = takeStories();
       sentRef.current = '';
+      keepFailed('');
       const doc = said ? { ...st.payload, stories: said } : st.payload;
       await adopt(doc, 'local');
       await keepInAccount(doc, '내 계정에 저장했습니다');
     }
-  }, [adopt, keepInAccount, takeStories, putDraft]);
+  }, [adopt, keepInAccount, takeStories, keepFailed]);
 
   // 새로고침해도 돌던 것을 다시 붙잡는다 (부팅 효과). 로컬 서버에만 있는 길이다.
   const pollRef = useRef(null);
@@ -335,9 +355,16 @@ export default function LifeView() {
     // 화면 글자에 영어를 두지 않는다 (CLAUDE.md §1) — 명령 이름도 적지 않는다.
     setJob({ state: 'error', error: r.payload?.error
       || '자료 서버에 닿지 못했습니다. 잠시 뒤에 다시 해 주세요.' });
-    putDraft(text);            // 못 보낸 글을 칸에 돌려놓는다
+    keepFailed(text);          // 못 보낸 글은 '되돌리기' 에 둔다
     sentRef.current = '';
-  }, [watchJob, finish, keepInAccount, rememberStories, putDraft, startTick, stopTick]);
+  }, [watchJob, finish, keepInAccount, rememberStories, keepFailed, startTick, stopTick]);
+
+  // 못 보낸 글을 사람이 부를 때. 칸으로 옮기고 '되돌리기' 는 걷는다.
+  const restoreFailed = useCallback(() => {
+    if (!failed) return;
+    putDraft(failed);
+    keepFailed('');
+  }, [failed, putDraft, keepFailed]);
 
   // 예전에 적은 글을 입력창으로 옮긴다 (2026-09-08 사용자: "예전 입력을 클릭하면
   // 우리 인생 입력창에 자동으로 복사해줘"). 상자는 브라우저에 남긴 글을 읽고
@@ -573,6 +600,7 @@ export default function LifeView() {
       {kept && <div className="life-toast" role="status" aria-live="polite">{kept}</div>}
 
       {writing && <StoryBox key={draftStamp} job={job} local={local} blocking={blocking} onSubmit={onStory}
+                            failed={failed} onRestore={restoreFailed}
                             onClose={() => setWriting(false)} />}
       {logOpen && <StoryLog stories={stories} running={job?.state === 'running'}
                             onPick={pickStory} onDrop={dropStory}
@@ -702,7 +730,7 @@ function progressOf(job, local) {
 // 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
 // 빈 칸에 '자유롭게 적으세요' 라고 쓰면 아무도 첫 줄을 못 적는다.
 // 적다 만 글은 브라우저에 남긴다. 분석이 몇 분이라 그동안 창을 닫는다.
-function StoryBox({ job, local, blocking, onSubmit, onClose }) {
+function StoryBox({ job, local, blocking, failed, onRestore, onSubmit, onClose }) {
   const [text, setText] = useState(() => {
     try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
   });
@@ -727,6 +755,9 @@ function StoryBox({ job, local, blocking, onSubmit, onClose }) {
     el.selectionStart = el.selectionEnd = el.value.length;
     el.scrollTop = el.scrollHeight;
   }, []);
+  // 누르는 순간 칸을 비운다 (2026-09-09 사용자: "'입력' 버튼을 누르면 해당 내용은
+  // 입력창에서 삭제 해줘"). 못 보낸 글은 화면이 들고 있다가 아래 '되돌리기' 로
+  // 내어 주므로, 비워도 잃지 않는다.
   const send = () => {
     onSubmit(text, '나');
     setText('');
@@ -766,6 +797,10 @@ function StoryBox({ job, local, blocking, onSubmit, onClose }) {
           /* 밖의 모델일 때는 아무 말도 안 한다 (2026-09-08 사용자). 빈 칸은
              단추를 오른쪽에 붙여 두는 자리다. */
           <span className="tl-hint">{local ? '이 컴퓨터의 모델이 읽습니다. 글은 어디로도 보내지 않습니다.' : ''}</span>
+        )}
+        {/* 못 보낸 글이 있으면 그 글을 칸으로 부르는 단추. 있을 때만 선다. */}
+        {failed && !running && (
+          <button type="button" className="life-btn" onClick={onRestore}>적은 글 되돌리기</button>
         )}
         <button type="button" className="life-btn" onClick={onClose}>닫기</button>
         {/* 글이 한 자라도 있으면 누를 수 있다. 전에는 40자 미만이면 말없이 잠겨

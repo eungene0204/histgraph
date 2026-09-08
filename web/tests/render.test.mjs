@@ -468,9 +468,17 @@ let detailHtml = '';
   ok('상자는 세워질 때 칸을 비우지 않는다',
      !/job\?\.state !== 'done'\)\s*return;/.test(lifeSrc2)
      && /const send = \(\) => \{[\s\S]{0,200}removeItem\(STORY_KEY\)/.test(lifeSrc2));
-  ok('못 보낸 글은 칸에 되돌린다',
-     /putDraft\(text\);\s+\/\/ 못 보낸 글/.test(lifeSrc2)
-     && /st\.state === 'error' && sentRef\.current/.test(lifeSrc2));
+  // 2026-09-09 사용자: "'입력' 버튼을 누르면 해당 내용은 입력창에서 삭제 해줘".
+  // 못 보낸 글도 칸으로 도로 들어가지 않는다 — 화면이 들고 있다가 '되돌리기'
+  // 단추로 내어 준다. 그래야 칸에 선 글이 '아직 안 보낸 글' 하나를 뜻한다.
+  ok('못 보낸 글은 칸이 아니라 되돌리기 단추에 둔다',
+     /keepFailed\(text\);\s+\/\/ 못 보낸 글/.test(lifeSrc2)
+     && /st\.state === 'error' && sentRef\.current\) \{ keepFailed/.test(lifeSrc2)
+     && !/putDraft\(text\);\s+\/\/ 못 보낸 글/.test(lifeSrc2));
+  ok("'되돌리기' 는 못 보낸 글이 있을 때만 서고, 누르면 칸으로 간다",
+     /\{failed && !running && \(/.test(lifeSrc2) && lifeSrc2.includes('적은 글 되돌리기')
+     && /const restoreFailed = useCallback\(\(\) => \{[\s\S]{0,120}putDraft\(failed\);\s+keepFailed\(''\)/.test(lifeSrc2));
+  ok('답이 온 글은 되돌릴 것이 없다', /takeStories\(\);[\s\S]{0,120}keepFailed\(''\)/.test(lifeSrc2));
 }
 
 // --- 화면에 영어를 쓰지 않는다 -------------------------------------------
