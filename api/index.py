@@ -21,6 +21,7 @@ histgraph.auth.ROUTES 둘뿐이고 여기서는 HTTP 껍데기만 씌운다. 로
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -30,8 +31,12 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from histgraph import auth, pages  # noqa: E402
-from histgraph.server import GraphAPI, dispatch  # noqa: E402
+from histgraph import accounts, auth, pages  # noqa: E402
+
+log = logging.getLogger("histgraph.api")
+from histgraph.server import (  # noqa: E402
+    LIFE_MAX_BODY, LIFE_POSTS, GraphAPI, dispatch, life_post,
+)
 
 # 화면이 띄우는 것은 시대 그래프다 — 전체 그래프(38,654 노드)가 아니라
 # data/korea.sqlite. cli.py 의 serve 가 고르는 것과 같은 파일을 고른다.
@@ -62,11 +67,11 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
 
     # --- 가입·계정 ------------------------------------------------------
 
-    def _read_body(self) -> bytes:
+    def _read_body(self, limit: int = auth.MAX_BODY) -> bytes:
         size = int(self.headers.get("Content-Length") or 0)
         if size <= 0:
             return b""
-        if size > auth.MAX_BODY:
+        if size > limit:
             return b""      # 큰 것은 읽지 않는다. auth 가 400 으로 답한다.
         return self.rfile.read(size)
 
@@ -92,7 +97,51 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         self._json(405, {"error": "허용되지 않는 방법입니다."})
 
     def do_POST(self) -> None:  # noqa: N802
-        self._auth_only()
+        """가입 경로와 **개인 역사** 둘뿐이다.
+
+        내 역사는 이야기를 받아 모델에게 묻는 유일한 문이라 여기 있어야 한다.
+        로컬 서버와 다른 것은 셋이다 — 답이 나올 때까지 **한 요청 안에서 돈다**
+        (서버리스에는 다음 요청까지 살아 있는 스레드가 없다), **파일을 남기지
+        않는다** (디스크는 읽기 전용이고 남의 삶을 우리 서버에 두지 않는다),
+        그리고 **로그인한 사람의 것만 받는다** (`_life_gate`)."""
+        path = _path(urlparse(self.path))
+        raw = self._read_body(LIFE_MAX_BODY if path in LIFE_POSTS else auth.MAX_BODY)
+        if self._try_auth(raw):
+            return
+        if path not in LIFE_POSTS:
+            self._json(405, {"error": "허용되지 않는 방법입니다."})
+            return
+        if self._life_gate(raw):
+            return
+        status, payload = life_post(api, path, raw, blocking=True, save=False)
+        self._json(status, payload)
+
+    def _life_gate(self, raw: bytes) -> bool:
+        """내 역사는 로그인한 사람의 것이다. 막았으면 True (여기서 답했다).
+
+        **여기서는 가입이 꺼져 있으면 아예 안 받는다.** 로컬 서버와 반대다 —
+        거기서는 설정이 없다고 내 역사를 못 쓰게 되면 안 되지만(README '내
+        역사만 로그인을 요구한다'), 열린 인터넷에서 문을 안 잠그면 아무나
+        남의 이름으로 우리 모델을 부른다. 켜져 있으면 세션과 표를 함께 본다:
+        표가 없으면 남의 사이트가 이 사람의 브라우저로 요청을 쏠 수 있다."""
+        if not auth.enabled():
+            self._json(503, {"error": "로그인이 아직 열리지 않아 내 역사를 쓸 수 없습니다."})
+            return True
+        url = urlparse(self.path)
+        req = auth.Request(self.command, _path(url), parse_qs(url.query),
+                           dict(self.headers.items()), raw)
+        try:
+            auth.require_user(req)
+            auth.check_write(req)
+        except auth.AuthError as err:
+            status = 401 if str(err) == "로그인이 필요합니다." else 400
+            self._json(status, {"error": str(err)})
+            return True
+        except accounts.StoreError as err:
+            log.warning("가입자 표 접근 실패: %s", err)
+            self._json(503, {"error": "가입자 정보에 닿지 못했습니다."})
+            return True
+        return False
 
     def do_PUT(self) -> None:  # noqa: N802
         self._auth_only()

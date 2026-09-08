@@ -12,7 +12,7 @@
 
 // 서버가 https 에서는 `__Host-` 를 붙인다 (auth.cookie_name). 개발(http)과
 // 배포(https)가 같은 코드를 지나므로 둘 다 찾아본다.
-function csrf() {
+export function csrf() {
   for (const part of document.cookie.split(';')) {
     const [name, ...rest] = part.trim().split('=');
     if (name === '__Host-hg_csrf' || name === 'hg_csrf') return rest.join('=');

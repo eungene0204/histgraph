@@ -18,8 +18,8 @@ import { auth } from './lib/auth.js';
 // (design.md §4 '인과 도면'). 꺼져 있으면 전처럼 그 노드의 주변 관계를 편다.
 export const CAUSAL_DIAGRAM = false;
 
-// 개인 역사 장이 이 빌드에 있는가. 배포(Vercel)에서는 비어 온다 — vite.config.js.
-// 서버 렌더 테스트(esbuild)에는 import.meta.env 가 없으므로 없는 것으로 친다.
+// 개인 역사 장이 이 빌드에 있는가 — vite.config.js. 서버 렌더 테스트(esbuild)
+// 에는 import.meta.env 가 없으므로 없는 것으로 친다.
 const LIFE_PAGE = Boolean(import.meta.env?.VITE_LIFE);
 
 function hashId() {
@@ -277,7 +277,6 @@ export default function App() {
             {era}
           </button>
           {/* 개인 역사 — 내 삶을 왕·대통령의 띠와 한국사 옆에 세우는 장 (life.html).
-              아직 배포하지 않는다 — 로컬 빌드에만 있다 (vite.config.js LIFE_PAGE).
 
               **여기만 로그인을 묻는다** (2026-09-08 사용자: "내 역사는 개인별로
               다 다르니깐"). 그래프는 로그인 없이 다 보이고, 사람마다 다른 것

@@ -36,6 +36,45 @@
 | 승격 보강 (`promote`) | 불필요 | 신규 노드 69 · 관계 189건 |
 | 공공데이터포털 / 문화광장 | **활용신청 대기** | 0 |
 
+## 2026-09-09 — 개인 역사를 배포한다 (`life_post` · 요청 하나 안에서 돈다)
+
+사용자: "개인 역사도 이제 배포 해줘". 2026-09-07 에 걸어 둔 `LIFE_PAGE = !VERCEL`
+을 푼 세션이다. **스위치만 푸는 것으로는 안 됐다** — 배포된 API 에 물어보니
+`POST /api/life/analyze` 가 405 였다. 화면이 이야기를 넣는 유일한 문이 그것이라,
+스위치만 풀면 오른쪽 열이 영영 빈 채로 단추만 서 있는 껍데기가 된다.
+
+막힌 것은 셋이었고 셋 다 구조였다:
+
+- **서버리스에는 띄워 두고 물어보는 길이 없다.** 함수가 응답과 함께 죽어서
+  스레드도 그것이 적은 상태도 다음 요청이 못 본다 (`LifeAnalysis` + `/api/life/job`).
+- **디스크가 읽기 전용이다.** 분석이 끝나면 `data/life/<이름>.json` 을 쓰던 자리.
+- **`api/index.py` 의 `do_POST` 가 가입 경로만 받았다** (그 밖은 405).
+
+만든 것:
+
+- `server.run_analysis` — `LifeAnalysis._run` 의 몸통을 모듈 함수로 뽑았다.
+  `save=False` 면 파일을 만들지 않고, `step` 을 안 주면 진행을 아무 데도 안 적는다.
+- `server.life_post(path, raw, *, blocking, save)` — POST 두 길(analyze·refine)의
+  몸통 하나. 로컬은 `blocking=False`(202 + 폴링), 배포는 `blocking=True`(200 + 끝난
+  상태). 부르는 자리가 둘이라 여기 있다.
+- `api/index.py` — `do_POST` 가 `LIFE_POSTS` 를 받고, `_life_gate` 가 **로그인과
+  CSRF 표를 함께** 잰다. 로컬과 반대로 **가입이 안 켜져 있으면 503** 이다: 열린
+  인터넷에서 문을 안 잠그면 아무나 남의 이름으로 우리 모델을 부른다.
+- `vercel.json` `maxDuration: 300` — 무료 모델 실측 54초.
+- 화면(`LifeView`) — 답이 오는 길 둘이 `finish()` 에서 만난다. 가르는 것은 **몸**
+  이다(`state` 가 `done`·`error` 면 다 온 것). `/api/life/job` 이 `blocking` 을
+  미리 알려 주므로, 한 번에 오는 자리에서는 초를 스스로 세고("서버가 안 세어 준다")
+  "창을 닫아도 계속 돕니다" 대신 "이 창을 열어 둔 채로 기다려 주세요" 라고 적는다.
+  `postJson` 이 CSRF 표와 쿠키를 함께 싣는다.
+
+**사람이 해야 하는 것** — Vercel 환경변수. 이것이 없으면 배포된 내 역사는 503 이다:
+`GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` · `HISTGRAPH_SESSION_SECRET`(32자 이상) ·
+`DATABASE_URL`(Neon — 배포는 SQLite 로 안 물러난다) · `OPENROUTER_API_KEY`. 그리고
+구글 콘솔의 승인된 리디렉션 URI 에 `https://www.histgraph.space/api/auth/callback`,
+표를 한 번 세우기(`uv run histgraph accounts --init`).
+
+테스트 1,370 (배포 몸통·문 여덟 줄 추가) · 화면 84.
+
 ## 2026-09-09 — 개인정보처리방침·이용약관 제3판 (‘내 역사’ · 외부 모델 국외 이전)
 
 사용자: "구글 로그인/가입 시스템을 구축했고, 내 역사 기능도 넣었으니 개인정보처리방침,
@@ -548,7 +587,7 @@ CLI 는 `histgraph life 더.txt --base data/life/나.json`.
 개발하고 테스트 해야 함"). 스위치는 `web/vite.config.js` `LIFE_PAGE = !VERCEL`
 하나 — Vercel 빌드에서 `life.html`·예시·머리의 링크가 빠진다 (`life.test.mjs`
 가 두 빌드를 잰다). 사용자가 넣으라고 할 때 그 줄을 푼다. main 에 합쳐도 화면에는
-안 나간다.
+안 나간다. → **2026-09-09 에 풀었다** (아래 '개인 역사를 배포한다').
 
 남는 것: 모바일 배치 없음.
 
