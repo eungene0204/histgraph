@@ -6624,13 +6624,17 @@ try:
     _pats = _ex["functions"]["api/index.py"]["excludeFiles"].strip("{}").split(",")
     _needed = [q for q in (_root / "src").rglob("*")
                if q.is_file() and q.suffix != ".py" and "__pycache__" not in q.parts]
+    # 걷어내는 자리가 **둘**이다 — `vercel.json` 의 excludeFiles 와 `.vercelignore`.
+    # 뒤엣것은 "CLI 로 올릴 때만 쓰인다"고 적혀 있었지만 Git 연동 배포도 본다.
+    _pats += [ln.strip() for ln in (_root / ".vercelignore").read_text(encoding="utf-8").splitlines()
+              if ln.strip() and not ln.strip().startswith(("#", "!"))]
     _cut = [str(q.relative_to(_root)) for q in _needed
             if any(_fn.fnmatch(str(q.relative_to(_root)), pat) or _fn.fnmatch(q.name, pat)
                    for pat in _pats)]
     _inc = _ex["functions"]["api/index.py"].get("includeFiles", "")
     _missed = [str(q.relative_to(_root)) for q in _needed
                if not _fn.fnmatch(str(q.relative_to(_root)), _inc)]
-    check("배포 번들이 패키지가 읽는 파일을 걷어내지 않는다",
+    check("배포 번들이 패키지가 읽는 파일을 걷어내지 않는다 (두 자리 다)",
           not _cut and any(q.name == "life_prompt.md" for q in _needed), str(_cut))
     check("배포 번들이 패키지가 읽는 파일을 이름 대어 싣는다", not _missed, str(_missed))
     blocked, (st, body) = gate()
