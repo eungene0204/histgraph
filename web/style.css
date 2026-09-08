@@ -360,17 +360,6 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   background: var(--tag-background); border: 1px solid var(--tag-border);
 }
 
-/* 안쪽 장(설정·즐겨찾기)의 머리 줄. 뒤로 가는 화살표와 그 장의 이름뿐이다. */
-.account-head { display: flex; align-items: center; gap: 6px; padding-bottom: 10px; }
-.account-head b { font-size: var(--font-ui-medium); font-weight: 600; }
-.account-back {
-  width: 22px; height: 22px; padding: 0; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  font-size: var(--font-ui-medium); color: var(--text-muted);
-  background: none; border: none; border-radius: var(--radius-s); cursor: pointer;
-}
-.account-back:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-
 /* 한 층 들어가는 줄. 아이콘이 왼쪽에 서고 오른쪽에는 아무 표시도 없다
    (2026-09-09 사용자: "'>' 표시를 삭제하고 설정 앞에 설정 아이콘"). */
 .account-nav { border-top: 1px solid var(--background-modifier-border); padding-top: 6px; }
@@ -383,15 +372,6 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 .account-row:hover { background: var(--background-modifier-hover); }
 .account-icon { width: 15px; height: 15px; flex: none; color: var(--text-muted); }
 .account-row:hover .account-icon { color: var(--text-normal); }
-
-.account-marks { padding: 4px 0 0; }
-.account-marks h4 { margin: 0 0 6px; font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-muted); }
-.account-marks ul { margin: 0; padding: 0; list-style: none; max-height: 168px; overflow-y: auto; }
-.account-marks li { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
-.account-marks a { color: var(--text-normal); text-decoration: none; }
-.account-marks a:hover { color: var(--text-accent); }
-.account-note { color: var(--text-faint); font-size: var(--font-ui-smaller);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-none { margin: 0; color: var(--text-faint); line-height: 1.6; }
 
 .account-error { margin: 0 0 8px; color: var(--text-danger); line-height: 1.6; }
@@ -405,11 +385,81 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 }
 .account-acts button:hover:not(:disabled) { background: var(--background-modifier-hover); }
 .account-acts button:disabled { opacity: .5; cursor: default; }
-.account-acts .account-danger { color: var(--text-danger); }
-/* 되묻는 자리. 무엇이 지워지는지 먼저 적고 단추는 그 아래에 둔다 —
-   '지웁니다'가 문장보다 먼저 눈에 띄면 읽지 않고 누른다. */
-.account-confirm { display: flex; flex-direction: column; gap: 8px; line-height: 1.6; color: var(--text-muted); }
-.account-confirm > span { display: flex; gap: 8px; }
+
+/* --- 설정 상자 (SettingsModal) -----------------------------------------
+   왼쪽에 무엇을 볼지, 오른쪽에 그 안의 줄들. 줄 하나는 왼쪽이 이름이고
+   오른쪽이 그 줄에서 할 일이다 (2026-09-09 사용자가 보여 준 화면). */
+.set-box {
+  display: flex; width: 100%; max-width: 720px; height: min(70vh, 460px);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+  overflow: hidden;
+}
+.set-rail {
+  flex: none; width: 190px; padding: 18px 12px;
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.set-rail h4 { margin: 0 0 10px 8px; font-size: var(--font-ui-smaller); font-weight: 600; color: var(--text-faint); }
+.set-rail ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.set-tab {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 8px 10px; border-radius: var(--radius-m);
+  font-size: var(--font-ui-small); color: var(--text-muted); text-align: left;
+  background: none; border: 1px solid transparent; cursor: pointer;
+}
+.set-tab:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.set-tab.on { color: var(--text-normal); border-color: var(--color-accent); background: var(--background-modifier-hover); }
+.set-icon { width: 17px; height: 17px; flex: none; }
+
+.set-pane { position: relative; flex: 1; min-width: 0; padding: 18px 22px; overflow-y: auto; }
+.set-pane h2 { margin: 0 0 16px; font-size: var(--font-ui-larger); font-weight: 600; }
+.set-close {
+  position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; padding: 5px;
+  color: var(--text-muted); background: none; border: none; border-radius: var(--radius-s); cursor: pointer;
+}
+.set-close:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.set-close svg { width: 100%; height: 100%; }
+
+.set-rows { display: flex; flex-direction: column; font-size: var(--font-ui-small); }
+/* 줄마다 아래 선을 긋는다 — 이름과 단추가 멀리 떨어져 있어 어느 것이 한
+   줄인지 선이 없으면 읽히지 않는다. */
+.set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 52px; padding: 10px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.set-row > span:first-child { color: var(--text-normal); line-height: 1.6; }
+.set-row a { color: var(--text-normal); text-decoration: none; }
+.set-row a:hover { color: var(--text-accent); }
+.set-note { margin-left: 8px; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+/* 담아 둔 것들은 읽는 목록이라 줄을 낮게 세운다 (설정 줄은 단추가 들어가 높다). */
+.set-list .set-row { min-height: 40px; }
+.set-value {
+  padding: 5px 10px; border-radius: var(--radius-s); font-weight: 500;
+  color: var(--text-normal); background: var(--background-modifier-hover);
+}
+.set-pair { display: flex; align-items: center; gap: 8px; flex: none; }
+.set-pair .account-admin { margin-left: 0; }
+.set-act {
+  flex: none; padding: 6px 12px; border-radius: var(--radius-s); cursor: pointer;
+  font-size: var(--font-ui-small); color: var(--text-normal);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+}
+.set-act:hover:not(:disabled) { border-color: var(--background-modifier-border-hover); }
+.set-act:disabled { opacity: .5; cursor: default; }
+.set-danger { color: var(--text-danger); }
+
+@media (max-width: 620px) {
+  .set-box { flex-direction: column; height: min(80vh, 560px); }
+  .set-rail { width: auto; padding: 12px; border-right: none;
+    border-bottom: 1px solid var(--background-modifier-border); }
+  .set-rail h4 { display: none; }
+  .set-rail ul { flex-direction: row; }
+}
 
 .results .empty-row { color: var(--text-faint); cursor: default; }
 
