@@ -6256,6 +6256,34 @@ with tempfile.TemporaryDirectory() as tmp:
         _backends.build_backend = keep_build
     check("두 길의 이름은 한 곳에 있다", _LIFE_POSTS == ("/api/life/analyze", "/api/life/refine"))
 
+    # 모델이 답을 안 줬을 때 **까닭을 한국어로** 말한다. 까닭을 말해야 사람이
+    # 다음에 뭘 할지 안다 — 붐비면 다시 누르면 되고, 열쇠가 없으면 소용없다.
+    # 상류가 주는 말은 영어라 화면에 옮기지 않는다 (CLAUDE.md §1).
+    from histgraph.server import model_silence as _silence  # noqa: E402
+
+    check("붐비는 것과 멎은 것과 열쇠 없는 것을 갈라 말한다",
+          "붐빕" in _silence("HTTP 429: rate limit")
+          and "응답하지 않" in _silence("HTTP 503: busy")
+          and "응답하지 않" in _silence("연결 실패: timed out")
+          and "준비되지 않" in _silence("OPENROUTER_API_KEY 없음")
+          and "돌려주지 않" in _silence("답에 choices 가 없음"))
+    check("어느 문구에도 영어가 없다",
+          not any(ch.isascii() and ch.isalpha() for w in
+                  ("HTTP 429", "HTTP 503", "연결 실패", "OPENROUTER_API_KEY 없음", "")
+                  for ch in _silence(w)))
+    # 모델이 답을 안 주면 그 까닭이 답에 실려 온다 (화면은 안 그리고, 사람이 물어볼 때 쓴다).
+    class _Silent(_FakeLife):
+        last_error = "HTTP 429: rate limited"
+        def complete_json(self, *a, **kw):
+            return None
+    _backends.build_backend = lambda kind, model=None: _Silent()
+    try:
+        st, body = _life_post(tapi, "/api/life/analyze", b'{"text": "x"}', blocking=True, save=False)
+        check("답이 없으면 까닭을 한국어로, 원문은 detail 로",
+              st == 500 and "붐빕" in body["error"] and "429" in body["detail"], str(body)[:200])
+    finally:
+        _backends.build_backend = keep_build
+
     # 화면이 기다리는 모습을 여기서 가른다 — 창을 닫아도 되는지가 이것으로 갈린다.
     _keep_vercel = _osl.environ.pop("VERCEL", None)
     try:
