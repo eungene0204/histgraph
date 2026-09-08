@@ -389,7 +389,7 @@ def analyze(text: str, backend, anchors: list[dict] | None = None,
 # --- 다듬기: 앞뒤에서 셈하고, 만난 곳에 잇는다 -----------------------------------
 # 모델이 빠뜨린 것을 이야기 안의 다른 노드에서 채운다. 검증 끝과 더하기 끝에
 # 한 번씩 돈다 (옛 그래프도 다음 더하기 때 같이 고쳐진다).
-#   0. 인물의 생몰년: 원문을 아는 자리에서는 근거 없는 것을 비운다 (gate_person_dates).
+#   0. 인물의 생몰년: 원문을 아는 자리에서는 근거 없는 것을 비운다 (gate_dates).
 #   1. 생년: 주인공 노드의 start_date 가 비었으면 '출생' 노드나 설명에서.
 #   2. 해: 학년('고등학교 2학년')은 입학 해에서, 없으면 생년에서. 사람 노드는
 #      설명의 '…1학년 때 만난' 도 본다 — 그 사람이 내 삶에 들어온 해다.
@@ -464,9 +464,14 @@ def stated_date(text: str | None, name: str | None, date: str | None, *, whole: 
     return None
 
 
-def gate_person_dates(nodes: list[dict], me: dict | None, text: str | None,
-                      timeline: list[dict] | None = None) -> list[str]:
-    """인물 노드의 생몰년을 원문에 대 보고, 근거 없는 것을 비운다.
+def gate_dates(nodes: list[dict], me: dict | None, text: str | None,
+               timeline: list[dict] | None = None) -> list[str]:
+    """인물·단체 노드의 날짜를 원문에 대 보고, 근거 없는 것을 비운다.
+
+    **단체도 사람과 같은 규칙이다** (2026-09-09). 모델이 지어낸 창립 연도는 그 노드
+    하나로 끝나지 않는다 — 이야기가 그 이름을 부르면 다른 노드가 그 해를 빌려 간다
+    (`time_anchors`). 실측(모델이 a-club 을 1995년으로 지어낸 답): 그 1995 가 같은
+    문장의 '최근호'에게 옮아 만난 해가 됐다. 닻이 되려면 근거가 있어야 한다.
 
     비운 사람은 **연표에서도 내린다** (준 `timeline` 을 그 자리에서 고친다) — 연표
     항목은 그 해의 나이와 단계를 들고 있어서, 남겨 두면 화면이 그 사람 이름 아래에
@@ -478,7 +483,7 @@ def gate_person_dates(nodes: list[dict], me: dict | None, text: str | None,
         return notes
     dropped: set[str] = set()
     for n in nodes:
-        if n.get("type") not in PERSON_TYPES:
+        if n.get("type") not in PERSON_TYPES | ORG_TYPES:
             continue
         mine = me is not None and n is me
         for key in ("start_date", "end_date"):
@@ -585,7 +590,7 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
         story = "\n".join(x for x in (story, added.strip()) if x)
     # 0. 인물의 생몰년 — 원문을 아는 자리에서는 여기서도 잰다 (옛 그래프가 들고 있는
     #    지어낸 생년은 이 길로 빠진다. 원문을 모르면 그대로 둔다.)
-    gate_person_dates(nodes, me, text, payload.get("timeline"))
+    gate_dates(nodes, me, text, payload.get("timeline"))
 
     # 1. 생년 — 그리고 생일. '출생' 사건이 든 날짜가 주인공 노드의 날짜를 이긴다
     #    (birth_date_from_nodes: 모델은 해만 알면 1월 1일을 적는다).
@@ -1674,7 +1679,7 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
       - 신뢰도는 0~1 로, 점수는 1~10 으로 자른다.
       - 노드의 날짜를 풀어 `year`·`end_year`·`precision` 을 단다. 연표 항목이
         연도를 안 적었으면 노드의 것을 쓴다. 나이만 있으면 생년으로 푼다.
-      - **인물의 생몰년은 원문(`text`)이 말한 것만 남긴다** (gate_person_dates).
+      - **인물의 생몰년은 원문(`text`)이 말한 것만 남긴다** (gate_dates).
       - 노드 이름·설명에 한글이 한 자도 없어도 손대지 않는다.
 
     `subject` 는 **더하는 이야기**일 때 옛 그래프의 주인공(id·생년)이다 — 새 답의
@@ -1735,8 +1740,8 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
         # 지시문이 화자를 '사용자'라 부르니 모델도 그 이름을 노드에 적는다.
         # 화면에서 그 사람은 '나'다 (2026-09-08 사용자: "'사용자'라고 하지 말고 '나' 라고 해줘").
         me["name"] = "나"
-    # 인물의 생몰년은 원문이 말한 것만 남긴다 (gate_person_dates 머리글).
-    notes += gate_person_dates(nodes, me, text, payload.get("timeline"))
+    # 인물의 생몰년은 원문이 말한 것만 남긴다 (gate_dates 머리글).
+    notes += gate_dates(nodes, me, text, payload.get("timeline"))
     birth = parse_when(me.get("start_date") if me else None)[0]
     if birth is None and subject and subject.get("birth_year") is not None:
         birth = int(subject["birth_year"])
@@ -1764,6 +1769,17 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
     by_name: dict[str, str] = {}
     for n in nodes:
         by_name[_norm_label(n["name"])] = "" if _norm_label(n["name"]) in by_name else n["id"]
+    # **주인공은 이름으로 불린다.** 더하는 이야기에서 주인공 노드는 새 답에 없고
+    # (`ghost`), 양끝을 이름으로 적는 모델은 그 자리에 '나'라고 쓴다 — id 로만 찾으면
+    # 그 사람이 든 모임·회사가 통째로 사라진다 (2026-09-09 실측: '나 → a-club 소속'이
+    # 여기서 버려져 모임을 만든 일이 연표에 못 섰다). 모델이 바뀌어도 같아야 하는 자리다.
+    if ghost or me is not None:
+        who = str(ghost or me["id"])
+        for label in {*SELF_NAMES, "나", str((subject or {}).get("name") or ""), 
+                      str(me.get("name") or "") if me is not None else ""}:
+            key = _norm_label(label)
+            if key and key not in by_name:
+                by_name[key] = who
 
     def _endpoint(ref: Any) -> str | None:
         if ref in by_id or (ghost is not None and ref == ghost) or ref in known:

@@ -1356,8 +1356,8 @@ def life_post(api: GraphAPI, path: str, raw: bytes, *,
     if path == "/api/life/refine":
         if not (isinstance(body, dict) and isinstance(body.get("nodes"), list)):
             return 400, {"error": "그래프가 아닙니다"}
-        # 이야기 원문이 옆에 있으면 같이 준다 — 인물의 생몰년을 원문에 대 본다
-        # (life.gate_person_dates). 없으면 재지 않는다.
+        # 이야기 원문이 옆에 있으면 같이 준다 — 인물·단체의 날짜를 원문에 대 본다
+        # (life.gate_dates). 없으면 재지 않는다.
         return 200, life_mod.refine(body, text=_life_story(body))
 
     if path != "/api/life/analyze":

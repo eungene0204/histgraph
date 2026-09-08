@@ -5766,6 +5766,59 @@ with tempfile.TemporaryDirectory() as tmp:
               "edges": [{"source": "me", "target": "club2", "type": "member_of", "confidence": 1.0}],
               "timeline": []}, "2010년에 산악회에 들어갔어.")["nodes"]})
 
+    # **모델이 달라져도 같은 화면이 나와야 한다** (2026-09-09 사용자: "llm 모델이
+    # 달라져도 똑같이 적용할 수 있는 하네스지?"). 모델마다 답하는 버릇이 다르다 —
+    # 양끝을 id 로 적기도 이름으로 적기도 하고(무료 모델 실측), 날짜를 지어내기도
+    # 한다. 규칙은 모델의 답이 아니라 **이야기**에 걸려 있으므로 셋 다 같아야 한다.
+    def _club_base():
+        return {"subject": {"id": "me", "name": "나", "birth_year": 1982},
+                "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982",
+                           "year": 1982, "precision": "year", "confidence": 1.0},
+                          {"id": "col", "type": "School", "name": "신구대학", "year": 2000,
+                           "precision": "year", "confidence": 1.0},
+                          {"id": "entry", "type": "PersonalEvent", "name": "신구대학 입학",
+                           "start_date": "2000", "year": 2000, "precision": "year", "confidence": 1.0}],
+                "edges": [{"source": "me", "target": "entry", "type": "experienced", "confidence": 1.0},
+                          {"source": "me", "target": "col", "type": "studied_at", "confidence": 1.0}],
+                "timeline": [{"event_id": "entry", "life_stage": "대학", "year": 2000, "age": 18}],
+                "historical_connections": [], "stories": [{"at": "2026-09-09", "text": "2000년에 신구대학에 들어갔어."}]}
+
+    def _club_run(raw):
+        base = _club_base()
+        val, _ = life_mod.validate(raw, subject=base["subject"], text=club_text,
+                                   known=life_mod.known_ids(base))
+        out, _ = life_mod.merge(base, val, club_text)
+        life_mod.refine(out, "2000년에 신구대학에 들어갔어.\n\n" + club_text)
+        return sorted((n["name"], n.get("year")) for n in out["nodes"]
+                      if n["id"].startswith(("met_", "made_")))
+
+    _want = [("a-club 결성", 2000), ("석민혁을 만남", 2000), ("이수혁을 만남", 2000), ("최근호를 만남", 2000)]
+    _people = [("f1", "최근호"), ("f2", "석민혁"), ("f3", "이수혁")]
+    # (가) 양끝을 id 로 적는 모델
+    check("모델이 id 로 이어도", _club_run({
+        "nodes": [*({"id": i, "type": "Person", "name": n, "confidence": 1.0} for i, n in _people),
+                  {"id": "club", "type": "Organization", "name": "a-club", "confidence": 1.0}],
+        "edges": [*({"source": "me", "target": i, "type": "met", "confidence": 1.0} for i, _ in _people),
+                  *({"source": i, "target": "club", "type": "member_of", "confidence": 1.0} for i, _ in _people),
+                  {"source": "me", "target": "club", "type": "member_of", "confidence": 1.0}],
+        "timeline": []}) == _want)
+    # (나) 양끝을 **이름**으로 적는 모델 — 주인공을 '나' 라고 부른다
+    check("모델이 이름으로 이어도 (주인공을 '나' 라 불러도)", _club_run({
+        "nodes": [*({"id": f"p{k}", "type": "Person", "name": n, "confidence": 1.0}
+                    for k, (_, n) in enumerate(_people)),
+                  {"id": "o1", "type": "Community", "name": "a-club", "confidence": 1.0}],
+        "edges": [*({"source": "나", "target": n, "type": "friend_of", "confidence": 1.0} for _, n in _people),
+                  {"source": "나", "target": "a-club", "type": "member_of", "confidence": 1.0}],
+        "timeline": []}) == _want)
+    # (다) 날짜를 지어내는 모델 — 이야기에 없는 해는 단체에서도 비운다
+    check("모델이 날짜를 지어내도 (이야기가 말한 해가 이긴다)", _club_run({
+        "nodes": [*({"id": i, "type": "Person", "name": n, "start_date": "1995-01-01", "confidence": 0.6}
+                    for i, n in _people),
+                  {"id": "club", "type": "Organization", "name": "a-club", "start_date": "1995", "confidence": 0.6}],
+        "edges": [*({"source": "me", "target": i, "type": "met", "confidence": 1.0} for i, _ in _people),
+                  {"source": "me", "target": "club", "type": "member_of", "confidence": 1.0}],
+        "timeline": []}) == _want)
+
     # 단계는 뒤로 가지 않는다 — 스무 살에 '초등학교'인 삶은 없다. 모델은 사람 노드의
     # 연표 항목에 단계를 아무렇게나 적는다 (실측: 2002년 항목이 '초등학교').
     back = life_mod.refine({
