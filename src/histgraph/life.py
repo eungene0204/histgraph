@@ -1814,7 +1814,12 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
     by_key = {(n.get("type"), _norm_label(n.get("name"))): n["id"] for n in nodes}
     subject = out.get("subject") or {}
     subj_id = subject.get("id") if subject.get("id") in by_id else None
-    stats = {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0}
+    # `ids` 는 **새로 생긴 노드의 id** 다. 화면이 그리로 간다 — 다 만들고도 연표가
+    # 서 있던 자리에 그대로 있으면 사람 눈에는 아무 일도 안 일어난 것이다
+    # (2026-09-09 사용자: "모델이 해석을 끝냈으면 그래프와 연표에 바로 적용되야
+    # 하는데 그게 안 되고 있는거 같어" — 실측: 2013년 사건을 더했는데 연표는
+    # 1980년대를 비추고 있었다).
+    stats = {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0, "ids": []}
 
     remap: dict[str, str] = {}
     fixed: list[str] = []
@@ -1851,6 +1856,7 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
         by_key[key] = nid
         remap[nid] = nid
         stats["nodes"] += 1
+        stats["ids"].append(nid)
 
     def _id(ref: Any) -> str | None:
         r = remap.get(ref, ref)
@@ -1973,11 +1979,16 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
     # 옛 그래프에 비어 있던 해·연결도 이 김에 채운다 (사유는 notes 뒤에 잇는다).
     # 이번 토막은 `added` 로 준다 — 이야기 안의 근거(함께한 사람·가족 호칭)는 읽되
     # 역사 연결의 관문은 걸지 않는다.
-    was = (len(out.get("nodes") or []), len(out.get("timeline") or []))
+    was = {n["id"] for n in out.get("nodes") or []}
+    was_tl = len(out.get("timeline") or [])
     refine(out, added=text)
-    # refine 이 세운 것(만남 사건)도 더한 것이다 — 화면이 '무엇이 늘었나'를 이 수로 적는다.
-    stats["nodes"] += max(0, len(out.get("nodes") or []) - was[0])
-    stats["timeline"] += max(0, len(out.get("timeline") or []) - was[1])
+    # refine 이 세운 것(만남 사건)도 더한 것이다 — 화면이 '무엇이 늘었나'를 이것으로 적고
+    # 그리로 옮겨 간다.
+    for n in out.get("nodes") or []:
+        if n["id"] not in was:
+            stats["nodes"] += 1
+            stats["ids"].append(n["id"])
+    stats["timeline"] += max(0, len(out.get("timeline") or []) - was_tl)
     return out, stats
 
 

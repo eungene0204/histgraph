@@ -10,6 +10,7 @@ import {
   ladder,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
+  addedFocus, addedNames,
   linkPeople, kinIn, markYs,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY,
 } from '../src/lib/life.js';
@@ -178,6 +179,21 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('스무 살의 항목이 초등학교로 되돌아가지 않는다', ss.gf === '군복무', JSON.stringify(ss));
   ok('뒤가 없으면 빈 단계는 채우지 않는다', ss.mv === null, JSON.stringify(ss));
   ok("'공익생활'도 군복무로 읽는다", MILITARY.test('공익생활을 하던 시절'));
+
+  // 더한 것으로 화면이 옮겨 간다 (2026-09-09 사용자: "모델이 해석을 끝냈으면 그래프와
+  // 연표에 바로 적용되야 하는데"). 연표에 서는 것(해를 아는 사건)이 먼저, 이른 것부터.
+  const madeDoc = { nodes: [
+    { id: 'p', type: 'Person', name: '정혜림', year: 2002 },
+    { id: 'e2', type: 'PersonalEvent', name: '제주도 혼자 여행', year: 2013 },
+    { id: 'e1', type: 'PersonalEvent', name: '정혜림을 만남', year: 2002 },
+    { id: 'x', type: 'PersonalEvent', name: '해를 모르는 일', year: null },
+  ] };
+  ok('더한 것 중 이른 사건으로 간다', addedFocus(madeDoc, ['e2', 'e1', 'p']) === 'e1');
+  ok('사건이 없으면 사람이라도 고른다', addedFocus(madeDoc, ['p']) === 'p');
+  ok('해를 모르는 것뿐이면 그것을 고른다', addedFocus(madeDoc, ['x']) === 'x');
+  ok('더한 것이 없으면 움직이지 않는다', addedFocus(madeDoc, []) === null && addedFocus(madeDoc, undefined) === null);
+  ok('무엇이 늘었는지 이름으로 적는다',
+    JSON.stringify(addedNames(madeDoc, ['e2', 'e1', 'p'])) === JSON.stringify(['정혜림을 만남', '제주도 혼자 여행']));
 
   const ab = stageBands(army, 2026).map((b) => `${b.stage} ${b.start}~${b.end}`);
   ok('띠는 소집해제한 해에 닫는다 (2년 복무가 4년이 되지 않게)',

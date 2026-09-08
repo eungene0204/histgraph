@@ -5710,6 +5710,8 @@ with tempfile.TemporaryDirectory() as tmp:
           str(met_tl.get("met_gf")))
     check("사람은 연표에 서지 않는다 (그 자리가 곧 생년이 된다)", "gf" not in met_tl, str(list(met_tl)))
     check("refine 이 세운 것도 '더한 수'에 센다", met_stats["nodes"] >= 1, str(met_stats))
+    check("더한 노드의 id 를 알려 준다 — 화면이 그리로 간다",
+          "met_gf" in met_stats["ids"] and "gf" in met_stats["ids"], str(met_stats["ids"]))
     check("두 번 돌려도 만남은 하나다",
           len([n for n in life_mod.refine(met_out, met_text)["nodes"] if n["id"] == "met_gf"]) == 1)
 
@@ -6296,7 +6298,7 @@ with tempfile.TemporaryDirectory() as tmp:
             time.sleep(0.02)
         st2 = job.status()
         check("더한 결과는 옛 주인공을 지키고 더한 수를 알린다",
-              st2["state"] == "done" and st2["added"] == {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0}
+              st2["state"] == "done" and st2["added"] == {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0, "ids": []}
               and st2["payload"]["subject"]["id"] == st["payload"]["subject"]["id"] and "그래프는 이미 있다" in made.user, str(st2)[:300])
         check("원문은 파일에 이어 둔다", (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기\n\n더")
         st, body = _life_dispatch(api, "/api/life/job", {})

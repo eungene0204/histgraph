@@ -4,7 +4,7 @@ import { auth, csrf } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -293,12 +293,14 @@ export default function LifeView() {
   }, []);
 
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
-  const adopt = useCallback(async (raw, from) => {
+  // `focus` 는 **이번에 새로 생긴 것**이다 (life.addedFocus) — 그리로 옮겨 간다.
+  const adopt = useCallback(async (raw, from, focus = null) => {
     let norm;
     try { norm = normalize(raw); } catch { return false; }
     if (!norm.nodes.length) return false;
     setLife(norm);
-    setSelected((cur) => (cur && norm.nodes.some((n) => n.id === cur) ? cur : null));
+    const goes = focus && norm.nodes.some((n) => n.id === focus) ? focus : null;
+    setSelected((cur) => goes || (cur && norm.nodes.some((n) => n.id === cur) ? cur : null));
     setStories(Array.isArray(raw.stories) ? raw.stories : []);
     rawRef.current = raw;
     if (from === 'local') {
@@ -336,7 +338,13 @@ export default function LifeView() {
       sentRef.current = '';
       keepFailed('');
       const doc = said ? { ...st.payload, stories: said } : st.payload;
-      await adopt(doc, 'local');
+      // **다 만들었으면 그것을 보여 준다.** 연표가 서 있던 자리에 그대로 있으면
+      // 사람 눈에는 아무 일도 안 일어난 것이다 (2026-09-09 사용자: "모델이 해석을
+      // 끝냈으면 그래프와 연표에 바로 적용되야 하는데 그게 안 되고 있는거 같어").
+      // 고른 노드는 연표를 그 자리로 미끄러뜨리고(LifeBoard.select) 그래프도
+      // 거기로 옮긴다(gv.focusOn). 첫 그래프(더한 것이 아닌 때)는 옮기지 않는다 —
+      // 전부가 새 것이라 고를 하나가 없다.
+      await adopt(doc, 'local', st.added ? addedFocus(doc, st.added.ids) : null);
       await keepInAccount(doc, '내 계정에 저장했습니다');
     }
   }, [adopt, keepInAccount, takeStories, keepFailed]);
@@ -823,6 +831,9 @@ function StoryBox({ job, local, blocking, sent, failed, onRestore, onSubmit, onC
   const done = job?.state === 'done';
   const pct = progressOf(job, local);
   const made = done && job.payload ? job.payload : null;
+  // 무엇이 늘었는지 **이름으로** 적는다 — 수만 적으면 '적용이 됐나'를 화면에서
+  // 확인할 수 없다 (2026-09-09 사용자).
+  const madeNames = made && job.added ? addedNames(made, job.added.ids) : [];
   return (
     <div className="life-paste life-story">
       {/* 도는 동안은 **보낸 글**이 선다 (2026-09-09 사용자). 칸이 비어 보기글이
@@ -837,7 +848,9 @@ function StoryBox({ job, local, blocking, sent, failed, onRestore, onSubmit, onC
             {running
               ? `${job.step || '읽는 중'} · ${job.elapsed ?? 0}초 · ${pct}%`
               : job.added
-                ? `있는 역사에 더했습니다 · 새 사건과 사람 ${job.added.nodes} · 새 관계 ${job.added.edges}${job.took != null ? ` · ${job.took}초 걸렸습니다` : ''}`
+                ? `있는 역사에 더했습니다 · ${madeNames.length
+                    ? madeNames.join(' · ') + (job.added.nodes > madeNames.length ? ` 외 ${job.added.nodes - madeNames.length}` : '')
+                    : `새 사건과 사람 ${job.added.nodes} · 새 관계 ${job.added.edges}`}${job.took != null ? ` · ${job.took}초 걸렸습니다` : ''}`
                 : made
                   ? `다 만들었습니다 · 사건과 사람 ${made.nodes?.length ?? 0} · 관계 ${made.edges?.length ?? 0}${job.took != null ? ` · ${job.took}초 걸렸습니다` : ''}`
                   : '다 만들었습니다'}

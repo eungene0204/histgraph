@@ -1162,6 +1162,33 @@ export function renderHead(subjectName) {
     <div class="life-col-head" style="width:${personal + stage}px">${esc(subjectName)}의 역사</div>`;
 }
 
+// 방금 더한 것 가운데 **화면이 보여 줄 하나**. 다 만들고도 연표가 서 있던 자리에
+// 그대로 있으면 사람 눈에는 아무 일도 안 일어난 것이다 (2026-09-09 사용자: "모델이
+// 해석을 끝냈으면 그래프와 연표에 바로 적용되야 하는데 그게 안 되고 있는거 같어" —
+// 실측: 2013년 사건을 더했는데 연표는 1980년대를 비추고 있었다).
+//
+// 고르는 자리는 **연표에 서는 것**이다 — 사건이고 해를 안다. 여럿이면 이른 것부터
+// (이야기의 차례대로 읽힌다). 사건이 없으면 사람·장소라도 고른다 — 연표는 못 가도
+// 그래프는 그리로 간다. 그것도 없으면 null 이고 화면은 움직이지 않는다.
+export function addedFocus(life, ids) {
+  if (!life || !Array.isArray(ids) || !ids.length) return null;
+  const want = new Set(ids.map(String));
+  const made = (life.nodes || []).filter((n) => want.has(n.id));
+  const dated = made.filter((n) => EVENT_TYPES.has(n.type) && n.year != null)
+    .sort((a, b) => a.year - b.year);
+  return (dated[0] || made[0] || null)?.id ?? null;
+}
+
+// 방금 더한 것의 이름 — 상자가 '무엇이 늘었나'를 수 대신 이름으로 적는다.
+export function addedNames(life, ids, cap = 2) {
+  if (!life || !Array.isArray(ids)) return [];
+  const want = new Set(ids.map(String));
+  const made = (life.nodes || []).filter((n) => want.has(n.id) && n.name);
+  const dated = made.filter((n) => EVENT_TYPES.has(n.type) && n.year != null)
+    .sort((a, b) => a.year - b.year);
+  return (dated.length ? dated : made).slice(0, cap).map((n) => n.name);
+}
+
 // 고른 노드를 연표 어디에 맞출 것인가. 그 노드의 표시가 서 있으면 그 자리(같은
 // 노드가 두 열에 다 서면 둘 다), 없으면 그와 이어진 표시들의 자리다 — 인물·장소
 // 노드는 연표에 서지 않지만 그 사람이 낀 사건들은 서 있다.
