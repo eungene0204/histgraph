@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 from html import escape
 
@@ -95,11 +96,28 @@ def store_name() -> str:
     return "배포 가입자 표" if neon.configured() else "이 컴퓨터의 가입자 표"
 
 
+# 두 저장소 다 **세계시로 적는다** (Postgres `now()` · SQLite
+# `CURRENT_TIMESTAMP`). 그대로 세우면 저녁에 가입한 사람이 오전에 온 것으로
+# 보인다 — 읽는 사람은 한국에 있다.
+KST = datetime.timezone(datetime.timedelta(hours=9))
+
+
 def when(value: object) -> str:
-    """저장소가 준 시각을 `2026-09-08 12:34` 로. Neon 은 `T` 로 잇고 소수점과
-    시간대를 달아 보내고, SQLite 는 공백으로 잇는다 — 둘 다 앞 열여섯 자다."""
-    text = str(value or "").strip().replace("T", " ")
-    return text[:16] if len(text) >= 16 else text[:10]
+    """저장소가 준 시각을 한국 시각 `2026-09-09 03:57` 로.
+
+    Neon 은 `2026-09-08 18:57:56.299034+00`, SQLite 는 `2026-09-08 18:57:56`
+    으로 준다. 시간대가 안 적혀 있으면 **세계시로 친다** — 두 저장소가 그렇게
+    적기 때문이다. 못 읽으면 온 대로 앞 열여섯 자만 세운다."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        got = datetime.datetime.fromisoformat(text.replace(" ", "T", 1))
+    except ValueError:
+        return text.replace("T", " ")[:16]
+    if got.tzinfo is None:
+        got = got.replace(tzinfo=datetime.timezone.utc)
+    return got.astimezone(KST).strftime("%Y-%m-%d %H:%M")
 
 
 def render(rows: list[dict], total: int, admin: dict) -> str:
@@ -122,7 +140,7 @@ def render(rows: list[dict], total: int, admin: dict) -> str:
     return _shell(f"""
 <main>
   <h1>가입자</h1>
-  <p class="sub">모두 <b>{total:,}</b>명 · {store_name()}를 읽었습니다.</p>
+  <p class="sub">모두 <b>{total:,}</b>명 · {store_name()}를 읽었습니다. 시각은 한국 시각입니다.</p>
   {table}
   {more}
   <p class="who">{escape(admin["email"])} 로 보고 있습니다.</p>

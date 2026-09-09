@@ -6901,6 +6901,13 @@ try:
           ("Cache-Control", "private, no-store") in room.headers
           and ("Vary", "Cookie") in room.headers)
     check("관리실은 검색에 담기지 않는다", 'content="noindex,nofollow"' in _room)
+    # 두 저장소 다 세계시로 적는다 — 그대로 세우면 저녁에 온 사람이 오전에
+    # 온 것으로 보인다. 시간대가 없으면 세계시로 친다.
+    import histgraph.console as _con  # noqa: E402
+    check("가입 시각은 한국 시각으로 세운다",
+          _con.when("2026-09-08 18:57:56.299034+00") == "2026-09-09 03:57"
+          and _con.when("2026-09-08 18:57:56") == "2026-09-09 03:57",
+          _con.when("2026-09-08 18:57:56"))
     # §1 — 사람이 읽는 자리에 한글 아닌 글을 세우지 않는다. **가입자의
     # 이메일과 이름만이 예외다**: 우리가 쓴 글이 아니라 그 사람의 것이다.
     _seen = re.sub(r"<[^>]+>", " ", _room[_room.find("<main"):_room.find("</main>")])
