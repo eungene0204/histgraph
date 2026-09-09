@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  normalize, removeNode, nodeYears, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
+  normalize, removeNode, editNode, edgeChoices, nodeYears, dateSaid, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
   ladder,
   graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
@@ -623,6 +623,106 @@ console.log('\n개인 역사 — 노드를 지운다');
   ], edges: [], timeline: [], turning_points: [{ event: '이사', turning_point_score: 7, reason: '두 번째 이사' }] };
   ok('이름이 겹치면 이름으로 지우지 않는다', removeNode(twins, 'a').turning_points.length === 1);
   ok('이름 하나뿐이면 이름으로 적힌 것도 지운다', removeNode(removeNode(twins, 'a'), 'b').turning_points.length === 0);
+}
+
+console.log('\n개인 역사 — 노드를 고친다');
+{
+  // 상세 패널의 '편집' (2026-09-09 사용자: "'삭제' 옆에 '편집'버튼 … 표시된 모든
+  // 정보를 사용자가 직접 편집 … 완료 버튼 누르면 그래프와 연표에 바로 반영").
+  // 지우기와 같은 규칙이다 — 고치는 것은 날것의 문서라 브라우저·계정에 남는
+  // 것도 같이 고쳐진다.
+  const view = normalize(sample);
+  const relsOf = (life, id) => life.edges.filter((e) => e.source === id || e.target === id)
+    .map((e) => ({ source: e.source, target: e.target, type: e.type, description: e.description, role: e.role }));
+
+  // 날짜 — 서버가 풀어 둔 옛 해(year·precision)가 남으면 고쳐도 연표는 옛 칸에 선다
+  const moved = normalize(editNode(sample, 'ev_worldcup', {
+    name: '월드컵의 기억', start_date: '2003-06', timeline: { date_text: '2003년 6월', life_stage: '고등학교' },
+  }));
+  ok('날것을 건드리지 않는다', sample.nodes.find((n) => n.id === 'ev_worldcup').name === '2002년 월드컵의 기억');
+  ok('이름이 바뀐다', moved.nodes.find((n) => n.id === 'ev_worldcup').name === '월드컵의 기억');
+  ok('고친 날짜로 연표가 다시 선다', moved.timeline.find((t) => t.event_id === 'ev_worldcup').year === 2003);
+  ok('나이도 다시 센다', moved.timeline.find((t) => t.event_id === 'ev_worldcup').age === 2003 - 1985);
+  ok('연표 점이 그 해로 옮겨 간다', personalMarks(moved).find((m) => m.id === 'ev_worldcup')?.year === 2003);
+  ok('안 건드린 것은 그대로', moved.nodes.find((n) => n.id === 'ev_worldcup').description
+    === sample.nodes.find((n) => n.id === 'ev_worldcup').description);
+
+  // 연표에서 내린다 — 앞뒤를 이어 붙이는 것은 지우기와 같다. 노드는 남는다.
+  const off = normalize(editNode(sample, 'ev_worldcup', { start_date: '', timeline: null }));
+  ok('날짜를 비우면 연표에서 내려간다', !off.timeline.some((t) => t.event_id === 'ev_worldcup')
+    && !personalMarks(off).some((m) => m.id === 'ev_worldcup'));
+  ok('내려도 노드는 그래프에 남는다', off.nodes.some((n) => n.id === 'ev_worldcup')
+    && graphPayload(off).nodes.some((n) => n.id === 'ev_worldcup'));
+  ok('연표의 앞뒤가 다시 이어진다',
+    off.timeline.every((t) => t.previous_event !== 'ev_worldcup' && t.next_event !== 'ev_worldcup'));
+
+  // 관계 — 화면에 선 것이 전부다
+  const rels = relsOf(view, 'ev_fail');
+  const cut = normalize(editNode(sample, 'ev_fail', { edges: rels.filter((e) => e.target !== 'ev_rejoin') }));
+  ok('지운 관계가 사라진다', !cut.edges.some((e) => e.source === 'ev_fail' && e.target === 'ev_rejoin'));
+  ok('남긴 관계는 그대로', cut.edges.some((e) => e.source === 'ev_found' && e.target === 'ev_fail'));
+  ok('남의 관계는 건드리지 않는다', cut.edges.length === view.edges.length - 1);
+  const added = normalize(editNode(sample, 'ev_fail', {
+    edges: [...rels, { source: 'ev_fail', target: 'ev_indie', type: 'caused', description: '실패가 독립을 불렀다' }] }));
+  const made = added.edges.find((e) => e.source === 'ev_fail' && e.target === 'ev_indie');
+  ok('더한 관계가 그래프에 선다', !!made && made.type === 'caused');
+  ok('사람이 적은 관계는 미룬 것이 아니다', made?.confidence === 1);
+
+  // 함께 — 관계에서 뺀 사람이 participants 로 다시 서지 않는다 (linkParticipants)
+  const found = view.nodes.find((n) => n.id === 'ev_found');
+  const solo = normalize(editNode(sample, 'ev_found', {
+    edges: relsOf(view, 'ev_found').filter((e) => e.source !== 'minjun' && e.target !== 'minjun'),
+    participants: found.participants, with_whom: [] }));
+  ok('민준이 창업에 서 있었다', view.edges.some((e) => e.source === 'minjun' && e.target === 'ev_found'));
+  ok('관계에서 뺀 사람은 참여자로도 다시 서지 않는다',
+    !solo.edges.some((e) => (e.source === 'minjun' && e.target === 'ev_found') || (e.source === 'ev_found' && e.target === 'minjun'))
+    && !(solo.nodes.find((n) => n.id === 'ev_found').participants || []).includes('minjun'));
+
+  // 전환점
+  const noTurn = normalize(editNode(sample, 'ev_fail', { turning: null }));
+  ok('전환점에서 내린다', !noTurn.turning_points.some((t) => t.event === 'ev_fail'));
+  ok('남의 전환점은 그대로', noTurn.turning_points.length === sample.turning_points.length - 1);
+  const newTurn = normalize(editNode(sample, 'ev_ai', { turning: { turning_point_score: 99, reason: '요즘의 일' } }));
+  const put = newTurn.turning_points.find((t) => t.event === 'ev_ai');
+  ok('전환점으로 세운다', put?.reason === '요즘의 일');
+  ok('점수는 1~10 안이다', put?.turning_point_score === 10);
+
+  // 인물의 날짜 — 사람이 적은 것은 셈한 것이 아니다 (dateSaid)
+  ok('셈한 날짜는 이름 옆에 안 선다', !dateSaid(view.nodes.find((n) => n.id === 'minjun')));
+  const said = normalize(editNode(sample, 'minjun', { start_date: '1985-07' }));
+  ok('사람이 적은 날짜는 선다', dateSaid(said.nodes.find((n) => n.id === 'minjun')));
+
+  // 그 무렵의 한국사 · 만약 없었다면
+  const links = view.historical_connections.filter((c) => c.personal_event === 'ev_bankrupt');
+  const relink = normalize(editNode(sample, 'ev_bankrupt', { links: links.map((c) => ({ ...c, description: '고친 설명' })) }));
+  ok('역사 연결의 설명을 고친다',
+    relink.historical_connections.filter((c) => c.personal_event === 'ev_bankrupt').every((c) => c.description === '고친 설명'));
+  const nolink = normalize(editNode(sample, 'ev_bankrupt', { links: [] }));
+  ok('역사 연결을 뺀다', !nolink.historical_connections.some((c) => c.personal_event === 'ev_bankrupt'));
+  ok('남의 역사 연결은 그대로', nolink.historical_connections.some((c) => c.personal_event === 'ev_move'));
+  const cf = normalize(editNode(sample, 'ev_bankrupt', {
+    counterfactual: [{ question: '부도가 없었다면?', answer: '대구에 남았을 것이다', possibilities: ['대구에 남았을 가능성', '  '] }] }));
+  const one = cf.counterfactual_analysis.find((c) => c.event === 'ev_bankrupt');
+  ok('만약 없었다면의 답을 고친다', one?.answer === '대구에 남았을 것이다');
+  ok('빈 줄은 갈렸을 길이 되지 않는다', one?.possibilities.length === 1);
+
+  // 고르개 — 두 끝에 놓을 수 있는 관계만 (놓을 수 없는 것을 고르면 다듬기가 버린다)
+  const meNode = view.nodes.find((n) => n.id === 'me');
+  const school = view.nodes.find((n) => n.id === 'middle_school');
+  const choice = edgeChoices(meNode, school);
+  ok('두 끝에 맞는 관계만 고르게 한다', choice.includes('studied_at') && !choice.includes('parent_of'));
+  ok('차례만 말하는 관계는 고르개에 없다',
+    !edgeChoices(view.nodes.find((n) => n.id === 'ev_move'), view.nodes.find((n) => n.id === 'ev_transfer')).includes('before'));
+  ok('고르개의 이름은 전부 한글', choice.every((k) => /[가-힣]/.test(EDGE_TYPE_KO[k] || '')));
+
+  // 화면 — 고치는 길이 지우는 길 옆에 서고, 완료가 그 자리에서 다시 그린다
+  const src = readFileSync(here('../src/components/LifeView.jsx'), 'utf8');
+  ok("상세 아래에 '편집' 이 '삭제' 옆에 선다", /삭제<\/button>[\s\S]{0,300}>편집<\/button>/.test(src));
+  ok('완료를 누르면 날것을 고쳐 다시 받아들인다', /editNode\(raw, id, patch\)[\s\S]{0,600}adopt\(next, 'local'\)/.test(src));
+  ok('고친 것은 계정에도 남는다', /const saveNode[\s\S]{0,900}keepInAccount\(next\)/.test(src));
+  ok('다른 노드로 옮겨 가면 폼이 접힌다', /\[selected\]/.test(src) && /setEditing\(false\)/.test(src));
+  ok('폼의 글자에 영어가 없다',
+    (src.match(/<option key=\{s\} value=\{s\}>|>완료<|>취소<|>관계 더하기<|>사람 더하기<|>전환점으로 세우기</g) || []).length >= 5);
 }
 
 console.log('\n개인 역사 — 내가 적은 이야기');

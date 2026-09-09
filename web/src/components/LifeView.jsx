@@ -4,7 +4,7 @@ import { auth, csrf } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, editNode, edgeChoices, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -166,6 +166,9 @@ export default function LifeView() {
   // 노드를 고르는 것은 "이것을 보겠다"는 뜻이라, 접혀 있으면 편다 — 접어 둔 채로
   // 두면 연표·그래프를 눌러도 아무 일이 없는 화면이 된다.
   const pick = useCallback((id, to = 'event') => { setSelected(id); setTab(to); setDetailOpen(true); }, []);
+  // 상세를 폼으로 펴 두었나 (아래 EventEdit). 다른 노드로 옮겨 가면 접는다 —
+  // 고치던 칸이 남의 노드 위에 서면 안 된다.
+  const [editing, setEditing] = useState(false);
   const [writing, setWriting] = useState(false);   // 이야기 상자를 폈나
   const [logOpen, setLogOpen] = useState(false);   // '내가 적은 이야기' 를 폈나
   // 사람이 한 번씩 적어 넣은 이야기 덩어리 — 문서가 `stories` 로 들고 다닌다.
@@ -543,6 +546,7 @@ export default function LifeView() {
   }, [life, context]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     boardRef.current?.select(selected);
+    setEditing(false);
     if (typeof history !== 'undefined') history.replaceState(null, '', selected ? `#${encodeURIComponent(selected)}` : location.pathname);
   }, [selected]);
   // 그래프는 통째로 싣는다 — 수십 노드라 자를 이유가 없다. 고른 노드가 중심.
@@ -600,6 +604,31 @@ export default function LifeView() {
     toast(gone ? `지웠습니다 · ${gone}` : '지웠습니다');
     await keepInAccount(next);
   }, [adopt, toast, keepInAccount]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- 노드 하나를 고친다 --------------------------------------------------
+  // 상세의 '편집' → 폼의 '완료' (2026-09-09 사용자: "완료 버튼 누르면 그래프와
+  // 연표에 바로 반영해주고"). 지우기와 같은 길이다 — **날것의 문서**를 고쳐
+  // (life.editNode) 다시 받아들이면(adopt) 화면·연표·그래프가 그 자리에서 다시
+  // 서고, 브라우저와 계정에도 같이 남는다.
+  //
+  // **못 세운 관계는 세어서 말한다.** 노드 타입을 바꾸면 그 노드에 놓여 있던
+  // 관계가 온톨로지에 어긋나 다듬기에서 빠질 수 있다 (tidyEdges) — 아무 말 없이
+  // 사라지면 '완료를 눌렀는데 안 됐다'로 보인다.
+  const saveNode = useCallback(async (patch) => {
+    const raw = rawRef.current;
+    const id = selectedRef.current;
+    if (!id || !raw) return;
+    const next = editNode(raw, id, patch);
+    setEditing(false);
+    let lost = 0;
+    try {
+      const drawn = normalize(next).edges.filter((e) => e.source === id || e.target === id).length;
+      lost = Math.max(0, (patch.edges || []).length - drawn);
+    } catch { /* 세지 못해도 고친 것은 들어간다 */ }
+    if (!(await adopt(next, 'local'))) { toast('고친 것을 받아들이지 못했습니다'); return; }
+    toast(lost ? `고쳤습니다 · 관계 ${lost}건은 두 끝에 맞지 않아 서지 못했습니다` : '고쳤습니다');
+    await keepInAccount(next);
+  }, [adopt, toast, keepInAccount]);
 
   const name = life?.subject?.name || '나';
 
@@ -727,7 +756,9 @@ export default function LifeView() {
                 <ChevronIcon to="right" />
               </button>
             </div>
-            {tab === 'event' && <EventDetail life={life} id={selected} onPick={pick} onDrop={dropNode} />}
+            {tab === 'event' && (editing && selected && life.nodes.some((n) => n.id === selected)
+              ? <EventEdit key={selected} life={life} id={selected} onDone={saveNode} onCancel={() => setEditing(false)} />
+              : <EventDetail life={life} id={selected} onPick={pick} onDrop={dropNode} onEdit={() => setEditing(true)} />)}
             {tab === 'analysis' && <Analysis life={life} onPick={(id) => pick(id)} />}
             {tab === 'people' && <Things life={life} />}
           </aside>
@@ -972,7 +1003,7 @@ function StoryLogIcon() {
 }
 
 // --- 사건 상세 ------------------------------------------------------------
-function EventDetail({ life, id, onPick, onDrop }) {
+function EventDetail({ life, id, onPick, onDrop, onEdit }) {
   const byId = useMemo(() => new Map(life.nodes.map((n) => [n.id, n])), [life]);
   // 지우기 전에 한 번 묻는다 — 되돌리는 길이 없다. 브라우저가 띄우는 상자는
   // 단추 글자가 우리 것이 아니므로(화면에 영어) 패널 안에서 묻는다.
@@ -1086,11 +1117,271 @@ function EventDetail({ life, id, onPick, onDrop }) {
               <button type="button" className="life-btn danger" onClick={() => { setAsk(false); onDrop(id); }}>지웁니다</button>
             </>
           ) : (
-            <button type="button" className="life-btn danger" onClick={() => setAsk(true)}>삭제</button>
+            <>
+              <button type="button" className="life-btn danger" onClick={() => setAsk(true)}>삭제</button>
+              {/* 고치는 길이 지우는 길 옆에 선다 (2026-09-09 사용자: "'삭제' 옆에
+                  '편집'버튼을 만들어줘"). 틀린 것을 지우기 전에 고쳐 보게 한다. */}
+              {onEdit && <button type="button" className="life-btn" onClick={() => onEdit(id)}>편집</button>}
+            </>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+// --- 사건 고치기 ------------------------------------------------------------
+// 상세에 선 것을 그 차례 그대로 칸으로 편다 (2026-09-09 사용자: "'삭제' 옆에
+// '편집'버튼을 만들어줘 … 그 노드에 표시된 모든 정보를 사용자가 직접 편집 할
+// 수있게 해줘(연도, 관계 등등). 완료 버튼 누르면 그래프와 연표에 바로 반영").
+// 읽던 자리에서 고치므로 칸의 차례는 상세의 차례와 같다 — 이름·날짜·설명,
+// 연표, 전환점, 감정, 함께, 관계, 그 무렵의 한국사, 만약 없었다면.
+//
+// **고르개는 놓을 수 있는 것만 세운다** (life.edgeChoices). 아무 관계나 고르게
+// 두면 온톨로지에 어긋난 선을 다듬기가 버려(tidyEdges) 완료를 눌러도 화면에
+// 아무 일이 안 일어난 것처럼 보인다 — 고르는 자리에서 막는 것이 낫다.
+//
+// **모델의 영어 식별자는 여기서도 안 보인다** (CLAUDE.md §1). 타입·관계·영향은
+// 한국어 이름으로 고르고, 상대 노드는 이름으로 고른다.
+function EventEdit({ life, id, onDone, onCancel }) {
+  const byId = useMemo(() => new Map(life.nodes.map((n) => [n.id, n])), [life]);
+  const node = byId.get(id) || null;
+  const item = life.timeline.find((x) => x.event_id === id) || null;
+  const turn = life.turning_points.find((p) => p.event === id) || null;
+  const [f, setF] = useState(() => {
+    const n = node || {};
+    // 관계로 이미 이어진 사람은 '함께'가 아니라 '관계'에서 고친다 (상세와 같은 규칙).
+    const tied = new Set(life.edges.filter((e) => e.source === id || e.target === id)
+      .map((e) => (e.source === id ? e.target : e.source)));
+    return {
+      type: n.type || 'PersonalEvent',
+      name: n.name || '',
+      start_date: n.start_date || '',
+      end_date: n.end_date || '',
+      location: n.location || '',
+      description: n.description || '',
+      emotional_impact: n.emotional_impact || '',
+      date_text: item?.date_text || '',
+      life_stage: item?.life_stage || '',
+      turning: turn ? { score: turn.turning_point_score ?? 5, reason: turn.reason || '' } : null,
+      participants: [...new Set(n.participants || [])],
+      withWhom: [...new Set(n.participants || [])]
+        .filter((p) => p !== life.subject?.id && !tied.has(p))
+        .map((p) => ({ value: p, was: nodeLabel(byId, p), name: nodeLabel(byId, p) }))
+        .filter((w) => w.was),
+      edges: life.edges.filter((e) => e.source === id || e.target === id).map((e) => ({
+        dir: e.source === id ? 'out' : 'in',
+        other: e.source === id ? e.target : e.source,
+        type: e.type, description: e.description || '', role: e.role || '',
+      })),
+      links: life.historical_connections.filter((c) => c.personal_event === id).map((c) => ({ ...c })),
+      cf: life.counterfactual_analysis.filter((c) => c.event === id)
+        .map((c) => ({ ...c, possibilities: (c.possibilities || []).join('\n') })),
+    };
+  });
+  const set = (patch) => setF((cur) => ({ ...cur, ...patch }));
+  const setAt = (key, i, patch) => setF((cur) => ({ ...cur, [key]: cur[key].map((row, k) => (k === i ? { ...row, ...patch } : row)) }));
+  const dropAt = (key, i) => setF((cur) => ({ ...cur, [key]: cur[key].filter((_, k) => k !== i) }));
+  // 이 노드에 놓을 수 있는 관계 — **고치는 중인 타입**으로 잰다 (타입을 바꾸면
+  // 놓을 수 있는 관계도 바뀐다).
+  const allowed = (row, type = f.type) => {
+    const other = byId.get(row.other);
+    if (!node || !other) return [];
+    const self = { ...node, type };
+    return row.dir === 'out' ? edgeChoices(self, other) : edgeChoices(other, self);
+  };
+  const reType = (row, type) => {
+    const list = allowed(row, type);
+    return list.includes(row.type) ? row : { ...row, type: list[0] || row.type };
+  };
+  const others = life.nodes.filter((n) => n.id !== id);
+  if (!node) return null;
+
+  const submit = (ev) => {
+    ev.preventDefault();
+    onDone({
+      type: f.type, name: f.name, start_date: f.start_date, end_date: f.end_date,
+      location: f.location, description: f.description, emotional_impact: f.emotional_impact,
+      // 날짜가 셋 다 비면 연표 항목을 내린다 — 해를 모르는 항목은 아무 자리도 못 잡는다.
+      timeline: (f.date_text.trim() || f.life_stage || f.start_date.trim())
+        ? { date_text: f.date_text, life_stage: f.life_stage || null } : null,
+      turning: f.turning ? { turning_point_score: f.turning.score, reason: f.turning.reason } : null,
+      participants: f.participants,
+      with_whom: f.withWhom.map((w) => (w.name.trim() === w.was ? w.value : w.name.trim())).filter(Boolean),
+      edges: f.edges.map((r) => ({
+        source: r.dir === 'out' ? id : r.other,
+        target: r.dir === 'out' ? r.other : id,
+        type: r.type, description: r.description, role: r.role,
+      })),
+      links: f.links,
+      counterfactual: f.cf.map((c) => ({ ...c, possibilities: String(c.possibilities || '').split('\n') })),
+    });
+  };
+
+  return (
+    <form className="life-edit" onSubmit={submit}>
+      <label className="life-field"><span>종류</span>
+        <select value={f.type} onChange={(e) => set({ type: e.target.value,
+          edges: f.edges.map((r) => reType(r, e.target.value)) })}>
+          {Object.entries(NODE_TYPE_KO).map(([k, ko]) => <option key={k} value={k}>{ko}</option>)}
+        </select>
+      </label>
+      <label className="life-field"><span>이름</span>
+        <input value={f.name} onChange={(e) => set({ name: e.target.value })} required />
+      </label>
+      <label className="life-field"><span>시작</span>
+        {/* 날짜를 고쳤는데 아래 '날짜 글'이 옛 날짜를 말하고 있으면 같이 비운다 —
+            연표가 2003년 칸에 세우면서 '2002년 6월'이라 적으면 그 줄이 거짓말을
+            한다. 사람이 손댄 날짜 글은 건드리지 않는다. */}
+        <input value={f.start_date} placeholder="1998-04-24 · 1998-04 · 1998"
+               onChange={(e) => set({ start_date: e.target.value,
+                 ...(f.date_text === (item?.date_text || '') ? { date_text: '' } : {}) })} />
+      </label>
+      <label className="life-field"><span>끝</span>
+        <input value={f.end_date} onChange={(e) => set({ end_date: e.target.value })} placeholder="비워 두면 없음" />
+      </label>
+      <label className="life-field"><span>장소</span>
+        <input value={f.location} onChange={(e) => set({ location: e.target.value })} />
+      </label>
+      <label className="life-field"><span>설명</span>
+        <textarea value={f.description} onChange={(e) => set({ description: e.target.value })} rows={4} />
+      </label>
+      <label className="life-field"><span>감정</span>
+        <input value={f.emotional_impact} onChange={(e) => set({ emotional_impact: e.target.value })} />
+      </label>
+
+      {/* 연표 — **세울지 말지를 묻는 칸은 두지 않는다.** 연표는 해를 아는 사건을
+          세우고(personalMarks) 그 규칙에 문턱을 놓지 않는다 (CLAUDE.md §1-3).
+          여기서 고치는 것은 그 자리에 적히는 말(날짜 글·시절)이고, 내리는 길은
+          날짜를 비우는 것이다 — 아래 한 줄이 그렇게 말한다.
+          나이는 칸으로 두지 않는다 — 생년과 해에서 세는 값이라 손으로 적으면 둘이
+          어긋난다 (2026-09-09 기준: 짐작한 값을 눈금으로 세우지 않는다). */}
+      {(item || EVENT_TYPES.has(f.type)) && (
+        <section className="life-sec">
+          <h3>연표</h3>
+          <label className="life-field"><span>날짜 글</span>
+            <input value={f.date_text} onChange={(e) => set({ date_text: e.target.value })}
+                   placeholder="1998년 봄 · 비우면 위 날짜를 씁니다" />
+          </label>
+          <label className="life-field"><span>시절</span>
+            <select value={f.life_stage} onChange={(e) => set({ life_stage: e.target.value })}>
+              <option value="">저절로</option>
+              {LIFE_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <p className="tl-hint">연표는 해를 아는 사건을 세웁니다. 날짜와 날짜 글을 다 비우면 내려갑니다.</p>
+        </section>
+      )}
+
+      <section className="life-sec">
+        <h3>전환점</h3>
+        {/* 1~10 점수는 칸으로도 두지 않는다 (2026-09-09 사용자 결정 셋: 중요도·영향
+            순위·전환점 점수) — 화면이 안 그리는 값을 고치라고 내밀면 그 눈금이
+            칸으로 되돌아온다. 적어 둔 값은 그대로 들고 있다가 도로 넣는다. */}
+        {f.turning ? (
+          <>
+            <label className="life-field"><span>까닭</span>
+              <input value={f.turning.reason} onChange={(e) => set({ turning: { ...f.turning, reason: e.target.value } })} />
+            </label>
+            <button type="button" className="life-btn" onClick={() => set({ turning: null })}>전환점에서 내리기</button>
+          </>
+        ) : (
+          <button type="button" className="life-btn" onClick={() => set({ turning: { score: 7, reason: '' } })}>전환점으로 세우기</button>
+        )}
+      </section>
+
+      <section className="life-sec">
+        <h3>함께</h3>
+        {f.withWhom.map((w, i) => (
+          <div className="life-row" key={i}>
+            <input value={w.name} onChange={(e) => setAt('withWhom', i, { name: e.target.value })} />
+            <button type="button" className="life-btn danger" onClick={() => dropAt('withWhom', i)}>빼기</button>
+          </div>
+        ))}
+        <button type="button" className="life-btn"
+                onClick={() => setF((cur) => ({ ...cur, withWhom: [...cur.withWhom, { value: '', was: '', name: '' }] }))}>
+          사람 더하기
+        </button>
+      </section>
+
+      <section className="life-sec">
+        <h3>관계</h3>
+        {f.edges.map((r, i) => (
+          <div className="life-rel-edit" key={i}>
+            <div className="life-row">
+              <select value={r.dir} onChange={(e) => setAt('edges', i, reType({ ...r, dir: e.target.value }))}>
+                <option value="out">이 노드가 앞</option>
+                <option value="in">이 노드가 뒤</option>
+              </select>
+              <select value={r.type} onChange={(e) => setAt('edges', i, { type: e.target.value })}>
+                {(allowed(r).includes(r.type) ? allowed(r) : [r.type, ...allowed(r)])
+                  .map((k) => <option key={k} value={k}>{EDGE_TYPE_KO[k] || k}</option>)}
+              </select>
+              <select value={r.other} onChange={(e) => setAt('edges', i, reType({ ...r, other: e.target.value }))}>
+                {others.map((n) => <option key={n.id} value={n.id}>{n.name} · {NODE_TYPE_KO[n.type]}</option>)}
+              </select>
+              <button type="button" className="life-btn danger" onClick={() => dropAt('edges', i)}>빼기</button>
+            </div>
+            <div className="life-row">
+              <input value={r.role} onChange={(e) => setAt('edges', i, { role: e.target.value })}
+                     placeholder="선 이름 (비우면 저절로)" />
+              <input value={r.description} onChange={(e) => setAt('edges', i, { description: e.target.value })}
+                     placeholder="설명" />
+            </div>
+          </div>
+        ))}
+        <button type="button" className="life-btn" onClick={() => {
+          const other = others[0];
+          if (!other) return;
+          const row = reType({ dir: 'out', other: other.id, type: '', description: '', role: '' });
+          setF((cur) => ({ ...cur, edges: [...cur.edges, row] }));
+        }}>관계 더하기</button>
+      </section>
+
+      {f.links.length > 0 && (
+        <section className="life-sec">
+          <h3>그 무렵의 한국사</h3>
+          {f.links.map((c, i) => (
+            <div className="life-rel-edit" key={i}>
+              <div className="life-row">
+                <input value={c.node_label || c.historical_event || ''}
+                       onChange={(e) => setAt('links', i, { historical_event: e.target.value, node_label: e.target.value })} />
+                <select value={c.impact_type} onChange={(e) => setAt('links', i, { impact_type: e.target.value })}>
+                  {Object.entries(IMPACT_KO).map(([k, ko]) => <option key={k} value={k}>{ko}</option>)}
+                </select>
+                <input className="life-year" value={c.year ?? ''} onChange={(e) => setAt('links', i, { year: e.target.value })} placeholder="해" />
+                <button type="button" className="life-btn danger" onClick={() => dropAt('links', i)}>빼기</button>
+              </div>
+              <textarea value={c.description || ''} onChange={(e) => setAt('links', i, { description: e.target.value })} rows={2} />
+            </div>
+          ))}
+        </section>
+      )}
+
+      {f.cf.length > 0 && (
+        <section className="life-sec">
+          <h3>만약 없었다면</h3>
+          {f.cf.map((c, i) => (
+            <div className="life-rel-edit" key={i}>
+              <div className="life-row">
+                <input value={c.question || ''} onChange={(e) => setAt('cf', i, { question: e.target.value })} placeholder="물음" />
+                <button type="button" className="life-btn danger" onClick={() => dropAt('cf', i)}>빼기</button>
+              </div>
+              <textarea value={c.answer || ''} onChange={(e) => setAt('cf', i, { answer: e.target.value })} rows={3} placeholder="답" />
+              <textarea value={c.possibilities} onChange={(e) => setAt('cf', i, { possibilities: e.target.value })}
+                        rows={2} placeholder="갈렸을 길 — 한 줄에 하나" />
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* 단추는 아래에 붙어 따라온다 — 칸이 길어 스크롤 끝까지 내려가야 고친 것을
+          거둘 수 있으면 안 된다. */}
+      <div className="life-edit-foot">
+        <button type="submit" className="life-btn go">완료</button>
+        <button type="button" className="life-btn" onClick={onCancel}>취소</button>
+      </div>
+    </form>
   );
 }
 

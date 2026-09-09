@@ -806,6 +806,18 @@ export function normalize(raw) {
 // 유령으로 선다. 분석 쪽은 아이디 대신 **이름**을 적어 두기도 하므로(모델이
 // 그렇게 답한다) 이름으로도 재되, 같은 이름의 노드가 또 남아 있으면 이름으로는
 // 재지 않는다 — 이름만으로는 아무것도 단정하지 않는다.
+// 연표에서 한 항목을 뺀 자리는 앞뒤를 이어 붙인다 — 사슬에 구멍을 내지 않는다.
+function cutTimeline(timeline, id) {
+  const gap = (timeline || []).find((t) => t && t.event_id === id) || null;
+  return (timeline || []).filter((t) => t && t.event_id !== id).map((t) => (
+    t.previous_event !== id && t.next_event !== id ? t : {
+      ...t,
+      previous_event: t.previous_event === id ? (gap?.previous_event ?? null) : t.previous_event,
+      next_event: t.next_event === id ? (gap?.next_event ?? null) : t.next_event,
+    }
+  ));
+}
+
 export function removeNode(raw, id) {
   const doc = { ...raw };
   const node = (raw.nodes || []).find((n) => n && n.id === id) || null;
@@ -814,15 +826,7 @@ export function removeNode(raw, id) {
   const hit = (v) => v === id || (label !== '' && typeof v === 'string' && norm(v) === label);
 
   doc.edges = (raw.edges || []).filter((e) => e && e.source !== id && e.target !== id);
-  // 연표에서 뺀 자리는 앞뒤를 이어 붙인다 — 사슬에 구멍을 내지 않는다.
-  const gap = (raw.timeline || []).find((t) => t && t.event_id === id) || null;
-  doc.timeline = (raw.timeline || []).filter((t) => t && t.event_id !== id).map((t) => (
-    t.previous_event !== id && t.next_event !== id ? t : {
-      ...t,
-      previous_event: t.previous_event === id ? (gap?.previous_event ?? null) : t.previous_event,
-      next_event: t.next_event === id ? (gap?.next_event ?? null) : t.next_event,
-    }
-  ));
+  doc.timeline = cutTimeline(raw.timeline, id);
   doc.historical_connections = (raw.historical_connections || []).filter((c) => c && c.personal_event !== id);
   for (const key of ['turning_points', 'impact_analysis', 'counterfactual_analysis']) {
     if (raw[key]) doc[key] = raw[key].filter((it) => !(it && hit(it.event)));
@@ -839,6 +843,143 @@ export function removeNode(raw, id) {
   // 주인공을 지웠으면 자리를 비운다 — normalize 가 남은 인물에서 다시 고른다.
   if (raw.subject && raw.subject.id === id) doc.subject = null;
   return doc;
+}
+
+// --- 고치기 ----------------------------------------------------------------
+// 상세 패널의 '편집' (2026-09-09 사용자: "'삭제' 옆에 '편집'버튼을 만들어줘 …
+// 그 노드에 표시된 모든 정보를 사용자가 직접 편집 할 수있게 해줘(연도, 관계
+// 등등). 완료 버튼 누르면 그래프와 연표에 바로 반영"). 지우기(removeNode)와
+// 같은 규칙이다 — 고치는 것은 **날것의 문서**라 브라우저·계정에 남는 것도
+// 같이 고쳐진다. 화면이 쥔 것(normalize 를 지난 것)만 고치면 새로고침에
+// 옛 값이 돌아온다.
+//
+// **사람이 적은 값은 짐작한 값을 이긴다.** 날짜를 고치면 거기서 나온 것(해·
+// 정밀도)을 지워 normalize 가 새 날짜로 다시 세게 하고, 인물의 날짜를 적으면
+// 미룬 표식(confidence < 1)을 걷는다 — 사람이 적은 날짜는 셈한 날짜가 아니다
+// (dateSaid). 연표 항목의 해·나이도 같이 비운다.
+//
+// **관계는 화면에 선 것이 전부다.** 이 노드에 닿는 날것의 엣지를 통째로 걷고
+// 폼이 준 것을 놓는다 — 화면에 없던 것(스키마에 어긋나 버려진 것·차례만 말하는
+// before·after)이 문서 안에 몰래 남아 있다가 되살아나지 않는다. 사람이 지운
+// 관계가 participants 로 다시 서는 것도 여기서 막는다 (linkParticipants).
+export function editNode(raw, id, patch) {
+  const doc = { ...raw };
+  const old = (raw.nodes || []).find((n) => n && n.id === id);
+  if (!old || !patch) return doc;
+  const clean = (v) => { const s = String(v ?? '').trim(); return s || null; };
+  const next = { ...old };
+  next.name = clean(patch.name) || old.name;
+  if (patch.type && NODE_TYPE_KO[patch.type]) next.type = patch.type;
+  for (const key of ['start_date', 'end_date', 'location', 'description', 'emotional_impact']) {
+    if (key in patch) next[key] = clean(patch[key]);
+  }
+  // 날짜에서 나온 값은 다시 센다 (normalize 는 둘 다 있으면 건드리지 않는다).
+  delete next.year; delete next.end_year; delete next.precision;
+  if (next.start_date && next.start_date !== old.start_date) next.confidence = 1;
+
+  // 관계 — 이 노드에 닿는 것을 통째로 갈아 놓는다.
+  const touches = (e) => e && (e.source === id || e.target === id);
+  if ('edges' in patch) {
+    const was = new Map((raw.edges || []).filter(touches).map((e) => [`${e.source}>${e.target}|${e.type}`, e]));
+    const edges = [];
+    const seen = new Set();
+    for (const e of patch.edges || []) {
+      const source = clean(e.source); const target = clean(e.target);
+      const key = `${source}>${target}|${e.type}`;
+      if (!source || !target || source === target || !EDGE_TYPE_KO[e.type] || seen.has(key)) continue;
+      if (source !== id && target !== id) continue;
+      seen.add(key);
+      const kept = { ...(was.get(key) || {}), source, target, type: e.type, description: clean(e.description) };
+      kept.confidence = was.has(key) ? (was.get(key).confidence ?? 1) : 1;
+      if (clean(e.role)) kept.role = clean(e.role); else delete kept.role;
+      edges.push(kept);
+    }
+    doc.edges = [...(raw.edges || []).filter((e) => !touches(e)), ...edges];
+  }
+
+  // 함께한 사람 — 관계로 이어 둔 사람과 폼이 남긴 이름만 남는다. 사람이 지운
+  // 관계의 상대가 여기 남아 있으면 normalize 가 그 선을 도로 긋는다.
+  if ('with_whom' in patch) {
+    const tied = new Set((doc.edges || raw.edges || []).filter(touches).flatMap((e) => [e.source, e.target]));
+    const withWhom = (patch.with_whom || []).map(clean).filter(Boolean);
+    const people = [...(patch.participants || []).map(clean)
+      .filter((p) => p && (tied.has(p) || withWhom.includes(p))), ...withWhom];
+    next.participants = [...new Set(people)];
+    if (!next.participants.length) delete next.participants;
+  }
+  doc.nodes = (raw.nodes || []).map((n) => (n && n.id === id ? next : n));
+
+  // 이름이 바뀌면 이름으로 적어 둔 분석 묶음이 길을 잃는다 — 아이디로 바꿔 적는다.
+  const label = norm(old.name);
+  const same = (v) => v === id || (typeof v === 'string' && norm(v) === label);
+
+  // 연표 — null 이면 내린다 (앞뒤를 이어 붙이는 것은 지우기와 같다).
+  if ('timeline' in patch) {
+    const list = (raw.timeline || []).map((t) => ({ ...t }));
+    const at = list.findIndex((t) => t && t.event_id === id);
+    if (patch.timeline === null) {
+      doc.timeline = cutTimeline(raw.timeline, id);
+    } else {
+      const item = at >= 0 ? list[at] : { event_id: id, previous_event: null, next_event: null };
+      item.date_text = clean(patch.timeline.date_text);
+      item.life_stage = LIFE_STAGES.includes(patch.timeline.life_stage) ? patch.timeline.life_stage : null;
+      item.year = null; item.age = null;   // 날짜에서 다시 센다
+      if (at < 0) list.push(item);
+      doc.timeline = list;
+    }
+  }
+
+  // 전환점 — null 이면 내린다.
+  if ('turning' in patch) {
+    const rest = (raw.turning_points || []).filter((t) => !(t && same(t.event)));
+    doc.turning_points = patch.turning === null ? rest
+      : [...rest, { ...(raw.turning_points || []).find((t) => t && same(t.event)),
+        event: id, turning_point_score: clamp(Math.round(+patch.turning.turning_point_score || 0), 1, 10),
+        reason: clean(patch.turning.reason) || '' }];
+  }
+
+  // 그 무렵의 한국사 · 만약 없었다면 — 남긴 것만 다시 놓는다.
+  if ('links' in patch) {
+    doc.historical_connections = [
+      ...(raw.historical_connections || []).filter((c) => c && c.personal_event !== id),
+      ...(patch.links || []).map((c) => ({ ...c, personal_event: id,
+        historical_event: clean(c.historical_event) || '',
+        impact_type: IMPACT_KO[c.impact_type] ? c.impact_type : 'possible',
+        year: c.year === '' || c.year == null ? null : Number(c.year),
+        description: clean(c.description) })),
+    ];
+  }
+  if ('counterfactual' in patch) {
+    doc.counterfactual_analysis = [
+      ...(raw.counterfactual_analysis || []).filter((c) => !(c && same(c.event))),
+      ...(patch.counterfactual || []).map((c) => ({ ...c, event: id,
+        question: clean(c.question) || '', answer: clean(c.answer),
+        possibilities: (c.possibilities || []).map(clean).filter(Boolean) })),
+    ];
+  }
+  // 이름만 적어 둔 나머지 묶음도 아이디로 옮겨 둔다 — 이름을 고쳐도 안 잃는다.
+  if (next.name !== old.name) {
+    for (const key of ['impact_analysis']) {
+      if (raw[key]) doc[key] = raw[key].map((it) => (it && same(it.event) ? { ...it, event: id } : it));
+    }
+    const ranking = raw.influence_ranking;
+    const items = Array.isArray(ranking) ? ranking : (Array.isArray(ranking?.items) ? ranking.items : null);
+    if (items) {
+      const moved = items.map((it) => (it && same(it.node) ? { ...it, node: id } : it));
+      doc.influence_ranking = Array.isArray(ranking) ? moved : { ...ranking, items: moved };
+    }
+    if (raw.subject && raw.subject.id === id) doc.subject = { ...raw.subject, name: next.name };
+  }
+  if (raw.subject && raw.subject.id === id && next.start_date !== old.start_date) {
+    doc.subject = { ...(doc.subject || raw.subject), birth_year: null };   // normalize 가 새 날짜에서 다시 센다
+  }
+  return doc;
+}
+
+// 관계 고르개가 세우는 것 — 이 두 끝 사이에 놓을 수 있는 관계 (LIFE_EDGES 의
+// 온톨로지 그대로다). 차례만 말하는 것(SEQUENCE_ONLY)은 화면에 서지 않으므로 뺀다.
+export function edgeChoices(source, target) {
+  return Object.keys(LIFE_EDGES).filter((k) => !SEQUENCE_ONLY.has(k) && fits(k, source, target));
 }
 
 // --- 내가 적은 이야기 -------------------------------------------------------
