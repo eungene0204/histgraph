@@ -18,6 +18,15 @@
 | `이칭` | 설명 첫 문장이 상대를 '또는 …', '…이라고도 한다'로 부른다 | `임오화변` / `사도세자 사건` |
 | `설명` | 설명 첫 문장이 글자 그대로 같다 (같은 문서가 두 노드에) | `진주민란` / `임술민란` |
 | `핵심어` | 갈래 접미사(전투·대첩·사건…)를 떼면 같은 이름 | `홍산대첩` / `홍산 전투` |
+| `자리` | (`role` 만) 한쪽 이름이 다른 쪽으로 끝난다 — 기관·나라·품계가 앞에 붙는다 | `사헌부 대사헌` / `대사헌` |
+
+자리 규칙은 2026-09-10 에 더했다. 무게(`central`)를 재다가 드러났다 —
+`role` 노드 285개 중 202개에 사람이 하나뿐이었는데, 파 보니 태반이 **같은
+자리가 여러 노드로 갈라진 것**이었다. 대통령 자리 하나가 일곱 조각이었다
+(`대통령` 4명 · `대한민국 대통령` 15명 · `1대 대통령` · `2대 대통령` ·
+`대한민국 초대 대통령` · `대한민국 임시정부 대통령` · `대통령 대리`).
+산문 추출이 만든 `ex:role:` 노드가 Wikidata 의 자리와 따로 서 있던 것이라,
+같은 병을 §1-7(`positions`)이 왕 자리에서 이미 한 번 앓았다.
 
 **규칙은 후보를 찾을 뿐, 합치지 않는다.** 라벨 유사도로 합치면 절반이
 틀린다 (`promote.title_variant_matches` 주석의 실측). 여기서도 같다:
@@ -53,6 +62,15 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# 자리 이름의 짧은 쪽이 이만큼은 돼야 후보로 올린다. **두 글자 자리 이름은
+# 총칭이다** — 장관·의원·판관·승지·제학·시랑·정사·시중·황제가 다 그렇고,
+# 구체적인 자리는 이름이 길다(대사헌·우의정·좌참찬·부수찬·동부승지).
+# 실측(2026-09-10, 한국사 파생본): 짧은 쪽이 두 글자인 후보 36쌍 중 35쌍이
+# '다른 자리'였고, 하나뿐인 예외는 사람이 아무도 안 걸린 빈 노드('세자')였다.
+# 원본 그래프에서는 이 문턱이 없으면 '의원'이 은평구의원·캘리포니아주
+# 하원의원까지 끌고 와 후보가 백 쌍 넘게 는다.
+SEAT_MIN = 3
 
 # 갈래 접미사. '홍산대첩'과 '홍산 전투'가 같은 싸움임을 보려면 떼야 한다.
 KIND_SUFFIX = re.compile(
@@ -326,7 +344,46 @@ def find(conn: sqlite3.Connection, node_type: str = "event") -> list[Candidate]:
                     continue                      # 제1차 ≠ 제2차
                 add("핵심어", x, y, f"갈래를 떼면 '{c}'")
 
-    order = {"라벨": 0, "별칭": 1, "이칭": 2, "설명": 3, "핵심어": 4}
+    # 규칙 6 — 자리 이름 (`role` 에만 건다). 기관·나라·품계 이름이 앞에
+    # 붙어도 자리는 같다: '사헌부 대사헌' = '대사헌', '의정부 우의정' =
+    # '우의정', '행 좌참찬' = '좌참찬'. 그래서 **한쪽 이름이 다른 쪽으로
+    # 끝나면** 후보로 올린다.
+    #
+    # 포함이 아니라 **끝맺음**인 것이 중요하다. 포함으로 재면 '조선 왕세자'가
+    # '조선 왕'의 후보가 되고(다른 자리다) 후보가 84쌍으로 는다. 끝맺음이면
+    # 62쌍이고 '조선 왕세자'는 '왕세자'로 끝나지 '조선 왕'으로 끝나지 않아
+    # 애초에 올라오지 않는다.
+    #
+    # **그래도 절반은 다른 자리다.** '동부승지'는 승지 여섯 중 하나이지
+    # '승지'와 같은 자리가 아니고, '대한민국의 법무부 장관'과 '법무부
+    # 장관'은 남과 북이다(뒤엣것에 리승엽·리용이 걸려 있다). 규칙은 후보를
+    # 찾을 뿐이다 — 판정은 표가 한다.
+    if node_type == "role":
+        holders: dict[str, set[str]] = {}
+        for r in conn.execute(
+            "SELECT dst, src FROM edges WHERE type = 'held_position'"
+        ):
+            holders.setdefault(r["dst"], set()).add(r["src"])
+        flat = {nid: PUNCT.sub("", n["label"]) for nid, n in nodes.items()}
+        ids = sorted(nodes)
+        for i, x in enumerate(ids):
+            fx = flat[x]
+            for y in ids[i + 1:]:
+                fy = flat[y]
+                if fx == fy or min(len(fx), len(fy)) < SEAT_MIN:
+                    continue
+                if not (fx.endswith(fy) or fy.endswith(fx)):
+                    continue
+                # 같은 사람이 둘 다 가졌으면 한 자리를 두 번 적은 것일 때가
+                # 많다 — 판정을 돕는 근거로 적어 준다. 판정하지는 않는다.
+                both = holders.get(x, set()) & holders.get(y, set())
+                short, long_ = sorted((fx, fy), key=len)
+                why = f"'{long_}' 이 '{short}' 으로 끝난다"
+                if both:
+                    why += f" · 같은 사람 {len(both)}명"
+                add("자리", x, y, why)
+
+    order = {"라벨": 0, "별칭": 1, "이칭": 2, "설명": 3, "핵심어": 4, "자리": 5}
     return sorted(found.values(), key=lambda c: (order[c.rule], c.a))
 
 

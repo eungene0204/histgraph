@@ -7559,5 +7559,64 @@ with GraphStore(Path(_tmp_cta.name) / "anchor.sqlite") as _st:
           [r["label"] for r in ct_mod.top(_st.conn, 2, "event")][0] == "큰일")
 _tmp_cta.cleanup()
 
+print("\n[자리 — 같은 자리가 여러 노드로 서 있다 (dedupe 규칙 6)]")
+from histgraph import duplicates as dup_seat  # noqa: E402
+from histgraph.sources.wikipedia import clean_lead  # noqa: E402
+
+_tmp_seat = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_seat.name) / "seat.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="wd:대사헌", type="role", label="대사헌", source="t"),
+        Node(id="ex:사헌부 대사헌", type="role", label="사헌부 대사헌", source="t"),
+        Node(id="wd:승지", type="role", label="승지", source="t"),
+        Node(id="ex:동부승지", type="role", label="동부승지", source="t"),
+        Node(id="wd:조선 왕", type="role", label="조선 왕", source="t"),
+        Node(id="wd:조선 왕세자", type="role", label="조선 왕세자", source="t"),
+        Node(id="wd:의원", type="role", label="의원", source="t"),
+        Node(id="wd:은평구의원", type="role", label="은평구의원", source="t"),
+        Node(id="p:갑", type="person", label="갑", source="t"),
+    ])
+    _st.upsert_edges([
+        Edge(src="p:갑", dst="wd:대사헌", type="held_position", source="t"),
+        Edge(src="p:갑", dst="ex:사헌부 대사헌", type="held_position", source="t"),
+    ])
+    _seat = {frozenset((c.a, c.b)): c for c in dup_seat.find(_st.conn, "role")}
+    check("기관 이름이 앞에 붙은 같은 자리를 후보로 올린다",
+          frozenset(("wd:대사헌", "ex:사헌부 대사헌")) in _seat)
+    check("같은 사람이 둘 다 가졌으면 근거에 적는다",
+          "같은 사람 1명" in _seat[frozenset(("wd:대사헌", "ex:사헌부 대사헌"))].evidence,
+          _seat[frozenset(("wd:대사헌", "ex:사헌부 대사헌"))].evidence)
+    # **포함이 아니라 끝맺음이다.** '조선 왕세자'는 '왕세자'로 끝나지
+    # '조선 왕'으로 끝나지 않는다 — 다른 자리이므로 물어볼 것도 아니다.
+    check("이름이 안에 든 것만으로는 후보가 아니다",
+          frozenset(("wd:조선 왕", "wd:조선 왕세자")) not in _seat)
+    # 두 글자 자리 이름은 총칭이다. 실측 36쌍 중 35쌍이 다른 자리였다.
+    check("두 글자 총칭은 후보로 올리지 않는다",
+          frozenset(("wd:의원", "wd:은평구의원")) not in _seat
+          and frozenset(("wd:승지", "ex:동부승지")) not in _seat)
+    check("자리 규칙은 role 에만 건다",
+          all(c.rule != "자리" for c in dup_seat.find(_st.conn, "person")))
+_tmp_seat.cleanup()
+
+# 저장소의 표에 자리 판정이 실려 있는가 (2026-09-10 에 60쌍을 적었다).
+_repo_dup = dup_seat.load_table(Path("data/duplicates.tsv"))
+_dup_keys = {v.key for v in _repo_dup}
+check("대통령 조각을 합치는 줄이 표에 있다",
+      frozenset(("wd:Q6296418", "wd:Q30461")) in _dup_keys)
+check("승지와 동부승지를 가르는 줄이 표에 있다",
+      frozenset(("wd:Q7457050", "ex:role:동부승지")) in _dup_keys)
+
+print("\n[위키백과 도입부의 뜻 없는 머리글자]")
+# 실측: `대한민국 대통령`·`국무총리`·`대법원장` 등 아홉 문서의 설명이
+# 크메르 문자 두 글자와 빈 줄로 시작하고 있었다. 뒤에 한글이 있어서
+# 한국어 관문이 놓친다.
+check("한글도 한자도 로마자도 없는 머리 줄은 뗀다",
+      clean_lead("\u1796\u1419\n\n대한민국 대통령(大韓民國 大統領)은")
+      == "대한민국 대통령(大韓民國 大統領)은")
+check("표제어로 시작하는 보통 도입부는 그대로 둔다",
+      clean_lead("대한민국 대통령은 국가원수이다.") == "대한민국 대통령은 국가원수이다.")
+check("괄호·낫표로 시작해도 그대로 둔다",
+      clean_lead("《난중일기》는 이순신이 쓴 일기다.") == "《난중일기》는 이순신이 쓴 일기다.")
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

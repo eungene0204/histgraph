@@ -510,6 +510,25 @@ def strip_sections(text: str, cut: re.Pattern[str] = CUT_SECTIONS) -> str:
     return re.sub(r"\n{3,}", "\n\n", "".join(keep)).strip()
 
 
+# 도입부 맨 앞에 한글도 한자도 로마자도 숫자도 없는 글자 뭉치가 붙어 오는
+# 문서가 있다. 실측(2026-09-10): `대한민국 대통령`·`국무총리`·`대법원장`·
+# `국회의장`·`헌법재판소장`·`햇볕정책` 등 아홉 문서의 설명이 `ពᐙ` 두 글자와
+# 빈 줄로 시작하고 있었다 (크메르 문자 + 캐나다 원주민 음절문자). 문서 이름이
+# 걸린 틀이 그렇게 렌더된 것이라 뜻이 없다. 한국어 관문(`check_korean`)은 뒤에
+# 한글이 있어서 놓치고, 화면에는 그대로 나간다.
+#
+# **첫 빈 줄 앞이 통째로 그런 글자면 버린다.** 한국어 문서의 도입부는 언제나
+# 표제어로 시작하므로 이 조건에 걸릴 일이 없다.
+_LEAD_OK = re.compile(r"[가-힣ㄱ-ㅎa-zA-Z0-9一-鿿\u3400-\u4dbf]")
+
+
+def clean_lead(text: str) -> str:
+    head, sep, rest = text.partition("\n")
+    if sep and head.strip() and not _LEAD_OK.search(head):
+        return clean_lead(rest.lstrip("\n"))
+    return text
+
+
 def fetch_extracts(
     fetcher: Fetcher,
     titles: list[str],
@@ -567,7 +586,7 @@ def fetch_extracts(
         for page in data.get("query", {}).get("pages", []):
             if page.get("missing"):
                 continue
-            text = (page.get("extract") or "").strip()
+            text = clean_lead((page.get("extract") or "").strip())
             if text:
                 title = page["title"]
                 out[title] = text
@@ -638,7 +657,7 @@ def fetch_articles(
                 missing.append(requested)
                 continue
             qid = page.get("pageprops", {}).get("wikibase_item")
-            extract = (page.get("extract") or "").strip()
+            extract = clean_lead((page.get("extract") or "").strip())
             if not qid or not extract:
                 missing.append(requested)
                 continue
