@@ -1473,16 +1473,28 @@ def cmd_reigns(args: argparse.Namespace) -> int:
     날짜 칸을 갱신하지 않는다. 다만 props 는 덮어쓰므로(`props =
     excluded.props`) 재위 표식은 날아간다. 수집 뒤에 다시 돌릴 것."""
     with GraphStore(args.db) as store:
-        pairs = store.conn.execute(
+        # 자리 노드가 `wd:` 가 아닐 수도 있다 — 왕조별로 가른 임금 자리는
+        # `ex:role:고려 왕` 이고 원래 QID 를 props 에 들고 있다
+        # (`positions` 모듈 머리글). QID 로 못 옮기면 그 자리에 앉은 왕들이
+        # 재위를 영영 못 받는다.
+        from . import positions as pos_mod
+        rows = store.conn.execute(
             """SELECT src, dst FROM edges
-                WHERE type = 'held_position'
-                  AND src LIKE 'wd:%' AND dst LIKE 'wd:%'"""
+                WHERE type = 'held_position' AND src LIKE 'wd:%'"""
         ).fetchall()
+        seat_qid: dict[str, str] = {}
+        pairs = []
+        for r in rows:
+            qid = seat_qid.get(r["dst"]) or pos_mod.position_qid(store.conn, r["dst"])
+            if not qid:
+                continue
+            seat_qid[r["dst"]] = qid
+            pairs.append(r)
         if not pairs:
             print("  직위 엣지가 없습니다.")
             return 0
         labels = dict(store.conn.execute("SELECT id, label FROM nodes"))
-        positions = sorted({r["dst"][len("wd:"):] for r in pairs})
+        positions = sorted(set(seat_qid.values()))
         print(f"  직위 엣지 {len(pairs):,}개 · 직위 {len(positions):,}종 조회 중...")
 
         fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.5))
@@ -1506,7 +1518,7 @@ def cmd_reigns(args: argparse.Namespace) -> int:
             print(f"  대통령 자리 {len(president)}종: "
                   + " · ".join(sorted(president.values()))[:150])
 
-        wanted = [r for r in pairs if r["dst"][len("wd:"):] in seats]
+        wanted = [r for r in pairs if seat_qid[r["dst"]] in seats]
         persons = sorted({r["src"][len("wd:"):] for r in wanted})
         print(f"  그 자리에 앉은 인물 {len(persons):,}명 — 재위·재임 조회 중...")
         reigns = wikidata.fetch_reigns(
@@ -1526,7 +1538,7 @@ def cmd_reigns(args: argparse.Namespace) -> int:
         filled = 0
         seated: set[str] = set()      # 재위를 하나라도 채운 인물
         for r in wanted:
-            key = (r["src"][len("wd:"):], r["dst"][len("wd:"):])
+            key = (r["src"][len("wd:"):], seat_qid[r["dst"]])
             start, end = reigns.get(key, (None, None))
             if not (start or end):
                 continue
@@ -1897,6 +1909,51 @@ def cmd_nikh(args: argparse.Namespace) -> int:
         merged = nikh.apply_merges(store, rep.merges)
         if merged:
             print(f"  ✓ 추출 고아 {merged}개를 정본 노드로 합침")
+    return 0
+
+
+def cmd_positions(args: argparse.Namespace) -> int:
+    """왕조가 나눠 쓰는 임금 자리를 가른다 (`positions` 모듈 머리글).
+
+        uv run histgraph positions --dry-run
+        uv run histgraph positions
+        uv run histgraph --db data/korea.sqlite positions
+    """
+    from . import positions as pos
+
+    with GraphStore(args.db) as store:
+        label = {r["id"]: r["label"]
+                 for r in store.conn.execute("SELECT id, label FROM nodes")}
+        rep = pos.split(store, dry_run=args.dry_run)
+        fix = pos.settle(store, dry_run=args.dry_run)
+
+        head = "옮길" if args.dry_run else "옮긴"
+        print(f"  일반 자리에서 {head} 임금 {len(rep.moved):,}명")
+        for seat, n in sorted(rep.seats.items(), key=lambda kv: -kv[1]):
+            print(f"    {label.get(seat, seat)}  {n}명")
+        if rep.unreigned:
+            # 재위 근거가 없는 참여는 임금이 아닐 수 있다. 세어서 보여만 준다.
+            names = " · ".join(label.get(p, p) for p, _ in rep.unreigned[:args.show])
+            print(f"  재위 근거가 없어 그대로 둔 참여 {len(rep.unreigned):,}건: {names}")
+        if rep.unknown:
+            # 짐작으로 옮기면 광개토왕이 고려 왕이 된다. 세어서 보여만 준다.
+            names = " · ".join(label.get(p, p) for p, _ in rep.unknown[:args.show])
+            print(f"  왕조를 몰라 그대로 둔 임금 {len(rep.unknown):,}명 "
+                  f"(시대 엣지가 없다): {names}")
+        for nid, was, now in fix.renamed:
+            print(f"  이름  {was} → {now}  ({nid})")
+        for nid, was, now in fix.retyped:
+            print(f"  타입  {was} → {now}  ({nid})")
+        for old, new in fix.merged:
+            print(f"  합침  {label.get(old, old)} ({old}) → {label.get(new, new)}")
+        for nid in rep.emptied:
+            print(f"  사람이 안 남은 일반 자리를 지움: {label.get(nid, nid)} ({nid})")
+
+        print("\n  지금 서 있는 임금 자리")
+        for nid, name, n in pos.seats(store.conn):
+            print(f"    {name:14} {n:>4}명  ({nid})")
+        if args.dry_run:
+            print("\n  (dry-run: 고치지 않음)")
     return 0
 
 
@@ -2761,6 +2818,13 @@ def main(argv: list[str] | None = None) -> int:
     p_nk.add_argument("--show", type=int, default=20, help="출력할 예시 수")
     p_nk.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
     p_nk.set_defaults(func=cmd_nikh)
+
+    p_ps = sub.add_parser(
+        "positions", help="왕조가 나눠 쓰는 임금 자리를 왕조별로 가른다"
+    )
+    p_ps.add_argument("--show", type=int, default=12, help="출력할 예시 수")
+    p_ps.add_argument("--dry-run", action="store_true", help="고치지 않고 세기만")
+    p_ps.set_defaults(func=cmd_positions)
 
     p_hm = sub.add_parser(
         "homonyms", help="이름이 같을 뿐 다른 사람인 연결을 가른다 (동명이인 관문)"

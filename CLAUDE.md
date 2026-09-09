@@ -289,12 +289,46 @@ uv run histgraph --db data/korea.sqlite roles --table
 군사 반란의 판정 16건을 '지휘관'으로 되돌려 놓았다. 표(origin `roles`)가
 모델(origin `roles-model`)을 이긴다.
 
+## 1-7. 한 자리를 여러 왕조가 나눠 쓰면 왕조별로 가른다
+
+2026-09-09 지적: "왕 노드에 왜 고려왕만 연결되어 있지? 조선 왕도 있는데".
+화면의 `왕(王)` 에는 고려 왕 34명만 서 있었고 조선 임금 28명은 이름도 타입도
+다른 노드에 따로 서 있었다.
+
+원인은 **Wikidata 의 자리 항목이 왕조마다 다르다**는 것이다. 조선에는 전용
+항목('조선 임금')이 있지만 고구려·고려 임금은 일반 항목인 '왕(王)'·'군주'를
+나눠 쓴다 — 고려·고구려 임금 자리는 Wikidata 에 항목 자체가 없다. 거기에
+`_labels` 가 P31 을 **아무거나 하나** 집어 오는 바람에 ('조선 임금'은 자리와
+군주 둘이다) 조선 임금이 직위가 아니라 단체로 앉았다.
+
+재는 것은 `uv run histgraph positions` 다. 일반 자리에 걸린 참여를 그 사람의
+왕조(`from_period`)로 갈라 `ex:role:{왕조} 왕` 으로 옮기고, 왕조 전용 자리는
+이름·타입만 바로잡는다. 원본과 파생본에 한 번씩:
+
+```
+uv run histgraph positions
+uv run histgraph --db data/korea.sqlite positions
+```
+
+**짐작으로 옮기지 않는다.** 둘은 세어서 보여만 준다 — 시대 엣지가 없어 왕조를
+모르는 사람(고구려 임금 7명)과, 재위 근거(`props.reign`·날짜)가 없는 참여다.
+뒤엣것이 없으면 왕이 아닌 왕자가 왕 자리에 선다 (임해군·순화군은 지금
+Wikidata 에 그 P39 자체가 없는 묵은 줄이다).
+
+**왕조 전용 자리는 가르지 않는다.** 대한제국 고종은 '조선 임금'을 가진 채
+시대가 대한제국이라, 같은 규칙을 씌우면 없던 '대한제국 왕' 자리가 생긴다.
+
+옮긴 자리는 편집 계층에 남는다 (옛 엣지에 `deleted`, 새 엣지에 재위 표식과
+날짜). 새 자리 노드는 `props.wd_position` 에 원래 QID 를 들고 있고 `reigns`
+가 그것으로 물어본다 — **`ex:` 자리에 QID 를 안 남기면 그 자리에 앉은 왕들이
+재위 띠를 영영 못 받는다.**
+
 ## 2. 그래프를 다시 만들 때
 
 수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 고친 값은
 **편집 계층(`overrides` 표)**에 남아 저장소가 쓸 때마다 다시 씌운다 (2026-09-05,
 README "편집 계층" 절) — `relabel`·`redescribe`·`describe`·`nikh`·`precision`·
-`reigns`·`dedupe`·`chronology`·`founding`·`roles --table` 이 거기 적는다. 그래서 수집 뒤에 그 열을 **잊어도 고친
+`reigns`·`dedupe`·`chronology`·`founding`·`roles --table`·`positions` 가 거기 적는다. 그래서 수집 뒤에 그 열을 **잊어도 고친
 값은 돌아온다.** 다시 돌리는 것은 새로 고칠 것이 생겼을 때다. 그 다음
 `scope korea` 로 파생본을 만든다. `dedupe`·`untangle`(`related_to` 갈라 내기)은
 수집이 새 노드·새 `related_to` 를 내므로 수집 뒤마다 돌린다. **SQL 로

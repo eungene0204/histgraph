@@ -158,10 +158,20 @@ def _labels(fetcher: Fetcher, qids: set[str], chunk: int = 400) -> dict[str, tup
                   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "ko,en". }}
                 }}""",
         )
+        # **P31 은 여럿이다.** 한 개체가 여러 줄로 돌아오는데 아무거나
+        # 집으면 타입이 운에 달린다 — '조선 임금'(Q22304810)은 P31 이
+        # 자리(Q4164871)와 군주(Q116) 둘인데 군주가 먼저 와서 직위가 아니라
+        # 단체로 앉았고, 그래서 화면의 임금 자리가 둘로 갈렸다 (2026-09-09
+        # 지적, `positions` 모듈 머리글). 아는 클래스를 먼저 고른다.
         for r in rows:
             qid = _qid(_val(r, "e") or "")
             type_uri = _val(r, "type")
-            out.setdefault(qid, (_val(r, "eLabel") or qid, _qid(type_uri) if type_uri else None))
+            type_qid = _qid(type_uri) if type_uri else None
+            prev = out.get(qid)
+            if prev is None:
+                out[qid] = (_val(r, "eLabel") or qid, type_qid)
+            elif prev[1] not in WD_CLASS_TO_TYPE and type_qid in WD_CLASS_TO_TYPE:
+                out[qid] = (prev[0], type_qid)
     return out
 
 

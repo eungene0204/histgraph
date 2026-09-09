@@ -7275,5 +7275,80 @@ with GraphStore(Path(_tmp_rc.name) / "g.sqlite") as _st:
     check("--since 를 주면 그 해부터", _rc.years_since(_st, "2024")[0] == 2024)
 _tmp_rc.cleanup()
 
+# --- 임금 자리: 왕조가 나눠 쓰는 직위 ------------------------------------------
+# "왕 노드에 왜 고려왕만 연결되어 있지? 조선 왕도 있는데" (2026-09-09).
+import json as _json  # noqa: E402
+from histgraph import positions as pos_mod  # noqa: E402
+
+print("\n[임금 자리]")
+
+_tmp_pos = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_pos.name) / "g.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="wd:Q12087706", type="role", label="왕(王)", source="wd"),
+        Node(id="wd:Q22304810", type="org", label="조선 임금", source="wd"),
+        Node(id="ex:role:조선 왕", type="role", label="조선 왕", source="extract"),
+        Node(id="wd:Q28208", type="org", label="고려", source="wd"),
+        Node(id="wd:Q334312", type="person", label="고려 태조", source="wd"),
+        Node(id="wd:Q498791", type="person", label="광개토왕", source="wd"),
+        Node(id="wd:Q485505", type="person", label="임해군", source="wd"),
+        Node(id="wd:Q334308", type="person", label="조선 세조", source="wd"),
+    ])
+    _st.upsert_edges([
+        Edge(src="wd:Q334312", dst="wd:Q28208", type="from_period", source="wd"),
+        Edge(src="wd:Q334312", dst="wd:Q12087706", type="held_position", source="wd",
+             label="직위", start_date="0918-06-15", end_date="0943-07-04",
+             props={"reign": "monarch"}),
+        # 시대 엣지가 없는 고구려 임금 — 짐작으로 옮기면 고려 왕이 된다.
+        Edge(src="wd:Q498791", dst="wd:Q12087706", type="held_position", source="wd",
+             label="직위", start_date="0391", props={"reign": "monarch"}),
+        # 재위 근거가 없는 참여 (묵은 수집이 남긴 줄). 왕자가 왕 자리에 서면 안 된다.
+        Edge(src="wd:Q485505", dst="wd:Q12087706", type="held_position", source="wd"),
+        Edge(src="wd:Q334308", dst="ex:role:조선 왕", type="held_position", source="extract"),
+    ])
+    _rep = pos_mod.split(_st)
+    _fix = pos_mod.settle(_st)
+
+    _seat = pos_mod.seat_id("고려")
+    _dst = dict(_st.conn.execute(
+        "SELECT src, dst FROM edges WHERE type = 'held_position'"))
+    check("왕조를 아는 임금은 왕조별 자리로 옮긴다", _dst.get("wd:Q334312") == _seat,
+          str(_dst))
+    check("시대 엣지가 없으면 옮기지 않고 센다",
+          _dst.get("wd:Q498791") == "wd:Q12087706"
+          and [p for p, _ in _rep.unknown] == ["wd:Q498791"], str(_rep.unknown))
+    check("재위 근거가 없는 참여는 임금 자리로 옮기지 않는다",
+          [p for p, _ in _rep.unreigned] == ["wd:Q485505"], str(_rep.unreigned))
+
+    _row = _st.conn.execute(
+        "SELECT start_date, end_date, props FROM edges WHERE src = ? AND dst = ?",
+        ("wd:Q334312", _seat)).fetchone()
+    check("옮긴 자리에도 재위 띠가 그대로 선다",
+          (_row["start_date"], _row["end_date"]) == ("0918-06-15", "0943-07-04")
+          and _json.loads(_row["props"])["reign"] == "monarch", str(tuple(_row)))
+    check("가른 자리는 원래 QID 를 들고 있다 (reigns 가 그것으로 물어본다)",
+          pos_mod.position_qid(_st.conn, _seat) == "Q12087706")
+
+    check("왕조 전용 자리는 이름과 타입을 바로잡는다",
+          _st.conn.execute("SELECT label, type FROM nodes WHERE id = 'wd:Q22304810'")
+          .fetchone()[:] == ("조선 왕", "role"))
+    check("같은 이름으로 따로 서 있던 노드는 합친다",
+          _dst.get("wd:Q334308") == "wd:Q22304810"
+          and not _st.conn.execute(
+              "SELECT 1 FROM nodes WHERE id = 'ex:role:조선 왕'").fetchone())
+
+    # 수집이 일반 자리 엣지를 되살려도 편집 계층이 다시 지운다.
+    _st.upsert_edges([
+        Edge(src="wd:Q334312", dst="wd:Q12087706", type="held_position", source="wd",
+             label="직위")])
+    check("되살아난 일반 자리 엣지는 편집 계층이 다시 지운다",
+          _st.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE src = ? AND dst = 'wd:Q12087706'",
+              ("wd:Q334312",)).fetchone()[0] == 0)
+
+    _again = pos_mod.split(_st)
+    check("두 번 돌려도 결과가 같다", not _again.moved, str(_again.moved))
+_tmp_pos.cleanup()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
