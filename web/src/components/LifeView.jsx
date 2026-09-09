@@ -6,6 +6,8 @@ import { COPYRIGHT } from '../lib/site.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
+import { DetailPanel } from './DetailPanel.jsx';
+import { api } from '../lib/api.js';
 import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
@@ -165,9 +167,34 @@ export default function LifeView() {
   // 접힌 채로 저장해 두면 다음에 열 때만 한 번 어긋나 보인다. 접은 것은
   // '지금 넓게 보고 싶다'는 그때의 뜻이지 이 사람의 설정이 아니다.
   const [detailOpen, setDetailOpen] = useState(true);
+  // --- 한국사를 이 화면에서 본다 ------------------------------------------
+  // 2026-09-10 사용자: "내 역사에서 한국사 사건을 연표에서 클릭하면 한국사
+  // 페이지로 이동하는데 그러지 말고 한국사 그래프와 노드 정보를 그 페이지에서
+  // 바로 보여줘 이동하지 말고". 가운데 캔버스가 그 사건의 주변 관계가 되고
+  // (`/api/graph` — 한국사 화면과 **같은 자료·같은 규칙**), 오른쪽은 한국사
+  // 상세(DetailPanel)가 그대로 선다. 설명·출처 한 줄·인과 사슬·관계 목록이
+  // 두 화면에서 같은 글이어야 하므로 여기에 다시 그리지 않고 그 부품을 부른다.
+  //
+  // 왼쪽 내 연표는 그대로 있다 — 화면을 떠나지 않는 것이 이 일의 전부다.
+  const [world, setWorld] = useState(null);        // 한국사 노드 상세 (서버 응답)
+  const [worldNote, setWorldNote] = useState(null);
+  const [worldTrail, setWorldTrail] = useState([]);   // 관계를 타고 들어간 자취
+  const [worldSide, setWorldSide] = useState(null);   // 한국사 그래프의 범례·시작점
+  const worldIdRef = useRef(null);   // 지금 보고 있는 한국사 노드 (콜백이 읽는다)
+  const worldAtRef = useRef(null);   // { id, label } — 자취에 쌓을 것
+  // 한국사에서 나온다 — 내 그래프로 되돌리는 것은 아래 효과가 맡는다(`world`).
+  const leaveWorld = useCallback(() => {
+    worldIdRef.current = null;
+    worldAtRef.current = null;
+    setWorld(null); setWorldNote(null); setWorldTrail([]);
+  }, []);
   // 노드를 고르는 것은 "이것을 보겠다"는 뜻이라, 접혀 있으면 편다 — 접어 둔 채로
   // 두면 연표·그래프를 눌러도 아무 일이 없는 화면이 된다.
-  const pick = useCallback((id, to = 'event') => { setSelected(id); setTab(to); setDetailOpen(true); }, []);
+  // 내 사건을 고르면 한국사에서 나온다 — 한 캔버스가 둘을 같이 그릴 수는 없다.
+  const pick = useCallback((id, to = 'event') => {
+    leaveWorld();
+    setSelected(id); setTab(to); setDetailOpen(true);
+  }, [leaveWorld]);
   // 상세를 폼으로 펴 두었나 (아래 EventEdit). 다른 노드로 옮겨 가면 접는다 —
   // 고치던 칸이 남의 노드 위에 서면 안 된다.
   const [editing, setEditing] = useState(false);
@@ -202,6 +229,9 @@ export default function LifeView() {
     centerForce: 1, repelForce: 1, linkDistance: 1,
   });
   const viewRef = useRef(null);
+  // 콜백 안에서 늘 최신 설정을 보게 하는 거울 (한국사 그래프를 부를 때 쓴다).
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const meta = useMemo(() => (life ? graphMeta(life) : null), [life]);
 
   // --- 내 계정에 두기 -----------------------------------------------------
@@ -539,7 +569,10 @@ export default function LifeView() {
 
   // 판 — DOM 을 직접 그리는 쪽
   useEffect(() => {
-    const board = new LifeBoard(rootRef.current, { onPick: (id) => pick(id) });
+    const board = new LifeBoard(rootRef.current, {
+      onPick: (id) => pick(id),
+      onHistory: (id) => openWorldRef.current?.(id),
+    });
     boardRef.current = board;
     return () => board.destroy();
   }, [pick]);
@@ -560,20 +593,93 @@ export default function LifeView() {
   lifeRef.current = life;
   const selectedRef = useRef(null);
   selectedRef.current = selected;
+  const openWorldRef = useRef(null);
   const loadGraph = useCallback((gv) => {
+    // 한국사를 보는 중이면 캔버스에 실을 것은 그 그래프다 — 캔버스가 다시
+    // 만들어졌을 때(StrictMode·테마) 내 그래프로 되돌아가 버리지 않게.
+    if (worldIdRef.current) { openWorldRef.current?.(worldIdRef.current, { back: true }); return; }
     const cur = lifeRef.current;
     if (!gv || !cur) return;
     gv.setData(graphPayload(cur, selectedRef.current));
     if (selectedRef.current) { gv.select(selectedRef.current); gv.focusOn(selectedRef.current); }
   }, []);
-  useEffect(() => { loadGraph(viewRef.current); }, [life, loadGraph]);
+  // 한국사에서 나오면 내 그래프가 그 자리에 다시 선다 (world → null).
+  useEffect(() => {
+    if (world) return;
+    loadGraph(viewRef.current);
+    boardRef.current?.select(selectedRef.current);
+  }, [world, life, loadGraph]);
   // 연표에서 고르든 그래프에서 고르든 같은 노드다 — 그래프의 조명도 따라간다.
   useEffect(() => {
     const gv = viewRef.current;
-    if (!gv || !selected || !gv.byId.has(selected)) return;
+    if (worldIdRef.current || !gv || !selected || !gv.byId.has(selected)) return;
     gv.select(selected);
     gv.focusOn(selected);
   }, [selected]);
+
+  // 한국사 노드 하나를 캔버스와 오른쪽에 세운다. 그래프와 상세를 같이 묻는다 —
+  // 둘 중 하나만 오면 화면이 반쪽이 된다.
+  //
+  // `nest` 를 준 걸음만 자취에 쌓인다 (한국사 화면의 규칙과 같다): 상세의 관계
+  // 목록에서 고른 것은 지금 노드가 데리고 있는 것이라 그 밑으로 들어가고,
+  // 연표·캔버스에서 고른 것은 새로 시작한 걸음이다.
+  const openWorld = useCallback(async (id, { back = false, nest = false, merge = false } = {}) => {
+    if (!id) return;
+    worldIdRef.current = id;
+    setEditing(false);
+    setDetailOpen(true);
+    if (!back) {
+      const cur = worldAtRef.current;
+      if (!nest) setWorldTrail([]);
+      else if (cur && cur.id !== id) setWorldTrail((t) => [...t, cur].slice(-50));
+    }
+    const [data, node] = await Promise.all([
+      api.graph(id, settingsRef.current).catch(() => null),
+      api.node(id).catch(() => null),
+    ]);
+    if (worldIdRef.current !== id) return;   // 그새 다른 것을 골랐다 — 늦게 온 답은 버린다
+    if (!node || node.error) {
+      leaveWorld();
+      toast('그 사건의 한국사 자료를 불러오지 못했습니다');
+      return;
+    }
+    worldAtRef.current = { id, label: node.label };
+    setWorld(node);
+    boardRef.current?.select(id);   // 연표에서도 그 줄이 켜져 있어야 한다
+    const gv = viewRef.current;
+    if (gv && data && data.nodes?.length) {
+      gv.setData(data, { merge });
+      gv.select(id);
+      gv.focusOn(id);
+      setWorldNote(
+        <>
+          {node.label} 주변 · 노드 {data.nodes.length} · 관계 {data.edges.length}
+          {data.truncated && <> · <b>중심에 가까운 것만 표시</b></>}
+        </>,
+      );
+    } else {
+      setWorldNote(<>{node.label} 주변에 그릴 관계가 없습니다</>);
+    }
+  }, [leaveWorld, toast]);
+  openWorldRef.current = openWorld;
+  // 한국사 상세에서 '←' — 타고 들어온 자리로 되짚어 올라간다.
+  const backWorld = useCallback(() => {
+    const prev = worldTrail[worldTrail.length - 1];
+    if (!prev) return;
+    setWorldTrail((t) => t.slice(0, -1));
+    openWorld(prev.id, { back: true });
+  }, [worldTrail, openWorld]);
+  // 한국사 그래프의 범례·시작점은 한 번만 묻는다 (내 그래프의 것과 다른 자료다).
+  useEffect(() => {
+    if (!world || worldSide) return;
+    let alive = true;
+    (async () => {
+      const m = await api.meta().catch(() => null);
+      const seeds = await api.seeds(12).catch(() => []);
+      if (alive && m) setWorldSide({ ...m, seeds });
+    })();
+    return () => { alive = false; };
+  }, [world, worldSide]);
 
   const forget = () => {
     try { localStorage.removeItem(STORE_KEY); } catch { /* 없다 */ }
@@ -725,32 +831,61 @@ export default function LifeView() {
         </section>
         {life && (
           <div className="stage-wrap">
+            {/* 한 캔버스가 둘을 그린다 — 내 관계망이거나, 고른 한국사 사건의
+                주변 관계이거나. 안내 줄이 지금 무엇을 보고 있는지 말하고, 그
+                줄에서 내 역사로 돌아온다. */}
             <GraphCanvas
               viewRef={viewRef}
               settings={settings}
-              note={<>{name}의 관계망 · 노드 {life.nodes.length} · 관계 {life.edges.length}</>}
+              note={world
+                ? <>{worldNote} · <button type="button" className="stage-back" onClick={leaveWorld}>내 역사로 돌아가기</button></>
+                : <>{name}의 관계망 · 노드 {life.nodes.length} · 관계 {life.edges.length}</>}
               empty={false}
               offline={false}
-              onSelect={(node) => pick(node.id)}
-              onExpand={(node) => pick(node.id)}
+              onSelect={(node) => (worldIdRef.current ? openWorld(node.id) : pick(node.id))}
+              onExpand={(node) => (worldIdRef.current ? openWorld(node.id, { merge: true }) : pick(node.id))}
               onReady={loadGraph}
             />
+            {/* 범례와 시작점도 지금 캔버스에 선 그래프의 것이어야 한다 — 한국사를
+                보는데 내 그래프의 타입 수가 적혀 있으면 그 수는 거짓말이다. */}
             <SidePanel
               open={sideOpen}
               onToggle={() => setSideOpen((v) => !v)}
-              meta={meta}
-              seeds={meta.seeds}
+              meta={world ? worldSide : meta}
+              seeds={world ? (worldSide?.seeds || []) : meta.seeds}
               settings={settings}
-              onSettings={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
-              onPick={(id) => pick(id)}
-              lines={LIFE_LINES}
-              whole
+              onSettings={(patch) => {
+                setSettings((prev) => {
+                  const next = { ...prev, ...patch };
+                  settingsRef.current = next;
+                  return next;
+                });
+                // 펼침 깊이·최대 노드는 서버에 다시 물어야 바뀐다 (한국사 그래프).
+                if (worldIdRef.current && ('depth' in patch || 'limit' in patch || 'includePeriod' in patch)) {
+                  openWorld(worldIdRef.current, { back: true });
+                }
+              }}
+              onPick={(id) => (worldIdRef.current ? openWorld(id) : pick(id))}
+              lines={world ? undefined : LIFE_LINES}
+              whole={!world}
             />
           </div>
         )}
+        {/* 한국사 사건을 고르면 그 자리에 **한국사 상세**가 선다 — 같은 노드를
+            두 화면에서 다르게 적지 않으려고 한국사 장의 부품을 그대로 부른다
+            (설명·출처 한 줄·인과 사슬·관계). 닫으면 내 사건 상세로 돌아온다. */}
+        {life && world && (
+          <DetailPanel
+            node={world}
+            prev={worldTrail[worldTrail.length - 1] || null}
+            onClose={leaveWorld}
+            onBack={backWorld}
+            onVisit={(id, opts) => openWorld(id, opts)}
+          />
+        )}
         {/* 접혀도 DOM 에서 빼지 않는다 — 빼면 미끄러질 것이 없어 그냥 사라진다.
             대신 화면 밖에 있는 동안은 탭에 걸리지 않게 inert 로 재운다. */}
-        {life && (
+        {life && !world && (
           <aside className={`detail life-detail${detailOpen ? '' : ' is-folded'}`}
                  inert={!detailOpen} aria-hidden={!detailOpen}>
             <div className="life-tabs">
@@ -766,7 +901,8 @@ export default function LifeView() {
             </div>
             {tab === 'event' && (editing && selected && life.nodes.some((n) => n.id === selected)
               ? <EventEdit key={selected} life={life} id={selected} onDone={saveNode} onCancel={() => setEditing(false)} />
-              : <EventDetail life={life} id={selected} onPick={pick} onDrop={dropNode} onEdit={() => setEditing(true)} />)}
+              : <EventDetail life={life} id={selected} onPick={pick} onHistory={openWorld}
+                             onDrop={dropNode} onEdit={() => setEditing(true)} />)}
             {tab === 'analysis' && <Analysis life={life} onPick={(id) => pick(id)} />}
             {tab === 'people' && <Things life={life} />}
           </aside>
@@ -774,7 +910,7 @@ export default function LifeView() {
         {/* 접은 뒤에도 되돌아갈 손잡이가 오른쪽 가장자리에 남는다 — 접고 나서 펼
             길이 없으면 안 된다. 화살표만 두지 않고 '상세'라고 적는다 (부호 하나로만
             말하지 않는다). */}
-        {life && !detailOpen && (
+        {life && !world && !detailOpen && (
           <button type="button" className="life-detail-peek" onClick={() => setDetailOpen(true)}
                   aria-label="상세 펼치기" title="상세 펼치기">
             <ChevronIcon to="left" />
@@ -1011,7 +1147,7 @@ function StoryLogIcon() {
 }
 
 // --- 사건 상세 ------------------------------------------------------------
-function EventDetail({ life, id, onPick, onDrop, onEdit }) {
+function EventDetail({ life, id, onPick, onHistory, onDrop, onEdit }) {
   const byId = useMemo(() => new Map(life.nodes.map((n) => [n.id, n])), [life]);
   // 지우기 전에 한 번 묻는다 — 되돌리는 길이 없다. 브라우저가 띄우는 상자는
   // 단추 글자가 우리 것이 아니므로(화면에 영어) 패널 안에서 묻는다.
@@ -1096,7 +1232,17 @@ function EventDetail({ life, id, onPick, onDrop, onEdit }) {
           <ul>
             {links.map((c, i) => (
               <li key={i}>
-                <b>{c.node_id ? <a href={`/#${encodeURIComponent(c.node_id)}`}>{c.node_label || c.historical_event}</a> : c.historical_event}</b>
+                {/* 한국사 사건은 연표에서와 같이 **이 화면에서** 펴진다
+                    (2026-09-10 사용자). 링크는 남겨 cmd·ctrl 로 새 탭에 여는
+                    길을 두되, 그냥 누르면 옮겨가지 않는다. */}
+                <b>{c.node_id
+                  ? <a href={`/#${encodeURIComponent(c.node_id)}`}
+                       onClick={(ev) => {
+                         if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+                         ev.preventDefault();
+                         onHistory?.(c.node_id);
+                       }}>{c.node_label || c.historical_event}</a>
+                  : c.historical_event}</b>
                 <span className="tl-rel"> {IMPACT_KO[c.impact_type]}{c.year != null ? ` · ${c.year}` : ''}</span>
                 <p>{c.description}</p>
               </li>

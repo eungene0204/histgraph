@@ -1368,7 +1368,7 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
     const extra = m.kind === 'extra' ? '<span class="tl-rel">그래프에 없는 사건</span>' : '';
     const tag = m.kind === 'extra' ? 'span' : 'a';
     const href = m.kind === 'extra' ? '' : ` href="/#${encodeURIComponent(m.id)}"`;
-    return `<${tag} class="tl-mark life-h${m.linked ? ' is-linked' : ''}"${href} data-id="${esc(m.id)}"
+    return `<${tag} class="tl-mark life-h${m.linked ? ' is-linked' : ''}${m.id === selected ? ' k-self' : ''}"${href} data-id="${esc(m.id)}"
       style="left:${xH}px; width:${HW - 8}px; top:${ty.toFixed(1)}px" title="${esc(m.label)} · ${m.year}년">
       <span class="tl-y${cell.repeat ? ' rep' : ''}">${cell.text}</span><span class="tl-name">${esc(m.label)}</span>${extra}</${tag}>`;
   }).join('');
@@ -1393,7 +1393,7 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
     const who = (m.links || []).map((c) => `${IMPACT_KO[c.impact_type]} · ${c.description}`).join(' / ');
     const tag = m.kind === 'extra' ? 'span' : 'a';
     const href = m.kind === 'extra' ? '' : ` href="/#${encodeURIComponent(m.id)}"`;
-    return `<div class="life-before-row"><span class="tl-y">${m.year}</span><${tag} class="life-before-name"${href}>${esc(m.label)}</${tag}><span class="life-before-why">${esc(who)}</span></div>`;
+    return `<div class="life-before-row"><span class="tl-y">${m.year}</span><${tag} class="life-before-name"${href} data-id="${esc(m.id)}">${esc(m.label)}</${tag}><span class="life-before-why">${esc(who)}</span></div>`;
   }).join('');
   // 캔버스 위에 따로 선다(흐름 배치) — 축 위에 얹으면 첫 해의 표시와 겹친다.
   const beforeBlock = before
@@ -1469,15 +1469,30 @@ export function markYs(lay, life, id) {
 
 // --- 브라우저 --------------------------------------------------------------
 export class LifeBoard {
-  constructor(root, { onPick } = {}) {
+  constructor(root, { onPick, onHistory } = {}) {
     this.root = root;
     this.head = root.querySelector('.life-head');
     this.body = root.querySelector('.life-body');
     this.onPick = onPick || (() => {});
+    this.onHistory = onHistory || (() => {});
     this.state = null;
     this.body.addEventListener('click', (ev) => {
-      const el = ev.target.closest('.life-p[data-id]');
-      if (el) this.onPick(el.dataset.id);
+      const mine = ev.target.closest('.life-p[data-id]');
+      if (mine) { this.onPick(mine.dataset.id); return; }
+      // 한국사 사건은 **이 화면에서 편다** (2026-09-10 사용자: "한국사 페이지로
+      // 이동하는데 그러지 말고 한국사 그래프와 노드 정보를 그 페이지에서 바로
+      // 보여줘"). 가운데 캔버스가 그 사건의 주변 관계가 되고 오른쪽이 그 노드의
+      // 상세가 된다 — 내 연표를 잃지 않은 채로 본다.
+      //
+      // 링크(`href`)는 남긴다: cmd·ctrl·가운데 단추로 한국사 장을 새 탭에 여는
+      // 길은 그대로고, 옮겨가는 것은 사람이 그렇게 눌렀을 때뿐이다.
+      // 링크인 것만 잡는다 — 그래프에 없는 사건(`kind: 'extra'`)은 <span> 이라
+      // 열 자리가 없다. 그것은 딱지로 그렇다고 적혀 있다.
+      const hist = ev.target.closest('a.life-h[data-id], a.life-before-name[data-id]');
+      if (!hist || ev.defaultPrevented) return;
+      if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      ev.preventDefault();
+      this.onHistory(hist.dataset.id);
     });
     this._ro = new ResizeObserver(() => this.layout());
     this._ro.observe(this.body);

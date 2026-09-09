@@ -221,6 +221,27 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('세 열 머리', html.includes('왕 · 대통령') && html.includes('한국사') && html.includes('나의 역사'));
   ok('고른 사건이 굵다', html.includes('life-p k-self'));
   ok('역사 사건은 그래프로 가는 링크', html.includes('href="/#wd%3AQ625457"'));
+  // 2026-09-10: 누르면 옮겨가지 않고 **이 화면 안에서** 한국사를 편다. 판이 잡을 수
+  // 있게 마크가 아이디를 들고 있어야 하고(태어나기 전의 줄도 같다), 그래프에 없는
+  // 사건은 링크가 아니라 <span> 이라 열 자리가 없다.
+  ok('한국사 마크가 아이디를 들고 있다', /<a class="tl-mark life-h[^"]*"[^>]*data-id="wd%3AQ625457"/.test(html.replace(/&#39;/g, "'")) || html.includes('data-id="wd:Q625457"'));
+  ok('태어나기 전의 줄도 아이디를 들고 있다', /class="life-before-name"[^>]*data-id="wd:Q8663"/.test(html));
+  {
+    // 그래프에 없는 사건은 열 자리가 없다 — 마크가 <span> 이라 판의 클릭 규칙
+    // (`a.life-h[data-id]`)에 걸리지 않는다.
+    const heads = [];
+    for (let i = html.indexOf('그래프에 없는 사건'); i > 0; i = html.indexOf('그래프에 없는 사건', i + 1)) {
+      const at = html.slice(0, i).lastIndexOf('class="tl-mark life-h');
+      heads.push(html.slice(0, at).lastIndexOf('<'));   // 그 마크를 여는 꺾쇠
+    }
+    ok('그래프에 없는 사건은 링크가 아니다',
+      heads.length > 0 && heads.every((at) => html.startsWith('<span', at)),
+      heads.map((at) => html.slice(at, at + 12)).join(' | '));
+  }
+  {
+    const lit = renderLife(lay, { selected: 'wd:Q625457', subjectName: '나' });
+    ok('보고 있는 한국사 사건이 연표에서 굵다', lit.includes('life-h is-linked k-self') || lit.includes('life-h k-self'));
+  }
   ok('대통령 띠가 시대 연표와 같은 문법', html.includes('tl-reign-bar') && html.includes('김대중'));
   // 화면 글자에 영어가 새지 않는다 — 기준은 시대 연표와 같다: **한 덩어리에 한글이
   // 한 자도 없으면** 걸린다. 자료의 고유명(IMF 구제금융·AI 도구)은 한글과 함께 있다.

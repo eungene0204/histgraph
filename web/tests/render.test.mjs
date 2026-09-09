@@ -507,6 +507,33 @@ let detailHtml = '';
   ok('눌린 물음의 꺾쇠가 아래를 가리킨다',
      /\.life-cf\.on \.life-cf-caret\s*\{[^}]*rotate\(90deg\)/.test(css));
 
+  // --- 한국사를 이 화면 안에서 편다 (2026-09-10 사용자) -------------------
+  // "한국사 사건을 연표에서 클릭하면 한국사 페이지로 이동하는데 그러지 말고
+  // 한국사 그래프와 노드 정보를 그 페이지에서 바로 보여줘 이동하지 말고."
+  const lifeSrc3 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
+  const boardSrc = readFileSync(join(WEB, 'src/lib/life.js'), 'utf-8');
+  ok('연표의 한국사 사건이 판을 거쳐 이 화면에서 열린다',
+     /onHistory: \(id\) => openWorldRef\.current/.test(lifeSrc3)
+     && /a\.life-h\[data-id\], a\.life-before-name\[data-id\]/.test(boardSrc)
+     && /ev\.preventDefault\(\);\s*\n\s*this\.onHistory/.test(boardSrc));
+  ok('cmd·ctrl 로 누른 것은 옛길 그대로 새 탭이다',
+     /ev\.metaKey \|\| ev\.ctrlKey/.test(boardSrc) && boardSrc.includes('href="/#'));
+  ok('한국사 상세는 한국사 장의 부품을 그대로 부른다',
+     lifeSrc3.includes("import { DetailPanel } from './DetailPanel.jsx'")
+     && /<DetailPanel\s[\s\S]{0,200}node=\{world\}/.test(lifeSrc3));
+  ok('캔버스는 그 사건의 주변 관계를 서버에서 받는다',
+     /api\.graph\(id, settingsRef\.current\)/.test(lifeSrc3)
+     && /api\.node\(id\)/.test(lifeSrc3));
+  ok('범례·시작점도 지금 캔버스에 선 그래프의 것이다',
+     /meta=\{world \? worldSide : meta\}/.test(lifeSrc3) && /whole=\{!world\}/.test(lifeSrc3));
+  ok('돌아오는 길이 셋이다 — 안내 줄·상세 닫기·내 사건 고르기',
+     lifeSrc3.includes('내 역사로 돌아가기') && /onClose=\{leaveWorld\}/.test(lifeSrc3)
+     && /const pick = useCallback\([\s\S]{0,120}leaveWorld\(\);/.test(lifeSrc3)
+     && /\.stage-back\s*\{/.test(css));
+  ok('보고 있는 한국사 사건은 연표에서 굵어진다',
+     /\.life-canvas \.tl-mark\.life-h\.k-self\s*\{/.test(css)
+     && boardSrc.includes("m.id === selected ? ' k-self' : ''"));
+
   // 머리 줄의 아이콘 — 그림만 서고 글자는 title·aria 로 말한다.
   const lifeSrc2 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
   ok("아이콘이 '내 역사 입력하기' 오른쪽에 선다",
