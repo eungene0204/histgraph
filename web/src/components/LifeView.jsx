@@ -1022,8 +1022,11 @@ function EventDetail({ life, id, onPick, onDrop }) {
         {/* 중요도(importance_score)는 그리지 않는다 (2026-09-09 사용자 결정). 모델이
             '1 = 거의 영향 없음, 10 = 인생을 바꾼 사건' 두 줄만 보고 매긴 값이라 재는
             식이 없고, 짐작을 눈금으로 그리면 측정처럼 보인다. 수집은 그대로 두고
-            화면에서만 뺀다. 연표 점의 크기도 같은 이유로 중요도를 말하지 않는다. */}
-        {turning && <><dt>전환점</dt><dd><Meter v={turning.turning_point_score} /> {turning.reason}</dd></>}
+            화면에서만 뺀다. 연표 점의 크기도 같은 이유로 중요도를 말하지 않는다.
+            **전환점 점수(turning_point_score)도 같은 날 내렸다** — 영향 순위에
+            이어 사용자가 "'전환점' 점수 그래프도 삭제해". 전환점인지 아닌지는
+            서 있는 것으로 말하고, 왜인지는 그 옆의 글이 말한다. */}
+        {turning && <><dt>전환점</dt><dd>{turning.reason}</dd></>}
         {node.emotional_impact && <><dt>감정</dt><dd>{node.emotional_impact}</dd></>}
         {withWhom.length > 0 && <><dt>함께</dt><dd>{withWhom.map((w, i) => (
           <span key={`${w.id || ''}${w.name}`}>{i ? ', ' : ''}{w.id
@@ -1182,13 +1185,16 @@ function Analysis({ life, onPick }) {
         {fam.members?.length > 0 && <ul>{fam.members.map((m, i) => <li key={i}><b>{m.relation}</b> <Link id={m.node_id} /> — {m.description}</li>)}</ul>}
         {fam.values && <p className="life-q">{fam.values}</p>}
       </section>
+      {/* 전환점 점수(turning_point_score)의 눈금도 세우지 않는다 (2026-09-09 사용자:
+          "'전환점' 점수 그래프도 삭제해" — 중요도·영향 순위에 이어 셋째다). 같은
+          1~10 모델 점수라 재는 식이 없는데 막대는 잰 값처럼 읽힌다. **차례는 남긴다**
+          — 영향 순위와 같은 자리다. 값은 수집에 그대로 둔다. */}
       {life.turning_points.length > 0 && (
         <section className="life-sec">
           <h3>전환점</h3>
           <ul>{[...life.turning_points].sort((a, b) => b.turning_point_score - a.turning_point_score).map((p, i) => (
             <li key={i}>
-              <Link id={p.event} />
-              {' '}<Meter v={p.turning_point_score} /><p>{p.reason}</p>
+              <Link id={p.event} /><p>{p.reason}</p>
             </li>
           ))}</ul>
         </section>
