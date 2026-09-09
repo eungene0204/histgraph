@@ -186,3 +186,64 @@ def init_schema(store=None) -> str:
         return str(store.path)
     neon.init_schema(store)
     return "Neon"
+
+
+# --- 두 표 사이에서 내 역사를 옮긴다 -------------------------------------------
+# 로컬은 SQLite, 배포는 Neon 이고 **둘은 다른 표**다 (위 `open_store` 머리글의
+# 2026-09-09 결정: 로컬 시험이 배포 가입자에게 닿지 않게 이름을 갈아 두었다).
+# 그래서 로컬에서 적은 이야기는 배포에 안 간다 — 2026-09-09 사용자: "지금
+# 로컬과 프로덕션의 내 역사가 달라". 옮기는 길은 표를 직접 건드리는 것뿐이라
+# 여기 둔다 (`histgraph lifesync`).
+PROD_ENV = "HISTGRAPH_PROD_DATABASE_URL"
+
+
+def prod_store():
+    """배포(Neon) 가입자 표. **이 이름을 읽는 곳은 여기 하나다.**
+
+    `.env` 의 이름을 갈아 둔 뜻은 '저절로 켜지지 않는다' 이므로, 읽는 자리도
+    하나여야 한다 — 이 함수를 부르는 것은 `lifesync` 뿐이고 그것은 사람이
+    직접 치는 명령이다. `serve` 도 `open_store()` 도 여기로 오지 않는다."""
+    url = os.environ.get(PROD_ENV, "").strip() or os.environ.get(neon.ENV_URL, "").strip()
+    if not url:
+        raise StoreError(f"{PROD_ENV} 이 없습니다 — .env 에 배포 연결 문자열을 넣어 주세요.")
+    return neon.Neon(url)
+
+
+def find_user(store, email: str | None = None, sub: str | None = None) -> dict | None:
+    """가입자 한 명. **두 표를 잇는 것은 이메일이 아니라 `google_sub`** 이다
+    (같은 사람의 id 가 로컬 1 · 배포 26 이다). 그래서 sub 을 먼저 본다."""
+    if sub:
+        row = store.one("select id, email, google_sub from users where google_sub = $1", [sub])
+        if row:
+            return row
+    if email:
+        return store.one("select id, email, google_sub from users where lower(email) = $1",
+                         [email.strip().lower()])
+    return None
+
+
+def life_of(store, user: dict) -> tuple[dict | None, str | None]:
+    """그 사람의 내 역사 문서와 마지막으로 고친 때. 없으면 (None, None)."""
+    import json
+
+    row = store.one("select doc, updated_at from life_docs where user_id = $1", [user["id"]])
+    if not row:
+        return None, None
+    doc = row["doc"]
+    return (json.loads(doc) if isinstance(doc, str) else doc), row.get("updated_at")
+
+
+def put_life(store, user: dict, doc: dict) -> int:
+    """내 역사 문서를 얹는다. 돌아오는 것은 보낸 바이트 수 (512KB 까지)."""
+    import json
+
+    raw = json.dumps(doc, ensure_ascii=False)
+    size = len(raw.encode("utf-8"))
+    if size > 512 * 1024:
+        raise StoreError(f"문서가 너무 큽니다 — {size:,} 바이트 (512KB 까지)")
+    store.query(
+        """insert into life_docs (user_id, doc) values ($1, $2::jsonb)
+           on conflict (user_id) do update
+              set doc = excluded.doc, updated_at = now()""",
+        [user["id"], raw])
+    return size

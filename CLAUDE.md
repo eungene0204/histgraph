@@ -335,4 +335,11 @@ uv run tests/test_pipeline.py        # 파이썬 (표준 라이브러리만, 의
 python3 tools/check_korean.py        # 배포될 DB 에 영어가 남았는지
 uv run histgraph serve               # http://127.0.0.1:8100 (8000 은 다른 프로젝트)
 cd web && npm test && npm run build  # 화면
+uv run histgraph lifesync            # 로컬 계정과 배포 계정의 '내 역사' 를 견준다
 ```
+
+로컬은 `data/accounts.sqlite`, 배포는 Neon 이라 **내 역사가 갈린다** (로컬
+시험이 배포 가입자에게 닿지 않게 갈라 둔 것이다). 옮기는 것은 `lifesync
+--push`(로컬 → 배포)·`--pull` 이고, **기본은 비교만 한다** — 받는 쪽에만 있는
+것이 있으면 멈추고, 쓰기 전에 받는 쪽을 `data/life/` 에 받아 둔다. 자세한 것은
+HANDOFF.md 의 2026-09-09 절.

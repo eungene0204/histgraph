@@ -7063,5 +7063,95 @@ finally:
         else:
             _os.environ[k] = v
 
+print("\n[내 역사를 로컬 계정 ↔ 배포 계정으로 옮긴다 (lifesync)]")
+# 로컬은 SQLite, 배포는 Neon 이라 **표가 둘**이고 로컬에서 적은 이야기는
+# 배포에 안 간다 (2026-09-09 사용자: "로컬과 프로덕션의 내 역사가 달라").
+# 여기서는 배포 자리에도 SQLite 를 세워 두 표 사이를 재 본다 — 네트워크 없이
+# 돈다. 재는 것은 **덮기 전에 잃을 것을 세는가** 하나다.
+import argparse as _ap  # noqa: E402
+
+import histgraph.cli as _cli  # noqa: E402
+
+_tmp3 = tempfile.TemporaryDirectory()
+_keep3 = {k: _os.environ.get(k) for k in ("DATABASE_URL", "HISTGRAPH_PROD_DATABASE_URL")}
+_was_prod = _acct.prod_store
+_was_path = _acct.LocalStore.path
+_life_dir = _cli.ROOT / "data" / "life"
+_had = set(_life_dir.glob("*.json")) if _life_dir.is_dir() else set()
+try:
+    # 로컬 자리는 **클래스**의 path 를 갈아 둔다 — 명령이 제 손으로 LocalStore()
+    # 를 세우므로 인스턴스에만 걸면 진짜 accounts.sqlite 를 본다.
+    _acct.LocalStore.path = Path(_tmp3.name) / "here.sqlite"
+    here = _acct.LocalStore()
+    _acct.init_schema(here)
+    there = _acct.LocalStore()
+    there.path = Path(_tmp3.name) / "there.sqlite"
+    _acct.init_schema(there)
+    _acct.prod_store = lambda: there
+
+    def _join(store, sub, email, uid):
+        store.query("insert into users (id, google_sub, email, email_lower, name) "
+                    "values ($1, $2, $3, $4, $5)", [uid, sub, email, email.lower(), "나"])
+
+    # 같은 사람인데 표마다 id 가 다르다 — 두 표를 잇는 것은 이메일이 아니라 google_sub
+    _join(here, "sub-1", "me@example.com", 1)
+    _join(there, "sub-1", "me@example.com", 26)
+    mine = _acct.find_user(here, email="me@example.com")
+    yours = _acct.find_user(there, email="딴사람@example.com", sub=mine["google_sub"])
+    check("두 표를 잇는 것은 google_sub 다", yours is not None and yours["id"] == 26)
+
+    doc_a = {"nodes": [{"id": "n1", "name": "출생"}, {"id": "n2", "name": "입학"}],
+             "edges": [], "timeline": [], "stories": [{"at": "", "text": "태어났다"},
+                                                      {"at": "", "text": "입학했다"}]}
+    doc_b = {"nodes": [{"id": "n1", "name": "출생"}], "edges": [], "timeline": [],
+             "stories": [{"at": "", "text": "태어났다"}]}
+    _acct.put_life(here, mine, doc_a)
+    _acct.put_life(there, yours, doc_b)
+    got, at = _acct.life_of(there, yours)
+    check("문서가 그대로 오간다", got == doc_b and at)
+    check("로컬에만 있는 것을 센다", _cli._life_only(doc_a, doc_b) == (1, 1))
+    check("배포에만 있는 것은 없다", _cli._life_only(doc_b, doc_a) == (0, 0))
+
+    def _run(**kw):
+        args = _ap.Namespace(push=False, pull=False, email="me@example.com", force=False)
+        for k, v in kw.items():
+            setattr(args, k, v)
+        return _cli.cmd_lifesync(args)
+
+    check("기본은 비교만 한다 (아무것도 안 쓴다)",
+          _run() == 0 and _acct.life_of(there, yours)[0] == doc_b)
+    check("--push 는 로컬 것을 올린다",
+          _run(push=True) == 0 and _acct.life_of(there, yours)[0] == doc_a)
+    # 이제 배포에만 있는 것을 만들어 둔다 — 덮으면 사라지는 자리
+    doc_c = dict(doc_a, nodes=doc_a["nodes"] + [{"id": "n3", "name": "졸업"}])
+    _acct.put_life(there, yours, doc_c)
+    check("받는 쪽에만 있는 것이 있으면 멈춘다", _run(push=True) == 1
+          and len(_acct.life_of(there, yours)[0]["nodes"]) == 3)
+    check("--force 는 알면서 덮는다", _run(push=True, force=True) == 0
+          and len(_acct.life_of(there, yours)[0]["nodes"]) == 2)
+    check("덮기 전에 받아 둔 것이 data/life/ 에 남는다",
+          any(p.name.startswith("backup-neon-") for p in _life_dir.glob("*.json")))
+    check("--pull 은 배포 것을 내린다", _run(pull=True) == 0
+          and _acct.life_of(here, mine)[0] == doc_a)
+    check("--push 와 --pull 은 함께 못 쓴다", _run(push=True, pull=True) == 2)
+    # 512KB 관문 — 서버(auth.life_doc)와 같은 자
+    try:
+        _acct.put_life(there, yours, {"nodes": [{"id": "x", "name": "가" * 300000}]})
+        check("너무 큰 문서는 안 올린다", False, "올라갔다")
+    except _acct.StoreError:
+        check("너무 큰 문서는 안 올린다", True)
+finally:
+    # 검사가 남긴 받아 둔 파일은 걷는다 — data/life/ 는 사람의 자료가 사는 곳이다.
+    for _p in (set(_life_dir.glob("*.json")) - _had if _life_dir.is_dir() else ()):
+        _p.unlink()
+    _acct.prod_store = _was_prod
+    _acct.LocalStore.path = _was_path
+    _tmp3.cleanup()
+    for k, v in _keep3.items():
+        if v is None:
+            _os.environ.pop(k, None)
+        else:
+            _os.environ[k] = v
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

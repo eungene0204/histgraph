@@ -2401,6 +2401,115 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _life_counts(doc: dict | None) -> str:
+    if not doc:
+        return "없음"
+    stories = [x for x in (doc.get("stories") or []) if isinstance(x, dict)]
+    return (f"노드 {len(doc.get('nodes') or []):3} · 엣지 {len(doc.get('edges') or []):3}"
+            f" · 연표 {len(doc.get('timeline') or []):3} · 이야기 {len(stories):2} 덩어리")
+
+
+def _life_only(a: dict | None, b: dict | None) -> tuple[int, int]:
+    """a 에는 있고 b 에는 없는 (노드, 이야기) 수. 덮어쓰면 사라질 것을 센다."""
+    if not a:
+        return 0, 0
+    bn = {n.get("id") for n in ((b or {}).get("nodes") or [])}
+    bs = {str(x.get("text") or "").strip() for x in ((b or {}).get("stories") or [])
+          if isinstance(x, dict)}
+    nodes = [n for n in (a.get("nodes") or []) if n.get("id") not in bn]
+    told = [x for x in (a.get("stories") or [])
+            if isinstance(x, dict) and str(x.get("text") or "").strip() not in bs]
+    return len(nodes), len(told)
+
+
+def cmd_lifesync(args: argparse.Namespace) -> int:
+    """로컬 계정과 배포 계정의 **내 역사**를 맞춘다. 기본은 비교만 한다.
+
+        uv run histgraph lifesync                     # 두 곳을 견줘 본다 (아무것도 안 쓴다)
+        uv run histgraph lifesync --push              # 로컬 → 배포
+        uv run histgraph lifesync --pull              # 배포 → 로컬
+        uv run histgraph lifesync --push --force      # 배포에만 있는 것을 알면서도 덮는다
+
+    **왜 갈리나.** 로컬은 `data/accounts.sqlite`, 배포는 Neon 이고 둘은 다른
+    표다 (2026-09-09 결정: 로컬에서 눌러 본 '지우기'가 배포 가입자에게 닿지
+    않게 `.env` 의 이름을 갈아 두었다). 그래서 로컬에서 적은 이야기는 배포에
+    안 간다 — 옮기는 길이 이 명령이다.
+
+    **덮기 전에 잃을 것을 센다.** 받는 쪽에만 있는 노드·이야기가 있으면
+    멈춘다 (`--force` 로 넘긴다). 어느 쪽이든 쓰기 전에 받는 쪽 문서를
+    `data/life/` 에 받아 둔다 — 저장소 밖이다."""
+    import json
+    import time
+
+    from . import accounts
+
+    try:
+        here = accounts.LocalStore()
+        there = accounts.prod_store()
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        return 1
+
+    email = (args.email or "").strip()
+    if not email:
+        rows = here.query("select email from users order by id")
+        if len(rows) != 1:
+            print("  ✗ 로컬 가입자가 하나가 아닙니다 — --email 로 골라 주세요: "
+                  + ", ".join(r["email"] for r in rows))
+            return 2
+        email = rows[0]["email"]
+
+    try:
+        mine = accounts.find_user(here, email=email)
+        yours = accounts.find_user(there, email=email, sub=(mine or {}).get("google_sub"))
+        local_doc, local_at = accounts.life_of(here, mine) if mine else (None, None)
+        prod_doc, prod_at = accounts.life_of(there, yours) if yours else (None, None)
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        return 1
+
+    print(f"  가입자: {email}")
+    print(f"  로컬  {accounts.LOCAL_DB.name:20} {_life_counts(local_doc)}  고침 {local_at or '-'}")
+    print(f"  배포  {'Neon':20} {_life_counts(prod_doc)}  고침 {prod_at or '-'}")
+    a, b = _life_only(local_doc, prod_doc)
+    c, d = _life_only(prod_doc, local_doc)
+    print(f"  로컬에만 노드 {a} · 이야기 {b}   |   배포에만 노드 {c} · 이야기 {d}")
+    if not args.push and not args.pull:
+        print("  (비교만 했습니다 — 옮기려면 --push 또는 --pull)")
+        return 0
+    if args.push and args.pull:
+        print("  ✗ --push 와 --pull 은 함께 못 씁니다.")
+        return 2
+
+    src, dst = (local_doc, "배포") if args.push else (prod_doc, "로컬")
+    user = yours if args.push else mine
+    store = there if args.push else here
+    old = prod_doc if args.push else local_doc
+    if src is None:
+        print(f"  ✗ 보낼 것이 없습니다 — {'로컬' if args.push else '배포'}에 내 역사가 없습니다.")
+        return 1
+    if user is None:
+        print(f"  ✗ {dst}에 그 가입자가 없습니다 — 거기서 한 번 로그인해야 표에 섭니다.")
+        return 1
+    lost_n, lost_s = _life_only(old, src)
+    if (lost_n or lost_s) and not args.force:
+        print(f"  ✗ {dst}에만 있는 노드 {lost_n} · 이야기 {lost_s} 가 사라집니다.")
+        print("    그래도 덮으려면 --force. 먼저 반대로 한 번 당겨 보는 것도 방법입니다.")
+        return 1
+    if old is not None:
+        out = ROOT / "data" / "life" / f"backup-{'neon' if args.push else 'local'}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(old, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"  ✓ {dst}에 있던 것을 받아 두었습니다 — {out.relative_to(ROOT)}")
+    try:
+        size = accounts.put_life(store, user, src)
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        return 1
+    print(f"  ✓ {dst}에 올렸습니다 — {_life_counts(src)} · {size:,} 바이트")
+    print("    화면은 계정을 브라우저보다 먼저 읽으므로 새로고침하면 바로 섭니다.")
+    return 0
+
 def neon_env() -> str:
     from . import neon
     return neon.ENV_URL
@@ -2844,6 +2953,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="'만약 없었다면' 의 빈 답만 모델에 물어 채운다 (--json 과 함께). "
                            "그래프는 건드리지 않는다")
     p_lf.set_defaults(func=cmd_life)
+
+    p_ls = sub.add_parser("lifesync", help="내 역사를 로컬 계정 ↔ 배포 계정으로 옮긴다")
+    p_ls.add_argument("--push", action="store_true", help="로컬 → 배포")
+    p_ls.add_argument("--pull", action="store_true", help="배포 → 로컬")
+    p_ls.add_argument("--email", help="가입자 (로컬에 한 명뿐이면 안 줘도 된다)")
+    p_ls.add_argument("--force", action="store_true",
+                      help="받는 쪽에만 있는 것이 사라져도 덮는다")
+    p_ls.set_defaults(func=cmd_lifesync)
 
     p_ac = sub.add_parser("accounts", help="가입자 표 (Neon) — 세우고 세어 본다")
     p_ac.add_argument("--init", action="store_true", help="표를 만든다 (없을 때만)")
