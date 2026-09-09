@@ -726,6 +726,8 @@ export function normalize(raw) {
   if (linkOrphans(nodes, out.edges, subj) + linkPeople(nodes, out.edges, subj, storyText(raw))) {
     out.edges = tidyEdges(nodes, out.edges, subj);
   }
+  // 사람이 지운 선은 코드가 도로 긋지 않는다 (life.py drop_unlinked 와 같은 표).
+  out.edges = dropUnlinked(out.edges, raw.unlinked);
   const timeline = [];
   for (const t of raw.timeline || []) {
     if (!t || !byId.has(t.event_id)) continue;
@@ -793,6 +795,24 @@ export function normalize(raw) {
   return out;
 }
 
+// --- 사람이 지운 선 ---------------------------------------------------------
+// 2026-09-09 사용자가 상세의 '편집'에서 관계를 빼고 완료를 눌렀는데 그 선이 그대로
+// 서 있었다. 지우기는 문서에서 제대로 빠졌지만 **섬을 잇는 규칙**(linkOrphans)이
+// 곧바로 다시 그었다 — 인물과 안 이어진 개인 사건은 주인공이 겪은 것으로 잇는다는
+// 2026-09-08 결정이다. 두 결정이 부딪히는 자리는 하나뿐이고, 거기서는 **사람이
+// 이긴다** (한국사 쪽 편집 계층과 같은 규칙: 사람이 적은 것을 수집이 되돌리지
+// 못한다). 지운 자리는 문서에 `unlinked` 로 남고, 여기서 마지막에 걷는다.
+//
+// 재는 것은 **두 끝과 관계 이름**이다 (방향은 안 본다 — tidyEdges 가 experienced 를
+// 뒤집기도 한다). 같은 두 노드 사이의 다른 관계는 그대로 남는다.
+export function unlinkKey(source, target, type) { return `${source}>${target}|${type}`; }
+export function dropUnlinked(edges, unlinked) {
+  const cut = new Set((unlinked || []).filter((k) => typeof k === 'string'));
+  if (!cut.size) return edges;
+  return edges.filter((e) => !cut.has(unlinkKey(e.source, e.target, e.type))
+    && !cut.has(unlinkKey(e.target, e.source, e.type)));
+}
+
 // --- 지우기 ----------------------------------------------------------------
 // 상세 패널의 '삭제' — 노드 하나와 그것을 가리키던 것을 함께 뺀다 (2026-09-08
 // 사용자: "삭제 버튼을 누르면 해당 노드를 지워서 그래프와 연표에서 삭제").
@@ -840,6 +860,7 @@ export function removeNode(raw, id) {
   if (raw.family_analysis && Array.isArray(raw.family_analysis.members)) {
     doc.family_analysis = { ...raw.family_analysis, members: raw.family_analysis.members.filter((m) => m && m.node_id !== id) };
   }
+  if (raw.unlinked) doc.unlinked = raw.unlinked.filter((k) => typeof k === 'string' && !k.split('|')[0].split('>').includes(id));
   // 주인공을 지웠으면 자리를 비운다 — normalize 가 남은 인물에서 다시 고른다.
   if (raw.subject && raw.subject.id === id) doc.subject = null;
   return doc;
@@ -895,6 +916,15 @@ export function editNode(raw, id, patch) {
       edges.push(kept);
     }
     doc.edges = [...(raw.edges || []).filter((e) => !touches(e)), ...edges];
+  }
+
+  // 폼에서 뺀 선은 문서에 적어 둔다 — 안 적으면 섬을 잇는 규칙이 다시 긋는다
+  // (dropUnlinked 머리글). 다시 이은 선은 그 자리에서 걷는다.
+  if ('unlinked' in patch) {
+    const back = new Set((patch.edges || []).flatMap((e) => [unlinkKey(e.source, e.target, e.type),
+      unlinkKey(e.target, e.source, e.type)]));
+    doc.unlinked = [...new Set([...(raw.unlinked || []), ...(patch.unlinked || [])])]
+      .filter((k) => typeof k === 'string' && !back.has(k));
   }
 
   // 함께한 사람 — 관계로 이어 둔 사람과 폼이 남긴 이름만 남는다. 사람이 지운

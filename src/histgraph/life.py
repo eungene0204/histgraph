@@ -872,6 +872,8 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
     # 6. 섬을 잇는다 — 내 삶의 사건은 내가 겪은 것이고, 가족은 이야기가 호칭으로 말한다
     if link_orphans(nodes, edges, me) + link_people(nodes, edges, me, story):
         tidy_edges(nodes, edges, me)   # 새로 이은 선에도 이름(역할)을 단다
+    #    그러고 **사람이 지운 선**을 걷는다 — 위 두 규칙이 도로 그은 것도 여기서 빠진다.
+    drop_unlinked(edges, payload.get("unlinked"))
 
     # 7. 역사 연결의 관문 — 이야기가 부르지 않은 사건·결과보다 늦은 원인을 지운다.
     # 옛 그래프도 화면이 열 때 refine 을 지나므로(POST /api/life/refine) 여기서
@@ -1160,6 +1162,29 @@ def participants_from_story(nodes: list[dict], text: str | None) -> int:
                 made += 1
             ev["participants"] = have
     return made
+
+
+def drop_unlinked(edges: list[dict], unlinked: list[str] | None) -> int:
+    """사람이 상세의 '편집'에서 뺀 선을 걷는다. 돌아오는 것은 걷어 낸 수.
+
+    2026-09-09 사용자가 관계를 빼고 완료를 눌렀는데 그 선이 그대로 서 있었다 —
+    문서에서는 빠졌지만 `link_orphans` 가 곧바로 다시 그었다 (인물과 안 이어진
+    개인 사건은 주인공이 겪은 것으로 잇는다는 2026-09-08 결정). 두 결정이
+    부딪히는 자리는 여기 하나뿐이고 **사람이 이긴다** — 한국사 쪽 편집 계층과
+    같은 규칙이다 (사람이 적은 것을 수집이 되돌리지 못한다).
+
+    재는 것은 두 끝과 관계 이름이다 (`출발>도착|관계`). 방향은 안 본다 —
+    tidy_edges 가 experienced 를 뒤집기도 한다. 같은 두 노드 사이의 다른
+    관계는 그대로 남는다."""
+    cut = {k for k in (unlinked or []) if isinstance(k, str)}
+    if not cut:
+        return 0
+    kept = [e for e in edges
+            if f"{e.get('source')}>{e.get('target')}|{e.get('type')}" not in cut
+            and f"{e.get('target')}>{e.get('source')}|{e.get('type')}" not in cut]
+    gone = len(edges) - len(kept)
+    edges[:] = kept
+    return gone
 
 
 def link_participants(nodes: list[dict], edges: list[dict], me: dict | None) -> int:

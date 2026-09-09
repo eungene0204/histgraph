@@ -4,7 +4,7 @@ import { auth, csrf } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, editNode, edgeChoices, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, editNode, edgeChoices, unlinkKey, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -1178,6 +1178,11 @@ function EventEdit({ life, id, onDone, onCancel }) {
         other: e.source === id ? e.target : e.source,
         type: e.type, description: e.description || '', role: e.role || '',
       })),
+      // 처음 든 선 — 완료할 때 여기 있다가 사라진 것이 '사람이 지운 선'이다.
+      // 코드가 그은 선(섬 잇기·참여자)은 문서에 없으므로 이렇게 세지 않으면
+      // 무엇이 빠졌는지 알 길이 없다 (life.dropUnlinked 머리글).
+      was: life.edges.filter((e) => e.source === id || e.target === id)
+        .map((e) => unlinkKey(e.source, e.target, e.type)),
       links: life.historical_connections.filter((c) => c.personal_event === id).map((c) => ({ ...c })),
       cf: life.counterfactual_analysis.filter((c) => c.event === id)
         .map((c) => ({ ...c, possibilities: (c.possibilities || []).join('\n') })),
@@ -1217,6 +1222,8 @@ function EventEdit({ life, id, onDone, onCancel }) {
         target: r.dir === 'out' ? r.other : id,
         type: r.type, description: r.description, role: r.role,
       })),
+      unlinked: f.was.filter((k) => !f.edges.some((r) => k === unlinkKey(
+        r.dir === 'out' ? id : r.other, r.dir === 'out' ? r.other : id, r.type))),
       links: f.links,
       counterfactual: f.cf.map((c) => ({ ...c, possibilities: String(c.possibilities || '').split('\n') })),
     });

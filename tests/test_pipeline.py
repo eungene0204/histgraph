@@ -5964,6 +5964,25 @@ with tempfile.TemporaryDirectory() as tmp:
           str(got["edges"]))
     check("한 번 이은 것을 두 번 잇지 않는다", life_mod.link_orphans(got["nodes"], got["edges"], got["nodes"][0]) == 0)
 
+    # 사람이 상세의 '편집'에서 뺀 선은 섬 잇기가 다시 긋지 않는다 (2026-09-09 사용자가
+    # 관계를 빼고 완료를 눌렀는데 그대로 서 있었다). 두 결정이 부딪히는 자리에서는
+    # 사람이 이긴다 — 한국사 쪽 편집 계층과 같은 규칙.
+    import copy as _copy
+
+    cut = _copy.deepcopy(island)
+    cut["unlinked"] = ["me>a2|experienced"]
+    kept = life_mod.refine(cut)
+    check("사람이 뺀 선은 다시 서지 않는다",
+          not any(e["source"] == "me" and e["target"] == "a2" for e in kept["edges"]),
+          str([(e["source"], e["target"], e["type"]) for e in kept["edges"]]))
+    check("뺀 선의 노드는 그대로 있다", any(n["id"] == "a2" for n in kept["nodes"]))
+    check("남의 선은 걷지 않는다",
+          any(e["source"] == "me" and e["target"] == "a1" for e in kept["edges"]))
+    check("방향이 뒤집혀도 같은 선으로 본다",
+          life_mod.drop_unlinked([{"source": "a", "target": "b", "type": "met"}], ["b>a|met"]) == 1)
+    check("같은 두 끝의 다른 관계는 남는다",
+          life_mod.drop_unlinked([{"source": "a", "target": "b", "type": "caused"}], ["a>b|led_to"]) == 0)
+
     # 가족은 이야기가 호칭으로 말한다 (2026-09-08 사용자: "왜 엄마라고 분명히 말했고
     # 엄마는 매우 중요한 사람인데 그래프에서 나와 엄마 사이에 엣지를 그리지 않았지?").
     # 실측: 더한 토막의 답이 person_mother → person_1 을 적었는데 주인공 노드가 새 답에

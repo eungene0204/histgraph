@@ -668,6 +668,26 @@ console.log('\n개인 역사 — 노드를 고친다');
   ok('더한 관계가 그래프에 선다', !!made && made.type === 'caused');
   ok('사람이 적은 관계는 미룬 것이 아니다', made?.confidence === 1);
 
+  // 사람이 뺀 선은 섬 잇기(linkOrphans)가 다시 긋지 않는다 — 2026-09-09 사용자가
+  // 관계를 빼고 완료를 눌렀는데 그대로 서 있었다. 지우기는 문서에서 제대로 빠졌고
+  // 코드가 곧바로 다시 그은 것이었다. 부딪히는 자리에서는 사람이 이긴다.
+  const auto = view.edges.filter((e) => e.source === 'ev_worldcup' || e.target === 'ev_worldcup');
+  ok('그 사건은 코드가 이어 준 나-당사자 하나뿐이다',
+    auto.length === 1 && auto[0].source === 'me' && auto[0].type === 'experienced');
+  ok('문서에는 그 선이 없다', !sample.edges.some((e) => e.source === 'ev_worldcup' || e.target === 'ev_worldcup'));
+  const marks = auto.map((e) => `${e.source}>${e.target}|${e.type}`);
+  const lone = editNode(sample, 'ev_worldcup', { edges: [], unlinked: marks });
+  const alone = normalize(lone);
+  ok('사람이 뺀 선은 다시 서지 않는다',
+    !alone.edges.some((e) => e.source === 'ev_worldcup' || e.target === 'ev_worldcup'));
+  ok('노드는 그대로 있다', alone.nodes.some((n) => n.id === 'ev_worldcup'));
+  ok('남의 선은 걷지 않는다', alone.edges.length === view.edges.length - 1);
+  const again = normalize(editNode(lone, 'ev_worldcup', { unlinked: [],
+    edges: [{ source: 'me', target: 'ev_worldcup', type: 'experienced' }] }));
+  ok('다시 이으면 선다', again.edges.some((e) => e.source === 'me' && e.target === 'ev_worldcup'));
+  ok('다시 이으면 지운 기록도 걷힌다', !(again.unlinked || []).length);
+  ok('지운 기록은 노드를 지울 때 함께 걷힌다', !(removeNode(lone, 'ev_worldcup').unlinked || []).length);
+
   // 함께 — 관계에서 뺀 사람이 participants 로 다시 서지 않는다 (linkParticipants)
   const found = view.nodes.find((n) => n.id === 'ev_found');
   const solo = normalize(editNode(sample, 'ev_found', {
