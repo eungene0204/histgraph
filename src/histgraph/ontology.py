@@ -35,6 +35,27 @@ NODE_TYPES: dict[str, str] = {
     "concept": "개념·주제",
 }
 
+# --- 타입 안의 갈래 -------------------------------------------------------
+# 씨족의 본관·파는 **새 타입이 아니라 `org` 다** (`clans.py` 머리글, 아래
+# FORMS 와 같은 판단). 타입을 늘리면 EDGE_TYPES 의 출발·도착 목록과 화면의
+# 색이 함께 늘어나는데, 파가 하는 일은 사람을 묶는 것뿐이라 그만한 값이
+# 없다. 대신 **화면이 부를 이름은 있어야 한다** — 덕천군파의 타입 딱지에
+# '단체·국가·왕조'라고 적으면 조선총독부와 같은 것으로 읽힌다.
+# 색을 새로 뽑지 않고 글자로 가르는 이유는 graph-drawer.md §12.21 에 있다.
+CLAN_LABELS: dict[str, str] = {"본관": "본관", "파": "분파"}
+
+
+def type_label(node_type: str, props: dict | None = None) -> str:
+    """화면의 타입 딱지에 세울 이름. 타입 안에서 뜻이 갈리는 노드는
+    그 이름으로 부른다 (지금은 본관·파 하나뿐이다)."""
+    props = props or {}
+    if props.get("kind") == "clan":
+        name = CLAN_LABELS.get(props.get("clan_level") or "")
+        if name:
+            return name
+    return NODE_TYPES.get(node_type, node_type)
+
+
 # --- 매체 구분 -------------------------------------------------------------
 # 영화·드라마·책·음악·다큐·게임을 **노드 타입으로 쪼개지 않는다.** 쪼개면
 # EDGE_TYPES 의 출발·도착 목록이 여섯 배로 늘고, 화면의 색이 아홉에서

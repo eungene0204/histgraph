@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import auth, pages, summaries
 from .labels import screen_alias
-from .ontology import EDGE_TYPES, NODE_TYPES
+from .ontology import EDGE_TYPES, NODE_TYPES, type_label
 from .provenance import desc_origin
 from .store import GraphStore
 
@@ -101,6 +101,46 @@ TYPE_GROUP: dict[str, str] = {
     "concept": "frame",
 }
 
+
+def _props(row) -> dict:
+    """노드 행의 props. 열이 없거나 깨져 있으면 빈 것으로 본다."""
+    if "props" not in row.keys():
+        return {}
+    try:
+        return json.loads(row["props"] or "{}") or {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _group(row) -> str:
+    """갈래는 대개 타입이 정하지만, **한 타입 안에서 뜻이 갈리는 노드는
+    스스로 말한다.** 갈래가 나르는 것은 색이 아니라 '얼마나 앞에 세우나'다
+    (팔란티어의 prominent/normal/hidden — graph-drawer.md §1.1).
+
+    지금 그런 노드는 씨족의 본관·파 하나다 (`clans.py`). `org` 이지만
+    행위자가 아니라 사람을 묶는 틀이라 — 날짜가 없고, 사건에 참여하지 않고,
+    하는 일이 '누구를 담는가'뿐이라 — 시대·직위와 같은 자리에서 물러난다.
+    캔버스에서 밑동 반지름이 6 에서 4 로 줄고, 색은 org 크림 그대로다
+    (색상은 타입이 쥔 부호다 — graph-drawer.md §12.21)."""
+    if _props(row).get("kind") == "clan":
+        return "frame"
+    return TYPE_GROUP.get(row["type"], "thing")
+
+
+def _other_brief(row) -> dict:
+    """관계 줄의 상대. 색 점(갈래)과 타입 딱지를 여기서 정한다 — 상대가
+    파면 '단체·국가·왕조'가 아니라 '분파'라고 적힌다."""
+    props = json.loads(row["other_props"] or "{}") if row["other_props"] else {}
+    return {
+        "id": row["other_id"],
+        "label": row["other_label"],
+        "type": row["other_type"],
+        "group": "frame" if props.get("kind") == "clan"
+                 else TYPE_GROUP.get(row["other_type"], "thing"),
+        "type_label": type_label(row["other_type"], props),
+    }
+
+
 # --- 연표 --------------------------------------------------------------
 # 차수 내림차순으로 훑는다. **끊지는 않는다** — 아래 `_anchors` 가 적은
 # 대로 연대를 아는 사건은 다 세우는 것이 규칙이다. 차례가 필요한 것은
@@ -139,18 +179,35 @@ MAX_SPAN = {"person": 110, "event": 60}
 ROLE_HEADS = frozenset({"주도", "가담", "대항", "피해", "표적", "수습", "지휘관", "주요 인물", "교전", "가해"})
 # 라벨이 타입 이름보다 정확한 관계 전부 (`relations.js` LABEL_HEADS 와 같은 표).
 # 그래프의 선과 연표의 딱지가 '관련' 대신 이 이름으로 말한다.
-LABEL_HEADS = ROLE_HEADS | frozenset({"다음", "이 기사의 대상", "소속", "직위"})
+# 씨족이 셋을 더한다 (`clans.py` — 파조·분파·본관). '소속'이라고 부르면 덕천군이
+# 덕천군파에 든 수만 명 중 하나로 읽히고, '상위'라고 부르면 파가 무엇인지 사라진다.
+LABEL_HEADS = ROLE_HEADS | frozenset(
+    {"다음", "이 기사의 대상", "소속", "직위", "파조", "분파", "본관"}
+)
 # 방향으로 갈라 부르는 라벨 (`relations.js` LABEL_DIR_HEAD 와 같은 표)
 LABEL_DIR_HEAD = {
     "다음": {"out": "다음 일", "in": "앞선 일"},
     "이 기사의 대상": {"out": "이 기록이 다루는 것", "in": "이것을 다룬 기록"},
+    # 파 → 상위(대파·본관). 나가는 쪽은 이 파가 갈라져 나온 문중이고,
+    # 들어오는 쪽은 여기서 갈라진 파들이다 (전주 이씨 바로 아래만 111개).
+    "분파": {"out": "속한 문중", "in": "갈라진 파"},
+    # 본관 → 그 지명. 씨족 쪽에서는 '본관'이지만 지명 쪽에서 보면
+    # 이곳을 본관으로 삼은 씨족들의 목록이다.
+    "본관": {"out": "본관 지명", "in": "이곳을 본관으로 하는 씨족"},
 }
 
 
 def _rel_name(etype: str, direction: str, label: str | None) -> dict:
     """연표·화면이 부를 관계 이름. 라벨이 타입보다 정확하면 그것을 쓰고
-    `specific` 을 달아 화면이 방향으로 다시 부르지 않게 한다."""
-    if etype in ("participated_in", "related_to") and label:
+    `specific` 을 달아 화면이 방향으로 다시 부르지 않게 한다.
+
+    **타입으로 막지 않는다.** 예전에는 참여·관련에만 걸었는데, 라벨이 타입
+    이름을 이기는 것은 타입의 문제가 아니라 라벨의 문제다 — `member_of`
+    에 적힌 '파조'는 '소속'보다 정확하고, `part_of` 의 '분파'는 '상위'보다
+    정확하다. 표에 있는 라벨만 이기므로 넓혀도 다른 관계가 흔들리지 않는다
+    (`held_position`·`member_of` 에 붙은 '직위'·'소속'은 타입 이름과 같은
+    말이다)."""
+    if label:
         if label in LABEL_DIR_HEAD:
             return {"type": etype, "dir": direction,
                     "label": LABEL_DIR_HEAD[label][direction], "specific": True}
@@ -267,7 +324,7 @@ def _node_brief(row, degree: int = 0) -> dict:
         "label": row["label"],
         "names": _names(row),
         "type": row["type"],
-        "group": TYPE_GROUP.get(row["type"], "thing"),
+        "group": _group(row),
         "degree": degree,
         "start": _year(row["start_date"]),
         "end": _year(row["end_date"]),
@@ -425,6 +482,13 @@ class GraphAPI:
         if not query:
             return []
         like = f"%{query}%"
+        # **띄어쓰기는 사람마다 다르다.** 소스마다 표제를 다르게 단다 —
+        # 국편은 '3·1운동', 위키백과는 '3·1 운동'이다 (§1-4). 라벨이
+        # '전주 이씨'인데 '전주이씨'를 치면 한 줄도 안 나왔다 (2026-09-10
+        # 지적). 찾는 사람이 띄어쓰기를 맞혀야 하는 검색은 없는 것과 같다.
+        # 그래서 라벨·별칭과 검색어에서 공백을 빼고 한 번 더 견준다.
+        tight = f"%{query.replace(' ', '')}%"
+        bare = query.replace(" ", "")
         # **무게가 첫 기준이다** (`_weighted` — 타입 가중 PageRank). 문자열
         # 일치도를 앞에 두면 '세종'을 쳤을 때 세종특별자치시와 '세종 비암사
         # 극락보전'이 먼저 나오고 정작 조선 세종은 네 번째로 밀린다 —
@@ -442,18 +506,23 @@ class GraphAPI:
             f"""SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                       COUNT(e.src) AS d,
                       MIN(CASE WHEN n.label = ?1 THEN 0
+                               WHEN REPLACE(n.label, ' ', '') = ?4 THEN 0
                                WHEN n.label LIKE ?1 || '%' THEN 1
+                               WHEN REPLACE(n.label, ' ', '') LIKE ?4 || '%' THEN 1
                                ELSE 2 END) AS rank
                  FROM nodes n
                  LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
                  {join}
                 WHERE (n.label LIKE ?2
-                       OR n.id IN (SELECT node_id FROM aliases WHERE alias LIKE ?2))
+                       OR REPLACE(n.label, ' ', '') LIKE ?5
+                       OR n.id IN (SELECT node_id FROM aliases
+                                    WHERE alias LIKE ?2
+                                       OR REPLACE(alias, ' ', '') LIKE ?5))
                   AND n.source != 'timeline'
              GROUP BY n.id
              ORDER BY (n.type = 'period'), {order}, rank, n.label
                 LIMIT ?3""",
-            (query, like, limit),
+            (query, like, limit, bare, tight),
         ).fetchall()
         return [_node_brief(r, r["d"]) for r in rows]
 
@@ -490,7 +559,9 @@ class GraphAPI:
                 label = EDGE_TYPES[e["type"]][0]
                 if e["type"] == "caused" and e["label"]:
                     label = e["label"]
-                if e["type"] in ("participated_in", "related_to") and e["label"] in LABEL_HEADS:
+                # 라벨이 타입 이름보다 정확하면 선의 이름도 그것이다
+                # (`_rel_name` 과 같은 규칙 — 역할·파조·분파).
+                if e["label"] in LABEL_HEADS:
                     label = e["label"]
                 merged[key] = {
                     "s": e["src"], "t": e["dst"], "type": e["type"],
@@ -502,7 +573,7 @@ class GraphAPI:
                 row["conf"] = max(row["conf"], e["confidence"])
                 if e["source"] not in row["sources"]:
                     row["sources"].append(e["source"])
-                if e["type"] in ("participated_in", "related_to") and e["label"] in LABEL_HEADS:
+                if e["label"] in LABEL_HEADS:
                     row["label"] = e["label"]
         edges = list(merged.values())
         return {
@@ -544,7 +615,8 @@ class GraphAPI:
         rows = self.store.conn.execute(
             """SELECT e.src, e.dst, e.type, e.source, e.confidence, e.props,
                       e.label AS edge_label,
-                      n.id AS other_id, n.label AS other_label, n.type AS other_type
+                      n.id AS other_id, n.label AS other_label, n.type AS other_type,
+                      n.props AS other_props
                  FROM edges e
                  JOIN nodes n
                    ON n.id = CASE WHEN e.src = ?1 THEN e.dst ELSE e.src END
@@ -556,6 +628,12 @@ class GraphAPI:
         # 행주산성'이 Wikidata 와 인포박스 양쪽에 있어 화면에 두 번 나왔다.
         # 지우지는 않는다 — 두 소스가 같은 말을 했다는 것 자체가 정보다.
         by_fact: dict[tuple[str, str, str], dict] = {}
+        # 파에 실린 '족보에 오른 자손 수'. **화면에 세우지 않는다** — 이미
+        # 설명 문장이 한 번 말했고, 관계 줄에 수를 붙이면 그 수가 '이 관계의
+        # 세기'로 읽힌다. 쓰는 자리는 차례뿐이다: 전주 이씨 아래 180개를
+        # 가나다로 세우면 완풍군파(124,001명)가 목록 한가운데 묻힌다
+        # (graph-drawer.md §12.21 — 무게를 차례에만 쓰는 것과 같은 자리).
+        clan_members: dict[str, int] = {}
         for r in rows:
             edge_props = json.loads(r["props"] or "{}")
             direction = "out" if r["src"] == node_id else "in"
@@ -569,12 +647,7 @@ class GraphAPI:
                     # 구체적이라 화면이 "1506년에 태어났다"까지 말할 수 있다.
                     "edge_label": r["edge_label"] or None,
                     "dir": direction,
-                    "other": {
-                        "id": r["other_id"],
-                        "label": r["other_label"],
-                        "type": r["other_type"],
-                        "group": TYPE_GROUP.get(r["other_type"], "thing"),
-                    },
+                    "other": _other_brief(r),
                     "confidence": r["confidence"],
                     "sources": [],
                     # 추출 엣지의 근거 구절. 이걸 화면에 띄우지 않으면
@@ -602,6 +675,10 @@ class GraphAPI:
                     fact[k] = edge_props[k]
             if r["source"] not in fact["sources"]:
                 fact["sources"].append(r["source"])
+            if r["other_props"] and '"members"' in r["other_props"]:
+                members = json.loads(r["other_props"]).get("members")
+                if isinstance(members, int):
+                    clan_members[r["other_id"]] = members
             if edge_props.get("evidence"):
                 fact["evidence"].append(edge_props["evidence"])
             # `roles` 가 말뭉치에서 찾은 근거. 역할('대항'·'표적')을 말할 때는
@@ -623,6 +700,9 @@ class GraphAPI:
                 -len(x["sources"]),
                 -x["confidence"],
                 0 if x["evidence"] else 1,
+                # 파는 큰 파부터. 족보가 실제로 센 수라 자격이 있고, 쓰는
+                # 자리는 차례뿐이다 (위 `clan_members` 주석).
+                -clan_members.get(x["other"]["id"], 0),
                 x["other"]["label"],
             )
         )
@@ -632,8 +712,8 @@ class GraphAPI:
             "label": row["label"],
             "names": names,
             "type": row["type"],
-            "group": TYPE_GROUP.get(row["type"], "thing"),
-            "type_label": NODE_TYPES.get(row["type"], row["type"]),
+            "group": _group(row),
+            "type_label": type_label(row["type"], _props(row)),
             "source": row["source"],
             "start": row["start_date"],
             "end": row["end_date"],
@@ -1154,8 +1234,8 @@ class GraphAPI:
             "id": row["id"],
             "label": row["label"],
             "type": row["type"],
-            "group": TYPE_GROUP.get(row["type"], "thing"),
-            "type_label": NODE_TYPES.get(row["type"], row["type"]),
+            "group": _group(row),
+            "type_label": type_label(row["type"], _props(row)),
             "year": start,
             "end": end,
             # '' 이면 이 노드의 연도를 우리가 모른다는 뜻이다. 화면은

@@ -115,14 +115,23 @@ export const SENTENCE = {
   depicts: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 다룬다`,
   spouse_of: (a, b) => `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 부부다`,
   taught: (a, b) => `${a}${pt(a, '이', '가')} ${b}${pt(b, '을', '를')} 가르쳤다`,
-  member_of: (a, b) => `${a}${pt(a, '은', '는')} ${b} 소속이다`,
+  // 씨족의 파에는 '파조'가 적혀 있다 (`clans.py`). '덕천군은 덕천군파
+  // 소속이다'는 그 파에 든 수만 명 중 하나라는 말이라 틀린다 — 파조는
+  // 그 파가 갈라져 나온 사람이다.
+  member_of: (a, b, o = {}) => (o.label === '파조'
+    ? `${a}${pt(a, '은', '는')} ${b}의 파조다`
+    : `${a}${pt(a, '은', '는')} ${b} 소속이다`),
   // 문장 규칙이 없으면 "성균관 스캔들 → 제도 · 주제" 라는 화살표가 화면에
   // 선다 (2026-09-07 전수 조사: set_in 105 · adapted_from 5 · about 1).
   about: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 주제로 한다`,
   set_in: (a, b) => `${a}의 배경은 ${b}${pt(b, '이다', '다')}`,
   adapted_from: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 원작으로 한다`,
   held_position: (a, b) => `${a}${pt(a, '은', '는')} ${b}${pt(b, '을', '를')} 지냈다`,
-  part_of: (a, b) => `${a}${pt(a, '은', '는')} ${b}의 일부다`,
+  // 파 → 상위(대파·본관)에는 '분파'가 적혀 있다. '덕천군파는 전주 이씨의
+  // 일부다'로는 파가 무엇인지 안 남는다.
+  part_of: (a, b, o = {}) => (o.label === '분파'
+    ? `${a}${pt(a, '은', '는')} ${b}에서 갈라져 나온 파다`
+    : `${a}${pt(a, '은', '는')} ${b}의 일부다`),
   caused: (a, b, o = {}) => (KIND_SENTENCE[o.label] || KIND_SENTENCE['원인'])(a, b),
   // 전후(P155/P156)는 앞선 사건에서, 인과(P828/P1542)는 원인에서 담는다.
   // 방향이 하나로 모여 있어 '다음'·'원인'이 적힌 엣지는 어느 쪽에서 읽어도
@@ -137,6 +146,9 @@ export const SENTENCE = {
     // 스키마가 안 맞아 '관련'으로 낮춰진 것 — 라벨이 원래 뜻을 들고 있다
     : o.label === '소속' ? SENTENCE.member_of(a, b)
     : o.label === '직위' ? SENTENCE.held_position(a, b)
+    // 씨족은 그 지명을 본관으로 삼는다 (`clans.py`) — 씨족 나무가 그래프에
+    // 닿는 자리이기도 하다
+    : o.label === '본관' ? `${a}의 본관은 ${b}${pt(b, '이다', '다')}`
     : ROLE_SENTENCE[o.label]
     ? roleSentence(o.label, a, b, o)
     : `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다`),
@@ -188,18 +200,29 @@ export const ROLE_HEADS = new Set(Object.keys(ROLE_SENTENCE).filter((k) => k !==
 // 사건의 앞뒤(`다음` 27건), 실록 기사가 다루는 대상(36건), 스키마가 안 맞아
 // `related_to` 로 낮춰졌지만 라벨은 남은 것(`소속` 4 · `직위` 1). 전부
 // '관련'이라는 한 더미에 묻혀 있었다 — 정도전이 묻힌 것과 같은 자리다.
+// 씨족이 둘을 더한다 (`clans.py`) — 파 → 상위(대파·본관)의 '분파'와
+// 본관 → 지명의 '본관'. 나가는 쪽은 이 파가 갈라져 나온 문중이고, 들어오는
+// 쪽은 여기서 갈라진 파들이다. '상위 · 1 / 하위 · 111' 로는 무엇의 목록인지
+// 알 수 없다.
 export const LABEL_DIR_HEAD = {
   '다음': { out: '다음 일', in: '앞선 일' },
   '이 기사의 대상': { out: '이 기록이 다루는 것', in: '이것을 다룬 기록' },
+  '분파': { out: '속한 문중', in: '갈라진 파' },
+  // 본관 → 그 지명. 지명 쪽에서 보면 이곳을 본관으로 삼은 씨족들의 목록이다.
+  '본관': { out: '본관 지명', in: '이곳을 본관으로 하는 씨족' },
 };
-export const LABEL_HEADS = new Set([...ROLE_HEADS, ...Object.keys(LABEL_DIR_HEAD), '소속', '직위']);
+export const LABEL_HEADS = new Set([...ROLE_HEADS, ...Object.keys(LABEL_DIR_HEAD), '소속', '직위', '파조']);
 
+// **타입으로 막지 않는다.** 라벨이 타입 이름을 이기는 것은 타입의 문제가
+// 아니라 라벨의 문제다 — `member_of` 의 '파조'는 '소속'보다, `part_of` 의
+// '분파'는 '상위'보다 정확하다. 이기는 것은 위 표에 적힌 라벨뿐이라 넓혀도
+// 다른 관계는 그대로다 ('직위'·'소속'은 타입 이름과 같은 말이고, '언급'·
+// '원인'·'출생'은 표에 없어 여기 걸리지 않는다). 서버의 `LABEL_HEADS`·
+// `_rel_name` 과 같은 규칙이다.
 export function relHead(r) {
   if (TIME_TYPES.has(r.type)) return r.dir === 'out' ? '시기' : '이 시기의 개체';
-  if (r.type === 'participated_in' || r.type === 'related_to') {
-    if (LABEL_DIR_HEAD[r.edge_label]) return LABEL_DIR_HEAD[r.edge_label][r.dir];
-    if (LABEL_HEADS.has(r.edge_label)) return r.edge_label;
-  }
+  if (LABEL_DIR_HEAD[r.edge_label]) return LABEL_DIR_HEAD[r.edge_label][r.dir];
+  if (LABEL_HEADS.has(r.edge_label)) return r.edge_label;
   return DIR_HEAD[r.type]?.[r.dir] || r.label;
 }
 

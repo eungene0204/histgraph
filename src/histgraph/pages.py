@@ -59,8 +59,11 @@ TIME_TYPES = ("from_period", "dated_to")
 ROLE_HEADS = frozenset({"주도", "가담", "대항", "피해", "표적", "수습", "지휘관", "주요 인물", "교전", "가해"})
 # 라벨이 타입보다 정확한 관계 (`relations.js` LABEL_HEADS 와 같은 표)
 LABEL_DIR_HEAD = {"다음": {"out": "다음 일", "in": "앞선 일"},
-                  "이 기사의 대상": {"out": "이 기록이 다루는 것", "in": "이것을 다룬 기록"}}
-LABEL_HEADS = ROLE_HEADS | set(LABEL_DIR_HEAD) | {"소속", "직위"}
+                  "이 기사의 대상": {"out": "이 기록이 다루는 것", "in": "이것을 다룬 기록"},
+                  # 씨족이 적는 라벨 둘 (`clans.py`) — 파 → 상위, 본관 → 지명.
+                  "분파": {"out": "속한 문중", "in": "갈라진 파"},
+                  "본관": {"out": "본관 지명", "in": "이곳을 본관으로 하는 씨족"}}
+LABEL_HEADS = ROLE_HEADS | set(LABEL_DIR_HEAD) | {"소속", "직위", "파조"}
 
 # 한 묶음에 이만큼까지만 적는다. 세종의 '자녀'처럼 수십이 붙는 자리가
 # 있는데, 문서로 읽는 화면에서 목록이 화면을 넘기면 아무도 안 읽는다.
@@ -278,14 +281,15 @@ def _why_empty(node: dict) -> str:
 
 
 def _head(rel: dict) -> str:
+    # 타입으로 막지 않는다 — 이기는 것은 표에 적힌 라벨뿐이다
+    # (`relations.js` relHead·`server._rel_name` 과 같은 규칙).
     if rel["type"] in TIME_TYPES:
         return "시기" if rel["dir"] == "out" else "이 시기의 개체"
-    if rel["type"] in ("participated_in", "related_to"):
-        lab = rel.get("edge_label")
-        if lab in LABEL_DIR_HEAD:
-            return LABEL_DIR_HEAD[lab][rel["dir"]]
-        if lab in LABEL_HEADS:
-            return lab   # '피해'·'주도'·'소속' — 화면(`relations.js` relHead)과 같은 규칙
+    lab = rel.get("edge_label")
+    if lab in LABEL_DIR_HEAD:
+        return LABEL_DIR_HEAD[lab][rel["dir"]]
+    if lab in LABEL_HEADS:
+        return lab   # '피해'·'주도'·'소속'·'파조'
     return DIR_HEAD.get(rel["type"], {}).get(rel["dir"]) or rel["label"]
 
 
@@ -354,7 +358,7 @@ def _origin_line(origin: dict | None) -> str:
 
 def _link(other: dict) -> str:
     color = GROUP_COLOR.get(other.get("group"), "var(--frame)")
-    kind = NODE_TYPES.get(other.get("type"), "")
+    kind = other.get("type_label") or NODE_TYPES.get(other.get("type"), "")
     return (
         f'<li><span class="dot" style="background:{color}"></span>'
         f'<a href="/n/{quote(other["id"], safe="")}">{escape(other["label"])}</a>'
@@ -419,7 +423,9 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     names = node.get("names") or [node["label"]]
     title = names[0]
     also = " · ".join(names[1:])
-    kind = NODE_TYPES.get(node["type"], node["type"])
+    # 타입 딱지. 파는 '단체·국가·왕조'가 아니라 '분파'다 — 서버가 판정해
+    # 보낸 것을 그대로 쓴다 (`ontology.type_label`).
+    kind = node.get("type_label") or NODE_TYPES.get(node["type"], node["type"])
     span = " ~ ".join(x for x in (_year(node.get("start")), _year(node.get("end"))) if x)
     color = GROUP_COLOR.get(node.get("group"), "var(--frame)")
     desc = (node.get("description") or "").strip()

@@ -263,6 +263,52 @@ console.log('\n라벨이 타입보다 정확한 관계');
      '불멸의 이순신은 제도를 주제로 한다');
 }
 
+// --- 씨족의 파 (`clans.py`) -------------------------------------------------
+// 파는 새 타입도 새 색도 아니다 — org 안의 갈래이고, 가르는 것은 글자다
+// (graph-drawer.md §12.21). 그 글자가 여기서 나온다.
+console.log('\n씨족의 파');
+{
+  const pa = other('ex:org:덕천군파', '덕천군파', 'org', 'frame');
+  const root = other('ex:org:전주 이씨', '전주 이씨', 'org', 'frame');
+  const founder = other('wd:Q12592850', '덕천군', 'person', 'actor');
+
+  // 타입 제한을 걷었다 — 이기는 것은 타입이 아니라 표에 적힌 라벨이다
+  const jopa = rel({ type: 'member_of', dir: 'out', other: pa, edge_label: '파조', label: '소속' });
+  eq('파조는 소속이 아니다', relHead(jopa), '파조');
+  eq('파조 문장', sentence(jopa, { label: '덕천군', type: 'person' }), '덕천군은 덕천군파의 파조다');
+  eq('파 쪽에서 봐도 같은 문장',
+     sentence(rel({ type: 'member_of', dir: 'in', other: founder, edge_label: '파조', label: '소속' }),
+              { label: '덕천군파', type: 'org' }),
+     '덕천군은 덕천군파의 파조다');
+  eq('라벨 없는 소속은 그대로',
+     sentence(rel({ type: 'member_of', dir: 'out', other: root, label: '소속' }), { label: '이방원', type: 'person' }),
+     '이방원은 전주 이씨 소속이다');
+
+  const bun = (dir, o) => rel({ type: 'part_of', dir, other: o, edge_label: '분파', label: '상위' });
+  eq('나가는 쪽은 속한 문중', relHead(bun('out', root)), '속한 문중');
+  eq('들어오는 쪽은 갈라진 파', relHead(bun('in', pa)), '갈라진 파');
+  eq('분파 문장', sentence(bun('out', root), { label: '덕천군파', type: 'org' }),
+     '덕천군파는 전주 이씨에서 갈라져 나온 파다');
+  eq('본관 쪽에서 봐도 같은 문장', sentence(bun('in', pa), { label: '전주 이씨', type: 'org' }),
+     '덕천군파는 전주 이씨에서 갈라져 나온 파다');
+  // 라벨이 없는 part_of 는 예전 그대로여야 한다 (전수 조사로 넓힌 자리라)
+  eq('라벨 없는 상위는 그대로', relHead(rel({ type: 'part_of', dir: 'out', other: root, label: '상위' })), '상위');
+  eq('일부다 문장도 그대로',
+     sentence(rel({ type: 'part_of', dir: 'out', other: root, label: '상위' }), { label: '아무개', type: 'org' }),
+     '아무개는 전주 이씨의 일부다');
+  // 파는 상세에서 '관련' 더미에 묻히지 않는다 — 묶음이 따로 선다
+  const gp = groupRelations([jopa, bun('out', root)]);
+  eq('파의 묶음 둘', gp.groups.map((x) => x.head).join(','), '파조,속한 문중');
+
+  // 본관 → 그 지명. 씨족 나무가 그래프에 닿는 자리다 (`clans.py`).
+  const jeonju = other('wd:Q42140', '전주시', 'place', 'thing');
+  const bon = (dir, o) => rel({ type: 'related_to', dir, other: o, edge_label: '본관', label: '관련' });
+  eq('본관 지명', relHead(bon('out', jeonju)), '본관 지명');
+  eq('지명 쪽에서는 씨족 목록', relHead(bon('in', root)), '이곳을 본관으로 하는 씨족');
+  eq('본관 문장', sentence(bon('out', jeonju), { label: '전주 이씨', type: 'org' }),
+     '전주 이씨의 본관은 전주시다');
+}
+
 // --- 인과 -----------------------------------------------------------------
 // "온톨로지 그래프이므로 인과관계를 보여줘야 한다 — 임진왜란 → 명의 쇠퇴 →
 // 여진족의 성장 → 병자호란" (2026-09-04). 엣지는 원인 → 결과, 라벨이 종류다.

@@ -36,6 +36,7 @@ DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
 DEFAULT_TERMS = ROOT / "data" / "terms.tsv"
 DEFAULT_RECENT = ROOT / "data" / "recent.tsv"
+DEFAULT_CLANS = ROOT / "data" / "clans.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -2004,6 +2005,54 @@ def cmd_nikh(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_clans(args: argparse.Namespace) -> int:
+    """씨족의 파를 노드로 세운다 (`clans` 모듈 머리글).
+
+        uv run histgraph clans --dry-run
+        uv run histgraph clans
+        uv run histgraph --db data/korea.sqlite clans
+    """
+    import collections
+
+    from . import clans as cl
+
+    table = cl.load_table(args.table)
+    with GraphStore(args.db) as store:
+        rep = cl.build(store, table, dry_run=args.dry_run)
+
+    by_origin = collections.Counter(r.origin for r in table)
+    head = "세울" if args.dry_run else "세운"
+    print(f"  표 {len(table)}줄 · {head} 노드 {rep.nodes:,} · 엣지 {rep.edges:,}")
+    for origin, n in by_origin.most_common():
+        print(f"    {origin}  파 {n}개")
+    print(f"  파조를 인물 노드에 이은 파 {len(rep.founded)}개")
+    if rep.removed:
+        print(f"  표에서 빠져 지운 파 노드 {rep.removed}개")
+    if rep.absent:
+        # 파생본에는 원본에만 있는 인물이 빠져 있다. 세어서 보여만 준다.
+        names = " · ".join(pa for pa, _ in rep.absent[:args.show])
+        print(f"  표가 가리키는 인물이 이 그래프에 없는 파 {len(rep.absent)}개: {names}")
+    if rep.orphan:
+        # **짐작으로 잇지 않는다.** 한자가 맞는 노드가 없으면 비워 둔다.
+        top = sorted(rep.orphan, key=lambda x: -x[2])[:args.show]
+        names = " · ".join(f"{pa}({n:,})" if n else pa for _, pa, n in top)
+        print(f"  파조 노드가 아직 없는 파 {len(rep.orphan)}개: {names}")
+    if rep.unknown_upper:
+        # 상위가 표에 없으면 그 가지가 통째로 뿌리로 올라간다.
+        seen = sorted({f"{o} {u}" for o, u in rep.unknown_upper})
+        print(f"\n  ✗ 상위로 적혔는데 표에 줄이 없는 파: {' · '.join(seen)}"
+              f" — {args.table} 에 그 파를 적을 것", file=sys.stderr)
+        return 1
+    if rep.unknown_origin:
+        # 닻이 없으면 다음 `scope` 가 그 씨족 나무를 통째로 잘라 낸다.
+        print(f"\n  ✗ 본관 지명 닻이 없는 본관: {' · '.join(rep.unknown_origin)}"
+              f" — clans.ORIGINS 에 적을 것", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print("  (dry-run: 세우지 않음)")
+    return 0
+
+
 def cmd_terms(args: argparse.Namespace) -> int:
     """임기 표를 씌운다 (`terms` 모듈 머리글).
 
@@ -2946,6 +2995,15 @@ def main(argv: list[str] | None = None) -> int:
     p_nk.add_argument("--show", type=int, default=20, help="출력할 예시 수")
     p_nk.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
     p_nk.set_defaults(func=cmd_nikh)
+
+    p_cl = sub.add_parser(
+        "clans", help="씨족의 파(派)를 노드로 세운다 (전주 이씨)"
+    )
+    p_cl.add_argument("--table", type=Path, default=DEFAULT_CLANS,
+                      help="파 표 (기본: data/clans.tsv)")
+    p_cl.add_argument("--show", type=int, default=8, help="출력할 예시 수")
+    p_cl.add_argument("--dry-run", action="store_true", help="세우지 않고 세기만")
+    p_cl.set_defaults(func=cmd_clans)
 
     p_tm = sub.add_parser(
         "terms", help="대통령의 띠를 취임일에서 시작시킨다 (임기 표)"

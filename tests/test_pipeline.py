@@ -1525,7 +1525,9 @@ check("재건된 조직은 가장 이른 설립·가장 늦은 해체",
       ]).get("Q9") == ("1910-01-01", "1940-01-01"))
 
 print("\n[탐색 서버]")
-from histgraph.server import GraphAPI, TYPE_GROUP, safe_static_path  # noqa: E402
+from histgraph.server import (  # noqa: E402
+    GraphAPI, TYPE_GROUP, _rel_name, safe_static_path,
+)
 
 check("모든 노드 타입에 색 갈래가 있음", set(TYPE_GROUP) == set(NODE_TYPES))
 
@@ -1585,6 +1587,14 @@ with tempfile.TemporaryDirectory() as tmp:
     # 실측 회귀: '1974'를 치면 연표 눈금 time:1974 가 첫 줄로 나와 엔터가 열었다
     check("연표 눈금 노드는 검색에 안 나온다",
           all(h["id"] != "wd:Q4" for h in api.search("1443")), str(api.search("1443")))
+    # 실측 회귀 (2026-09-10): 라벨이 '전주 이씨'인데 '전주이씨'로 치면 0건이었다.
+    # 소스마다 띄어쓰기를 다르게 단다 — 찾는 사람이 그걸 맞혀야 하면 안 된다.
+    check("띄어쓰기를 빼고 쳐도 찾는다",
+          [h["id"] for h in api.search("조선세종")] == ["wd:Q1"],
+          str(api.search("조선세종")))
+    check("라벨에 없는 띄어쓰기를 넣어 쳐도 찾는다",
+          any(h["id"] == "wd:Q5" for h in api.search("이 방원")),
+          str(api.search("이 방원")))
 
     g = api.graph("wd:Q1", depth=1)
     check("연도 노드는 기본적으로 빼고 그린다",
@@ -1630,6 +1640,68 @@ with tempfile.TemporaryDirectory() as tmp:
     g2 = api.graph("wd:Q1", depth=1)
     same = [e for e in g2["edges"] if e["type"] == "born_in"]
     check("그래프에도 선은 하나", len(same) == 1 and len(same[0]["sources"]) == 2)
+
+    # --- 씨족의 파 (`clans.py`) — org 이지만 행위자가 아니다 -------------
+    # 새 타입도 새 색도 만들지 않았다. 가르는 것은 갈래(물러남)와 글자다
+    # (graph-drawer.md §12.21).
+    store.upsert_nodes([
+        Node(id="ex:org:전주 이씨", type="org", label="전주 이씨", source="clans",
+             description="전주를 본관으로 하는 이씨.",
+             props={"kind": "clan", "clan_level": "본관"}),
+        Node(id="ex:org:덕천군파", type="org", label="덕천군파", source="clans",
+             description="전주 이씨의 분파.",
+             props={"kind": "clan", "clan_level": "파",
+                    "clan_root": "ex:org:전주 이씨", "members": 68936}),
+        Node(id="ex:org:완풍군파", type="org", label="완풍군파", source="clans",
+             description="전주 이씨의 분파.",
+             props={"kind": "clan", "clan_level": "파",
+                    "clan_root": "ex:org:전주 이씨", "members": 124001}),
+    ])
+    store.upsert_edges([
+        Edge(src="ex:org:덕천군파", dst="ex:org:전주 이씨", type="part_of",
+             source="clans", label="분파"),
+        Edge(src="ex:org:완풍군파", dst="ex:org:전주 이씨", type="part_of",
+             source="clans", label="분파"),
+        Edge(src="wd:Q5", dst="ex:org:덕천군파", type="member_of",
+             source="clans", label="파조"),
+    ])
+    pa = api.node("ex:org:덕천군파")
+    check("파의 타입 딱지는 '단체·국가·왕조'가 아니라 '분파'",
+          pa["type_label"] == "분파", pa["type_label"])
+    check("본관은 '본관'", api.node("ex:org:전주 이씨")["type_label"] == "본관")
+    check("조선총독부 같은 단체는 그대로", api.node("wd:Q28179")["type_label"] == "단체·국가·왕조")
+    # 갈래는 색이 아니라 '얼마나 앞에 세우나'를 나른다. 파는 사람을 묶는
+    # 틀이라 시대·직위와 같은 자리에서 물러난다 (캔버스 밑동 반지름 6 → 4).
+    check("파는 뼈대로 물러난다", pa["group"] == "frame", pa["group"])
+    check("여느 단체는 행위자 그대로", api.node("wd:Q28179")["group"] == "actor")
+    # 상대 쪽 딱지도 파면 '분파'다 (`/n/` 장의 목록에 그대로 적힌다)
+    root_rels = api.node("ex:org:전주 이씨")["relations"]
+    check("관계 줄의 상대도 '분파'로 적힌다",
+          {r["other"]["type_label"] for r in root_rels} == {"분파"}, str(root_rels[:1]))
+    # 족보가 센 수는 화면에 세우지 않고 **차례에만** 쓴다. 가나다로 세우면
+    # 완풍군파(124,001명)가 180개 한가운데 묻힌다.
+    check("파는 큰 파부터 선다",
+          [r["other"]["label"] for r in root_rels] == ["완풍군파", "덕천군파"],
+          str([r["other"]["label"] for r in root_rels]))
+    check("자손 수 자체는 화면으로 안 나간다",
+          all("members" not in r["other"] for r in root_rels))
+    # 라벨이 타입 이름을 이긴다 — 참여·관련만이 아니라 표에 적힌 라벨 전부.
+    check("파조는 '소속'을 이긴다", _rel_name("member_of", "in", "파조")["label"] == "파조")
+    check("분파는 방향으로 갈라 부른다",
+          (_rel_name("part_of", "in", "분파")["label"],
+           _rel_name("part_of", "out", "분파")["label"]) == ("갈라진 파", "속한 문중"))
+    check("라벨 없는 part_of 는 그대로 '상위'",
+          _rel_name("part_of", "out", None)["label"] == "상위")
+    check("본관도 방향으로 갈라 부른다",
+          (_rel_name("related_to", "out", "본관")["label"],
+           _rel_name("related_to", "in", "본관")["label"])
+          == ("본관 지명", "이곳을 본관으로 하는 씨족"))
+    gc = api.graph("ex:org:덕천군파", depth=1)
+    check("캔버스의 선 이름도 파조·분파",
+          {e["label"] for e in gc["edges"]} == {"파조", "분파"},
+          str([e["label"] for e in gc["edges"]]))
+    check("캔버스에서도 파는 뼈대",
+          {n["group"] for n in gc["nodes"] if n["id"].startswith("ex:org:")} == {"frame"})
 
     check("왕조 노드가 그래프의 중심", api.root() == "wd:Q28179")
     check("시작점 맨 위가 왕조", api.seeds(5)[0]["id"] == "wd:Q28179")

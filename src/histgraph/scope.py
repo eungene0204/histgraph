@@ -338,6 +338,46 @@ def close_places(store: GraphStore, keep: set[str]) -> set[str]:
     return keep | added
 
 
+def close_clans(store: GraphStore, keep: set[str]) -> set[str]:
+    """씨족 나무는 **한 덩어리로** 데려온다. 위로도 아래로도 따라간다.
+
+    `close_places` 와 같은 이유다. 나무의 어느 한 마디만 남으면 그 마디가
+    말할 수 있는 것이 이름밖에 없다. 파는 파조(인물)를 통해 한 홉으로
+    들어오는데 그 위의 대파와 본관은 두 홉 밖이라 잘려 나가고, 그러면 화면에
+    '덕천군파'만 서고 그것이 전주 이씨의 파라는 말은 사라진다.
+
+    아래로도 가는 까닭은 닻이 뿌리에 걸리는 씨족이 있어서다. 김해 김씨는
+    파조 가운데 우리 그래프에 있는 사람이 하나뿐이라 본관 노드가 지명(김해시)
+    으로 들어오는데, 위로만 따라가면 파 66개가 그대로 잘린다.
+    """
+    added: set[str] = set()
+    frontier = set(keep)
+    while frontier:
+        found: set[str] = set()
+        ordered = sorted(frontier)
+        for i in range(0, len(ordered), 500):
+            batch = ordered[i : i + 500]
+            marks = ",".join("?" * len(batch))
+            for r in store.conn.execute(
+                f"""SELECT e.src AS a, e.dst AS b FROM edges e
+                     JOIN nodes s ON s.id = e.src
+                     JOIN nodes d ON d.id = e.dst
+                     WHERE e.type='part_of'
+                       AND (e.src IN ({marks}) OR e.dst IN ({marks}))
+                       AND json_extract(s.props,'$.kind')='clan'
+                       AND json_extract(d.props,'$.kind')='clan'""",
+                (*batch, *batch),
+            ):
+                for nid in (r["a"], r["b"]):
+                    if nid not in keep and nid not in added:
+                        found.add(nid)
+        added |= found
+        frontier = found
+    if added:
+        log.info("씨족 보강: +%d 노드", len(added))
+    return keep | added
+
+
 def _dated_events(store: GraphStore, ids: set[str]) -> set[str]:
     """그 가운데 연대를 아는 사건만. 연표에 놓을 자리가 있는 것들이다."""
     if not ids:
@@ -448,6 +488,7 @@ def extract(
     # 왕조 노드 자신도 그래프의 중심으로 포함한다
     keep.update(f"wd:{e.polity_qid}" for e in eras)
     keep = close_places(store, keep)
+    keep = close_clans(store, keep)
 
     # **노드 행이 없는 id 를 걸러낸다.** `expand` 는 엣지의 양끝을 모으는데,
     # 원본 그래프에도 이미 댕글링인 엣지가 있어서 노드가 없는 id 가 섞여
