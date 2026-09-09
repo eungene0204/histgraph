@@ -774,9 +774,10 @@ export function normalize(raw) {
     if (me && t.event_id === me.id) continue;
     const node = byId.get(t.event_id);
     const item = { ...t };
-    if (!LIFE_STAGES.includes(item.life_stage)) item.life_stage = null;
+    if (!LIFE_STAGES.includes(item.life_stage)) { item.life_stage = null; item.stage_said = false; }
     // 훈련소 입소부터 소집해제까지는 병역이지 사회생활이 아니다 (life.py refine 3 과 같다)
-    if (['event', 'period'].includes(klass(node))
+    // — **사람이 고른 시절은 건드리지 않는다** (stage_said: 아래 editNode 가 적는다).
+    if (!item.stage_said && ['event', 'period'].includes(klass(node))
       && MILITARY.test(`${node.name || ''} ${node.description || ''}`)) item.life_stage = '군복무';
     // 해의 출처 차례: 항목의 날짜 글 → 나이(생년을 알 때) → 노드의 날짜 (life.py 와 같다)
     if (item.year == null) item.year = parseWhen(item.date_text, birth).year;
@@ -798,6 +799,10 @@ export function normalize(raw) {
   for (const t of timeline) {
     const stage = STAGE_ORDER.has(t.life_stage) ? t.life_stage : null;
     if (stage == null) continue;
+    // 사람이 고른 칸은 이 셈에서 빠진다 — 고쳐지지도 않고, 뒤따르는 항목의
+    // 바닥(cur)이 되지도 않는다. 한 칸을 고쳤는데 안 건드린 뒷일까지 따라
+    // 움직이면 그것도 '내가 안 한 일'이다.
+    if (t.stage_said) continue;
     if (cur != null && ONE_WAY_STAGES.has(stage) && STAGE_ORDER.get(stage) < STAGE_ORDER.get(cur)) t.life_stage = cur;
     else cur = stage;
   }
@@ -941,7 +946,12 @@ export function editNode(raw, id, patch) {
     } else {
       const item = at >= 0 ? list[at] : { event_id: id, previous_event: null, next_event: null };
       item.date_text = clean(patch.timeline.date_text);
+      // **사람이 고른 시절은 셈한 시절을 이긴다** (날짜와 같은 규칙 — dateSaid).
+      // 표식을 안 남기면 normalize·refine 의 셈(한 방향 · 앞뒤 잇기 · 군복무)이
+      // 사람이 고른 칸을 그 자리에서 도로 덮어, '완료를 눌렀는데 안 바뀐다'가 된다.
+      // '저절로'(빈 칸)를 고르면 표식을 걷어 다시 셈에 맡긴다.
       item.life_stage = LIFE_STAGES.includes(patch.timeline.life_stage) ? patch.timeline.life_stage : null;
+      if (item.life_stage) item.stage_said = true; else delete item.stage_said;
       item.year = null; item.age = null;   // 날짜에서 다시 센다
       if (at < 0) list.push(item);
       doc.timeline = list;

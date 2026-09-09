@@ -5836,6 +5836,32 @@ with tempfile.TemporaryDirectory() as tmp:
     check("뒤가 없으면 빈 단계는 채우지 않는다 (앞만 보고 이으면 십 년 뒤가 '초등학교')",
           back_tl["c"] is None, str(back_tl))
 
+    # **사람이 고른 시절은 셈이 덮지 않는다** (2026-09-09 지적: 노드를 편집하고 완료를
+    # 눌러도 편집 전 정보가 그대로였다 — 화면의 편집 칸이 고른 '시절'을 이 셈이 그
+    # 자리에서 도로 덮고 있었다). 표식은 `stage_said` 이고 web/src/lib/life.js 의
+    # normalize 가 같은 규칙을 건다. 고친 칸 말고는 아무것도 따라 움직이지 않는다.
+    said = life_mod.refine({
+        "subject": {"id": "me", "name": "나", "birth_year": 1982},
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982},
+                  {"id": "a", "type": "PersonalEvent", "name": "대학 입학", "year": 2000},
+                  {"id": "b", "type": "PersonalEvent", "name": "첫 출근", "year": 2006},
+                  {"id": "c", "type": "PersonalEvent", "name": "이사", "year": 2008}],
+        "edges": [], "timeline": [
+            {"event_id": "a", "life_stage": "대학", "year": 2000},
+            {"event_id": "b", "life_stage": "초등학교", "stage_said": True, "year": 2006},
+            {"event_id": "c", "life_stage": None, "year": 2008}]})
+    said_tl = {t["event_id"]: t["life_stage"] for t in said["timeline"]}
+    check("사람이 고른 시절은 그대로 선다", said_tl["b"] == "초등학교", str(said_tl))
+    check("고친 칸 말고는 따라 움직이지 않는다",
+          (said_tl["a"], said_tl["c"]) == (back_tl["a"], back_tl["c"]), str(said_tl))
+    duty = life_mod.refine({
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982"},
+                  {"id": "d", "type": "PersonalEvent", "name": "훈련소 입소", "year": 2002}],
+        "edges": [], "timeline": [
+            {"event_id": "d", "life_stage": "사회생활", "stage_said": True, "year": 2002}]})
+    check("군복무로 읽히는 이름도 사람이 고른 칸은 안 덮는다",
+          duty["timeline"][0]["life_stage"] == "사회생활", str(duty["timeline"]))
+
     # 주인공의 생일 — '출생' 사건이 든 날짜가 이긴다 (2026-09-08 사용자: "2월 27일에
     # 태어 났다고 했는데, 왜 헷갈리게 '1982-01-01 · 0세 · 출생' 이라고 써있지").
     born = {"nodes": [

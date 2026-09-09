@@ -822,8 +822,13 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
             node["year"], node["precision"] = t["year"], "year"
     # 군복무 — 훈련소 입소부터 소집해제까지는 병역이지 사회생활이 아니다
     # (2026-09-08 사용자). 모델이 '사회생활'로 적어 와도 이름이 말하면 여기서 고친다.
+    # **사람이 고른 시절은 건드리지 않는다** (`stage_said` — 화면의 편집 칸이 적는다.
+    # life.js normalize 와 같은 규칙이다: 셈이 사람의 칸을 덮으면 '완료를 눌렀는데
+    # 안 바뀐다'가 된다).
     for t in timeline:
         node = by_id.get(t.get("event_id"))
+        if t.get("stage_said"):
+            continue
         if node is not None and klass(node) in ("event", "period") \
                 and MILITARY.search(f"{node.get('name') or ''} {node.get('description') or ''}"):
             t["life_stage"] = "군복무"
@@ -834,6 +839,10 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
     for t in timeline:
         stage = t.get("life_stage") if t.get("life_stage") in STAGE_ORDER else None
         if stage is None:
+            continue
+        # 사람이 고른 칸은 이 셈에서 빠진다 — 고쳐지지도 않고 뒤따르는 항목의
+        # 바닥(cur)이 되지도 않는다 (life.js normalize 와 같다).
+        if t.get("stage_said"):
             continue
         if cur is not None and stage in ONE_WAY_STAGES and STAGE_ORDER[stage] < STAGE_ORDER[cur]:
             t["life_stage"] = cur

@@ -1032,7 +1032,14 @@ function EventDetail({ life, id, onPick, onDrop, onEdit }) {
   const cf = life.counterfactual_analysis.filter((c) => c.event === id);
   // 날짜 줄도 같은 규칙이다 — 이야기가 말하지 않은 인물의 생년은 적지 않는다.
   // '세'는 만 나이다 (2026-09-08 사용자: "나이 앞에 '만'이라고 써줘").
-  const when = [t?.date_text || (dateSaid(node) ? node.start_date : null),
+  // **끝을 아는 일은 한 점이 아니라 기간이다.** 편집 칸이 '끝'을 받으므로 여기서
+  // 안 그리면 고쳐도 화면이 그대로다 — '완료를 눌렀는데 안 바뀐다'로 보인다.
+  // 날짜 글이 이미 기간을 말하고 있으면(물결) 덧붙이지 않는다.
+  const from = t?.date_text || (dateSaid(node) ? node.start_date : null);
+  // 끝이 시작과 같은 날이면 기간이 아니다 — 모델이 하루짜리 일에도 끝을 적어 둔다.
+  const till = from && node.end_date && node.end_date !== node.start_date
+    && dateSaid(node) && !String(from).includes('~') ? node.end_date : null;
+  const when = [till ? `${from} ~ ${till}` : from,
     t?.age != null ? `만 ${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
   // 이름을 모르는 아이디는 화면에 내지 않는다 (lib/life.js nodeLabel) — 모델의
   // 식별자가 그대로 서는 자리가 없어야 한다 (2026-09-08 지적).

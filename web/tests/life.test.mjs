@@ -673,6 +673,28 @@ console.log('\n개인 역사 — 노드를 고친다');
   ok('전환점으로 세운다', put?.reason === '요즘의 일');
   ok('점수는 1~10 안이다', put?.turning_point_score === 10);
 
+  // 시절 — 사람이 고른 칸은 셈이 덮지 않는다. 셈(한 방향·앞뒤 잇기·군복무)이
+  // 사람의 칸을 그 자리에서 도로 덮으면 '완료를 눌렀는데 안 바뀐다'가 된다
+  // (2026-09-09 지적: 편집하고 완료를 눌러도 편집 전 정보가 그대로였다).
+  const stageOf = (doc, id) => doc.timeline.find((t) => t.event_id === id)?.life_stage;
+  const back = normalize(editNode(sample, 'ev_ai', { timeline: { date_text: '', life_stage: '초등학교' } }));
+  ok('사람이 고른 시절이 화면에 그대로 선다', stageOf(back, 'ev_ai') === '초등학교',
+    `${stageOf(view, 'ev_ai')} → ${stageOf(back, 'ev_ai')}`);
+  // 한 칸을 고쳤는데 안 건드린 뒷일까지 따라 움직이면 그것도 '내가 안 한 일'이다 —
+  // 앞으로 밀든 뒤로 끌든 마찬가지라, 사람이 고른 칸은 셈의 바닥(cur)이 되지 않는다.
+  for (const [id, stage] of [['ev_ai', '초등학교'], ['ev_move', '창업']]) {
+    const one = normalize(editNode(sample, id, { timeline: { date_text: '', life_stage: stage } }));
+    ok(`'${stage}' 로 고친 한 칸 말고는 그대로다`,
+      stageOf(one, id) === stage && sample.timeline.filter((t) => t.event_id !== id)
+        .every((t) => stageOf(one, t.event_id) === stageOf(view, t.event_id)),
+      sample.timeline.filter((t) => t.event_id !== id)
+        .filter((t) => stageOf(one, t.event_id) !== stageOf(view, t.event_id))
+        .map((t) => `${t.event_id}: ${stageOf(view, t.event_id)} → ${stageOf(one, t.event_id)}`).join(', '));
+  }
+  const auto = editNode(sample, 'ev_ai', { timeline: { date_text: '', life_stage: '' } });
+  ok("'저절로' 로 되돌리면 표식을 걷어 다시 셈에 맡긴다",
+    !('stage_said' in auto.timeline.find((t) => t.event_id === 'ev_ai')));
+
   // 인물의 날짜 — 사람이 적은 것은 셈한 것이 아니다 (dateSaid)
   ok('셈한 날짜는 이름 옆에 안 선다', !dateSaid(view.nodes.find((n) => n.id === 'minjun')));
   const said = normalize(editNode(sample, 'minjun', { start_date: '1985-07' }));
@@ -701,6 +723,8 @@ console.log('\n개인 역사 — 노드를 고친다');
   ok('폼의 글자에 영어가 없다',
     (src.match(/<option key=\{s\} value=\{s\}>|>완료<|>취소<|>사람 더하기<|>전환점으로 세우기</g) || []).length >= 4);
   ok('관계는 편집 칸에 없다 (2026-09-09 사용자)', !/<h3>관계<\/h3>/.test(src) && !/관계 더하기/.test(src));
+  // 고칠 수 있는 칸은 화면에도 자리가 있어야 한다 — '끝'이 그 자리를 못 찾고 있었다.
+  ok("'끝'을 고치면 날짜 줄이 기간으로 선다", /node\.end_date[\s\S]{0,200}~/.test(src));
 }
 
 console.log('\n개인 역사 — 내가 적은 이야기');
