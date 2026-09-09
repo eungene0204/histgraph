@@ -501,6 +501,16 @@ let detailHtml = '';
      && /const restoreFailed = useCallback\(\(\) => \{[\s\S]{0,120}putDraft\(failed\);\s+keepFailed\(''\)/.test(lifeSrc2));
   ok('답이 온 글은 되돌릴 것이 없다', /takeStories\(\);[\s\S]{0,120}keepFailed\(''\)/.test(lifeSrc2));
 
+  // 짐작한 값은 눈금으로 세우지 않는다 (graph-drawer §12.19). 2026-09-09 사용자:
+  // "'가장 크게 영향을 준 것' 메뉴에서 점수 그래프를 삭제해". 중요도에 이어 영향
+  // 점수도 내렸다 — 둘 다 모델이 매긴 1~10 이라 재는 식이 없다. 남는 눈금은
+  // 전환점과 '역사가 준 영향'뿐이고, 순위는 차례로만 말한다.
+  const meters = [...lifeSrc2.matchAll(/<Meter v=\{([^}]+)\}/g)].map((m) => m[1]);
+  ok('영향 순위에 눈금을 세우지 않는다',
+     !meters.some((v) => /influence_score|importance_score/.test(v)), meters.join(' · '));
+  ok('그래도 차례는 영향 순위 그대로다',
+     /influence_ranking\.items\][\s\S]{0,80}influence_score - a\.influence_score/.test(lifeSrc2));
+
   // 보기글은 여럿이고 열 때마다 하나가 선다 (2026-09-09 사용자: "연령, 성별,
   // 직종을 다르게 해서 여러개 만들어서 랜덤으로 보여주게 해줘"). 예가 하나면
   // 그 한 사람의 삶이 '이렇게 적어야 하는 것'이 된다.

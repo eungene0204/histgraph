@@ -1213,10 +1213,14 @@ function Analysis({ life, onPick }) {
       {life.influence_ranking?.items?.length > 0 && (
         <section className="life-sec">
           <h3>가장 크게 영향을 준 것</h3>
+          {/* 영향 점수(influence_score)의 눈금은 세우지 않는다 (2026-09-09 사용자:
+              "'가장 크게 영향을 준 것' 메뉴에서 점수 그래프를 삭제해"). 중요도와 같은
+              1~10 모델 점수라 재는 식이 없고, 막대는 잰 값처럼 읽힌다
+              (graph-drawer §12.19). 다만 **차례는 남긴다** — 이 묶음이 말하는 것이
+              순위 자체이고, 차례는 화면에 세우는 수가 아니다. 값은 수집에 그대로 둔다. */}
           <ul>{[...life.influence_ranking.items].sort((a, b) => b.influence_score - a.influence_score).map((p, i) => (
             <li key={i}><span className="tl-rel">{p.category} </span>
-              <Link id={p.node} />
-              {' '}<Meter v={p.influence_score} /><p>{p.reason}</p></li>
+              <Link id={p.node} /><p>{p.reason}</p></li>
           ))}</ul>
         </section>
       )}
