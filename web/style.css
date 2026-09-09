@@ -220,17 +220,24 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 /* 아직 아무것도 안 적은 사람에게만 '내 역사'가 숨을 쉰다 (2026-09-09 사용자:
    "내 역사가 비었을때 사용자의 주위를 끌기 위해 … 빛나는 효과를 줘").
    **자리는 그대로 두고 빛만 오간다** — 커지거나 움직이면 옆의 시대 단추가
-   밀려 머리 줄이 흔들린다. 색은 이미 있는 강조색 하나뿐이라 팔레트가 늘지
-   않는다. 채운 사람의 화면에는 이 반이 아예 붙지 않는다 (App.jsx lifeEmpty). */
+   밀려 머리 줄이 흔들린다. 채운 사람의 화면에는 이 반이 아예 붙지 않는다
+   (App.jsx lifeEmpty).
+
+   빛은 **흰빛이다** (2026-09-09 사용자: "보라색으로 빛나지 말고 백색으로
+   빛나게 해줘"). 그래서 색을 뜻으로 읽는 자리(강조색 보라 = 누를 수 있는 것,
+   노드 팔레트)와 겹치지 않는다 — 이 단추는 무슨 종류라서가 아니라 **비어서**
+   부르는 것이다. 밝은 화면에서는 흰 바탕이 회색 머리 줄보다 밝은 것이 그
+   빛이라, 글자만 그 위에서 읽히는 검정으로 되돌린다. */
 .era.beckon {
-  color: var(--text-accent);
-  background: hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .12);
+  color: #fff;
+  background: rgba(255, 255, 255, .10);
   animation: era-beckon 2.4s ease-in-out infinite;
 }
-.era.beckon:hover { color: var(--text-accent-hover); }
+.era.beckon:hover { color: #fff; background: rgba(255, 255, 255, .18); }
+:root[data-theme="light"] .era.beckon { color: var(--text-normal); background: #fff; }
 @keyframes era-beckon {
-  0%, 100% { box-shadow: 0 0 0 0 hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .5); }
-  50%      { box-shadow: 0 0 9px 2px hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .5); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, .55); }
+  50%      { box-shadow: 0 0 10px 3px rgba(255, 255, 255, .55); }
 }
 
 .search { position: relative; grid-column: 2; width: 100%; }
@@ -1215,10 +1222,8 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 @media (prefers-reduced-motion: reduce) {
   .life-detail { transition: none; }
   /* 깜박이지 않는다. 그래도 '여기를 보라'는 것은 남아야 하므로 테두리로 세운다. */
-  .era.beckon {
-    animation: none;
-    box-shadow: 0 0 0 1px hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .5);
-  }
+  .era.beckon { animation: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, .55); }
+  :root[data-theme="light"] .era.beckon { box-shadow: 0 0 0 1px var(--background-modifier-border); }
   /* 돌리지 않는다. 그래도 '돌고 있다'는 것은 보여야 하므로 밝기만 오간다. */
   .life-spinner { animation: life-breathe 1.6s ease-in-out infinite; }
 }

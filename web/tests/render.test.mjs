@@ -423,6 +423,11 @@ let detailHtml = '';
   const frames = eraCss.match(/@keyframes era-beckon\s*\{[^]*?\n\}/)?.[0] || '';
   ok('빛만 오가고 자리는 그대로다',
      /box-shadow/.test(frames) && !/(transform|width|padding|font-size|margin)/.test(frames));
+  // 2026-09-09 사용자: "보라색으로 빛나지 말고 백색으로 빛나게 해줘." 강조색
+  // 보라는 '누를 수 있는 것'이라는 뜻을 이미 지고 있다 — 이 빛은 뜻이 아니라
+  // 부름이다.
+  ok('빛은 흰빛이다',
+     /255,\s*255,\s*255/.test(frames) && !/accent/.test(frames));
   ok('움직임을 줄여 달라고 한 사람에게는 깜박이지 않는다',
      /prefers-reduced-motion[^]*?\.era\.beckon\s*\{[^}]*animation:\s*none/.test(eraCss));
 }
