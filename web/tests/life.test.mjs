@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   normalize, removeNode, editNode, nodeYears, dateSaid, parseWhen, lifeLayout, renderLife, renderHead, personalMarks, historyMarks, stageBands,
   ladder,
-  graphPayload, graphMeta, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
+  graphPayload, graphMeta, nodeWeight, EDGE_WEIGHT, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
   addedFocus, addedNames,
   linkPeople, kinIn, markYs,
@@ -352,7 +352,32 @@ console.log('\n개인 역사 — 그래프 (역사 그래프와 같은 캔버스
   const meta = graphMeta(life);
   ok('범례가 캔버스 타입으로 세어진다', meta.node_types.person.count >= 4 && meta.node_types.artwork.count === 4 && meta.node_types.person.label === '인물·가족');
   ok('관계 종류 필터가 한글 이름으로', Object.values(meta.edge_types).every((t) => /[가-힣]/.test(t.label)) && meta.edge_types.caused.count === 3);
-  ok('시작점은 차수 순', meta.seeds[0].id === 'me' && meta.seeds.length === 8);
+  ok('시작점은 무게 순 (주인공이 맨 앞)', meta.seeds[0].id === 'me' && meta.seeds.length === 8);
+  // **무게는 나눌 때 일한다** (central.py 모듈 머리글과 같은 규칙). 차수가
+  // 같아도 무거운 관계로 이어진 쪽이 앞선다. 여기서는 사건에 '당사자'로
+  // 걸린 것과 '곳'으로만 걸린 것을 견준다.
+  {
+    const tiny = {
+      subject: { id: 'me' },
+      nodes: [{ id: 'me', name: '나', type: 'Person' }, { id: 'ev', name: '일', type: 'PersonalEvent' },
+        { id: 'p1', name: '한 사람', type: 'Person' }, { id: 'p2', name: '두 사람', type: 'Person' },
+        { id: 'pl', name: '어느 곳', type: 'Location' }, { id: 'q1', name: '거기 산 이', type: 'Person' },
+        { id: 'q2', name: '거기 산 이 둘', type: 'Person' }, { id: 'q3', name: '거기 산 이 셋', type: 'Person' }],
+      edges: [{ source: 'p1', target: 'ev', type: 'caused' }, { source: 'p2', target: 'ev', type: 'caused' },
+        { source: 'ev', target: 'pl', type: 'at' }, { source: 'q1', target: 'pl', type: 'lived_in' },
+        { source: 'q2', target: 'pl', type: 'lived_in' }, { source: 'q3', target: 'pl', type: 'lived_in' },
+        { source: 'p1', target: 'me', type: 'at' }, { source: 'q1', target: 'me', type: 'at' }],
+    };
+    const w = nodeWeight(tiny);
+    ok('차수가 같아도 무거운 관계로 이어진 쪽이 무겁다', w.get('p1') > w.get('q1'),
+      `${w.get('p1')} vs ${w.get('q1')}`);
+    ok('무게의 합은 1', Math.abs([...w.values()].reduce((a, b) => a + b, 0) - 1) < 1e-9);
+    ok('빈 이야기에도 터지지 않는다', nodeWeight({ nodes: [], edges: [] }).size === 0);
+  }
+  ok('모든 관계에 무게가 있다', Object.keys(EDGE_TYPE_KO).every((t) => EDGE_WEIGHT[t] !== undefined),
+    Object.keys(EDGE_TYPE_KO).filter((t) => EDGE_WEIGHT[t] === undefined).join(','));
+  ok('무게 표에 이름 없는 관계가 없다', Object.keys(EDGE_WEIGHT).every((t) => EDGE_TYPE_KO[t] !== undefined),
+    Object.keys(EDGE_WEIGHT).filter((t) => EDGE_TYPE_KO[t] === undefined).join(','));
   // 캔버스가 실제로 받는다 (DOM 없이 — layout.test 와 같은 흉내)
   const canvas = { clientWidth: 800, clientHeight: 600, getContext: () => null, addEventListener() {}, style: {} };
   let gv = null;

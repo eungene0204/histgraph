@@ -564,6 +564,78 @@ export const GRAPH_TYPE_LABEL = {
   artwork: '책·영화·음악·게임', media: '기술·문화·종교', period: '시기', role: '직업·취미·기술',
 };
 
+// --- 무게 ----------------------------------------------------------------
+//
+// **무엇을 먼저 보여줄지는 무게가 정한다.** 한국사 그래프와 같은 자다
+// (`central.py` 모듈 머리글 — 타입 가중 PageRank). 이쪽에서도 이유가 같다:
+// 연결 개수는 이야기를 길게 쓴 대목에서 저절로 늘어난다. 군대 이야기를 길게
+// 쓰면 부대·보직·동기가 줄줄이 서고, 한 줄로 적은 결혼은 선이 둘뿐이다.
+//
+// 무게는 **차례만** 정한다 — 무엇을 뺄지 정하는 데 쓰지 않고, 원의 크기도
+// 지금처럼 연결 개수다.
+//
+// 관계마다 무게가 다르다. 삶을 움직인 것(인과·영향)이 가장 무겁고, 언제·어디
+// 였는지는 좌표라 가볍다. 그리고 잎(이웃이 나 하나뿐인 노드)이 **돌려주는**
+// 몫을 줄인다 — 나를 설명하려고 생긴 노드는 나를 인정해 주지 못한다.
+const W_CAUSE = 1.0, W_PERSON = 0.8, W_BELONG = 0.6, W_PLACE = 0.25;
+export const EDGE_WEIGHT = {
+  caused: W_CAUSE, triggered: W_CAUSE, led_to: W_CAUSE, resulted_in: W_CAUSE,
+  changed: W_CAUSE, affected: W_CAUSE, influenced: W_CAUSE, inspired: W_CAUSE,
+  changed_life: W_CAUSE, changed_belief: W_CAUSE, changed_view: W_CAUSE,
+  shaped: W_CAUSE, shaped_interest: W_CAUSE, enabled: W_CAUSE, changed_by: W_CAUSE,
+  inspired_by: W_CAUSE, triggered_by: W_CAUSE,
+  parent_of: W_PERSON, child_of: W_PERSON, grandparent_of: W_PERSON,
+  ancestor_of: W_PERSON, relative_of: W_PERSON, mentored_by: W_PERSON,
+  worked_with: W_PERSON, helped: W_PERSON, friend_of: W_PERSON,
+  met: W_BELONG, schoolmate: W_BELONG, studied_at: W_BELONG, worked_at: W_BELONG,
+  member_of: W_BELONG, played: W_BELONG, learned: W_BELONG, built_skill: W_BELONG,
+  read: W_BELONG, watched: W_BELONG, listened_to: W_BELONG, used: W_BELONG,
+  recommended_by: W_BELONG, shared_with: W_BELONG, created_memory: W_BELONG,
+  remembered_by: W_BELONG, connected_to_event: W_BELONG, experienced: W_BELONG,
+  associated_with: W_PLACE, reminds_of: W_PLACE, connected_to: W_PLACE, connected: W_PLACE,
+  born_in: W_PLACE, lived_in: W_PLACE, moved_to: W_PLACE, visited: W_PLACE,
+  grew_up_in: W_PLACE, at: W_PLACE,
+  before: W_PLACE, after: W_PLACE, during: W_PLACE, overlapped: W_PLACE,
+};
+export const DEFAULT_WEIGHT = 0.5;
+const LEAF_RETURN = 0.75;
+const DAMPING = 0.85;
+
+export function nodeWeight(life) {
+  const ids = (life?.nodes || []).map((n) => n.id);
+  const n = ids.length;
+  const out = new Map();
+  if (!n) return out;
+  const at = new Map(ids.map((id, i) => [id, i]));
+  const adj = ids.map(() => new Map());
+  for (const e of life.edges || []) {
+    const a = at.get(e.source), b = at.get(e.target);
+    if (a === undefined || b === undefined || a === b) continue;
+    const w = EDGE_WEIGHT[e.type] ?? DEFAULT_WEIGHT;
+    if (w > (adj[a].get(b) || 0)) { adj[a].set(b, w); adj[b].set(a, w); }
+  }
+  const emit = adj.map((m) => (m.size === 1 ? LEAF_RETURN : 1));
+  const sum = adj.map((m) => [...m.values()].reduce((a, b) => a + b, 0));
+  let rank = new Array(n).fill(1 / n);
+  for (let it = 0; it < 100; it++) {
+    const next = new Array(n).fill((1 - DAMPING) / n);
+    let loose = 0;
+    for (let v = 0; v < n; v++) {
+      if (sum[v] <= 0) { loose += rank[v]; continue; }
+      loose += rank[v] * (1 - emit[v]);
+      const share = DAMPING * rank[v] * emit[v] / sum[v];
+      for (const [u, w] of adj[v]) next[u] += share * w;
+    }
+    const spill = DAMPING * loose / n;
+    let delta = 0;
+    for (let i = 0; i < n; i++) { next[i] += spill; delta += Math.abs(next[i] - rank[i]); }
+    rank = next;
+    if (delta < 1e-12 * n) break;
+  }
+  ids.forEach((id, i) => out.set(id, rank[i]));
+  return out;
+}
+
 // 캔버스가 받는 꼴 (server.graph 와 같다): {center, nodes:[{id,label,type,group,degree}],
 // edges:[{s,t,type,label,conf}]}. 개인 그래프는 작아서(수십 노드) 통째로 준다 —
 // 역사 그래프처럼 한 노드 주변만 잘라 줄 이유가 없다.
@@ -639,7 +711,10 @@ export function graphMeta(life) {
     const t = (edgeTypes[e.type] ||= { label: EDGE_TYPE_KO[e.type] || e.label, count: 0 });
     t.count++;
   }
-  const seeds = [...pay.nodes].sort((a, b) => b.degree - a.degree).slice(0, 8);
+  const w = nodeWeight(life);
+  const seeds = [...pay.nodes]
+    .sort((a, b) => (w.get(b.id) || 0) - (w.get(a.id) || 0) || b.degree - a.degree)
+    .slice(0, 8);
   return { node_types: nodeTypes, edge_types: edgeTypes, seeds };
 }
 

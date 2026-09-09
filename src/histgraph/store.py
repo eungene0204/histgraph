@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS summaries (
     made_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 무게 — 타입 가중 PageRank (central.py). 세어서 나온 값이라 편집 계층이
+-- 아니다. 수집·scope 뒤에 다시 만든다. 없으면 화면이 차수로 물러난다.
+CREATE TABLE IF NOT EXISTS centrality (
+    node_id TEXT PRIMARY KEY,
+    score   REAL NOT NULL,
+    rank    INTEGER NOT NULL,
+    made_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_centrality_score ON centrality(score DESC);
+
 CREATE TABLE IF NOT EXISTS ingest_log (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     source   TEXT NOT NULL,
@@ -110,6 +120,9 @@ class GraphStore:
         # (busy_timeout=0)이면 다른 쪽이 쓰는 순간 곧바로 'database is
         # locked' 로 죽어서 진행 중이던 작업을 잃는다. 기다리게 한다.
         self.conn.execute("PRAGMA busy_timeout = 30000")
+        #: `centrality` 표가 있는가. 한 번만 묻는다 (배포 DB 는 읽기 전용이라
+        #: 스키마가 돌지 않아 표가 없을 수 있다).
+        self._has_centrality: bool | None = None
         if not readonly:
             self.conn.executescript(SCHEMA)
 
@@ -259,6 +272,24 @@ class GraphStore:
         )
         return {r["id"]: r["d"] for r in rows}
 
+    def weights(self, ids: set[str]) -> dict[str, float]:
+        """**무엇을 먼저 보여줄지 정하는 값.** 차수가 아니라 타입 가중
+        PageRank 다 (`central` 모듈 머리글 — 차수는 역사가 아니라 문서의
+        길이를 잰다). 아직 `histgraph central` 을 돌리지 않은 DB 에서는
+        차수로 물러난다. 자르는 데 쓰는 값이 아니라 **줄 세우는** 값이다."""
+        if self._has_centrality is None:
+            from . import central
+            self._has_centrality = central.present(self.conn)
+        if not self._has_centrality:
+            return {k: float(v) for k, v in self.degrees(ids).items()}
+        rows = self._query_chunked(
+            "SELECT node_id AS id, score FROM centrality WHERE node_id IN ({marks})", ids
+        )
+        got = {r["id"]: r["score"] for r in rows}
+        # 표에 없는 노드(수집이 방금 넣은 것)는 맨 뒤가 아니라 0 이다 —
+        # 없는 것과 낮은 것을 가르지 않는다. 다시 돌리면 제자리를 찾는다.
+        return {nid: got.get(nid, 0.0) for nid in ids}
+
     def _share_budget(
         self,
         rows: list[sqlite3.Row],
@@ -274,9 +305,9 @@ class GraphStore:
         명성황후가 아니라 조선의 그래프가 됐다 (2026-09-06 지적). 조선이
         중요해서 이긴 것이 아니라 엣지가 많아서 이긴 것이다.
 
-        그래서 프론티어 노드마다 하나씩 돌아가며 담는다. 제 몫 안에서는 차수가
-        높은 이웃이 먼저고, 이웃이 적은 노드가 남긴 자리는 많은 쪽이 이어 쓴다.
-        걸음이 하나뿐이면(프론티어 = 중심 하나) 예전처럼 차수 순서가 된다 —
+        그래서 프론티어 노드마다 하나씩 돌아가며 담는다. 제 몫 안에서는 무게가
+        큰 이웃이 먼저고, 이웃이 적은 노드가 남긴 자리는 많은 쪽이 이어 쓴다.
+        걸음이 하나뿐이면(프론티어 = 중심 하나) 무게 순서가 그대로 남는다 —
         나눌 상대가 없다.
         """
         if budget <= 0:
@@ -288,7 +319,7 @@ class GraphStore:
             for parent, kid in ((a, b), (b, a)):
                 if parent in frontier and kid in candidates:
                     kids.setdefault(parent, set()).add(kid)
-        rank = self.degrees(candidates)
+        rank = self.weights(candidates)
         order = {
             p: sorted(ids, key=lambda i: (-rank.get(i, 0), i)) for p, ids in kids.items()
         }
@@ -328,7 +359,7 @@ class GraphStore:
         max_nodes 로 상한을 두지 않으면 허브 노드에서 그래프 절반이 딸려와
         화면에 그릴 수 없는 결과가 나온다.
 
-        **상한에 걸리면 차수가 높은 이웃부터 남긴다.** id 순으로 자르면
+        **상한에 걸리면 무게가 큰 이웃부터 남긴다** (`weights`). id 순으로 자르면
         'wd:Q1…' 이 먼저 살아남을 뿐이라 무엇이 남는지가 우연에 맡겨진다.
 
         `exclude_types` 는 아예 따라가지 않을 타입. 연도(`period`) 노드는

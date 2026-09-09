@@ -112,7 +112,9 @@ export default function App() {
     const text = (
       <>
         {label} 주변 · 노드 {data.nodes.length} · 관계 {data.edges.length}
-        {data.truncated && <> · <b>차수 상위만 표시</b></>}
+        {/* 잘릴 때 남는 것은 무게가 큰 이웃이다 (store._share_budget ·
+            central.py). 설정 상자의 '시작점' 안내와 같은 말을 쓴다. */}
+        {data.truncated && <> · <b>중심에 가까운 것만 표시</b></>}
       </>
     );
     worldNoteRef.current = text;

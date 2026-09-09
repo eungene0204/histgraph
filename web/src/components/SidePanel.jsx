@@ -112,7 +112,10 @@ export function SidePanel({ open, onToggle, meta, seeds, settings, onSettings, o
         <details open>
           <summary>시작점</summary>
           <section>
-            <p className="hint">{whole ? '가장 많이 연결된 것부터. 클릭하면 그리로 옮깁니다.' : '가장 많이 연결된 개체부터. 클릭하면 그 주변을 펼칩니다.'}</p>
+            {/* 차례는 **무게**다 (central.py · life.js nodeWeight — 타입 가중
+                PageRank). 연결 개수로 세우면 문서가 긴 쪽이 먼저 선다. 오른쪽
+                수는 여전히 연결 개수라, 차례와 다를 수 있다고 적어 둔다. */}
+            <p className="hint">{whole ? '이 그래프의 중심부터 (오른쪽 수는 연결 개수). 클릭하면 그리로 옮깁니다.' : '이 그래프의 중심부터 (오른쪽 수는 연결 개수). 클릭하면 그 주변을 펼칩니다.'}</p>
             <ul className="seeds">
               {seeds.map((s) => (
                 <li key={s.id} onClick={() => onPick(s.id)}>

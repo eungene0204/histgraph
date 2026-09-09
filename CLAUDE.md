@@ -354,6 +354,11 @@ uv run histgraph --db data/korea.sqlite terms
 
 ## 2. 그래프를 다시 만들 때
 
+수집·`scope` 뒤에 **무게를 다시 잰다** (`uv run histgraph central`, 몇 초).
+무엇을 먼저 보여줄지 정하는 값이고 노드·엣지가 바뀌면 같이 바뀐다. `scope` 는
+파생본을 만들며 스스로 돌리지만 원본에는 따로 돌려야 한다. 안 돌리면 화면이
+조용히 차수로 물러난다 (README "무엇이 중심인가" 절).
+
 수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 고친 값은
 **편집 계층(`overrides` 표)**에 남아 저장소가 쓸 때마다 다시 씌운다 (2026-09-05,
 README "편집 계층" 절) — `relabel`·`redescribe`·`describe`·`nikh`·`precision`·
@@ -399,6 +404,7 @@ DB 는 다른 세션이 동시에 쓴다. 파일을 복사해 되돌리지 않�
 ```
 uv run tests/test_pipeline.py        # 파이썬 (표준 라이브러리만, 의존성 없이 돈다)
 python3 tools/check_korean.py        # 배포될 DB 에 영어가 남았는지
+uv run histgraph central             # 무게 (무엇을 먼저 보여줄지) 다시 재기
 uv run histgraph serve               # http://127.0.0.1:8100 (8000 은 다른 프로젝트)
 cd web && npm test && npm run build  # 화면
 uv run histgraph lifesync            # 로컬 계정과 배포 계정의 '내 역사' 를 견준다

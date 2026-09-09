@@ -309,6 +309,27 @@ class GraphAPI:
             self._local.store = store
         return store
 
+    # --- 무게 ---------------------------------------------------------
+    #
+    # **무엇을 먼저 보여줄지는 무게가 정한다** (`central` 모듈 머리글 —
+    # 타입 가중 PageRank). 차수는 문서의 길이를 재지 역사를 재지 않는다.
+    # 무게는 **차례만** 정한다 — 무엇을 뺄지 정하는 데 쓰지 않는다.
+    #
+    # 아직 `histgraph central` 을 안 돌린 DB 도 있다. 배포 DB 는 읽기
+    # 전용으로 열려 스키마가 돌지 않으므로 표 자체가 없을 수 있다 —
+    # 그때는 조용히 차수로 물러난다.
+    def _weighted(self) -> tuple[str, str]:
+        """(조인 절, 차례 절). 표가 없으면 예전처럼 차수 순."""
+        got = getattr(self._local, "central", None)
+        if got is None:
+            from . import central
+            got = central.present(self.store.conn)
+            self._local.central = got
+        if not got:
+            return "", "d DESC"
+        return ("LEFT JOIN centrality ct ON ct.node_id = n.id",
+                "COALESCE(ct.score, 0) DESC, d DESC")
+
     # --- 메타 ---------------------------------------------------------
     def root(self) -> str | None:
         """이 그래프의 중심. 조선 그래프의 중심은 조선이다.
@@ -363,8 +384,10 @@ class GraphAPI:
         **맨 위는 왕조 자신이다.** 이 그래프의 중심이고, 거기서 사람과
         사건으로 갈라져 나가는 것이 이 시대를 읽는 순서다.
 
-        나머지는 차수 상위순 — 많이 연결된 개체라야 펼쳤을 때 볼 게 있다.
-        인물만 주면 사건 쪽으로 들어가는 길이 안 보이므로 섞는다."""
+        나머지는 **무게 상위순**이다 (`_weighted`). 차수로 고르면 문서가
+        긴 노드가 서고, 무게로 고르면 무신정변·위화도 회군처럼 자료가 얇은
+        시대의 큰일도 문 앞에 선다. 인물만 주면 사건 쪽으로 들어가는 길이
+        안 보이므로 섞는다."""
         out: list[dict] = []
         root = self.root()
         if root:
@@ -376,15 +399,17 @@ class GraphAPI:
                 out.append(_node_brief(row, self.store.degrees({root}).get(root, 0)))
                 limit -= 1
 
+        join, order = self._weighted()
         for node_type, take in (("person", limit - limit // 3), ("event", limit // 3)):
             rows = self.store.conn.execute(
-                """SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
+                f"""SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                           COUNT(e.src) AS d
                      FROM nodes n
                      LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
+                     {join}
                     WHERE n.type = ? AND n.description IS NOT NULL
                  GROUP BY n.id
-                 ORDER BY d DESC
+                 ORDER BY {order}
                     LIMIT ?""",
                 (node_type, take),
             ).fetchall()
@@ -400,9 +425,11 @@ class GraphAPI:
         if not query:
             return []
         like = f"%{query}%"
-        # **차수가 첫 기준이다.** 문자열 일치도를 앞에 두면 '세종'을 쳤을 때
-        # 세종특별자치시와 '세종 비암사 극락보전'이 먼저 나오고 정작 조선
-        # 세종(차수 21)은 네 번째로 밀린다 — 실측으로 확인한 순서다.
+        # **무게가 첫 기준이다** (`_weighted` — 타입 가중 PageRank). 문자열
+        # 일치도를 앞에 두면 '세종'을 쳤을 때 세종특별자치시와 '세종 비암사
+        # 극락보전'이 먼저 나오고 정작 조선 세종은 네 번째로 밀린다 —
+        # 실측으로 확인한 순서다. 예전에는 이 자리가 차수였는데, 차수는
+        # 문서가 긴 쪽을 세운다(`central` 모듈 머리글).
         # 연도 노드는 검색 대상이 되는 일이 드물어 뒤로 보낸다.
         #
         # **연표 눈금(`source='timeline'`)은 아예 뺀다.** '1974'를 치면
@@ -410,19 +437,21 @@ class GraphAPI:
         # 자리에 '1974년'이라는 노드가 앉았다. 눈금은 날짜 없는 사건을
         # 해에 걸어 두는 뼈대지 사람이 찾을 개체가 아니다 — 그 해를
         # 찾는 사람에게는 그 해의 사건이 나와야 한다.
+        join, order = self._weighted()
         rows = self.store.conn.execute(
-            """SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
+            f"""SELECT n.id, n.type, n.label, n.start_date, n.end_date, n.props,
                       COUNT(e.src) AS d,
                       MIN(CASE WHEN n.label = ?1 THEN 0
                                WHEN n.label LIKE ?1 || '%' THEN 1
                                ELSE 2 END) AS rank
                  FROM nodes n
                  LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
+                 {join}
                 WHERE (n.label LIKE ?2
                        OR n.id IN (SELECT node_id FROM aliases WHERE alias LIKE ?2))
                   AND n.source != 'timeline'
              GROUP BY n.id
-             ORDER BY (n.type = 'period'), d DESC, rank, n.label
+             ORDER BY (n.type = 'period'), {order}, rank, n.label
                 LIMIT ?3""",
             (query, like, limit),
         ).fetchall()
@@ -729,9 +758,9 @@ class GraphAPI:
         한 해에 38건)은 화면이 그 해를 늘려 세우므로, 라벨이 제 해를
         떠나지 않는다.
 
-        차수는 자를 자리가 아니라 **줄 세울 자리**다. 이름도 해도 같은
-        노드가 둘일 때 많이 연결된 쪽을 남기려고 내림차순으로 훑는다.
-        차수로 자르면 자료가 얇은 시대가 먼저 사라진다 — 고려의 사건은
+        무게는 자를 자리가 아니라 **줄 세울 자리**다. 이름도 해도 같은
+        노드가 둘일 때 무거운 쪽을 남기려고 내림차순으로 훑는다.
+        수를 세어 자르면 자료가 얇은 시대가 먼저 사라진다 — 고려의 사건은
         엣지가 둘셋뿐이라 조선에 밀린다.
 
         연도를 못 찾은 사건은 뺀다 — 연표에 놓을 자리가 없다.
@@ -739,14 +768,16 @@ class GraphAPI:
         cached = getattr(self._local, "anchors", None)
         if cached is not None:
             return cached
+        join, order = self._weighted()
         rows = self.store.conn.execute(
-            """SELECT n.id, n.type, n.label, n.start_date, n.end_date,
+            f"""SELECT n.id, n.type, n.label, n.start_date, n.end_date,
                       COUNT(e.src) AS d
                  FROM nodes n
                  LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
+                 {join}
                 WHERE n.type = 'event'
              GROUP BY n.id
-             ORDER BY d DESC"""
+             ORDER BY {order}"""
         ).fetchall()
         undated = {r["id"] for r in rows if _span(r)[0] is None}
         linked = self._linked_years(undated) if undated else {}
@@ -770,7 +801,7 @@ class GraphAPI:
             # **이름도 해도 같으면 한 줄만 세운다.** 실측: 임진왜란이
             # wd:Q122846639(차수 37)와 wd:Q576338(차수 1) 둘로 있어 1592년
             # 자리에 같은 이름이 나란히 찍혔다. 화면에서 둘은 구별되지
-            # 않으므로 많이 연결된 쪽만 남긴다 (rows 가 차수 내림차순).
+            # 않으므로 무거운 쪽만 남긴다 (rows 가 무게 내림차순).
             # 노드를 합치지는 않는다 — 라벨 유사도로 합치면 제1차/제2차
             # 요동 정벌이 한 노드가 된다. 여기서는 보이는 것만 정리한다.
             # 이름을 못 받아온 노드는 연표에 세울 수 없다. 라벨이 QID

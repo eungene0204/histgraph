@@ -837,6 +837,73 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_central(args: argparse.Namespace) -> int:
+    """무게를 다시 잰다 — 타입 가중 PageRank (`central` 모듈 머리글).
+
+        uv run histgraph central
+        uv run histgraph central --type event --top 30
+        uv run histgraph --db data/korea.sqlite central
+
+    **수집·`scope` 뒤에 다시 돌린다.** 노드가 늘거나 엣지가 바뀌면 무게도
+    바뀐다. `scope` 는 파생본을 만들면서 스스로 한 번 돌린다.
+    """
+    from . import central
+
+    with GraphStore(args.db) as store:
+        result = central.compute(store.conn)
+        if not args.dry_run:
+            central.save(store.conn, result)
+        deg = {r["id"]: r["d"] for r in store.conn.execute(
+            """SELECT n.id AS id, COUNT(e.src) AS d FROM nodes n
+                 LEFT JOIN edges e ON e.src = n.id OR e.dst = n.id
+             GROUP BY n.id""")}
+
+        print(f"  노드 {result.nodes:,} · 엣지 {result.edges:,}"
+              f" · 반복 {result.iters}회"
+              f" ({'수렴' if result.converged else '상한에서 멈춤'})")
+        if result.unweighted:
+            # 무게 표에 없는 타입이 들어왔다. 기본값으로 재고 있으므로
+            # 표에 적어야 한다 (`central.EDGE_WEIGHT`).
+            for t, n in sorted(result.unweighted.items(), key=lambda kv: -kv[1]):
+                print(f"  무게 표에 없는 관계 {t} {n:,}건 — 기본값 "
+                      f"{central.DEFAULT_WEIGHT} 로 쟀다")
+        if args.dry_run:
+            print("  (dry-run: 적지 않음)")
+
+        rows = central.top(store.conn, args.top, args.type) if not args.dry_run else []
+        if args.dry_run:
+            order = sorted(result.score, key=lambda i: -result.score[i])
+            names = {r["id"]: (r["label"], r["type"]) for r in store.conn.execute(
+                "SELECT id, label, type FROM nodes")}
+            if args.type:
+                order = [i for i in order if names.get(i, ("", ""))[1] == args.type]
+            rows = [{"label": names[i][0], "type": names[i][1], "score": result.score[i],
+                     "rank": k, "id": i, "degree": deg.get(i, 0)}
+                    for k, i in enumerate(order[: args.top], 1)]
+
+        head = f"  무게 상위 {len(rows)}개"
+        print(f"\n{head}" + (f" ({args.type})" if args.type else ""))
+        print(f"    {'':4} {'이름':22} {'타입':8} {'무게':>8} {'차수':>6}")
+        for r in rows:
+            print(f"    {r['rank']:>3}. {str(r['label'])[:20]:22} {r['type']:8}"
+                  f" {r['score'] * 1e4:8.2f} {deg.get(r['id'], 0):6}")
+
+        # **차수와 얼마나 다른가**를 같이 보여준다. 같다면 이 값을 따로 둘
+        # 이유가 없고, 순위가 크게 오른 쪽이 차수가 못 보던 것들이다.
+        by_deg = {nid: k for k, nid in enumerate(
+            sorted(deg, key=lambda i: (-deg[i], i)), 1)}
+        risen = sorted(((by_deg.get(r["id"], 0) - r["rank"], r) for r in rows),
+                       key=lambda kv: -kv[0])[:5]
+        if risen and risen[0][0] > 0:
+            print("\n  차수 순위에서 가장 많이 올라온 것")
+            for gap, r in risen:
+                if gap <= 0:
+                    break
+                print(f"    {str(r['label'])[:20]:22} 차수 {by_deg.get(r['id'], 0):>5}위"
+                      f" → 무게 {r['rank']:>3}위")
+    return 0
+
+
 def cmd_scope(args: argparse.Namespace) -> int:
     """시대를 뽑아 별도 그래프로 만든다. 원본은 그대로 둔다."""
     from . import scope as scope_mod
@@ -881,6 +948,11 @@ def cmd_scope(args: argparse.Namespace) -> int:
         swept = ({"nodes": 0, "edges": 0} if args.keep_undescribed
                  else scope_mod.sweep_undescribed(derived.conn))
         foreign = labels_mod.foreign_text(derived.conn)
+        # **무게도 여기서 잰다.** 노드가 확정된 뒤라야 뜻이 있고, 잊으면
+        # 화면이 조용히 차수로 물러난다 (`central` 모듈 머리글). 몇 초다.
+        from . import central
+        weight = central.compute(derived.conn)
+        central.save(derived.conn, weight)
 
     print(f"\n=== {result['era']} 서브그래프 ===")
     print(f"  출력: {result['out']}")
@@ -899,6 +971,11 @@ def cmd_scope(args: argparse.Namespace) -> int:
     for k, v in result["by_edge_type"].items():
         print(f"    {k:16} {v:>6,}")
 
+    print(f"\n  무게: 노드 {weight.nodes:,}개를 {weight.iters}회 반복으로 쟀다"
+          f" ({'수렴' if weight.converged else '상한에서 멈춤'})")
+    if weight.unweighted:
+        for t, n in sorted(weight.unweighted.items(), key=lambda kv: -kv[1]):
+            print(f"    무게 표에 없는 관계 {t} {n:,}건 — central.EDGE_WEIGHT 에 적을 것")
     print(f"\n  한국어 관문: 이름 {len(relabeled.applied):,}개 · 설명"
           f" {len(redescribed.applied):,}개 옮김 · 설명 {len(redescribed.cleared):,}개 비움")
     if filled["filled"]:
@@ -2943,6 +3020,15 @@ def main(argv: list[str] | None = None) -> int:
     p_pp.add_argument("--scope", type=Path, default=None,
                       help="이 파생본에 있는 노드만 쓴다 (원본 전체는 며칠 걸린다)")
     p_pp.set_defaults(func=cmd_paraphrase)
+
+    p_ct = sub.add_parser(
+        "central",
+        help="무게를 다시 잰다 — 타입 가중 PageRank (수집·scope 뒤마다)")
+    p_ct.add_argument("--top", type=int, default=25, help="보여줄 상위 개수")
+    p_ct.add_argument("--type", default=None,
+                      help="한 타입만 (event·person·org·place…)")
+    p_ct.add_argument("--dry-run", action="store_true", help="재기만 하고 적지 않는다")
+    p_ct.set_defaults(func=cmd_central)
 
     p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")
     p_sc.add_argument("era", nargs="+",

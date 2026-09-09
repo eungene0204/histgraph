@@ -7430,5 +7430,134 @@ check("저장소의 임기 표는 대통령 14명을 적고 있다", len(_repo_t
 check("모든 줄이 대한민국 대통령 자리다",
       {r.seat for r in _repo_terms} == {"wd:Q6296418"})
 
+print("\n[무게 — 무엇을 먼저 보여줄 것인가 (central)]")
+from histgraph import central as ct_mod  # noqa: E402
+
+# **관문: 모든 엣지 타입에 무게가 있다.** 새 타입이 무게 없이 들어오면
+# 기본값으로 재게 되고, 그것은 아무도 정하지 않은 값이다.
+check("온톨로지의 모든 엣지 타입이 무게 표에 있다",
+      set(EDGE_TYPES) <= set(ct_mod.EDGE_WEIGHT),
+      str(sorted(set(EDGE_TYPES) - set(ct_mod.EDGE_WEIGHT))))
+check("무게 표에 온톨로지에 없는 타입이 없다",
+      set(ct_mod.EDGE_WEIGHT) <= set(EDGE_TYPES),
+      str(sorted(set(ct_mod.EDGE_WEIGHT) - set(EDGE_TYPES))))
+
+_tmp_ct = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_ct.name) / "w.sqlite") as _st:
+    # **무게는 나눌 때 일한다.** 무향 그래프의 PageRank 에서 노드는 제 몫을
+    # 이웃에게 무게에 비례해 나눠 준다. 그러니 무게가 뜻을 갖는 자리는
+    # 이웃이 여럿일 때다 — 사건 노드는 연도(0.15)보다 참여자(1.0)에게 훨씬
+    # 많이 보내고, 연도 노드는 걸린 모두에게 똑같이 나눈다.
+    #
+    # 참여자와 방관자는 **차수가 같다**(둘 다 2). 다른 것은 이어진 관계의
+    # 무게뿐이다.
+    _st.upsert_nodes([
+        Node(id="e:사건", type="event", label="어떤 사건", source="t"),
+        Node(id="t:1592", type="period", label="1592년", source="t"),
+        Node(id="t:1600", type="period", label="1600년", source="t"),
+        Node(id="p:참여자", type="person", label="일을 한 사람", source="t"),
+        Node(id="p:참여자2", type="person", label="같이 한 사람", source="t"),
+        Node(id="p:방관자", type="person", label="그 해에 산 사람", source="t"),
+        Node(id="p:방관자2", type="person", label="그 해에 산 사람 둘", source="t"),
+        Node(id="p:방관자3", type="person", label="그 해에 산 사람 셋", source="t"),
+    ])
+    _st.upsert_edges([
+        Edge(src="p:참여자", dst="e:사건", type="participated_in", source="t"),
+        Edge(src="p:참여자2", dst="e:사건", type="participated_in", source="t"),
+        Edge(src="e:사건", dst="t:1592", type="dated_to", source="t"),
+        Edge(src="p:방관자", dst="t:1592", type="dated_to", source="t"),
+        Edge(src="p:방관자2", dst="t:1592", type="dated_to", source="t"),
+        Edge(src="p:방관자3", dst="t:1592", type="dated_to", source="t"),
+        Edge(src="p:참여자", dst="t:1600", type="dated_to", source="t"),
+        Edge(src="p:방관자", dst="t:1600", type="dated_to", source="t"),
+    ])
+    _res = ct_mod.compute(_st.conn)
+    _deg = _st.degrees({"p:참여자", "p:방관자"})
+    check("두 사람의 차수가 같다", _deg["p:참여자"] == _deg["p:방관자"], str(_deg))
+    check("무게는 무거운 관계로 이어진 쪽이 이긴다",
+          _res.score["p:참여자"] > _res.score["p:방관자"],
+          f"{_res.score['p:참여자']:.6f} vs {_res.score['p:방관자']:.6f}")
+    check("점수의 합은 1이다", abs(sum(_res.score.values()) - 1.0) < 1e-9,
+          str(sum(_res.score.values())))
+    check("수렴한다", _res.converged, str(_res.iters))
+    check("무게 표에 없는 관계는 없었다", not _res.unweighted, str(_res.unweighted))
+
+    # 표가 없을 때는 차수로 물러난다 (배포 DB 는 읽기 전용이라 표가 없을 수 있다).
+    _st.conn.execute("DELETE FROM centrality")
+    _st._has_centrality = None
+    check("무게 표가 비면 차수로 물러난다",
+          _st.weights({"p:참여자"})["p:참여자"] == float(_deg["p:참여자"]))
+
+    ct_mod.save(_st.conn, _res)
+    _st._has_centrality = None
+    _w = _st.weights({"p:참여자", "p:방관자"})
+    check("표가 있으면 무게를 읽는다", _w["p:참여자"] > _w["p:방관자"], str(_w))
+    check("표에 없는 노드는 0 이다", _st.weights({"p:없는놈"}) == {"p:없는놈": 0.0})
+    check("순위가 1부터 매겨진다",
+          _st.conn.execute("SELECT MIN(rank) FROM centrality").fetchone()[0] == 1)
+_tmp_ct.cleanup()
+
+_tmp_lf = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_lf.name) / "leaf.sqlite") as _st:
+    # **잎은 증언하지 못한다.** 자리 여섯 개를 혼자 지낸 사람(김명준 꼴)과,
+    # 남들도 앉은 자리 둘에 앉은 사람. 잎 할인이 없으면 앞엣사람이 이긴다.
+    _st.upsert_nodes(
+        [Node(id="p:이력", type="person", label="이력이 긴 사람", source="t"),
+         Node(id="p:자리", type="person", label="자리를 지낸 사람", source="t"),
+         Node(id="p:동료", type="person", label="같은 자리에 앉은 이", source="t"),
+         Node(id="r:참의", type="role", label="참의", source="t"),
+         Node(id="r:판서", type="role", label="판서", source="t")]
+        + [Node(id=f"r:이력{i}", type="role", label=f"어느 모임 위원 {i}", source="t") for i in range(6)]
+    )
+    _st.upsert_edges(
+        [Edge(src="p:이력", dst=f"r:이력{i}", type="held_position", source="t") for i in range(6)]
+        + [Edge(src="p:자리", dst="r:참의", type="held_position", source="t"),
+           Edge(src="p:자리", dst="r:판서", type="held_position", source="t"),
+           Edge(src="p:동료", dst="r:참의", type="held_position", source="t"),
+           Edge(src="p:동료", dst="r:판서", type="held_position", source="t")]
+    )
+    def _gap(leaf_return: float) -> float:
+        was = ct_mod.LEAF_RETURN
+        ct_mod.LEAF_RETURN = leaf_return
+        try:
+            sc = ct_mod.compute(_st.conn).score
+        finally:
+            ct_mod.LEAF_RETURN = was
+        return sc["p:이력"] / sc["p:자리"]
+
+    # 잎이 다 돌려주면 이력 줄 여섯이 자리 둘을 이긴다. 되돌림을 줄이면
+    # 그 격차가 좁아진다 — 실측(그래프 전체): 김명준이 인물 4위에서 26위로
+    # 물러났다. 값 자체가 아니라 **방향**을 잰다.
+    check("잎이 되돌리는 몫을 줄이면 이력 줄로 쌓은 무게가 깎인다",
+          _gap(ct_mod.LEAF_RETURN) < _gap(1.0),
+          f"{_gap(ct_mod.LEAF_RETURN):.4f} < {_gap(1.0):.4f}")
+    check("되돌림이 작을수록 더 깎인다", _gap(0.25) < _gap(0.75))
+_tmp_lf.cleanup()
+
+print("\n[무게는 차례만 정한다 — 자르지 않는다]")
+_tmp_cta = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_cta.name) / "anchor.sqlite") as _st:
+    # 무게가 아주 낮은 고려 사건도 연표에 선다. 연표에서 빠진 사건은
+    # 읽는 사람에게 그 시대에 없었던 일이다 (CLAUDE.md §1-3).
+    _st.upsert_nodes([
+        Node(id="e:큰일", type="event", label="큰일", start_date="1592", source="t"),
+        Node(id="e:작은일", type="event", label="고려의 작은 일", start_date="1050", source="t"),
+        Node(id="p:가", type="person", label="가", source="t"),
+        Node(id="p:나", type="person", label="나", source="t"),
+    ])
+    _st.upsert_edges([
+        Edge(src="p:가", dst="e:큰일", type="participated_in", source="t"),
+        Edge(src="p:나", dst="e:큰일", type="participated_in", source="t"),
+        Edge(src="p:가", dst="e:작은일", type="participated_in", source="t"),
+    ])
+    ct_mod.save(_st.conn, ct_mod.compute(_st.conn))
+    from histgraph.server import GraphAPI as _API  # noqa: E402
+    _api = _API(_st)
+    _marks = {a["label"] for a in _api._anchors()}
+    check("무게가 낮아도 연표에 선다", "고려의 작은 일" in _marks, str(_marks))
+    check("무게 순으로 훑는다 (차례를 정하는 자리)",
+          [r["label"] for r in ct_mod.top(_st.conn, 2, "event")][0] == "큰일")
+_tmp_cta.cleanup()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)
