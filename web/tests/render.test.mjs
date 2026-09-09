@@ -419,17 +419,25 @@ let detailHtml = '';
   ok('부르는 말이 로그인 전과 후로 갈린다',
      appSrc.includes('로그인하면 내 역사를 적을 수 있습니다')
      && appSrc.includes('아직 적은 내 역사가 없습니다'));
-  // 자리를 흔들지 않는다 — 커지거나 움직이면 옆의 시대 단추가 밀린다.
+  // 오가는 것은 **밝기 하나다** (2026-09-09 사용자: "조금 끊어지는 느낌이야").
+  // 자리를 흔들지 않을 뿐 아니라, 다시 그리게 하는 값(그림자의 번짐·퍼짐)도
+  // 움직이지 않는다 — 그 일은 캔버스와 한 줄에 서서 힘 배치가 도는 동안 빛이
+  // 같이 끊긴다. `opacity` 는 합성기가 따로 맡는다.
   const frames = eraCss.match(/@keyframes era-beckon\s*\{[^]*?\n\}/)?.[0] || '';
-  ok('빛만 오가고 자리는 그대로다',
-     /box-shadow/.test(frames) && !/(transform|width|padding|font-size|margin)/.test(frames));
+  ok('빛은 밝기만 오간다 (자리도 그리는 일도 흔들지 않는다)',
+     /opacity/.test(frames)
+     && !/(transform|width|padding|font-size|margin|box-shadow|filter)/.test(frames));
+  // 그 빛을 지고 있는 것은 단추가 아니라 딱지다 — 단추에 걸면 다시 그리는 값이
+  // 다시 애니메이션에 들어온다.
+  const glow = eraCss.match(/\.era\.beckon::after\s*\{[^}]*\}/)?.[0] || '';
+  ok('빛은 딱지에 지워 놓는다', /box-shadow/.test(glow) && /animation:\s*era-beckon/.test(glow));
   // 2026-09-09 사용자: "보라색으로 빛나지 말고 백색으로 빛나게 해줘." 강조색
   // 보라는 '누를 수 있는 것'이라는 뜻을 이미 지고 있다 — 이 빛은 뜻이 아니라
   // 부름이다.
   ok('빛은 흰빛이다',
-     /255,\s*255,\s*255/.test(frames) && !/accent/.test(frames));
+     /255,\s*255,\s*255/.test(glow) && !/accent/.test(glow));
   ok('움직임을 줄여 달라고 한 사람에게는 깜박이지 않는다',
-     /prefers-reduced-motion[^]*?\.era\.beckon\s*\{[^}]*animation:\s*none/.test(eraCss));
+     /prefers-reduced-motion[^]*?\.era\.beckon::after\s*\{[^}]*animation:\s*none/.test(eraCss));
 }
 
 // --- 내가 적은 이야기 -----------------------------------------------------
