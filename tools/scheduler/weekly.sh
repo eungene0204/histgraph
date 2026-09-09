@@ -62,11 +62,14 @@ uv run tests/test_pipeline.py >/dev/null || { echo "  파이프라인 테스트 
 
 # 3) 커밋 — **파일 이름을 대고 담는다.** 작업 트리의 다른 수정은 남의 것이다.
 #    무엇이 들어왔는지를 커밋에 적는다. 사람이 나중에 보는 자리가 거기다.
+# **한글이 바로 뒤에 오면 ${} 로 감싼다** — `$COUNT건` 은 셸이 변수 이름을
+# 'COUNT건' 으로 읽어 unbound variable 로 죽는다 (실측: 첫 커밋이 그렇게
+# 실패했다).
 NEW=$(grep '^    + ' "$OUT" | sed 's/^    + /  /' | cut -c1-100)
 COUNT=$(printf '%s\n' "$NEW" | grep -c .)
 git add "$DERIVED" || exit 1
 git commit -q -F - <<EOF || { echo "  커밋 실패"; exit 1; }
-지금 일어나는 일 $COUNT건 — $(date '+%Y-%m-%d') 주간 수집
+지금 일어나는 일 ${COUNT}건 — $(date '+%Y-%m-%d') 주간 수집
 
 주마다 도는 수집(tools/scheduler/weekly.sh)이 한국어 위키백과의
 '분류:{해}년 대한민국' 에서 걷어 화면 DB 에 세웠다.
