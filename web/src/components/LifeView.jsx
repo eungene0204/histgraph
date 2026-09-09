@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import { LifeSearch } from './LifeSearch.jsx';
 import { auth, csrf } from '../lib/auth.js';
+import { COPYRIGHT } from '../lib/site.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
@@ -783,7 +784,7 @@ export default function LifeView() {
       </div>
 
       <footer className="foot">
-        <span className="foot-copy">© 2026 histgraph</span>
+        <span className="foot-copy">{COPYRIGHT}</span>
         <a href="/privacy.html">개인정보처리방침</a>
         <a href="/terms.html">이용약관</a>
       </footer>

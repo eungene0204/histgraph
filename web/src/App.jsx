@@ -9,6 +9,7 @@ import { ThemeToggle } from './components/ThemeToggle.jsx';
 import { AccountMenu } from './components/AccountMenu.jsx';
 import { LoginModal } from './components/LoginModal.jsx';
 import { auth } from './lib/auth.js';
+import { COPYRIGHT } from './lib/site.js';
 
 // 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
 // 더할 때마다 두 곳을 고쳐야 하고, 빠뜨린 하나가 화면에 영어로 뜬다.
@@ -396,7 +397,7 @@ export default function App() {
           두 장은 리액트 바깥의 정적 문서라 자바스크립트 없이도 열린다
           (web/privacy.html · web/terms.html). 그래서 <a> 로 그냥 넘긴다. */}
       <footer className="foot">
-        <span className="foot-copy">© 2026 histgraph</span>
+        <span className="foot-copy">{COPYRIGHT}</span>
         <a href="/privacy.html">개인정보처리방침</a>
         <a href="/terms.html">이용약관</a>
       </footer>

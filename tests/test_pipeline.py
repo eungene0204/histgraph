@@ -4688,6 +4688,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("목록 장에도 영어가 없다 — 저작권 한 줄 말고는",
           not _foreign(text), str(_foreign(text)))
     check("목록 장에도 저작권 한 줄이 선다", pages.COPYRIGHT in text)
+    # **정적 장과 리액트 화면이 같은 문장을 세운다** (2026-09-09 사용자: "© 2026
+    # histgraph 왜 이거만 보이지? 뒷 문장 어디감?"). 두 상수는 서로 다른 언어에
+    # 사는 같은 한 줄이라, 한쪽만 고치면 화면마다 저작권이 달라진다.
+    _site = (Path(__file__).resolve().parents[1] / "web" / "src" / "lib" / "site.js").read_text(encoding="utf-8")
+    check("화면 쪽 저작권 상수가 글자 하나까지 같다",
+          f"export const COPYRIGHT = '{pages.COPYRIGHT}';" in _site, _site[-200:])
 
     # 배포에서는 rewrite 가 `/api/n/…` 으로 바꿔 넘긴다 — 같은 표가 받아야 한다.
     check("배포 경로(/api/n/…)도 같은 장을 낸다",

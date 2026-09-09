@@ -37,7 +37,8 @@ import { Glyph } from './src/components/Glyph.jsx';
 import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
 import { LoginModal } from './src/components/LoginModal.jsx';
 import LifeView, { StoryLog, Counterfactual } from './src/components/LifeView.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, Counterfactual, LifeView };
+import { COPYRIGHT } from './src/lib/site.js';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, Counterfactual, LifeView, COPYRIGHT };
 `;
 
 await build({
@@ -54,7 +55,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, Counterfactual, LifeView } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, Counterfactual, LifeView, COPYRIGHT } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -591,8 +592,13 @@ let detailHtml = '';
   // 제품 이름과 범례에 일부러 적어 둔 자료 용어는 봐준다. 막으려는 것은
   // **설명이 영어로 새는 것**이지 이름 자체가 아니다. 방침·약관의 문의
   // 메일 주소도 같다 — 한글로 옮기면 편지가 오지 않는다.
+  //
+  // 저작권 한 줄도 봐준다 (2026-09-09 사용자 결정 · lib/site.js COPYRIGHT).
+  // **그 상수와 글자 하나까지 같을 때만** 걷어내므로, 문구를 늘리면 여기서
+  // 다시 걸린다.
   const visibleText = (html) => plain(html)
     .replace(/<[^>]+>/g, ' ')                  // 태그를 통째로 걷어낸다
+    .split(COPYRIGHT).join(' ')
     .replace(/histgraph|same_as/g, ' ')
     .replace(/[\w.+-]+@[\w.-]+/g, ' ');
   const leaks = [];
@@ -604,6 +610,13 @@ let detailHtml = '';
     if (found) leaks.push(`${name}: ${[...new Set(found)].join(', ')}`);
   }
   ok('사람이 읽는 글자에 영어가 없다', leaks.length === 0, leaks.join('\n      '));
+  // 2026-09-09 사용자: "© 2026 histgraph 왜 이거만 보이지? 뒷 문장 어디감?"
+  // 전에는 그래프·내 역사 화면에 앞머리만 서고 전체 문장은 정적 장(/n/)에만
+  // 있었다. 이제 **어느 화면에나 같은 한 문장**이다.
+  ok('바닥의 저작권은 어느 화면에서나 같은 한 문장이다',
+     COPYRIGHT.endsWith('All rights reserved.')
+     && appHtml.includes(COPYRIGHT)
+     && plain(renderToString(h(LifeView))).includes(COPYRIGHT));
 }
 
 rmSync(out, { force: true });
