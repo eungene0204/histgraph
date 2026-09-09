@@ -15,7 +15,7 @@
 // 브라우저에 붙는 부분(LifeBoard)을 가른다 — 배치가 어긋나는지는 브라우저
 // 없이 재야 한다.
 
-import { buildScale, placeMarks, reignBand, causeWire, yearCells, CAUSE_WIRE, REIGN_COLOR } from './timeline.js';
+import { buildScale, placeMarks, reignBand, causeWire, dateRuler, yearCells, CAUSE_WIRE, REIGN_COLOR } from './timeline.js';
 
 export const NODE_TYPE_KO = {
   Person: '인물', FamilyMember: '가족', Ancestor: '조상', Relationship: '관계',
@@ -1173,9 +1173,9 @@ export function lifeLayout({ life, context, bodyH = 700, today = new Date().getF
   const virtual = [];
   for (const [y, n] of count) for (let i = 0; i < n; i++) virtual.push({ year: y });
   const axis = buildScale(virtual, { from, to, base: (bodyH - PAD_TOP - PAD_BOTTOM) * ZOOM });
-  // 해 -> 픽셀. 소수를 받는다 — 재위 띠가 취임한 날에 앉으려면 두 눈금
-  // 사이를 나눠야 한다 (`TimelineRail.yOf` 와 같은 규칙).
-  const at = (y) => {
+  // 해 -> 픽셀. 소수를 받는다 — 사건이 하나도 없는 해에서 재위 띠가 취임한
+  // 날에 앉으려면 두 눈금 사이를 나눠야 한다 (`TimelineRail.yOf` 와 같은 규칙).
+  const yOf = (y) => {
     const v = clamp(y, from, to);
     const i = Math.floor(v);
     const a = axis.pos[i - from];
@@ -1185,6 +1185,9 @@ export function lifeLayout({ life, context, bodyH = 700, today = new Date().getF
 
   const placeP = placeMarks(personal, axis).map(({ m, y }) => ({ m, ty: y }));
   const placeH = placeMarks(history, axis).map(({ m, y }) => ({ m, ty: y }));
+  // 재위 띠는 **역사 열**의 사건들 사이에 앉는다 — 시대 연표와 같은 규칙
+  // (`dateRuler`). 개인 열은 사람마다 달라 자가 될 수 없다.
+  const at = dateRuler(placeH, yOf);
   const tyP = new Map(placeP.map((p) => [p.m.id, p.ty]));
   const tyH = new Map(placeH.map((p) => [p.m.id, p.ty]));
 

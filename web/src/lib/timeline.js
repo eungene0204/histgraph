@@ -113,6 +113,40 @@ export function placeMarks(marks, { from, to, pos }) {
   });
 }
 
+// 날짜 -> 픽셀. **그 해에 선 사건들 사이의 차례로 앉힌다.**
+//
+// 자의 눈금은 한 해지만, 사건이 몰린 해는 그 해가 늘어나고 그 안에서는
+// 사건이 날짜 순으로 **한 칸(GAP)씩** 선다 (`placeMarks`). 그러니 한 해를
+// 소수로 고르게 나누면 재위 띠가 사건과 어긋난다 — 2025년에 사건이 아홉
+// 서 있는데 이재명의 취임(6월 4일)을 해의 42% 자리에 앉히면 이름이 4월
+// 사건 옆에 선다 (2026-09-09 지적: "이재명 대통령은 2025년 6월에 취임했어
+// 그럼 2025년 6월 오른쪽에 이름을 둬야 하는거야").
+//
+// 그래서 **그 날짜가 그 해의 몇 번째로 오는가**를 세어 그 칸에 앉힌다.
+// 사건이 하나도 없는 해는 셀 것이 없으니 소수로 나눈 자리를 쓴다.
+export function dateRuler(placed, at) {
+  const byYear = new Map();
+  for (const { m, ty } of placed) {
+    if (!byYear.has(m.year)) byYear.set(m.year, []);
+    byYear.get(m.year).push({ date: String(m.date || ''), y: ty });
+  }
+  for (const rows of byYear.values()) rows.sort((a, b) => a.y - b.y);
+  return (year, date) => {
+    const rows = date ? byYear.get(Math.floor(year)) : null;
+    if (!rows || !rows.length) return at(year);
+    // 날짜를 모르는 마크는 '그 해 어딘가'라 맨 앞에 선다 (`sortMarks`).
+    // 그 뒤부터 헤아린다 — 빈 날짜보다 앞선 날은 없다.
+    let n = 0;
+    while (n < rows.length && (!rows[n].date || rows[n].date <= date)) n++;
+    // **두 사건 사이에 앉힌다.** 한 사건의 칸에 딱 맞추면 그 사건이 곧
+    // 즉위·취임인 것처럼 읽힌다 — 이재명의 취임(2025-06-04)은 제21대
+    // 대통령 선거(06-03) 다음이고 한반도 집중호우(07-16) 앞이다.
+    if (n === 0) return rows[0].y;
+    const prev = rows[n - 1].y;
+    return (prev + (n < rows.length ? rows[n].y : prev + GAP)) / 2;
+  };
+}
+
 // 한 해가 늘어나면 그 안의 **차례가 곧 시간 순으로 읽힌다.** 그러니 같은
 // 해는 가나다가 아니라 날짜로 세운다 (실측: 1592년 38건이 가나다순이라
 // 부산진 전투(5월)가 한산도 대첩(7월)보다 아래에 섰다). 날짜를 모르는
@@ -430,8 +464,10 @@ export class TimelineRail {
     // 시대 전체가 한 화면에 드는 높이의 ZOOM 배가 '빈 해'의 몫이다.
     this.axis = buildScale(visible, { from, to, base: (bodyH - PAD_TOP - PAD_BOTTOM) * ZOOM });
     const H = this.axis.H;
-    const at = (year) => this.yOf(year);
     const place = placeMarks(visible, this.axis).map(({ m, y }) => ({ m, ty: y }));
+    // 재위 띠는 날짜를 안다. 그 해에 선 사건들 사이의 차례로 앉힌다
+    // (`dateRuler`); 날짜를 안 주면 예전처럼 해의 자리다.
+    const at = dateRuler(place, (year) => this.yOf(year));
 
     const wires = place.map(({ m, ty }) => {
       const c = nodeColor(m.type, m.group);
@@ -584,9 +620,9 @@ export function reignBand(reigns, at, self = {}) {
     // 막대와 이름이 그 해 1월에 선다 (박정희 1963-12-17 · 최규하
     // 1979-12-21 · 전두환 1980-09-01). 서버가 해 안의 자리를 소수로 준다
     // (`server._year_at`); 없는 것은 해의 첫날이다.
-    const y1 = at(r.at_start ?? r.start);
-    const y2 = Math.max(at(r.at_end ?? r.end), y1 + 2);
-    const dy = r.death != null ? at(r.at_death ?? r.death) : null;
+    const y1 = at(r.at_start ?? r.start, r.start_date);
+    const y2 = Math.max(at(r.at_end ?? r.end, r.end_date), y1 + 2);
+    const dy = r.death != null ? at(r.at_death ?? r.death, r.death_date) : null;
     const tip = `${r.label} · ${r.position} ${seatWord(r)} ${yr(r.start)}~`
       + (r.ongoing ? '' : yr(r.end))
       + (r.death != null ? ` · ${yr(r.death)} 사망` : '');

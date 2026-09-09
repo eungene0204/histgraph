@@ -6,7 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, dateRuler, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
 import { causalReach, causalLayout, GraphView, MUTUAL } from '../src/lib/graph-view.js';
 
 let pass = 0;
@@ -663,6 +663,7 @@ console.log('\n화살촉 (대칭 관계)');
      `${twelfth.toFixed(1)} / ${at(1963).toFixed(1)}~${at(1964).toFixed(1)}`);
 
   // 박정희의 취임은 1963-12-17 이다. 해로만 앉히면 이름이 1963년 1월에 선다.
+  // (그 해에 사건이 하나도 없을 때의 자리 — 소수로 나눈다.)
   const band = reignBand([{
     id: 'wd:Q14356', label: '박정희', position: '대한민국 대통령', kind: 'president',
     start: 1963, end: 1979, at_start: 1963.96, at_end: 1979.818,
@@ -684,6 +685,64 @@ console.log('\n화살촉 (대칭 관계)');
   }], at, {});
   ok('해 안의 자리를 모르면 그 해의 첫날에 선다',
      Math.abs(Number(/top:([\d.]+)px/.exec(plain.items)[1]) - at(1970)) < 0.06);
+}
+
+// --- 사건이 선 해에서는 그 사건들 사이에 앉는다 (`dateRuler`) ------------------
+// "이재명 대통령은 2025년 6월에 취임했어 그럼 2025년 6월 오른쪽에 이름을 둬야
+// 하는거야" (2026-09-09). 몰린 해는 사건이 한 칸씩 서므로 (`placeMarks`), 해를
+// 소수로 고르게 나누면 6월 취임이 4월 사건 옆에 선다.
+{
+  const from = 2020;
+  const to = 2030;
+  const marks = [
+    { year: 2025, label: '폭설', date: '2025-01-27' },
+    { year: 2025, label: '산불', date: '2025-03-22' },
+    { year: 2025, label: '유심 해킹', date: '2025-04-18' },
+    { year: 2025, label: '태안화력', date: '2025-06-02' },
+    { year: 2025, label: '제21대 대통령 선거', date: '2025-06-03' },
+    { year: 2025, label: '집중호우', date: '2025-07-16' },
+    { year: 2025, label: 'APEC', date: '2025-10-31' },
+  ];
+  // 빈 해의 몫(rate)이 라벨 간격(GAP 30)보다 작아야 몰린 해가 사건 수만큼
+  // 늘어난다 — 실제 연표가 그렇다 (1100년에 9,900px 이면 한 해 9px).
+  const scale = buildScale(sortMarks(marks), { from, to, base: 100 });
+  const place = placeMarks(sortMarks(marks), scale).map(({ m, y }) => ({ m, ty: y }));
+  const yOf = (y) => {
+    const v = Math.min(Math.max(y, from), to);
+    const i = Math.floor(v);
+    const a = scale.pos[i - from];
+    const f = v - i;
+    return (!f || i >= to) ? a : a + (scale.pos[i + 1 - from] - a) * f;
+  };
+  const at = dateRuler(place, yOf);
+  const yAt = (label) => place.find((p) => p.m.label === label).ty;
+
+  const inaug = at(2025, '2025-06-04');
+  ok('취임일은 그 앞 사건과 뒷 사건 사이에 앉는다',
+     inaug > yAt('제21대 대통령 선거') && inaug < yAt('집중호우'),
+     `${inaug} / 선거 ${yAt('제21대 대통령 선거')} · 호우 ${yAt('집중호우')}`);
+  ok('한 사건의 칸에 딱 맞추지 않는다 — 그 사건이 곧 취임인 것처럼 읽힌다',
+     inaug !== yAt('집중호우') && inaug !== yAt('제21대 대통령 선거'));
+  ok('해를 소수로 고르게 나눈 자리(4월 언저리)와는 다르다',
+     Math.abs(inaug - yOf(2025.42)) > 30,
+     `${inaug} vs ${yOf(2025.42)}`);
+  ok('그 해의 첫 사건보다 앞선 날은 해의 첫 칸이다',
+     at(2025, '2025-01-02') === yAt('폭설'));
+  ok('그 해의 마지막 사건보다 뒤인 날은 그 아래 반 칸이다',
+     at(2025, '2025-12-25') > yAt('APEC') && at(2025, '2025-12-25') < yOf(2026));
+  ok('사건이 하나도 없는 해는 소수로 나눈 자리 그대로다',
+     at(2023.5, '2023-07-01') === yOf(2023.5));
+  ok('날짜를 안 주면 예전처럼 해의 자리다', at(2025) === yOf(2025));
+
+  // 띠도 같은 자를 쓴다.
+  const band = reignBand([{
+    id: 'wd:Q12612463', label: '이재명', position: '대한민국 대통령', kind: 'president',
+    start: 2025, end: 2026, at_start: 2025.42, start_date: '2025-06-04',
+    ongoing: true, death: null, birth: 1964,
+  }], at, {});
+  const top = Number(/top:([\d.]+)px/.exec(band.items)[1]);
+  ok('대통령의 이름이 그 해 6월 자리에 선다', Math.abs(top - inaug) < 0.06,
+     `${top} vs ${inaug}`);
 }
 
 console.log('\n==============================================');

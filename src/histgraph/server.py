@@ -885,9 +885,11 @@ class GraphAPI:
             if overlap is not None:
                 if start < overlap["start"]:
                     overlap["at_start"] = at_start
+                    overlap["start_date"] = r["r_start"] or None
                 overlap["start"] = min(overlap["start"], start)
                 if end > overlap["end"]:
                     overlap["at_end"] = at_end
+                    overlap["end_date"] = r["r_end"] or None
                 overlap["end"] = max(overlap["end"], end)
                 continue
             band = {
@@ -895,14 +897,19 @@ class GraphAPI:
                 "position": r["position"],
                 "kind": "president" if r["seat"] == "president" else "monarch",
                 "start": start, "end": end,
-                # 해 안의 자리 (없으면 화면이 해의 첫날로 앉힌다).
+                # 해 안의 자리. 두 가지로 준다 — 화면이 **그 해에 선 사건들
+                # 사이의 차례**로 앉힐 때는 날짜가 필요하고(`dateRuler`),
+                # 사건이 하나도 없는 해는 소수로 나눠 앉힌다.
                 "at_start": at_start,
                 "at_end": at_end if at_end is not None and not ongoing else None,
+                "start_date": r["r_start"] or None,
+                "end_date": r["r_end"] if not ongoing else None,
                 "ongoing": ongoing,
                 # 몰년이 재위 끝보다 앞서면 둘 중 하나가 틀린 것이다.
                 # 화면이 거꾸로 된 꼬리를 그리지 않게 여기서 뗀다.
                 "death": death if death is not None and death >= end else None,
                 "at_death": at_death if death is not None and death >= end else None,
+                "death_date": r["end_date"] if death is not None and death >= end else None,
                 "birth": _year(r["start_date"]),
             }
             mine.append(band)
