@@ -7153,5 +7153,85 @@ finally:
         else:
             _os.environ[k] = v
 
+
+# --- 지금 일어나는 일 (`recent`) ------------------------------------------
+#
+# 관문이 셋이다: 사건이 아닌 문서를 세우지 않는가, 날짜를 제 자리에서
+# 읽는가, 사람이 적은 표가 기계를 이기는가.
+print("\n[지금 일어나는 일]")
+from histgraph import recent as _rc  # noqa: E402
+
+check("괄호 안의 생몰년을 사건 날짜로 읽지 않는다",
+      _rc.first_date(
+          "2025년 태안화력발전소 사고는 하청업체 소속 노동자 김충현"
+          "(1975년 ~ 2025년 6월 2일)이 2025년 6월 2일 오후 기계에 끼여 사망한 사고이다.",
+          "2025년 태안화력발전소 사고") == ("2025-06-02", None))
+check("이름에 박힌 해를 건너뛰고 정의 문장의 달을 읽는다",
+      _rc.first_date("2025년 대한민국 산불은 2025년 3월 영남에서 발생한 산불을 총칭한다.",
+                     "2025년 대한민국 산불") == ("2025-03", None))
+check("'부터 … 까지' 만 끝 날짜로 읽는다",
+      _rc.first_date("봉대산 불다람쥐 연쇄 방화사건은 1994년부터 2011년까지 이어졌다.",
+                     "봉대산 불다람쥐 연쇄 방화사건") == ("1994", "2011"))
+check("뒤에 오는 딴 날짜를 끝으로 읽지 않는다",
+      _rc.first_date("가나 사건은 2025년 3월 1일 일어났고 2026년 재판이 열렸다.",
+                     "가나 사건") == ("2025-03-01", None))
+check("날짜가 없으면 없다고 한다", _rc.first_date("윤석열을 지지하는 집회이다.") == (None, None))
+check("Wikidata 의 거짓 정밀도(1월 1일)는 해로 물린다",
+      _rc._trim_fake("2026-01-01") == "2026" and _rc._trim_fake("2026-03-20") == "2026-03-20")
+
+_cand = lambda title, cats: _rc.Candidate(title=title, year=2026, categories=cats)
+check("빼는 분류를 남기는 분류보다 먼저 본다 (야구 + 대한민국)",
+      _rc.judge_by_category(_cand("2025년 KBO 포스트시즌",
+                                  ["2025년 대한민국", "2025년 야구"]))[0] == "제외")
+check("분류가 사고라 말하면 수집한다",
+      _rc.judge_by_category(_cand("서산영덕고속도로 30중 추돌사고",
+                                  ["2026년 도로 사고"]))[0] == "수집")
+check("아무 말도 없는 분류는 보류한다 (짐작으로 세우지 않는다)",
+      _rc.judge_by_category(_cand("K-휴머노이드 연합", ["2025년 대한민국"]))[0] == "보류")
+
+_reach = {"Q168983", "Q46190676"}   # 화재 · 스포츠 시즌 — 둘 다 사건 계층에 닿는다
+check("사건 계층에 닿으면 수집한다",
+      _rc.judge_by_class(_cand("어느 화재", []), {"Q168983"}, _reach)[0] == "수집")
+check("사건 계층에 닿아도 스포츠는 뺀다",
+      _rc.judge_by_class(_cand("어느 시즌", []), {"Q46190676"}, _reach)[0] == "제외")
+check("연도 문서·목록·시상식은 사건이 아니다",
+      all(_rc.judge_by_class(_cand("x", []), {q}, _reach)[0] == "제외"
+          for q in _rc.NOT_EVENT_CLASSES))
+check("클래스가 없으면 분류에 물어본다",
+      _rc.judge_by_class(_cand("어느 화재", ["2026년 화재"]), set(), _reach)[0] == "수집")
+check("드라마는 사건 계층에 닿지 않아 저절로 빠진다",
+      _rc.judge_by_class(_cand("어느 드라마", []), {"Q5398426"}, _reach)[0] == "제외")
+
+_tmp_rc = tempfile.TemporaryDirectory()
+_table = Path(_tmp_rc.name) / "recent.tsv"
+_table.write_text(
+    "# 주석\n\n"
+    "제외\t어떤 정부\t\t체제이지 사건이 아니다\n"
+    "수집\t누리호 4차 발사\t\t분류가 우주발사체뿐이라 기계가 못 갈랐다\n"
+    "수집\t어떤 시위\t2022\t문서에 시작 날짜가 없다\n"
+    "모름\t알 수 없는 판정\n",
+    encoding="utf-8")
+_rules = _rc.load_table(_table)
+check("표의 판정과 날짜와 근거를 읽는다",
+      _rules["어떤 시위"] == ("수집", "2022", "문서에 시작 날짜가 없다"))
+check("날짜 칸은 비워도 된다", _rules["누리호 4차 발사"][1] == "")
+check("알 수 없는 판정은 버린다 (주석·빈 줄도)",
+      "알 수 없는 판정" not in _rules and len(_rules) == 3)
+
+with GraphStore(Path(_tmp_rc.name) / "g.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="wd:Q1", type="event", label="연등회", source="wd", start_date="982"),
+        Node(id="wd:Q2", type="event", label="제21대 대통령 선거", source="wd",
+             start_date="2025-06-03"),
+    ])
+    # 글자로 비교하면 '982' 가 '2025' 보다 커서, 걷는 해가 982년이 된다.
+    import datetime as _dt
+    _now = _dt.date.today().year
+    check("마지막 사건의 해를 숫자로 고른다 ('982' 가 '2025' 보다 크지 않게)",
+          _rc.years_since(_st)[0] == min(2025, _now - 1))
+    check("지난해는 늘 다시 훑는다", _rc.years_since(_st)[-2:] == [_now - 1, _now])
+    check("--since 를 주면 그 해부터", _rc.years_since(_st, "2024")[0] == 2024)
+_tmp_rc.cleanup()
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

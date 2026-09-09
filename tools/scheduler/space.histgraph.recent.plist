@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  주간 사건 수집 (launchd). install.sh 가 __ROOT__ 를 이 저장소 경로로 바꿔
+  ~/Library/LaunchAgents/ 에 놓고 걸어 준다.
+
+  PATH 를 적어 두는 이유: launchd 는 로그인 셸을 거치지 않아서 uv(homebrew)
+  도 git 도 찾지 못한다. 실패가 "명령 없음" 한 줄로만 남아 조용하다.
+
+  맥이 자고 있었으면 그 시각을 지나쳐도 깨어난 뒤에 한 번 돈다.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>space.histgraph.recent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>__ROOT__/tools/scheduler/weekly.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__ROOT__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- 매주 월요일 09:00 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>1</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- 스크립트가 자기 로그를 쓴다. 여기는 그 밖으로 샌 것만 받는다. -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/.cache/histgraph/recent/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.cache/histgraph/recent/launchd.log</string>
+</dict>
+</plist>

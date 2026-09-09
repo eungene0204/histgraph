@@ -34,6 +34,7 @@ DEFAULT_ALIASES = ROOT / "data" / "aliases.tsv"
 DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
 DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
+DEFAULT_RECENT = ROOT / "data" / "recent.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -2258,6 +2259,54 @@ def cmd_chronology(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recent(args: argparse.Namespace) -> int:
+    """지금 일어나는 일을 걷는다 (`recent` 모듈 머리글).
+
+    시드 표는 사람이 적는 명단이라 어제 일어난 일을 담지 못한다. 해마다
+    저절로 자라는 한국어 위키백과 분류(`분류:2026년 대한민국`)에서 걷고,
+    Wikidata 클래스 계층과 문서 분류로 사건만 가른다. 원본과 파생본에
+    한 번씩 돌린다 — 화면이 읽는 것은 파생본이다:
+
+        uv run histgraph recent
+        uv run histgraph --db data/korea.sqlite recent
+
+    주마다 도는 것은 `tools/scheduler/weekly.sh` 다.
+    """
+    from . import recent as rc
+
+    fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 0.5))
+    with GraphStore(args.db) as store:
+        years = args.years or rc.years_since(store, args.since)
+        print(f"  걸을 해: {', '.join(str(y) for y in years)}")
+        rep = rc.collect(
+            fetcher, store, years,
+            table=args.table, dry_run=args.dry_run, limit=args.limit,
+        )
+
+    print(f"  {rep.counted}")
+    for cand in sorted(rep.collected, key=lambda c: c.start or ""):
+        mark = "(적지 않음)" if args.dry_run else ""
+        print(f"    + {cand.start} {cand.title}  [{cand.node_id}] {mark}")
+    if rep.nodes:
+        print(f"  ✓ {rc.SOURCE}: 노드 {rep.nodes:,}개 저장")
+    if args.show:
+        for cand in rep.dropped[: args.show]:
+            print(f"    - {cand.title} — {cand.reason}")
+
+    if rep.failures:
+        # 부재를 근거로 삼는 판정이라, 못 물어본 것을 '아닌 것'으로 세면 안 된다.
+        print(f"\n  ⚠ Wikidata 조회 실패 {len(rep.failures)}건 —"
+              f" 그 후보는 판정하지 않고 보류했습니다", file=sys.stderr)
+    if rep.held:
+        print(f"\n  판정이 안 서는 후보 {len(rep.held)}건 — 표에 적어 주세요"
+              f" ({args.table}):")
+        for cand in rep.held:
+            print(f"    {cand.title}   ({cand.reason})")
+        print("\n    수집<TAB>문서명<TAB>날짜<TAB>근거"
+              "   /   제외<TAB>문서명<TAB><TAB>근거")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """그래프 탐색 화면을 띄운다."""
     from . import server
@@ -2925,6 +2974,19 @@ def main(argv: list[str] | None = None) -> int:
     p_rl.add_argument("--list-remaining", action="store_true",
                       help="아직 영문인 노드를 전부 나열 (표에 더 적을 때)")
     p_rl.set_defaults(func=cmd_relabel)
+
+    p_rc = sub.add_parser(
+        "recent", help="지금 일어나는 일을 걷는다 (해마다 자라는 위키백과 분류에서)")
+    p_rc.add_argument("--years", type=int, nargs="+",
+                      help="걸을 해 (기본: 그래프의 마지막 사건 해부터 올해까지)")
+    p_rc.add_argument("--since", help="이 해부터 (예: 2025)")
+    p_rc.add_argument("--table", type=Path, default=DEFAULT_RECENT,
+                      help=f"판정 표 `판정<TAB>문서명<TAB>날짜<TAB>근거` (기본 {DEFAULT_RECENT.name})")
+    p_rc.add_argument("--dry-run", action="store_true", help="적지 않고 판정만 출력")
+    p_rc.add_argument("--limit", type=int, help="후보를 이만큼만 (시험용)")
+    p_rc.add_argument("--show", type=int, default=0, help="제외한 후보도 이만큼 출력")
+    p_rc.add_argument("--interval", type=float, default=0.5)
+    p_rc.set_defaults(func=cmd_recent)
 
     p_sv = sub.add_parser("serve", help="그래프 탐색 화면 (브라우저)")
     p_sv.add_argument("--era", default="korea",
