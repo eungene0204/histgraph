@@ -14,6 +14,8 @@ import {
   linkPeople, kinIn, markYs,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY,
 } from '../src/lib/life.js';
+import { searchNodes } from '../src/lib/life.js';
+import { isTyping } from '../src/lib/keys.js';
 import { TYPE_COLOR, GraphView } from '../src/lib/graph-view.js';
 
 let pass = 0;
@@ -739,6 +741,51 @@ console.log('\n개인 역사 — 오른쪽 상세는 접힌다');
   ok('되찾은 폭을 가운데가 쓴다', /\.life-detail\.is-folded[^}]*margin-right: calc\(-1 \* var\(--fold-w\)\)/.test(css));
   ok('손잡이 글자가 한국어다', /aria-label="상세 펼치기"/.test(view) && /<span>상세<\/span>/.test(view));
 }
+
+console.log('\n개인 역사 — 검색');
+{
+  // 2026-09-09 사용자: "내 역사 페이지에 노드를 검색 할수 있는 기능넣어줘.
+  // 검색창은 오른쪽 상단에 만들고 숏컷으로 '/' 을 누르면".
+  const life = { nodes: [
+    { id: 'e1', type: 'PersonalEvent', name: '대학 입학', description: '서울에서 공부를 시작했다', year: 1998 },
+    { id: 'e2', type: 'PersonalEvent', name: '첫 출근', description: '대학 동기가 소개한 회사', year: 2004 },
+    { id: 'p1', type: 'FamilyMember', name: '대학 친구 민수', year: null },
+    { id: 'l1', type: 'Residence', name: '봉천동', location: '서울', year: 1998 },
+  ] };
+  const names = (rows) => rows.map((r) => r.id).join(',');
+  ok('이름에 걸린 것이 설명에 걸린 것보다 먼저다',
+    names(searchNodes(life, '대학')) === 'e1,p1,e2',
+    names(searchNodes(life, '대학')));
+  ok('이름이 그대로 같으면 맨 위다', searchNodes(life, '첫 출근')[0].id === 'e2');
+  ok('장소·종류로도 찾는다', names(searchNodes(life, '서울')) === 'l1,e1');
+  // 위의 '대학' 이 같은 자리(이름 머리) 둘을 냈다 — 1998년 입학이 해 없는 민수보다 위다.
+  ok('해로는 찾지 않는다 — 그건 연표가 하는 일이다', names(searchNodes(life, '1998')) === '');
+  ok('빈 말은 아무것도 안 찾는다', searchNodes(life, '   ').length === 0);
+  ok('없는 말은 없다고 한다', searchNodes(life, '없는낱말').length === 0);
+  ok('줄에 색 견본과 한국어 종류가 붙는다', (() => {
+    const r = searchNodes(life, '봉천동')[0];
+    return r.type === 'place' && r.group === 'thing' && r.kind_label === '거주지';
+  })());
+  ok('세는 수를 넘기지 않는다', searchNodes(life, '대학', 2).length === 2);
+
+  const box = readFileSync(here('../src/components/LifeSearch.jsx'), 'utf8');
+  const view = readFileSync(here('../src/components/LifeView.jsx'), 'utf8');
+  const css = readFileSync(here('../style.css'), 'utf8');
+  ok('검색창이 머리 줄 오른쪽에 선다',
+    /<div className="top-right">[\s\S]{0,240}<LifeSearch/.test(view) && /\.life-search[^}]*grid-column: auto/.test(css),
+    '오른쪽 상단이 아니다');
+  ok('목록이 오른쪽 가장자리에 맞춰 떨어진다', /\.life-search \.results[^}]*right: 0/.test(css));
+  ok("'/' 가 검색창으로 데려간다", /ev\.key !== '\/'/.test(box) && /inputRef\.current\?\.focus\(\)/.test(box));
+  ok("글 치는 중의 '/' 는 글자다", /isTyping\(document\.activeElement\)/.test(box), '이야기 상자에서 커서를 뺏는다');
+  ok('입력기가 조립 중인 키는 넘긴다', /imeKey\(ev\)/.test(box));
+  ok('고른 노드는 연표·그래프·상세가 함께 따라간다', /onPick=\{pick\}/.test(view));
+  ok('노드가 없으면 검색창도 없다', /\{life && <LifeSearch/.test(view));
+  ok('창의 글자가 한국어다', !/[A-Za-z]/.test((box.match(/placeholder="([^"]*)"/) || [,''])[1]));
+}
+ok("글 치는 중을 가른다 (isTyping)",
+  isTyping({ tagName: 'TEXTAREA' }) && isTyping({ tagName: 'INPUT' })
+  && isTyping({ tagName: 'DIV', isContentEditable: true })
+  && !isTyping({ tagName: 'DIV' }) && !isTyping(null));
 
 console.log('\n개인 역사 — 배포에도 싣는다');
 {

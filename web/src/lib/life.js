@@ -585,6 +585,46 @@ export function graphPayload(life, center = null) {
   return { center: center && nodes.some((n) => n.id === center) ? center : (life.subject?.id || nodes[0]?.id), nodes, edges };
 }
 
+// --- 검색 --------------------------------------------------------------
+//
+// **서버에 묻지 않는다.** 역사 그래프의 검색(/api/search)과 갈리는 자리다 —
+// 개인 그래프는 수십 노드라 브라우저가 이미 통째로 들고 있고, 무엇보다
+// 내 이야기를 찾자고 그 낱말을 밖으로 내보낼 이유가 없다.
+//
+// 재는 차례는 **이름이 언제나 먼저다**. 설명은 길어서 아무 낱말이나 걸리므로,
+// 설명에 걸린 줄이 이름에 걸린 줄 위에 서면 찾던 것을 못 찾는다. 같은 자리에
+// 선 것끼리는 이른 해가 위다 (연표와 같은 차례).
+const SEARCH_RANK = { name: 0, exact: 0, head: 1, part: 2, side: 3, desc: 4 };
+
+export function searchNodes(life, term, limit = 12) {
+  const q = String(term || '').trim().toLowerCase();
+  if (!q || !life?.nodes) return [];
+  const rows = [];
+  for (const n of life.nodes) {
+    const name = String(n.name || '').toLowerCase();
+    const kindKo = NODE_TYPE_KO[n.type] || '';
+    const side = `${n.location || ''} ${kindKo}`.toLowerCase();
+    const desc = String(n.description || '').toLowerCase();
+    let rank;
+    if (name === q) rank = SEARCH_RANK.exact;
+    else if (name.startsWith(q)) rank = SEARCH_RANK.head;
+    else if (name.includes(q)) rank = SEARCH_RANK.part;
+    else if (side.includes(q)) rank = SEARCH_RANK.side;
+    else if (desc.includes(q)) rank = SEARCH_RANK.desc;
+    else continue;
+    const type = GRAPH_TYPE[n.type] || 'event';
+    rows.push({
+      id: n.id, name: n.name, type, group: GRAPH_GROUP[type],
+      kind_label: kindKo, year: n.year ?? null, rank,
+    });
+  }
+  rows.sort((a, b) => a.rank - b.rank
+    || (a.year == null) - (b.year == null)
+    || (a.year || 0) - (b.year || 0)
+    || a.name.localeCompare(b.name, 'ko'));
+  return rows.slice(0, limit);
+}
+
 // 설정 상자(SidePanel)가 읽는 메타 — 범례와 관계 종류 필터. 역사 그래프는
 // 서버(/api/meta)가 주는 것을 개인 그래프는 자료에서 센다.
 export function graphMeta(life) {

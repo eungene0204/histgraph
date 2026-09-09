@@ -935,6 +935,16 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 .life-top .brand .era { text-decoration: none; }
 .life-here { color: var(--text-normal); background: var(--background-modifier-hover); cursor: default; }
 .life-tools { display: flex; align-items: center; gap: 6px; grid-column: 2; }
+/* 내 역사 검색 — 머리 줄 오른쪽 끝(.top-right)에 든다. 한국사 장은 검색이
+   가운데 칸을 통째로 쓰지만(640px) 여기 가운데는 '내 역사 입력하기'가 쓰고
+   있어서, 칸 하나를 다투지 않고 오른쪽으로 왔다. 목록은 오른쪽 가장자리에
+   맞춰 떨어진다 — 왼쪽에 맞추면 화면 밖으로 나간다. */
+.life-search { grid-column: auto; width: 232px; }
+.life-search input { height: 32px; padding: 0 11px; font-size: var(--font-ui-small); }
+.life-search .results { left: auto; right: 0; width: 320px; max-height: 52vh; }
+/* 이름은 길면 줄이고, 타입·해는 오른쪽에서 자리를 지킨다 */
+.life-search-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.life-search .meta { flex: none; }
 /* 계정에 저장하고 나서 무슨 일이 있었는지 — 머리 아래 가운데에 잠깐 떠 있다
    사라지는 팝업. 자리를 차지하지 않아 단추 줄이 흔들리지 않는다. */
 .life-toast {

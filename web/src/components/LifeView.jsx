@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { LifeSearch } from './LifeSearch.jsx';
 import { auth, csrf } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
@@ -686,7 +687,13 @@ export default function LifeView() {
           )}
           {/* 계정에 두는 단추는 없다 — 저절로 올라간다 (위 keepInAccount 머리글). */}
         </div>
-        <ThemeToggle onChange={() => boardRef.current?.layout()} />
+        {/* 머리 줄 오른쪽 끝 — 검색이 안쪽, 화면 밝기가 바깥쪽이다. 한국사
+            장은 검색이 가운데지만 여기 가운데 칸은 '내 역사 입력하기'가 쓴다.
+            노드가 있을 때만 선다 — 빈 화면에서는 찾을 것이 없다. */}
+        <div className="top-right">
+          {life && <LifeSearch nodes={life.nodes} onPick={pick} />}
+          <ThemeToggle onChange={() => boardRef.current?.layout()} />
+        </div>
       </header>
       {kept && <div className="life-toast" role="status" aria-live="polite">{kept}</div>}
 

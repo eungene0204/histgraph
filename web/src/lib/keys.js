@@ -17,3 +17,15 @@ export function moveCursor(cursor, key, count) {
   if (key === 'ArrowUp') return cursor < 0 ? count - 1 : (cursor + count - 1) % count;
   return cursor;
 }
+
+// '/' 로 검색창에 가는 단축키가 **글을 치는 중에는 글자여야 한다.** 내 역사
+// 장에는 이야기를 적는 큰 상자와 편집 폼이 있어서, 여기를 안 보면 '/' 를 칠
+// 때마다 커서가 검색창으로 튄다. 태그 이름만 보지 않고 contenteditable 도
+// 함께 본다 (요소가 없으면 '치고 있지 않다').
+export function isTyping(el) {
+  if (!el) return false;
+  const tag = (el.tagName || '').toLowerCase();
+  if (tag === 'textarea' || tag === 'select') return true;
+  if (tag === 'input') return true;
+  return Boolean(el.isContentEditable);
+}
