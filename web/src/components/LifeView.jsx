@@ -1058,7 +1058,11 @@ function EventDetail({ life, id, onPick, onDrop, onEdit }) {
             이어 사용자가 "'전환점' 점수 그래프도 삭제해". 전환점인지 아닌지는
             서 있는 것으로 말하고, 왜인지는 그 옆의 글이 말한다. */}
         {turning && <><dt>전환점</dt><dd>{turning.reason}</dd></>}
-        {node.emotional_impact && <><dt>감정</dt><dd>{node.emotional_impact}</dd></>}
+        {/* 감정(emotional_impact)은 그리지 않는다 (2026-09-09 사용자: "노드의 '감정'
+            메뉴도 삭제해 필요 없어"). 모델이 사건마다 '불안'·'설렘' 한 낱말을
+            붙여 온 것이라 이야기가 그렇게 말했다는 근거가 없고, 한 낱말로는
+            읽는 사람에게 아무것도 더 말하지 않는다. 수집은 그대로 두고 화면에서만
+            뺀다 — 중요도·영향 순위·전환점 점수를 내린 자리와 같다. */}
         {withWhom.length > 0 && <><dt>함께</dt><dd>{withWhom.map((w, i) => (
           <span key={`${w.id || ''}${w.name}`}>{i ? ', ' : ''}{w.id
             ? <button type="button" className="life-link" onClick={() => onPick(w.id)}>{w.name}</button>
@@ -1135,7 +1139,8 @@ function EventDetail({ life, id, onPick, onDrop, onEdit }) {
 // '편집'버튼을 만들어줘 … 그 노드에 표시된 모든 정보를 사용자가 직접 편집 할
 // 수있게 해줘(연도, 관계 등등). 완료 버튼 누르면 그래프와 연표에 바로 반영").
 // 읽던 자리에서 고치므로 칸의 차례는 상세의 차례와 같다 — 이름·날짜·설명,
-// 연표, 전환점, 감정, 함께, 관계, 그 무렵의 한국사, 만약 없었다면.
+// 연표, 전환점, 함께, 관계, 그 무렵의 한국사, 만약 없었다면. 화면이 안 그리는
+// 것은 칸으로도 두지 않는다 — 감정·1~10 점수가 그렇다.
 //
 // **고르개는 놓을 수 있는 것만 세운다** (life.edgeChoices). 아무 관계나 고르게
 // 두면 온톨로지에 어긋난 선을 다듬기가 버려(tidyEdges) 완료를 눌러도 화면에
@@ -1160,7 +1165,6 @@ function EventEdit({ life, id, onDone, onCancel }) {
       end_date: n.end_date || '',
       location: n.location || '',
       description: n.description || '',
-      emotional_impact: n.emotional_impact || '',
       date_text: item?.date_text || '',
       life_stage: item?.life_stage || '',
       turning: turn ? { score: turn.turning_point_score ?? 5, reason: turn.reason || '' } : null,
@@ -1201,7 +1205,7 @@ function EventEdit({ life, id, onDone, onCancel }) {
     ev.preventDefault();
     onDone({
       type: f.type, name: f.name, start_date: f.start_date, end_date: f.end_date,
-      location: f.location, description: f.description, emotional_impact: f.emotional_impact,
+      location: f.location, description: f.description,
       // 날짜가 셋 다 비면 연표 항목을 내린다 — 해를 모르는 항목은 아무 자리도 못 잡는다.
       timeline: (f.date_text.trim() || f.life_stage || f.start_date.trim())
         ? { date_text: f.date_text, life_stage: f.life_stage || null } : null,
@@ -1245,9 +1249,6 @@ function EventEdit({ life, id, onDone, onCancel }) {
       </label>
       <label className="life-field"><span>설명</span>
         <textarea value={f.description} onChange={(e) => set({ description: e.target.value })} rows={4} />
-      </label>
-      <label className="life-field"><span>감정</span>
-        <input value={f.emotional_impact} onChange={(e) => set({ emotional_impact: e.target.value })} />
       </label>
 
       {/* 연표 — **세울지 말지를 묻는 칸은 두지 않는다.** 연표는 해를 아는 사건을

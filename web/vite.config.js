@@ -30,6 +30,12 @@ export default {
         target: 'http://127.0.0.1:8100',
         changeOrigin: false,
       },
+      // 관리실은 서버가 통째로 그려 준다 (`histgraph.console`). 여기 목록에
+      // 없으면 개발 서버가 자기 index.html 을 내주어 그래프 화면이 뜬다.
+      '/console': {
+        target: 'http://127.0.0.1:8100',
+        changeOrigin: false,
+      },
     },
   },
   build: {

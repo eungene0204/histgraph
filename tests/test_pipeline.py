@@ -6879,6 +6879,39 @@ try:
     check("남의 쿠키로는 아무도 아니다",
           _js.loads(_auth.route(req("GET", "/api/me", cookies="hg_session=지어낸값")).body)["user"] is None)
 
+    # 3-2) 관리실(`/console`) — **문은 서버에서 잠근다.** 화면에서 단추를
+    # 감추는 것은 잠금이 아니다: 주소를 직접 치면 열린다.
+    anon = _auth.route(req("GET", "/console"))
+    check("로그인하지 않으면 관리실이 열리지 않는다",
+          anon.status == 401 and "Boss@Example.com" not in anon.body.decode())
+    check("관리실 문 앞에서 로그인하면 다시 관리실로 돌아온다",
+          "next=/console" in anon.body.decode())
+
+    _os.environ["HISTGRAPH_ADMIN_EMAILS"] = "someone-else@example.com"
+    outsider = _auth.route(req("GET", "/console", cookies=jar))
+    _os.environ["HISTGRAPH_ADMIN_EMAILS"] = "boss@example.com"
+    check("관리자가 아니면 가입자를 볼 수 없다 (몇 명인지도)",
+          outsider.status == 403 and "Boss@Example.com" not in outsider.body.decode())
+
+    room = _auth.route(req("GET", "/console", cookies=jar))
+    _room = room.body.decode()
+    check("관리자에게는 가입자 목록이 보인다",
+          room.status == 200 and "Boss@Example.com" in _room and "홍길동" in _room)
+    check("관리실은 어디에도 재우지 않는다",
+          ("Cache-Control", "private, no-store") in room.headers
+          and ("Vary", "Cookie") in room.headers)
+    check("관리실은 검색에 담기지 않는다", 'content="noindex,nofollow"' in _room)
+    # §1 — 사람이 읽는 자리에 한글 아닌 글을 세우지 않는다. **가입자의
+    # 이메일과 이름만이 예외다**: 우리가 쓴 글이 아니라 그 사람의 것이다.
+    _seen = re.sub(r"<[^>]+>", " ", _room[_room.find("<main"):_room.find("</main>")])
+    for _mine in ("Boss@Example.com", "홍길동"):
+        _seen = _seen.replace(_mine, "")
+    check("관리실 글자에 영어가 없다 (가입자의 이메일·이름 말고는)",
+          not re.search(r"[A-Za-z]", _seen), _seen.strip()[:120])
+    # 배포에서는 rewrite 가 `/api/console` 로 넘긴다 (vercel.json) — 같은 장이다.
+    check("배포 경로(/api/console)도 같은 장을 낸다",
+          _auth.route(req("GET", "/api/console", cookies=jar)).body == room.body)
+
     # 4) 즐겨찾기 — 담고, 읽고, 뺀다
     _auth.route(req("POST", "/api/my/bookmarks", cookies=jar, extra=csrf_head,
                     body=b'{"id":"wd:Q1","label":"\xec\x84\xb8\xec\xa2\x85","note":"\xeb\x82\x98\xec\xa4\x91\xec\x97\x90"}'))

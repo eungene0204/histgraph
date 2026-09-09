@@ -28,6 +28,10 @@
       "destination": "/api?__p=n/:id*"
     },
     {
+      "source": "/console",
+      "destination": "/api?__p=console"
+    },
+    {
       "source": "/sitemap.xml",
       "destination": "/api?__p=sitemap.xml"
     }

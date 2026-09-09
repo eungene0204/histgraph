@@ -35,7 +35,10 @@ sys.path.insert(0, str(ROOT / "src"))
 # 파일은 `vercel.json` 의 `includeFiles` 로 이름을 대야 번들에 실린다 —
 # 안 대면 배포에서만 `FileNotFoundError` 로 떨어진다 (2026-09-09 실측:
 # `src/histgraph/life_prompt.md`, 개인 역사의 지시문).
-from histgraph import accounts, auth, pages  # noqa: E402
+# `console` 은 auth 가 요청 안에서 늦게 부르지만 (되돌이 임포트를 피한다),
+# 번들은 **임포트를 따라가며** 담는다 — 여기서 한 번 이름을 대 두지 않으면
+# 배포에서만 `/console` 이 ImportError 로 떨어진다.
+from histgraph import accounts, auth, console, pages  # noqa: E402,F401
 from histgraph.server import (  # noqa: E402
     LIFE_MAX_BODY, LIFE_POSTS, GraphAPI, dispatch, life_post,
 )

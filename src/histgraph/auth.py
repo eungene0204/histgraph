@@ -813,6 +813,21 @@ def bookmarks(req: Request) -> Response:
 # --- 표 --------------------------------------------------------------------
 # (경로, 허용하는 메서드) → 함수. **여기 한 표뿐이다** — 로컬 서버와
 # 서버리스 함수가 같은 것을 읽는다 (`server.dispatch` 머리글과 같은 이유).
+def _console(req: Request) -> Response:
+    """`/console` — 관리실. 몸통은 `console.py` 에 있다.
+
+    **표에 이름이 둘인 이유**는 배포의 rewrite 다 (`console` 머리말).
+    여기서 늦게 부르는 것은 되돌이 임포트를 막기 위해서다 — 관리실은
+    이 파일의 `Response`·`current_user` 를 쓴다."""
+    from . import console
+    return console.page(req)
+
+
+def _console_paths() -> tuple[str, ...]:
+    from . import console
+    return console.PATHS
+
+
 ROUTES: dict[str, tuple[frozenset[str], object]] = {
     "/api/me":             (frozenset({"GET", "DELETE"}), None),
     "/api/auth/google":    (frozenset({"GET"}), start),
@@ -820,6 +835,8 @@ ROUTES: dict[str, tuple[frozenset[str], object]] = {
     "/api/auth/logout":    (frozenset({"POST"}), logout),
     "/api/my/life":        (frozenset({"GET", "PUT", "DELETE"}), life_doc),
     "/api/my/bookmarks":   (frozenset({"GET", "POST", "DELETE"}), bookmarks),
+    "/console":            (frozenset({"GET"}), _console),
+    "/api/console":        (frozenset({"GET"}), _console),
 }
 
 
@@ -838,6 +855,10 @@ def route(req: Request) -> Response | None:
             return Response.json({"enabled": False, "user": None})
         # 여기는 브라우저가 주소로 곧장 올 수 있는 자리다. JSON 을 뱉으면
         # 날것이 화면에 뜬다 — 사람이 읽는 쪽지로 답한다.
+        if req.path in _console_paths():
+            return Response.page(
+                "관리실을 열 수 없습니다",
+                "로그인 설정이 아직 갖춰지지 않아 가입자를 볼 수 없습니다.", 503)
         if req.path == "/api/auth/google":
             return Response.page("로그인은 아직 준비 중입니다",
                                  "구글 계정으로 들어오는 길을 여는 중입니다. "
