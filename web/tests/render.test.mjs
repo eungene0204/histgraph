@@ -401,6 +401,22 @@ let detailHtml = '';
      /!mine\?\.user.*preventDefault/s.test(appSrc) && appSrc.includes('setAskLogin(true)'));
   ok('주소로 곧장 들어와도 같은 문을 지난다',
      /if \(account\.enabled && !account\.user\)/.test(lifeSrc) && lifeSrc.includes('dismissible={false}'));
+
+  // 2026-09-09 사용자: "내 역사가 비었을때 사용자의 주위를 끌기 위해 '내 역사'
+  // 버튼이 빛나는 효과를 줘." 빈 안내와 같은 관문을 건다 — `null`(아직 안
+  // 읽었다)에는 안 빛난다. 적어 둔 사람의 머리 줄이 한 번 번쩍이면 그것이 더
+  // 눈에 띈다.
+  const eraCss = readFileSync(join(WEB, 'style.css'), 'utf-8');
+  ok('비었다고 확인된 뒤에만 빛난다',
+     /const \[lifeEmpty, setLifeEmpty\] = useState\(null\)/.test(appSrc));
+  ok("빛나는 반은 '내 역사'에만 붙는다",
+     /lifeEmpty \? ' beckon' : ''/.test(appSrc) && /\.era\.beckon\s*\{/.test(eraCss));
+  // 자리를 흔들지 않는다 — 커지거나 움직이면 옆의 시대 단추가 밀린다.
+  const frames = eraCss.match(/@keyframes era-beckon\s*\{[^]*?\n\}/)?.[0] || '';
+  ok('빛만 오가고 자리는 그대로다',
+     /box-shadow/.test(frames) && !/(transform|width|padding|font-size|margin)/.test(frames));
+  ok('움직임을 줄여 달라고 한 사람에게는 깜박이지 않는다',
+     /prefers-reduced-motion[^]*?\.era\.beckon\s*\{[^}]*animation:\s*none/.test(eraCss));
 }
 
 // --- 내가 적은 이야기 -----------------------------------------------------

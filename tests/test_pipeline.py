@@ -6961,6 +6961,16 @@ try:
                     body='{"doc":{"nodes":[{"id":"me","name":"나"}]}}'.encode()))
     life = _js.loads(_auth.route(req("GET", "/api/my/life", cookies=jar)).body)
     check("내 역사를 계정에 담고 되읽는다", life["doc"]["nodes"][0]["name"] == "나", str(life)[:120])
+    # 적어 둔 것이 있는지는 **`/api/me` 가 한 줄로 답한다** — 머리 줄의 '내 역사'
+    # 단추가 비었을 때만 빛나는데(web/src/App.jsx), 그것 하나를 알자고 문서를
+    # 통째로 내려받게 하지 않는다 (2026-09-09).
+    check("담아 둔 사람에게는 /api/me 가 그렇다고 답한다",
+          _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)["life"] is True)
+    _auth.route(req("DELETE", "/api/my/life", cookies=jar, extra=csrf_head))
+    check("지우면 비었다고 답한다",
+          _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)["life"] is False)
+    _auth.route(req("PUT", "/api/my/life", cookies=jar, extra=csrf_head,
+                    body='{"doc":{"nodes":[{"id":"me","name":"나"}]}}'.encode()))
 
     # 5-2) **내 역사의 문 (배포 함수)** — 이야기를 모델에게 보내는 길은
     # 로그인한 사람의 것만 받는다. 이 관문이 없으면 남의 사이트가 이 사람의

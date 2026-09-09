@@ -712,6 +712,12 @@ def me(req: Request) -> Response:
             "가입일": str(user.get("created_at") or "")[:10],
             "관리자": user["admin"],
         },
+        # 내 역사를 적어 두었는가. 그래프 화면의 '내 역사' 단추가 **비었을 때만**
+        # 빛나는데(App.jsx), 그 하나를 알자고 문서를 통째로(512KB 까지) 내려받게
+        # 하지 않으려고 여기서 한 줄로 답한다. 줄이 있으면 노드가 있다 —
+        # 문서는 노드가 있어야 저장되고(LifeView.adopt), 다 지우면 줄째 지워진다.
+        "life": db().one("select 1 as one from life_docs where user_id = $1",
+                         [user["id"]]) is not None,
     })
 
 

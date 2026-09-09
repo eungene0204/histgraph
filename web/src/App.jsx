@@ -21,6 +21,8 @@ export const CAUSAL_DIAGRAM = false;
 // 개인 역사 장이 이 빌드에 있는가 — vite.config.js. 서버 렌더 테스트(esbuild)
 // 에는 import.meta.env 가 없으므로 없는 것으로 친다.
 const LIFE_PAGE = Boolean(import.meta.env?.VITE_LIFE);
+// 로그인 없이 적은 내 역사가 남는 자리 (LifeView 의 STORE_KEY 와 같은 열쇠).
+const LIFE_STORE_KEY = 'life-json';
 
 function hashId() {
   return location.hash ? decodeURIComponent(location.hash.slice(1)) : '';
@@ -54,6 +56,8 @@ export default function App() {
   // (`null` = 아직 안 물어봤다. 그동안 눌러도 상자가 뜨는 쪽이 안전하다.)
   const [mine, setMine] = useState(null);
   const [askLogin, setAskLogin] = useState(false);
+  // 내 역사가 비었는가. `null` = 아직 안 읽었다 — 그동안은 아무 표시도 안 한다.
+  const [lifeEmpty, setLifeEmpty] = useState(null);
 
   const viewRef = useRef(null);
   const railRef = useRef(null);
@@ -258,8 +262,31 @@ export default function App() {
     });
   }, [load, showTimeline]);
 
-  // 내 역사 장이 있는 빌드에서만 묻는다 (배포에는 그 장이 없다).
-  useEffect(() => { if (LIFE_PAGE) auth.me().then(setMine); }, []);
+  // 내 역사 장이 있는 빌드에서만 묻는다 (배포에는 그 장이 없다). 같은 걸음에
+  // **적어 둔 것이 있는지**도 본다 — 없으면 아래 단추가 숨을 쉰다.
+  //
+  // 비었는지 재는 자리가 둘이다 (LifeView 의 부팅과 같은 차례): 계정에 올려 둔
+  // 문서가 먼저이고, 그것이 없으면 로그인 없이 적어 브라우저에만 남은 것이다.
+  // 계정 쪽은 **서버가 한 줄로 답한다** (`auth.me` 의 `life`) — 빛낼지 말지를
+  // 알자고 남의 역사를 통째로 내려받게 하지 않는다.
+  //
+  // 다 읽기 전에는 `null` 이라 아무 표시도 안 한다 — '아직 모른다'를 '없다'로
+  // 읽으면 적어 둔 사람의 머리 줄이 한 번 번쩍인다 (2026-09-09 사용자: 빈
+  // 안내는 없다고 확인된 뒤에 세운다).
+  useEffect(() => {
+    if (!LIFE_PAGE) return undefined;
+    let alive = true;
+    (async () => {
+      const me = await auth.me();
+      if (!alive) return;
+      setMine(me);
+      if (me.life) { setLifeEmpty(false); return; }
+      let kept = null;
+      try { kept = JSON.parse(localStorage.getItem(LIFE_STORE_KEY) || 'null'); } catch { /* 비었다 */ }
+      if (alive) setLifeEmpty(!kept?.nodes?.length);
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const era = meta?.era_label || '전체';
   const prev = trail[trail.length - 1] || null;
@@ -283,7 +310,9 @@ export default function App() {
               하나만 막는다. 로그인 전이면 옮겨가지 않고 상자를 세운다 — 빈
               화면을 보여 준 뒤에 묻는 것보다 낫다. */}
           {LIFE_PAGE && (
-            <a className="era" href="/life.html" title="내 삶을 세상의 역사와 나란히 봅니다"
+            <a className={`era${lifeEmpty ? ' beckon' : ''}`} href="/life.html"
+               title={lifeEmpty ? '아직 적은 내 역사가 없습니다 — 눌러서 시작합니다'
+                                : '내 삶을 세상의 역사와 나란히 봅니다'}
                onClick={(e) => { if (!mine?.user) { e.preventDefault(); setAskLogin(true); } }}>
               내 역사
             </a>

@@ -217,6 +217,21 @@ button, input, select { font-family: inherit; }
 }
 .era:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
 a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼 보인다 */
+/* 아직 아무것도 안 적은 사람에게만 '내 역사'가 숨을 쉰다 (2026-09-09 사용자:
+   "내 역사가 비었을때 사용자의 주위를 끌기 위해 … 빛나는 효과를 줘").
+   **자리는 그대로 두고 빛만 오간다** — 커지거나 움직이면 옆의 시대 단추가
+   밀려 머리 줄이 흔들린다. 색은 이미 있는 강조색 하나뿐이라 팔레트가 늘지
+   않는다. 채운 사람의 화면에는 이 반이 아예 붙지 않는다 (App.jsx lifeEmpty). */
+.era.beckon {
+  color: var(--text-accent);
+  background: hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .12);
+  animation: era-beckon 2.4s ease-in-out infinite;
+}
+.era.beckon:hover { color: var(--text-accent-hover); }
+@keyframes era-beckon {
+  0%, 100% { box-shadow: 0 0 0 0 hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .5); }
+  50%      { box-shadow: 0 0 9px 2px hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .5); }
+}
 
 .search { position: relative; grid-column: 2; width: 100%; }
 /* 머리 줄 오른쪽 끝 — 화면 밝기와 계정이 나란히 선다. */
@@ -1199,6 +1214,11 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 /* 움직임을 줄여 달라고 한 사람에게는 미끄러지지 않고 곧장 접힌다. */
 @media (prefers-reduced-motion: reduce) {
   .life-detail { transition: none; }
+  /* 깜박이지 않는다. 그래도 '여기를 보라'는 것은 남아야 하므로 테두리로 세운다. */
+  .era.beckon {
+    animation: none;
+    box-shadow: 0 0 0 1px hsla(var(--accent-h) var(--accent-s) var(--accent-l) / .5);
+  }
   /* 돌리지 않는다. 그래도 '돌고 있다'는 것은 보여야 하므로 밝기만 오간다. */
   .life-spinner { animation: life-breathe 1.6s ease-in-out infinite; }
 }
