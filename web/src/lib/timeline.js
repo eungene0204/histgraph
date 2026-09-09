@@ -363,9 +363,19 @@ export class TimelineRail {
   }
 
   // 해 -> 픽셀. 재위 띠도 사건 점도 이걸 쓴다 (buildScale 주석 참고).
+  //
+  // **소수를 받는다.** 자의 눈금은 한 해지만 재위 띠는 날짜를 안다 —
+  // 1963.96 은 박정희가 취임한 1963-12-17 이다. 두 눈금 사이를 그만큼
+  // 나눠 앉히지 않으면 12월에 취임한 사람의 이름이 그 해 1월에 선다
+  // (2026-09-09 지적). 정수를 주면 예전과 똑같이 그 해의 첫날이다.
   yOf(year) {
     const { from, to, pos } = this.axis;
-    return pos[clamp(Math.round(year), from, to) - from];
+    const y = clamp(year, from, to);
+    const i = Math.floor(y);
+    const a = pos[i - from];
+    const f = y - i;
+    if (!f || i >= to) return a;
+    return a + (pos[i + 1 - from] - a) * f;
   }
 
   // 픽셀 -> 해. 눈금이 고르지 않으니 나누기가 아니라 표를 되짚는다.
@@ -570,9 +580,13 @@ export function reignBand(reigns, at, self = {}) {
   const now = (r) => self.id === r.id
     || (self.year != null && self.year >= r.start && self.year <= r.end);
   for (const [i, r] of reigns.entries()) {
-    const y1 = at(r.start);
-    const y2 = Math.max(at(r.end), y1 + 2);
-    const dy = r.death != null ? at(r.death) : null;
+    // **띠는 취임한 날에서 시작한다.** 해만 쓰면 12월에 취임한 대통령의
+    // 막대와 이름이 그 해 1월에 선다 (박정희 1963-12-17 · 최규하
+    // 1979-12-21 · 전두환 1980-09-01). 서버가 해 안의 자리를 소수로 준다
+    // (`server._year_at`); 없는 것은 해의 첫날이다.
+    const y1 = at(r.at_start ?? r.start);
+    const y2 = Math.max(at(r.at_end ?? r.end), y1 + 2);
+    const dy = r.death != null ? at(r.at_death ?? r.death) : null;
     const tip = `${r.label} · ${r.position} ${seatWord(r)} ${yr(r.start)}~`
       + (r.ongoing ? '' : yr(r.end))
       + (r.death != null ? ` · ${yr(r.death)} 사망` : '');

@@ -1173,7 +1173,15 @@ export function lifeLayout({ life, context, bodyH = 700, today = new Date().getF
   const virtual = [];
   for (const [y, n] of count) for (let i = 0; i < n; i++) virtual.push({ year: y });
   const axis = buildScale(virtual, { from, to, base: (bodyH - PAD_TOP - PAD_BOTTOM) * ZOOM });
-  const at = (y) => axis.pos[clamp(Math.round(y), from, to) - from];
+  // 해 -> 픽셀. 소수를 받는다 — 재위 띠가 취임한 날에 앉으려면 두 눈금
+  // 사이를 나눠야 한다 (`TimelineRail.yOf` 와 같은 규칙).
+  const at = (y) => {
+    const v = clamp(y, from, to);
+    const i = Math.floor(v);
+    const a = axis.pos[i - from];
+    const f = v - i;
+    return (!f || i >= to) ? a : a + (axis.pos[i + 1 - from] - a) * f;
+  };
 
   const placeP = placeMarks(personal, axis).map(({ m, y }) => ({ m, ty: y }));
   const placeH = placeMarks(history, axis).map(({ m, y }) => ({ m, ty: y }));

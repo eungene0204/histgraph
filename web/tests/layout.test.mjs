@@ -6,7 +6,7 @@
 // NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
 // 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
 import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
 import { causalReach, causalLayout, GraphView, MUTUAL } from '../src/lib/graph-view.js';
 
 let pass = 0;
@@ -636,6 +636,54 @@ console.log('\n화살촉 (대칭 관계)');
     globalThis.cancelAnimationFrame = saved.caf;
     if (saved.win === undefined) delete globalThis.window; else globalThis.window = saved.win;
   }
+}
+
+// --- 재위 띠는 취임한 날에 앉는다 -------------------------------------------
+// "해당 대통령의 이름을 취임날에 맞춰서 위치 시켜 달라고" (2026-09-09).
+{
+  const from = 1960;
+  const to = 1990;
+  const marks = [];
+  for (let y = from; y <= to; y += 1) marks.push({ year: y, label: `${y}`, date: `${y}-01-01` });
+  const scale = buildScale(sortMarks(marks), { from, to, base: 4000 });
+  // TimelineRail.yOf 와 같은 규칙 — 두 눈금 사이를 소수만큼 나눠 앉힌다.
+  const at = (y) => {
+    const v = Math.min(Math.max(y, from), to);
+    const i = Math.floor(v);
+    const a = scale.pos[i - from];
+    const f = v - i;
+    return (!f || i >= to) ? a : a + (scale.pos[i + 1 - from] - a) * f;
+  };
+
+  ok('정수를 주면 예전처럼 그 해의 첫날이다', at(1963) === scale.pos[3]);
+  const twelfth = at(1963.96);
+  ok('12월은 그 해 칸의 끝에 앉는다',
+     twelfth > at(1963) && twelfth < at(1964)
+     && twelfth - at(1963) > (at(1964) - at(1963)) * 0.9,
+     `${twelfth.toFixed(1)} / ${at(1963).toFixed(1)}~${at(1964).toFixed(1)}`);
+
+  // 박정희의 취임은 1963-12-17 이다. 해로만 앉히면 이름이 1963년 1월에 선다.
+  const band = reignBand([{
+    id: 'wd:Q14356', label: '박정희', position: '대한민국 대통령', kind: 'president',
+    start: 1963, end: 1979, at_start: 1963.96, at_end: 1979.818,
+    ongoing: false, death: 1979, at_death: 1979.818, birth: 1917,
+  }], at, {});
+  const top = Number(/top:([\d.]+)px/.exec(band.items)[1]);
+  // 화면에 적히는 값은 소수 한 자리로 잘린다 (`toFixed(1)`).
+  ok('대통령의 이름이 취임한 날에 선다', Math.abs(top - at(1963.96)) < 0.06,
+     `${top.toFixed(1)} vs ${at(1963.96).toFixed(1)}`);
+  ok('이름이 취임한 해의 1월에 서지 않는다', top - at(1963) > 1,
+     `${(top - at(1963)).toFixed(1)}px`);
+  const barY = Number(/tl-reign-bar[^>]*?y="([\d.]+)"/.exec(band.svg)[1]);
+  ok('막대도 이름과 같은 날에서 시작한다', Math.abs(barY - top) < 0.06);
+
+  // 날짜를 모르는 띠는 예전 그대로 — 해의 첫날이다.
+  const plain = reignBand([{
+    id: 'x', label: '아무개', position: '자리', kind: 'monarch',
+    start: 1970, end: 1975, ongoing: false, death: null, birth: null,
+  }], at, {});
+  ok('해 안의 자리를 모르면 그 해의 첫날에 선다',
+     Math.abs(Number(/top:([\d.]+)px/.exec(plain.items)[1]) - at(1970)) < 0.06);
 }
 
 console.log('\n==============================================');

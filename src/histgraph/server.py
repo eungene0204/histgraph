@@ -178,6 +178,29 @@ def _year(value: str | None) -> int | None:
     return int(m.group(2)) * (-1 if m.group(1) else 1) if m else None
 
 
+def _year_at(value: str | None) -> float | None:
+    """'1963-12-17' -> 1963.96. 해 안의 자리까지 아는 연도.
+
+    연표의 세로 자는 해 단위라(`buildScale` 의 `pos`), 재위 띠를 해로만
+    주면 12월에 취임한 대통령의 이름이 그 해 1월에 선다 — 박정희의 띠가
+    1963년 1월부터 그어졌다 (2026-09-09 지적: "해당 대통령의 이름을 취임날에
+    맞춰서 위치 시켜 달라고"). 화면은 두 해 사이를 이 소수로 나눠 앉힌다.
+
+    달까지만 아는 날짜는 그 달의 첫날로 본다. 없는 정밀도를 지어내는 것보다
+    낫고, 1월 1일로 적힌 거짓 정밀도(`precision`)는 어차피 해의 시작이다."""
+    year = _year(value)
+    if year is None:
+        return None
+    m = re.match(r"^-?\d{1,4}-(\d{2})(?:-(\d{2}))?", (value or "").strip())
+    if not m:
+        return float(year)
+    month = min(max(int(m.group(1)), 1), 12)
+    day = min(max(int(m.group(2) or 1), 1), 31)
+    # 달의 길이를 따지지 않는다. 자의 눈금은 한 해이고 하루는 그 0.3% 라,
+    # 30.5일로 고르게 나눠도 화면에서 갈리지 않는다.
+    return year + ((month - 1) * 30.5 + (day - 1)) / 366.0
+
+
 def _span(row) -> tuple[int | None, int | None]:
     """노드가 스스로 말하는 연대. **인물의 생년=몰년은 없는 셈 친다.**
 
@@ -827,6 +850,10 @@ class GraphAPI:
             start = _year(r["r_start"])
             if start is None:
                 continue
+            # 해 안의 자리. 띠와 이름을 취임한 날에 앉히려면 해만으로는 모자란다.
+            at_start = _year_at(r["r_start"])
+            at_end = _year_at(r["r_end"])
+            at_death = _year_at(r["end_date"])
             # 재위 끝이 비어 있으면(재위 중 죽은 임금 일부) 몰년으로 닫는다.
             # 그것도 없고 살아 있으면 재임 중이다. 죽었는데 몰년도 없으면
             # 한 점으로 둔다 — 모르는 끝을 오늘로 늘리지 않는다.
@@ -836,11 +863,18 @@ class GraphAPI:
             if end is None:
                 if death is not None:
                     end = death if death >= start else start
+                    at_end = at_death if end == death else at_start
                 elif r["end_date"]:
                     end = start
+                    at_end = at_start
                 else:
                     end = max(this_year, start)
                     ongoing = True
+            # 몰년이 재위 끝과 같은 해면 소수 자리에서 앞설 수 있다 (고려
+            # 광종: 끝 07-09 · 몰 07-01). 막대 위에 동그라미가 뜨지 않게
+            # 막대 끝까지 민다 — 어느 쪽이 하루 이른지는 자료가 못 가른다.
+            if at_death is not None and at_end is not None and at_death < at_end:
+                at_death = at_end
             mine = bands.setdefault(r["id"], [])
             overlap = next(
                 (b for b in mine
@@ -849,7 +883,11 @@ class GraphAPI:
                 None,
             )
             if overlap is not None:
+                if start < overlap["start"]:
+                    overlap["at_start"] = at_start
                 overlap["start"] = min(overlap["start"], start)
+                if end > overlap["end"]:
+                    overlap["at_end"] = at_end
                 overlap["end"] = max(overlap["end"], end)
                 continue
             band = {
@@ -857,10 +895,14 @@ class GraphAPI:
                 "position": r["position"],
                 "kind": "president" if r["seat"] == "president" else "monarch",
                 "start": start, "end": end,
+                # 해 안의 자리 (없으면 화면이 해의 첫날로 앉힌다).
+                "at_start": at_start,
+                "at_end": at_end if at_end is not None and not ongoing else None,
                 "ongoing": ongoing,
                 # 몰년이 재위 끝보다 앞서면 둘 중 하나가 틀린 것이다.
                 # 화면이 거꾸로 된 꼬리를 그리지 않게 여기서 뗀다.
                 "death": death if death is not None and death >= end else None,
+                "at_death": at_death if death is not None and death >= end else None,
                 "birth": _year(r["start_date"]),
             }
             mine.append(band)
