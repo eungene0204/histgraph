@@ -4,7 +4,7 @@ import { auth, csrf } from '../lib/auth.js';
 import { LoginModal } from './LoginModal.jsx';
 import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
-import { LifeBoard, normalize, removeNode, editNode, edgeChoices, unlinkKey, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -1139,12 +1139,14 @@ function EventDetail({ life, id, onPick, onDrop, onEdit }) {
 // '편집'버튼을 만들어줘 … 그 노드에 표시된 모든 정보를 사용자가 직접 편집 할
 // 수있게 해줘(연도, 관계 등등). 완료 버튼 누르면 그래프와 연표에 바로 반영").
 // 읽던 자리에서 고치므로 칸의 차례는 상세의 차례와 같다 — 이름·날짜·설명,
-// 연표, 전환점, 함께, 관계, 그 무렵의 한국사, 만약 없었다면. 화면이 안 그리는
+// 연표, 전환점, 함께, 그 무렵의 한국사, 만약 없었다면. 화면이 안 그리는
 // 것은 칸으로도 두지 않는다 — 감정·1~10 점수가 그렇다.
 //
-// **고르개는 놓을 수 있는 것만 세운다** (life.edgeChoices). 아무 관계나 고르게
-// 두면 온톨로지에 어긋난 선을 다듬기가 버려(tidyEdges) 완료를 눌러도 화면에
-// 아무 일이 안 일어난 것처럼 보인다 — 고르는 자리에서 막는 것이 낫다.
+// **관계는 여기서 고치지 않는다** (2026-09-09 사용자: "편집 메뉴에서 관계를
+// 빼라고"). 관계는 이야기가 짓는 것이고, 화면에 선 선 가운데는 문서에 없는 것도
+// 있다 — 섬 잇기·참여자 풀기·가족 호칭을 코드가 그때그때 긋는다. 그 선을 칸으로
+// 내밀면 사람이 고른 것과 코드가 그은 것이 한 자리에서 섞인다. 노드가 틀렸으면
+// '삭제'가, 이야기가 틀렸으면 그 글을 고쳐 다시 넣는 길이 있다.
 //
 // **모델의 영어 식별자는 여기서도 안 보인다** (CLAUDE.md §1). 타입·관계·영향은
 // 한국어 이름으로 고르고, 상대 노드는 이름으로 고른다.
@@ -1173,16 +1175,6 @@ function EventEdit({ life, id, onDone, onCancel }) {
         .filter((p) => p !== life.subject?.id && !tied.has(p))
         .map((p) => ({ value: p, was: nodeLabel(byId, p), name: nodeLabel(byId, p) }))
         .filter((w) => w.was),
-      edges: life.edges.filter((e) => e.source === id || e.target === id).map((e) => ({
-        dir: e.source === id ? 'out' : 'in',
-        other: e.source === id ? e.target : e.source,
-        type: e.type, description: e.description || '', role: e.role || '',
-      })),
-      // 처음 든 선 — 완료할 때 여기 있다가 사라진 것이 '사람이 지운 선'이다.
-      // 코드가 그은 선(섬 잇기·참여자)은 문서에 없으므로 이렇게 세지 않으면
-      // 무엇이 빠졌는지 알 길이 없다 (life.dropUnlinked 머리글).
-      was: life.edges.filter((e) => e.source === id || e.target === id)
-        .map((e) => unlinkKey(e.source, e.target, e.type)),
       links: life.historical_connections.filter((c) => c.personal_event === id).map((c) => ({ ...c })),
       cf: life.counterfactual_analysis.filter((c) => c.event === id)
         .map((c) => ({ ...c, possibilities: (c.possibilities || []).join('\n') })),
@@ -1191,19 +1183,6 @@ function EventEdit({ life, id, onDone, onCancel }) {
   const set = (patch) => setF((cur) => ({ ...cur, ...patch }));
   const setAt = (key, i, patch) => setF((cur) => ({ ...cur, [key]: cur[key].map((row, k) => (k === i ? { ...row, ...patch } : row)) }));
   const dropAt = (key, i) => setF((cur) => ({ ...cur, [key]: cur[key].filter((_, k) => k !== i) }));
-  // 이 노드에 놓을 수 있는 관계 — **고치는 중인 타입**으로 잰다 (타입을 바꾸면
-  // 놓을 수 있는 관계도 바뀐다).
-  const allowed = (row, type = f.type) => {
-    const other = byId.get(row.other);
-    if (!node || !other) return [];
-    const self = { ...node, type };
-    return row.dir === 'out' ? edgeChoices(self, other) : edgeChoices(other, self);
-  };
-  const reType = (row, type) => {
-    const list = allowed(row, type);
-    return list.includes(row.type) ? row : { ...row, type: list[0] || row.type };
-  };
-  const others = life.nodes.filter((n) => n.id !== id);
   if (!node) return null;
 
   const submit = (ev) => {
@@ -1217,13 +1196,6 @@ function EventEdit({ life, id, onDone, onCancel }) {
       turning: f.turning ? { turning_point_score: f.turning.score, reason: f.turning.reason } : null,
       participants: f.participants,
       with_whom: f.withWhom.map((w) => (w.name.trim() === w.was ? w.value : w.name.trim())).filter(Boolean),
-      edges: f.edges.map((r) => ({
-        source: r.dir === 'out' ? id : r.other,
-        target: r.dir === 'out' ? r.other : id,
-        type: r.type, description: r.description, role: r.role,
-      })),
-      unlinked: f.was.filter((k) => !f.edges.some((r) => k === unlinkKey(
-        r.dir === 'out' ? id : r.other, r.dir === 'out' ? r.other : id, r.type))),
       links: f.links,
       counterfactual: f.cf.map((c) => ({ ...c, possibilities: String(c.possibilities || '').split('\n') })),
     });
@@ -1232,8 +1204,7 @@ function EventEdit({ life, id, onDone, onCancel }) {
   return (
     <form className="life-edit" onSubmit={submit}>
       <label className="life-field"><span>종류</span>
-        <select value={f.type} onChange={(e) => set({ type: e.target.value,
-          edges: f.edges.map((r) => reType(r, e.target.value)) })}>
+        <select value={f.type} onChange={(e) => set({ type: e.target.value })}>
           {Object.entries(NODE_TYPE_KO).map(([k, ko]) => <option key={k} value={k}>{ko}</option>)}
         </select>
       </label>
@@ -1312,39 +1283,6 @@ function EventEdit({ life, id, onDone, onCancel }) {
         </button>
       </section>
 
-      <section className="life-sec">
-        <h3>관계</h3>
-        {f.edges.map((r, i) => (
-          <div className="life-rel-edit" key={i}>
-            <div className="life-row">
-              <select value={r.dir} onChange={(e) => setAt('edges', i, reType({ ...r, dir: e.target.value }))}>
-                <option value="out">이 노드가 앞</option>
-                <option value="in">이 노드가 뒤</option>
-              </select>
-              <select value={r.type} onChange={(e) => setAt('edges', i, { type: e.target.value })}>
-                {(allowed(r).includes(r.type) ? allowed(r) : [r.type, ...allowed(r)])
-                  .map((k) => <option key={k} value={k}>{EDGE_TYPE_KO[k] || k}</option>)}
-              </select>
-              <select value={r.other} onChange={(e) => setAt('edges', i, reType({ ...r, other: e.target.value }))}>
-                {others.map((n) => <option key={n.id} value={n.id}>{n.name} · {NODE_TYPE_KO[n.type]}</option>)}
-              </select>
-              <button type="button" className="life-btn danger" onClick={() => dropAt('edges', i)}>빼기</button>
-            </div>
-            <div className="life-row">
-              <input value={r.role} onChange={(e) => setAt('edges', i, { role: e.target.value })}
-                     placeholder="선 이름 (비우면 저절로)" />
-              <input value={r.description} onChange={(e) => setAt('edges', i, { description: e.target.value })}
-                     placeholder="설명" />
-            </div>
-          </div>
-        ))}
-        <button type="button" className="life-btn" onClick={() => {
-          const other = others[0];
-          if (!other) return;
-          const row = reType({ dir: 'out', other: other.id, type: '', description: '', role: '' });
-          setF((cur) => ({ ...cur, edges: [...cur.edges, row] }));
-        }}>관계 더하기</button>
-      </section>
 
       {f.links.length > 0 && (
         <section className="life-sec">

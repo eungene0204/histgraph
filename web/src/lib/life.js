@@ -726,8 +726,6 @@ export function normalize(raw) {
   if (linkOrphans(nodes, out.edges, subj) + linkPeople(nodes, out.edges, subj, storyText(raw))) {
     out.edges = tidyEdges(nodes, out.edges, subj);
   }
-  // 사람이 지운 선은 코드가 도로 긋지 않는다 (life.py drop_unlinked 와 같은 표).
-  out.edges = dropUnlinked(out.edges, raw.unlinked);
   const timeline = [];
   for (const t of raw.timeline || []) {
     if (!t || !byId.has(t.event_id)) continue;
@@ -795,24 +793,6 @@ export function normalize(raw) {
   return out;
 }
 
-// --- 사람이 지운 선 ---------------------------------------------------------
-// 2026-09-09 사용자가 상세의 '편집'에서 관계를 빼고 완료를 눌렀는데 그 선이 그대로
-// 서 있었다. 지우기는 문서에서 제대로 빠졌지만 **섬을 잇는 규칙**(linkOrphans)이
-// 곧바로 다시 그었다 — 인물과 안 이어진 개인 사건은 주인공이 겪은 것으로 잇는다는
-// 2026-09-08 결정이다. 두 결정이 부딪히는 자리는 하나뿐이고, 거기서는 **사람이
-// 이긴다** (한국사 쪽 편집 계층과 같은 규칙: 사람이 적은 것을 수집이 되돌리지
-// 못한다). 지운 자리는 문서에 `unlinked` 로 남고, 여기서 마지막에 걷는다.
-//
-// 재는 것은 **두 끝과 관계 이름**이다 (방향은 안 본다 — tidyEdges 가 experienced 를
-// 뒤집기도 한다). 같은 두 노드 사이의 다른 관계는 그대로 남는다.
-export function unlinkKey(source, target, type) { return `${source}>${target}|${type}`; }
-export function dropUnlinked(edges, unlinked) {
-  const cut = new Set((unlinked || []).filter((k) => typeof k === 'string'));
-  if (!cut.size) return edges;
-  return edges.filter((e) => !cut.has(unlinkKey(e.source, e.target, e.type))
-    && !cut.has(unlinkKey(e.target, e.source, e.type)));
-}
-
 // --- 지우기 ----------------------------------------------------------------
 // 상세 패널의 '삭제' — 노드 하나와 그것을 가리키던 것을 함께 뺀다 (2026-09-08
 // 사용자: "삭제 버튼을 누르면 해당 노드를 지워서 그래프와 연표에서 삭제").
@@ -860,7 +840,6 @@ export function removeNode(raw, id) {
   if (raw.family_analysis && Array.isArray(raw.family_analysis.members)) {
     doc.family_analysis = { ...raw.family_analysis, members: raw.family_analysis.members.filter((m) => m && m.node_id !== id) };
   }
-  if (raw.unlinked) doc.unlinked = raw.unlinked.filter((k) => typeof k === 'string' && !k.split('|')[0].split('>').includes(id));
   // 주인공을 지웠으면 자리를 비운다 — normalize 가 남은 인물에서 다시 고른다.
   if (raw.subject && raw.subject.id === id) doc.subject = null;
   return doc;
@@ -879,10 +858,9 @@ export function removeNode(raw, id) {
 // 미룬 표식(confidence < 1)을 걷는다 — 사람이 적은 날짜는 셈한 날짜가 아니다
 // (dateSaid). 연표 항목의 해·나이도 같이 비운다.
 //
-// **관계는 화면에 선 것이 전부다.** 이 노드에 닿는 날것의 엣지를 통째로 걷고
-// 폼이 준 것을 놓는다 — 화면에 없던 것(스키마에 어긋나 버려진 것·차례만 말하는
-// before·after)이 문서 안에 몰래 남아 있다가 되살아나지 않는다. 사람이 지운
-// 관계가 participants 로 다시 서는 것도 여기서 막는다 (linkParticipants).
+// **관계는 고치지 않는다** (2026-09-09 사용자: "편집 메뉴에서 관계를 빼라고").
+// 화면에 선 선 가운데는 문서에 없는 것이 있어(섬 잇기·참여자 풀기·가족 호칭을
+// 코드가 긋는다) 칸으로 내밀면 사람이 고른 것과 코드가 그은 것이 섞인다.
 export function editNode(raw, id, patch) {
   const doc = { ...raw };
   const old = (raw.nodes || []).find((n) => n && n.id === id);
@@ -898,39 +876,10 @@ export function editNode(raw, id, patch) {
   delete next.year; delete next.end_year; delete next.precision;
   if (next.start_date && next.start_date !== old.start_date) next.confidence = 1;
 
-  // 관계 — 이 노드에 닿는 것을 통째로 갈아 놓는다.
-  const touches = (e) => e && (e.source === id || e.target === id);
-  if ('edges' in patch) {
-    const was = new Map((raw.edges || []).filter(touches).map((e) => [`${e.source}>${e.target}|${e.type}`, e]));
-    const edges = [];
-    const seen = new Set();
-    for (const e of patch.edges || []) {
-      const source = clean(e.source); const target = clean(e.target);
-      const key = `${source}>${target}|${e.type}`;
-      if (!source || !target || source === target || !EDGE_TYPE_KO[e.type] || seen.has(key)) continue;
-      if (source !== id && target !== id) continue;
-      seen.add(key);
-      const kept = { ...(was.get(key) || {}), source, target, type: e.type, description: clean(e.description) };
-      kept.confidence = was.has(key) ? (was.get(key).confidence ?? 1) : 1;
-      if (clean(e.role)) kept.role = clean(e.role); else delete kept.role;
-      edges.push(kept);
-    }
-    doc.edges = [...(raw.edges || []).filter((e) => !touches(e)), ...edges];
-  }
-
-  // 폼에서 뺀 선은 문서에 적어 둔다 — 안 적으면 섬을 잇는 규칙이 다시 긋는다
-  // (dropUnlinked 머리글). 다시 이은 선은 그 자리에서 걷는다.
-  if ('unlinked' in patch) {
-    const back = new Set((patch.edges || []).flatMap((e) => [unlinkKey(e.source, e.target, e.type),
-      unlinkKey(e.target, e.source, e.type)]));
-    doc.unlinked = [...new Set([...(raw.unlinked || []), ...(patch.unlinked || [])])]
-      .filter((k) => typeof k === 'string' && !back.has(k));
-  }
-
-  // 함께한 사람 — 관계로 이어 둔 사람과 폼이 남긴 이름만 남는다. 사람이 지운
-  // 관계의 상대가 여기 남아 있으면 normalize 가 그 선을 도로 긋는다.
+  // 함께한 사람 — 관계로 이어 둔 사람과 폼이 남긴 이름만 남는다.
   if ('with_whom' in patch) {
-    const tied = new Set((doc.edges || raw.edges || []).filter(touches).flatMap((e) => [e.source, e.target]));
+    const touches = (e) => e && (e.source === id || e.target === id);
+    const tied = new Set((raw.edges || []).filter(touches).flatMap((e) => [e.source, e.target]));
     const withWhom = (patch.with_whom || []).map(clean).filter(Boolean);
     const people = [...(patch.participants || []).map(clean)
       .filter((p) => p && (tied.has(p) || withWhom.includes(p))), ...withWhom];
@@ -1004,12 +953,6 @@ export function editNode(raw, id, patch) {
     doc.subject = { ...(doc.subject || raw.subject), birth_year: null };   // normalize 가 새 날짜에서 다시 센다
   }
   return doc;
-}
-
-// 관계 고르개가 세우는 것 — 이 두 끝 사이에 놓을 수 있는 관계 (LIFE_EDGES 의
-// 온톨로지 그대로다). 차례만 말하는 것(SEQUENCE_ONLY)은 화면에 서지 않으므로 뺀다.
-export function edgeChoices(source, target) {
-  return Object.keys(LIFE_EDGES).filter((k) => !SEQUENCE_ONLY.has(k) && fits(k, source, target));
 }
 
 // --- 내가 적은 이야기 -------------------------------------------------------
