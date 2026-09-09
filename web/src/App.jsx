@@ -265,10 +265,17 @@ export default function App() {
   // 내 역사 장이 있는 빌드에서만 묻는다 (배포에는 그 장이 없다). 같은 걸음에
   // **적어 둔 것이 있는지**도 본다 — 없으면 아래 단추가 숨을 쉰다.
   //
-  // 비었는지 재는 자리가 둘이다 (LifeView 의 부팅과 같은 차례): 계정에 올려 둔
-  // 문서가 먼저이고, 그것이 없으면 로그인 없이 적어 브라우저에만 남은 것이다.
-  // 계정 쪽은 **서버가 한 줄로 답한다** (`auth.me` 의 `life`) — 빛낼지 말지를
-  // 알자고 남의 역사를 통째로 내려받게 하지 않는다.
+  // **로그인 전에는 늘 부른다** (2026-09-09 사용자: "로그인 안 했을때도 똑같은
+  // 효과를 줘"). 그 사람에게 내 역사는 아직 아무것도 아니고, 여기가 로그인을
+  // 묻는 유일한 자리다 — 이 브라우저에 적어 둔 것이 남아 있어도 마찬가지다
+  // (그것은 이 컴퓨터의 것이지 그 사람의 계정에 있는 것이 아니다). 대신 부르는
+  // 말을 바꾼다 — 아래 title 이 '비었다' 대신 '로그인하면 적을 수 있다'로 선다.
+  //
+  // 로그인한 사람은 재는 자리가 둘이다 (LifeView 의 부팅과 같은 차례): 계정에
+  // 올려 둔 문서가 먼저이고, 그것이 없으면 브라우저에만 남은 것이다 (부팅이
+  // 그것을 찾으면 계정으로 옮긴다). 계정 쪽은 **서버가 한 줄로 답한다**
+  // (`auth.me` 의 `life`) — 빛낼지 말지를 알자고 남의 역사를 통째로 내려받게
+  // 하지 않는다.
   //
   // 다 읽기 전에는 `null` 이라 아무 표시도 안 한다 — '아직 모른다'를 '없다'로
   // 읽으면 적어 둔 사람의 머리 줄이 한 번 번쩍인다 (2026-09-09 사용자: 빈
@@ -280,6 +287,7 @@ export default function App() {
       const me = await auth.me();
       if (!alive) return;
       setMine(me);
+      if (!me.user) { setLifeEmpty(true); return; }
       if (me.life) { setLifeEmpty(false); return; }
       let kept = null;
       try { kept = JSON.parse(localStorage.getItem(LIFE_STORE_KEY) || 'null'); } catch { /* 비었다 */ }
@@ -311,8 +319,9 @@ export default function App() {
               화면을 보여 준 뒤에 묻는 것보다 낫다. */}
           {LIFE_PAGE && (
             <a className={`era${lifeEmpty ? ' beckon' : ''}`} href="/life.html"
-               title={lifeEmpty ? '아직 적은 내 역사가 없습니다 — 눌러서 시작합니다'
-                                : '내 삶을 세상의 역사와 나란히 봅니다'}
+               title={!lifeEmpty ? '내 삶을 세상의 역사와 나란히 봅니다'
+                      : mine?.user ? '아직 적은 내 역사가 없습니다 — 눌러서 시작합니다'
+                                   : '로그인하면 내 역사를 적을 수 있습니다'}
                onClick={(e) => { if (!mine?.user) { e.preventDefault(); setAskLogin(true); } }}>
               내 역사
             </a>

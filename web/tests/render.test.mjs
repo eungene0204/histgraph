@@ -411,6 +411,14 @@ let detailHtml = '';
      /const \[lifeEmpty, setLifeEmpty\] = useState\(null\)/.test(appSrc));
   ok("빛나는 반은 '내 역사'에만 붙는다",
      /lifeEmpty \? ' beckon' : ''/.test(appSrc) && /\.era\.beckon\s*\{/.test(eraCss));
+  // 2026-09-09 사용자: "로그인 안 했을때도 똑같은 효과를 줘." 그 사람에게 내
+  // 역사는 아직 아무것도 아니다 — 이 브라우저에 남은 것이 있어도 부른다.
+  // 대신 부르는 말이 다르다 ('비었다'가 아니라 '로그인하면 적을 수 있다').
+  ok('로그인 전에는 늘 부른다',
+     /if \(!me\.user\) \{ setLifeEmpty\(true\); return; \}/.test(appSrc));
+  ok('부르는 말이 로그인 전과 후로 갈린다',
+     appSrc.includes('로그인하면 내 역사를 적을 수 있습니다')
+     && appSrc.includes('아직 적은 내 역사가 없습니다'));
   // 자리를 흔들지 않는다 — 커지거나 움직이면 옆의 시대 단추가 밀린다.
   const frames = eraCss.match(/@keyframes era-beckon\s*\{[^]*?\n\}/)?.[0] || '';
   ok('빛만 오가고 자리는 그대로다',
