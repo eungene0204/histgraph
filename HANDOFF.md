@@ -599,7 +599,9 @@ CLI 는 `histgraph life 더.txt --base data/life/나.json`.
   안 이어지던 것.
 - **명령** `uv run histgraph life 이야기.txt` (MLX 기본, 35GB) ·
   `--json 받은.json` (Claude 채팅에 지시문을 넣어 받은 JSON 을 같은 관문으로) ·
-  `--dry-run` (프롬프트만). 결과는 `data/life/` — **.gitignore** (개인 자료).
+  `--dry-run` (프롬프트만) · `--json 받은.json --counterfactuals` ('만약 없었다면'
+  의 빈 답만 모델에 물어 채운다 — 그래프는 안 건드린다). 결과는 `data/life/` —
+  **.gitignore** (개인 자료).
 - **서버** `/api/context?from&to` (그 구간의 재위 띠 + `_anchors` 와 같은 규칙의
   큰 사건). 저장된 개인 그래프를 폴더에서 골라 주던 `/api/life` 는 2026-09-08 에
   뺐다 (아래 '기본 자료 없음'). 배포(Vercel)에는 개인 자료가 없으므로 화면이
@@ -613,6 +615,14 @@ CLI 는 `histgraph life 더.txt --base data/life/나.json`.
   머리 '태어나기 전'에 이어진 것만 선다. 주소 `#사건id` 가 고른 사건. 오른쪽
   패널: 사건(원인·결과·그 무렵의 한국사·만약 없었다면) · 분석(가족 뿌리·전환점·
   역사가 준 영향·패턴·영향 순위·물음) · 사람·문화.
+- **'만약 없었다면' 은 물음을 눌러 편다** (2026-09-09 사용자: "질문만 있고 답변이
+  없어. 질문을 클릭하면 답을 볼수 있게 답안도 작성해줘"). 전에는 물음 아래에 갈렸을
+  길(`possibilities`)만 서 있었는데 그것은 '한국에서 대학을 계속 다녔을 가능성' 같은
+  구절이라 답으로 읽히지 않았다. 이제 항목마다 문단 하나(`answer`)가 따라오고
+  (지시문·`SCHEMA` 를 같이 고쳤다), 화면은 `Counterfactual` 이 접어 두었다가 누르면
+  편다. 옛 문서는 `histgraph life --json … --counterfactuals` 가 빈 답만 채운다.
+  답에 한글이 없거나 한자·가나가 섞이면 버린다 (`life.korean_line` — 실측: 무료
+  모델이 '더 오래続했을' 을 냈다).
 - **한글 관문**: 지시문의 식별자(노드 38·관계 54·영향 3)에 전부 한국어 이름표
   (`NODE_TYPE_KO`·`EDGE_TYPE_KO`·`IMPACT_KO`, 파이썬·JS 같은 표). 테스트가
   지시문을 읽어 빠진 것을 잡는다. 화면 글자 덩어리마다 한글이 있어야 한다.

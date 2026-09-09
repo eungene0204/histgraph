@@ -1069,15 +1069,7 @@ function EventDetail({ life, id, onPick, onDrop }) {
           })}</ul>
         </section>
       )}
-      {cf.length > 0 && (
-        <section className="life-sec">
-          <h3>만약 없었다면</h3>
-          {cf.map((c, i) => (
-            <div key={i}><p className="life-q">{c.question}</p><ul>{(c.possibilities || []).map((p, j) => <li key={j}>{p}</li>)}</ul></div>
-          ))}
-          <p className="tl-hint">가능성일 뿐 단정이 아닙니다.</p>
-        </section>
-      )}
+      {cf.length > 0 && <Counterfactual items={cf} />}
       {/* 상세의 맨 아래 — 이 노드를 지운다. 함께 사라지는 것(관계·연표 자리)을
           먼저 세어 보여 준다. 지운 뒤에는 되돌릴 길이 없으므로 두 번 누르게 한다. */}
       {onDrop && (
@@ -1118,6 +1110,54 @@ function Rel({ head, items, side, nameOf, onPick }) {
 
 function Meter({ v }) {
   return <span className="life-meter" title={`${v} / 10`}><i><span style={{ width: `${v * 10}%` }} /></i><b>{v}</b></span>;
+}
+
+// --- 만약 없었다면 ---------------------------------------------------------
+// 물음을 누르면 답이 펴진다 (2026-09-09 사용자: "질문만 있고 답변이 없어.
+// 질문을 클릭하면 답을 볼수 있게"). 전에는 물음 아래에 갈렸을 길만 서 있었는데
+// ('한국에서 대학을 계속 다녔을 가능성') 그것은 구절이라 **답으로 읽히지
+// 않는다** — 같은 크기의 줄이 넷 서 있으면 물음도 목록의 한 줄로 보인다.
+//
+// 그래서 두 켜로 나눈다. 문단(`answer`)이 그 물음에 대한 답이고, 그 아래
+// 짧은 구절(`possibilities`)이 갈렸을 길이다. **접어 둔 채로 연다** — 물음이
+// 여럿이라 다 펴 두면 목록이 아니라 글이 되고, 읽는 사람은 어떤 물음이
+// 있는지부터 훑는다.
+//
+// 답이 없는 옛 문서(지시문이 `answer` 를 요구하기 전에 만든 것)는 구절만
+// 펴고, 답이 아직 없다고 한국어로 적는다 — 빈 자리를 지어내지 않는다.
+export function Counterfactual({ items }) {
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (i) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(i)) next.delete(i); else next.add(i);
+    return next;
+  });
+  return (
+    <section className="life-sec">
+      <h3>만약 없었다면</h3>
+      {items.map((c, i) => {
+        const on = open.has(i);
+        const ways = c.possibilities || [];
+        return (
+          <div className={`life-cf${on ? ' on' : ''}`} key={i}>
+            <button type="button" aria-expanded={on} onClick={() => toggle(i)}>
+              <span className="life-cf-caret" aria-hidden="true">▸</span>
+              <span>{c.question}</span>
+            </button>
+            {on && (
+              <div className="life-cf-a">
+                {c.answer
+                  ? <p>{c.answer}</p>
+                  : <p className="life-hint">이 물음에는 아직 답이 적히지 않았습니다. 갈렸을 길만 아래에 있습니다.</p>}
+                {ways.length > 0 && <ul className="life-sub">{ways.map((p, j) => <li key={j}>{p}</li>)}</ul>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <p className="tl-hint">가능성일 뿐 단정이 아닙니다.</p>
+    </section>
+  );
 }
 
 // --- 분석 -----------------------------------------------------------------
@@ -1180,15 +1220,7 @@ function Analysis({ life, onPick }) {
           ))}</ul>
         </section>
       )}
-      {life.counterfactual_analysis.length > 0 && (
-        <section className="life-sec">
-          <h3>만약 없었다면</h3>
-          {life.counterfactual_analysis.map((c, i) => (
-            <div key={i}><p className="life-q">{c.question}</p><ul>{(c.possibilities || []).map((p, j) => <li key={j}>{p}</li>)}</ul></div>
-          ))}
-          <p className="tl-hint">가능성일 뿐 단정이 아닙니다.</p>
-        </section>
-      )}
+      {life.counterfactual_analysis.length > 0 && <Counterfactual items={life.counterfactual_analysis} />}
       {life.follow_up_questions.length > 0 && (
         <section className="life-sec">
           <h3>더 말해 주면 좋은 것</h3>

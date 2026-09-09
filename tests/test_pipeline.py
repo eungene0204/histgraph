@@ -6054,6 +6054,61 @@ with tempfile.TemporaryDirectory() as tmp:
     check("지시문의 단계 목록에도 있다", "- 군복무" in life_mod.system_prompt())
     check("'제대로'는 제대가 아니다", not life_mod.MILITARY.search("제대로 하지 못했다"))
 
+    # --- 만약 없었다면 — 물음에는 답이 따라와야 한다 (2026-09-09 사용자) ---
+    # "질문만 있고 답변이 없어. 질문을 클릭하면 답을 볼수 있게 답안도 작성해줘."
+    # 지시문·스키마가 `answer` 를 받고, 옛 문서는 `answer_counterfactuals` 가 채운다.
+    _cf = life_mod.SCHEMA["properties"]["counterfactual_analysis"]["items"]
+    check("스키마가 물음마다 답을 받는다",
+          "answer" in _cf["properties"] and "answer" in _cf["required"])
+    check("지시문도 답을 시킨다", "answer" in life_mod.system_prompt())
+    _doc = {"nodes": [{"id": "e1", "name": "창업 실패", "description": "2013년에 접었다"},
+                      {"id": "e2", "name": "독립 개발"}],
+            "edges": [{"source": "e1", "target": "e2", "type": "led_to"}],
+            "counterfactual_analysis": [
+                {"event": "e1", "question": "창업이 실패하지 않았다면?", "possibilities": ["남았을 가능성"]},
+                {"event": "e2", "question": "이미 답이 있는 물음", "answer": "있는 답은 그대로 둔다."}]}
+    check("답이 빈 물음만 센다", [c["question"] for c in life_mod.unanswered(_doc)] == ["창업이 실패하지 않았다면?"])
+
+    class _CF:
+        name = model = "fake"
+        def complete_json(self, system, user, schema, max_tokens=None):
+            self.got = (system, user, schema)
+            return {"answers": [{"question": "창업이 실패하지 않았다면?", "answer": "그 회사에 남았을 것이다."},
+                                {"question": "이미 답이 있는 물음", "answer": "덮어쓰면 안 된다."}]}
+    _be = _CF()
+    check("빈 답만 채운다", life_mod.answer_counterfactuals(_doc, _be, "이야기") == 1
+          and _doc["counterfactual_analysis"][0]["answer"] == "그 회사에 남았을 것이다."
+          and _doc["counterfactual_analysis"][1]["answer"] == "있는 답은 그대로 둔다.")
+    check("그 사건 뒤에 이어진 일을 모델에게 보인다", "독립 개발" in _be.got[1] and "이야기" in _be.got[1])
+    check("물을 것이 없으면 모델을 안 부른다", life_mod.answer_counterfactuals(_doc, None) == 0)
+
+    class _Bad:
+        name = model = "fake"
+        def complete_json(self, system, user, schema, max_tokens=None):
+            return {"answers": [{"question": "창업이 실패하지 않았다면?", "answer": "would have stayed"}]}
+    _doc2 = {"nodes": [], "edges": [], "counterfactual_analysis": [
+        {"event": "e1", "question": "창업이 실패하지 않았다면?"}]}
+    check("한국어가 아닌 답은 안 받는다", life_mod.answer_counterfactuals(_doc2, _Bad()) == 0
+          and not _doc2["counterfactual_analysis"][0].get("answer"))
+    # 한자가 한 자 섞여 오기도 한다 (실측: '더 오래続했을') — 화면에 세우지 않는다.
+    check("한자·가나가 섞이면 안 받는다", life_mod.korean_line("더 오래続했을 수 있다") == ""
+          and life_mod.korean_line("nullSpace 를 만들지 못했을 수 있다"))
+    _kept, _ = life_mod.validate({"nodes": [], "edges": [], "counterfactual_analysis": [
+        {"event": "e", "question": "ㄱ?", "answer": "한국어 답", "possibilities": []},
+        {"event": "f", "question": "ㄴ?", "answer": "english only", "possibilities": []}]})
+    check("검증도 같은 관문을 건다",
+          [c.get("answer") for c in _kept["counterfactual_analysis"]] == ["한국어 답", None])
+
+    # 옛 문서에 다시 물으면 빈 답이 채워진다 (merge 의 겹친 줄).
+    _old = {"nodes": [], "edges": [], "timeline": [], "historical_connections": [],
+            "counterfactual_analysis": [{"event": "e1", "question": "ㄱ?", "possibilities": ["ㄷ"]}]}
+    _new = {"nodes": [], "edges": [], "timeline": [], "historical_connections": [],
+            "counterfactual_analysis": [{"event": "e1", "question": "ㄱ?", "answer": "채워진 답"}]}
+    _mg, _ = life_mod.merge(_old, _new)
+    check("겹친 물음은 빈 답만 채운다", len(_mg["counterfactual_analysis"]) == 1
+          and _mg["counterfactual_analysis"][0]["answer"] == "채워진 답"
+          and _mg["counterfactual_analysis"][0]["possibilities"] == ["ㄷ"])
+
     # 그래프에 잇기 + 엔드포인트
     store = GraphStore(Path(tmp) / "korea.sqlite")
     store.upsert_nodes([

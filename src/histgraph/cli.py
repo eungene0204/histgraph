@@ -2288,6 +2288,7 @@ def cmd_life(args: argparse.Namespace) -> int:
         uv run histgraph life --json data/life/나.json         # 이미 받은 JSON 을 검증·연결만
         uv run histgraph life data/life/나.txt --dry-run       # 프롬프트만 찍는다
         uv run histgraph life 더.txt --base data/life/나.json  # 있는 그래프에 더한다 (life.merge)
+        uv run histgraph life --json data/life/나.json --counterfactuals  # '만약 없었다면' 의 빈 답만 채운다
 
     모델은 `.env` 에 OpenRouter 열쇠가 있으면 **openrouter**(무료 모델,
     남의 GPU)이고 없으면 MLX 다. MLX 는 35GB 를 잡는다 — `extract`·`roles`·
@@ -2301,6 +2302,9 @@ def cmd_life(args: argparse.Namespace) -> int:
     if args.json is None and args.text is None:
         print("  이야기 글 파일이나 --json 을 주세요.", file=sys.stderr)
         return 2
+    if args.counterfactuals and args.json is None:
+        print("  --counterfactuals 는 --json 과 함께 씁니다.", file=sys.stderr)
+        return 2
     db = ROOT / "data" / f"{args.era}.sqlite"
     api = GraphAPI(db, era=args.era, readonly=True) if db.exists() else None
     base = life_mod.load(Path(args.base)) if args.base else None
@@ -2313,6 +2317,25 @@ def cmd_life(args: argparse.Namespace) -> int:
         story = Path(args.json).with_suffix(".txt")
         if story.is_file():
             text = story.read_text(encoding="utf-8")
+        # 물음만 있고 답이 없는 옛 문서를 위한 길 — 그래프는 그대로 두고
+        # '만약 없었다면' 의 빈 답만 모델에 묻는다 (2026-09-09 지적).
+        if args.counterfactuals:
+            todo = life_mod.unanswered(raw)
+            if not todo:
+                print("  답이 빈 '만약 없었다면' 이 없습니다.")
+                return 0
+            backend = build_backend(args.backend or default_life_backend(), args.model)
+            print(f"  모델: {backend.name} · {backend.model} · 물음 {len(todo)}")
+            filled = life_mod.answer_counterfactuals(raw, backend, text)
+            if not filled:
+                # 무료 모델은 빈 답을 돌려주기도 한다 (실측: 같은 물음에 한 번은
+                # 0건, 다음 번엔 4건). 안 채웠으면 문서를 건드리지 않고 물러난다.
+                print("  모델이 답하지 않았습니다 — 문서를 그대로 둡니다.", file=sys.stderr)
+                return 1
+            out = Path(args.out) if args.out else Path(args.json)
+            life_mod.save(raw, out)
+            print(f"  답 {filled}/{len(todo)} 채움 · 저장: {out}")
+            return 0
     else:
         text = Path(args.text).read_text(encoding="utf-8")
         name = args.name or Path(args.text).stem
@@ -2817,6 +2840,9 @@ def main(argv: list[str] | None = None) -> int:
     p_lf.add_argument("--model", default=None,
                       help="모델 이름 (openrouter 는 .env 의 OPENROUTER_MODEL 이 기본)")
     p_lf.add_argument("--dry-run", action="store_true", help="프롬프트만 찍고 모델은 안 부른다")
+    p_lf.add_argument("--counterfactuals", action="store_true",
+                      help="'만약 없었다면' 의 빈 답만 모델에 물어 채운다 (--json 과 함께). "
+                           "그래프는 건드리지 않는다")
     p_lf.set_defaults(func=cmd_life)
 
     p_ac = sub.add_parser("accounts", help="가입자 표 (Neon) — 세우고 세어 본다")

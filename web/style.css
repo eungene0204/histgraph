@@ -1097,6 +1097,25 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 .life-sec ul.life-sub { margin: 4px 0 0 10px; }
 .life-sec ul.life-sub li { border: none; padding: 1px 0; color: var(--text-muted); font-size: 12px; }
 .life-q { font-size: 12.5px; color: var(--text-muted); font-style: normal; margin: 6px 0 2px; }
+
+/* '만약 없었다면' — 물음을 누르면 답이 펴진다 (2026-09-09 사용자).
+   물음 줄은 목록의 다른 줄과 같은 자리에 서되(위 테두리·같은 높이) 누를 수
+   있다는 것이 보여야 하므로 앞에 꺾쇠를 두고, 펴지면 그것이 아래를 가리킨다. */
+.life-cf { border-top: 1px solid var(--background-modifier-border); }
+.life-cf > button {
+  display: flex; gap: 6px; align-items: baseline; width: 100%;
+  padding: 6px 0; border: none; background: none;
+  color: var(--text-normal); font: inherit; font-size: 12.5px;
+  line-height: 1.5; text-align: left; cursor: pointer;
+}
+.life-cf > button:hover { color: var(--text-accent); }
+.life-cf-caret { flex: none; color: var(--text-faint); font-size: 10px; transition: transform .12s ease; }
+.life-cf.on .life-cf-caret { transform: rotate(90deg); }
+.life-cf.on > button { color: var(--text-accent); }
+.life-cf-a { padding: 0 0 8px 16px; }
+.life-cf-a p { margin: 0; font-size: 12.5px; line-height: 1.65; color: var(--text-normal); }
+.life-cf-a .life-hint { font-size: 12px; }
+.life-cf-a ul.life-sub { margin: 6px 0 0; }
 .life-link { padding: 0; border: none; background: none; color: var(--text-accent); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
 .life-link:hover { text-decoration: underline; }
 .life-before { position: relative; margin: 8px 0 2px; padding: 6px 10px; border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-m); font-size: 12px; color: var(--text-muted); background: var(--background-primary); }

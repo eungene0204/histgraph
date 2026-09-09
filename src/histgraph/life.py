@@ -226,10 +226,13 @@ SCHEMA: dict[str, Any] = {
             },
             "required": ["event", "turning_point_score", "reason"],
         }},
+        # 물음만 세우면 화면에 물음표만 선다 (2026-09-09 지적: "질문만 있고 답변이
+        # 없어"). `answer` 는 그 물음에 대한 **문단**이고, `possibilities` 는 그
+        # 아래에 갈린 길을 짧게 나열한 것이다 — 둘은 서로를 대신하지 못한다.
         "counterfactual_analysis": {"type": "array", "items": {
             "type": "object",
-            "properties": {"event": _STR, "question": _STR, "possibilities": _STRS},
-            "required": ["event", "question", "possibilities"],
+            "properties": {"event": _STR, "question": _STR, "answer": _STR, "possibilities": _STRS},
+            "required": ["event", "question", "answer", "possibilities"],
         }},
         "life_patterns": {"type": "array", "items": {
             "type": "object",
@@ -384,6 +387,123 @@ def analyze(text: str, backend, anchors: list[dict] | None = None,
     if not isinstance(got, dict):
         return None
     return got
+
+
+# --- '만약 없었다면' 의 답 --------------------------------------------------------
+# 2026-09-09 지적: "질문만 있고 답변이 없어". 화면은 물음 아래에 갈린 길
+# (`possibilities`)만 세우고 있었는데, 그것은 '한국에서 대학을 계속 다녔을
+# 가능성' 같은 구절이라 **답으로 읽히지 않는다.** 그래서 물음마다 문단 하나
+# (`answer`)를 받아 화면이 물음을 누르면 펴 보이게 했다.
+#
+# 답은 **이야기가 말한 것에서만 온다.** 없는 사실을 지어내면 그 사람의 삶에
+# 남의 이야기가 섞인다 — 설명을 못 채울 때 비우는 규칙(`redescribe`)과 같다.
+# 우리 말이 아닌 답은 버린다 (화면에 영어를 세우지 않는다, CLAUDE.md §1). 버린
+# 자리는 화면이 '아직 답이 적히지 않았습니다' 로 그리고, 다시 물으면 채워진다.
+
+# 한글이 한 자라도 있는가 — 화면에 낼 수 있는 말인지를 가른다 (CLAUDE.md §1).
+_HANGUL = re.compile(r"[가-힣]")
+# 한자·가나. 모델이 한국어 문장 한가운데에 한 자씩 흘린다 (실측: '더 오래続했을').
+# 이름은 이야기에서 오므로 한글이거나 로마자다 — 여기 걸리는 것은 흘린 것이다.
+_NOT_KO = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def korean_line(s: Any) -> str:
+    """화면에 세울 수 있는 한국어 한 줄이면 그대로, 아니면 빈 글."""
+    text = str(s or "").strip()
+    return text if text and _HANGUL.search(text) and not _NOT_KO.search(text) else ""
+
+
+# 이미 만든 그래프의 물음에만 답을 채울 때 쓰는 작은 스키마. 본 스키마
+# (SCHEMA)를 다시 물으면 모델이 그래프를 통째로 새로 써서 노드가 흔들린다.
+ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"answers": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"question": _STR, "answer": _STR},
+        "required": ["question", "answer"],
+    }}},
+    "required": ["answers"],
+}
+
+ANSWER_SYSTEM = """너는 한 사람이 적은 인생 이야기를 읽고 '만약 그 일이 없었다면?' 에 답한다.
+
+규칙:
+- 한국어로만 적는다. 한자·가나·영어 문장을 섞지 않는다.
+- 물음마다 두세 문장의 문단 하나를 적는다. 목록으로 적지 않는다.
+- **이야기에 나오는 이름을 부른다.** 그 일이 없었다면 이어지지 못했을 다음 일
+  (학교·회사·만난 사람·옮겨 간 곳)을 이름으로 대며 적는다.
+- 이야기가 말하지 않은 사실은 지어내지 않는다.
+- 단정하지 않는다. '~였을 것이다', '~했을 수 있다' 로 적는다.
+- **물음을 되풀이하지 않는다.** '미국에 가지 않았다면 미국에 가지 않았을 것이다'
+  같은 답은 답이 아니다. 무엇이 달라졌을지를 적는다.
+- 답을 모르겠으면 그 물음은 빼고 답한 것만 돌려준다.
+
+JSON 만 돌려준다: {"answers": [{"question": "...", "answer": "..."}]}"""
+
+
+def _counterfactual(item: dict) -> dict:
+    """'만약 없었다면' 한 줄을 다듬는다 — 한국어가 아닌 답은 화면에 세우지 않는다."""
+    out = dict(item)
+    answer = korean_line(out.get("answer"))
+    if answer:
+        out["answer"] = answer
+    else:
+        out.pop("answer", None)
+    return out
+
+
+def unanswered(payload: dict) -> list[dict]:
+    """답이 없는 '만약 없었다면' 줄들."""
+    return [c for c in payload.get("counterfactual_analysis") or []
+            if isinstance(c, dict) and c.get("question") and not str(c.get("answer") or "").strip()]
+
+
+def answer_counterfactuals(payload: dict, backend, text: str | None = None) -> int:
+    """답이 빈 물음만 모델에 물어 채운다. 채운 수를 돌려준다.
+
+    옛 그래프를 위한 길이다 — 지시문이 `answer` 를 요구하기 전에 만든 문서에는
+    물음만 있다. 그래프는 건드리지 않는다."""
+    todo = unanswered(payload)
+    if not todo:
+        return 0
+    by_id = {n["id"]: n for n in payload.get("nodes") or []
+             if isinstance(n, dict) and n.get("id")}
+    # 그 사건 뒤에 이어진 일들. 답이 '무엇이 달라졌을지' 를 말하려면 무엇이
+    # 이어졌는지를 알아야 한다 — 그것이 없으면 모델은 물음을 되풀이한다.
+    after: dict[str, list[str]] = {}
+    for e in payload.get("edges") or []:
+        if not isinstance(e, dict) or e.get("type") not in CAUSAL_EDGES:
+            continue
+        name = (by_id.get(e.get("target")) or {}).get("name")
+        if name:
+            after.setdefault(e.get("source"), []).append(name)
+    lines = []
+    for c in todo:
+        ev = by_id.get(c.get("event"))
+        about = ev.get("name") if ev else str(c.get("event") or "")
+        desc = (ev or {}).get("description") or ""
+        nxt = after.get(c.get("event")) or []
+        lines.append(f"- 사건: {about}\n  물음: {c['question']}"
+                     + (f"\n  사건 설명: {desc}" if desc else "")
+                     + (f"\n  그 뒤에 이어진 일: {', '.join(nxt[:8])}" if nxt else ""))
+    user = "\n".join(filter(None, [
+        "이야기:", (text or "").strip() or "(원문이 없다 — 아래 사건 설명만 보고 답한다)",
+        "", "물음:", *lines,
+    ]))
+    got = backend.complete_json(ANSWER_SYSTEM, user, ANSWER_SCHEMA, max_tokens=4000)
+    if not isinstance(got, dict):
+        return 0
+    said = {}
+    for a in got.get("answers") or []:
+        if isinstance(a, dict) and a.get("question"):
+            said[_norm_label(a["question"])] = str(a.get("answer") or "").strip()
+    filled = 0
+    for c in todo:
+        answer = korean_line(said.get(_norm_label(c["question"])))
+        if answer:
+            c["answer"] = answer
+            filled += 1
+    return filled
 
 
 # --- 다듬기: 앞뒤에서 셈하고, 만난 곳에 잇는다 -----------------------------------
@@ -1662,9 +1782,6 @@ def _norm_label(s: str) -> str:
     return re.sub(r"[\s·.\-–—()（）]", "", str(s or "")).lower()
 
 
-# 한글이 한 자라도 있는가 — 화면에 낼 수 있는 말인지를 가른다 (CLAUDE.md §1).
-_HANGUL = re.compile(r"[가-힣]")
-
 # 모델이 주인공에게 붙이는 남의 이름. 화면에서 그 사람은 '나'다.
 SELF_NAMES = {"사용자", "본인", "화자", "주인공", "나 (사용자)", "사용자 (나)", "user", "me", "self"}
 
@@ -1858,7 +1975,8 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
     out["influence_ranking"] = ranking
     out["follow_up_questions"] = [str(q) for q in (payload.get("follow_up_questions") or [])][:5]
     out["family_analysis"] = payload.get("family_analysis") or {"members": []}
-    out["counterfactual_analysis"] = [c for c in payload.get("counterfactual_analysis") or [] if isinstance(c, dict)]
+    out["counterfactual_analysis"] = [_counterfactual(c)
+                                      for c in payload.get("counterfactual_analysis") or [] if isinstance(c, dict)]
     out["life_patterns"] = [p for p in payload.get("life_patterns") or [] if isinstance(p, dict)]
     # 어느 모델이 쓴 그래프인지. 백엔드가 여럿이라(로컬 MLX·OpenRouter 무료
     # 모델) 이 값이 없으면 나중에 이상한 노드의 출처를 가릴 수 없다.
@@ -2033,11 +2151,11 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
         conns.append(dict(c, personal_event=pe))
         stats["connections"] += 1
 
-    def _extend(key: str, ident) -> None:
+    def _extend(key: str, ident, fill: tuple[str, ...] = ()) -> None:
         items = out.setdefault(key, [])
         if not isinstance(items, list):
             items = out[key] = []
-        seen = {ident(it) for it in items if isinstance(it, dict)}
+        seen = {ident(it): it for it in items if isinstance(it, dict)}
         for it in add.get(key) or []:
             if not isinstance(it, dict):
                 continue
@@ -2047,13 +2165,19 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
                     it[f] = remap[it[f]]
             k = ident(it)
             if k in seen:
+                # 겹친 줄은 옛 것을 남기되 **빈 칸은 채운다** — 옛 문서의 '만약
+                # 없었다면' 에는 물음만 있고 답이 없다 (지시문이 `answer` 를
+                # 요구하기 전에 만든 것). 다시 물었을 때 그 답이 들어올 자리다.
+                for f in fill:
+                    if not str(seen[k].get(f) or "").strip() and str(it.get(f) or "").strip():
+                        seen[k][f] = it[f]
                 continue
-            seen.add(k)
+            seen[k] = it
             items.append(it)
 
     _extend("turning_points", lambda it: _norm_label(it.get("event")))
     _extend("impact_analysis", lambda it: (_norm_label(it.get("event")), it.get("impact_type")))
-    _extend("counterfactual_analysis", lambda it: _norm_label(it.get("event")))
+    _extend("counterfactual_analysis", lambda it: _norm_label(it.get("event")), fill=("answer",))
     _extend("life_patterns", lambda it: _norm_label(it.get("pattern")))
 
     ranking = out.get("influence_ranking")

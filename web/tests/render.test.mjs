@@ -36,8 +36,8 @@ import { DetailPanel } from './src/components/DetailPanel.jsx';
 import { Glyph } from './src/components/Glyph.jsx';
 import { ChainTree, PathView } from './src/components/ChainPanel.jsx';
 import { LoginModal } from './src/components/LoginModal.jsx';
-import LifeView, { StoryLog } from './src/components/LifeView.jsx';
-export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, LifeView };
+import LifeView, { StoryLog, Counterfactual } from './src/components/LifeView.jsx';
+export { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, Counterfactual, LifeView };
 `;
 
 await build({
@@ -54,7 +54,7 @@ await build({
 });
 
 const m = await import(`file://${out}`);
-const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, LifeView } = m;
+const { renderToString, App, SidePanel, DetailPanel, Glyph, ChainTree, PathView, LoginModal, StoryLog, Counterfactual, LifeView } = m;
 
 console.log('\n조립 (서버 렌더링)');
 
@@ -447,6 +447,27 @@ let detailHtml = '';
      /\.life-booting\s*\{[^}]*justify-content:\s*center/.test(css)
      && /\.life-booting\s*\{[^}]*align-items:\s*center/.test(css)
      && /@keyframes life-spin/.test(css));
+
+  // --- 만약 없었다면 — 물음을 누르면 답이 펴진다 (2026-09-09 사용자) ---
+  // "질문만 있고 답변이 없어. 질문을 클릭하면 답을 볼수 있게 답안도 작성해줘."
+  // 전에는 물음 아래에 갈렸을 길만 서 있었고 그것은 구절이라 답으로 읽히지
+  // 않았다. 이제 물음이 단추이고, 답은 눌러야 나온다.
+  const cf = plain(renderToString(h(Counterfactual, { items: [
+    { event: 'ev', question: '창업이 실패하지 않았다면?', answer: '그 회사에 남았을 것이다.',
+      possibilities: ['독립하지 않았을 가능성'] },
+  ] })));
+  ok('물음은 눌러서 펴는 단추다',
+     cf.includes('aria-expanded="false"') && cf.includes('창업이 실패하지 않았다면?')
+     && cf.includes('class="life-cf"'), cf.slice(0, 240));
+  ok('답은 누르기 전에는 서지 않는다',
+     !cf.includes('그 회사에 남았을 것이다') && !cf.includes('독립하지 않았을 가능성'));
+  ok('단정이 아니라고 적어 둔다', cf.includes('가능성일 뿐 단정이 아닙니다'));
+  // 답이 없는 옛 문서는 빈 자리를 지어내지 않고 그렇게 적는다.
+  ok('답이 없으면 없다고 한국어로 적는다',
+     readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8')
+       .includes('아직 답이 적히지 않았습니다'));
+  ok('눌린 물음의 꺾쇠가 아래를 가리킨다',
+     /\.life-cf\.on \.life-cf-caret\s*\{[^}]*rotate\(90deg\)/.test(css));
 
   // 머리 줄의 아이콘 — 그림만 서고 글자는 title·aria 로 말한다.
   const lifeSrc2 = readFileSync(join(WEB, 'src/components/LifeView.jsx'), 'utf-8');
