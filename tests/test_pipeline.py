@@ -7350,5 +7350,85 @@ with GraphStore(Path(_tmp_pos.name) / "g.sqlite") as _st:
     check("두 번 돌려도 결과가 같다", not _again.moved, str(_again.moved))
 _tmp_pos.cleanup()
 
+# --- 임기 표: 대통령의 띠는 취임한 날에서 시작한다 ------------------------------
+# "대통령 타임라인을 대통령 취임날을 기준으로 만들어줘" (2026-09-09).
+from histgraph import terms as tm_mod  # noqa: E402
+
+print("\n[임기 표]")
+
+_tmp_tm = tempfile.TemporaryDirectory()
+_tm_table = Path(_tmp_tm.name) / "terms.tsv"
+_tm_table.write_text(
+    "# 주석\n\n"
+    "wd:Q14356\twd:Q6296418\t1963-12-17\t1979-10-26\t대통령기록관 제5대 취임식\n"
+    "wd:Q12612463\twd:Q6296418\t2025-06-04\t\t제21대 취임\n",
+    encoding="utf-8")
+_tm_rows = tm_mod.load_table(_tm_table)
+check("표는 인물·자리·취임일·퇴임일·근거 다섯 칸이다",
+      [(r.person, r.start, r.end) for r in _tm_rows]
+      == [("wd:Q14356", "1963-12-17", "1979-10-26"),
+          ("wd:Q12612463", "2025-06-04", "")], str(_tm_rows))
+
+for _bad, _why in (
+    ("wd:Q1\twd:Q2\t1963-12-17\t\t\n", "근거가 비면 막는다"),
+    ("wd:Q1\twd:Q2\t1963년\t\t근거\n", "날짜가 아니면 막는다"),
+    ("wd:Q1\twd:Q2\t1979-10-26\t1963-12-17\t근거\n", "퇴임일이 앞서면 막는다"),
+    ("wd:Q1\twd:Q2\t1963-12-17\t\t근거\nwd:Q1\twd:Q2\t1970-01-01\t\t근거\n",
+     "같은 사람이 두 번 적히면 막는다"),
+):
+    _p = Path(_tmp_tm.name) / "bad.tsv"
+    _p.write_text(_bad, encoding="utf-8")
+    try:
+        tm_mod.load_table(_p)
+        check(_why, False, "막지 않았다")
+    except tm_mod.TermsTableError:
+        check(_why, True)
+
+with GraphStore(Path(_tmp_tm.name) / "g.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="wd:Q6296418", type="role", label="대한민국 대통령", source="wd"),
+        Node(id="wd:Q14356", type="person", label="박정희", source="wd"),
+        Node(id="wd:Q12612463", type="person", label="이재명", source="wd"),
+        Node(id="wd:Q192049", type="person", label="윤보선", source="wd"),
+    ])
+    _st.upsert_edges([
+        # 위키가 준 값 — 권한대행을 맡은 날이 시작으로 들어와 있다.
+        Edge(src="wd:Q14356", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="1962-03-24", end_date="1979-10-26", props={"reign": "president"}),
+        Edge(src="wd:Q12612463", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="2025-06-04", end_date="2029-06-03", props={"reign": "president"}),
+        Edge(src="wd:Q192049", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="1960-08-13", end_date="1962-03-24", props={"reign": "president"}),
+    ])
+    _rep = tm_mod.apply(_st, _tm_rows)
+    _row = _st.conn.execute(
+        "SELECT start_date, end_date FROM edges WHERE src = 'wd:Q14356'").fetchone()
+    check("권한대행을 맡은 날이 아니라 취임한 날에서 시작한다",
+          tuple(_row) == ("1963-12-17", "1979-10-26"), str(tuple(_row)))
+    _now = _st.conn.execute(
+        "SELECT start_date, end_date FROM edges WHERE src = 'wd:Q12612463'").fetchone()
+    check("재임 중이면 끝을 비운다 (띠가 거기서 잘리지 않게)",
+          tuple(_now) == ("2025-06-04", None), str(tuple(_now)))
+    check("표에 없는 대통령은 관문이 묻는다",
+          [n for _, n in _rep.missing] == ["윤보선"], str(_rep.missing))
+
+    # 수집이 위키 값을 되살려도 편집 계층이 표의 날짜를 다시 씌운다.
+    _st.upsert_edges([
+        Edge(src="wd:Q14356", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="1962-03-24", end_date="1979-10-26", props={"reign": "president"})])
+    check("수집이 되살린 위키 날짜를 편집 계층이 다시 덮는다",
+          _st.conn.execute(
+              "SELECT start_date FROM edges WHERE src = 'wd:Q14356'").fetchone()[0]
+          == "1963-12-17")
+    check("두 번 씌워도 결과가 같다", not tm_mod.apply(_st, _tm_rows).changed)
+_tmp_tm.cleanup()
+
+# 저장소에 실린 표가 실제 그래프와 맞는가 (관문이 도는지).
+_repo_terms = tm_mod.load_table(Path("data/terms.tsv"))
+check("저장소의 임기 표는 대통령 14명을 적고 있다", len(_repo_terms) == 14,
+      str(len(_repo_terms)))
+check("모든 줄이 대한민국 대통령 자리다",
+      {r.seat for r in _repo_terms} == {"wd:Q6296418"})
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

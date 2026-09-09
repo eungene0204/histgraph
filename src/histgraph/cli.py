@@ -34,6 +34,7 @@ DEFAULT_ALIASES = ROOT / "data" / "aliases.tsv"
 DEFAULT_UNTANGLE = ROOT / "data" / "untangle.tsv"
 DEFAULT_DUPLICATES = ROOT / "data" / "duplicates.tsv"
 DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
+DEFAULT_TERMS = ROOT / "data" / "terms.tsv"
 DEFAULT_RECENT = ROOT / "data" / "recent.tsv"
 
 
@@ -1589,6 +1590,20 @@ def cmd_reigns(args: argparse.Namespace) -> int:
         if failures:
             print(f"  ⚠ 실패한 쿼리 {len(failures)}건 — 재실행하면 그 구간만 다시 시도합니다.",
                   file=sys.stderr)
+
+        # **임기 표를 마지막에 다시 씌운다.** 위키의 P39 한정어에는 취임한
+        # 날이 아닌 것이 섞여 있어(권한대행을 맡은 날·선출된 날), 여기서
+        # 안 씌우면 이 명령이 돌 때마다 대통령의 띠가 그 날로 되돌아간다
+        # (`terms` 모듈 머리글).
+        if not args.dry_run:
+            from . import terms as tm
+            trep = tm.apply(store, tm.load_table(DEFAULT_TERMS))
+            if trep.changed:
+                print(f"  임기 표로 되돌린 띠 {len(trep.changed)}건: "
+                      + " · ".join(labels.get(p, p) for p, *_ in trep.changed))
+            if trep.missing:
+                print(f"  ⚠ 임기 표에 없는 대통령 {len(trep.missing)}명 — "
+                      f"`histgraph terms` 로 볼 것", file=sys.stderr)
     return 0
 
 
@@ -1909,6 +1924,42 @@ def cmd_nikh(args: argparse.Namespace) -> int:
         merged = nikh.apply_merges(store, rep.merges)
         if merged:
             print(f"  ✓ 추출 고아 {merged}개를 정본 노드로 합침")
+    return 0
+
+
+def cmd_terms(args: argparse.Namespace) -> int:
+    """임기 표를 씌운다 (`terms` 모듈 머리글).
+
+        uv run histgraph terms --dry-run
+        uv run histgraph terms
+        uv run histgraph --db data/korea.sqlite terms
+    """
+    from . import terms as tm
+
+    table = tm.load_table(args.table)
+    with GraphStore(args.db) as store:
+        label = {r["id"]: r["label"]
+                 for r in store.conn.execute("SELECT id, label FROM nodes")}
+        rep = tm.apply(store, table, dry_run=args.dry_run)
+
+    head = "고칠" if args.dry_run else "고친"
+    print(f"  표 {len(table)}줄 · 이미 맞는 것 {rep.kept} · {head} 것 {len(rep.changed)}")
+    for pid, os_, ns, oe, ne in rep.changed:
+        print(f"    {label.get(pid, pid)[:10]:12} {os_ or '?':10} ~ {oe or '':10}"
+              f"  →  {ns:10} ~ {ne or '재임 중'}")
+    for row in rep.absent:
+        print(f"  이 그래프에 없는 줄: {row.person} → {row.seat}")
+    if args.dry_run:
+        print("  (dry-run: 고치지 않음)")
+    if rep.missing:
+        # 새 대통령이 들어오면 취임일을 사람이 적어야 한다. 조용히 넘기면
+        # 그 사람의 띠만 위키의 값으로 서서 아무도 모른다.
+        print(f"\n  ✗ 표에 없는 대통령 {len(rep.missing)}명 — {args.table} 에 취임일을 적을 것:",
+              file=sys.stderr)
+        for pid, name in rep.missing:
+            print(f"      {name} ({pid})", file=sys.stderr)
+        return 1
+    print("\n  ✓ 대통령의 띠가 모두 취임일에서 시작한다")
     return 0
 
 
@@ -2818,6 +2869,14 @@ def main(argv: list[str] | None = None) -> int:
     p_nk.add_argument("--show", type=int, default=20, help="출력할 예시 수")
     p_nk.add_argument("--dry-run", action="store_true", help="저장하지 않고 결과만 출력")
     p_nk.set_defaults(func=cmd_nikh)
+
+    p_tm = sub.add_parser(
+        "terms", help="대통령의 띠를 취임일에서 시작시킨다 (임기 표)"
+    )
+    p_tm.add_argument("--table", type=Path, default=DEFAULT_TERMS,
+                      help="임기 표 (기본: data/terms.tsv)")
+    p_tm.add_argument("--dry-run", action="store_true", help="고치지 않고 세기만")
+    p_tm.set_defaults(func=cmd_terms)
 
     p_ps = sub.add_parser(
         "positions", help="왕조가 나눠 쓰는 임금 자리를 왕조별로 가른다"
