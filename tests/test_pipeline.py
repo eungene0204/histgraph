@@ -7690,5 +7690,106 @@ check("표제어로 시작하는 보통 도입부는 그대로 둔다",
 check("괄호·낫표로 시작해도 그대로 둔다",
       clean_lead("《난중일기》는 이순신이 쓴 일기다.") == "《난중일기》는 이순신이 쓴 일기다.")
 
+# --- 만든 사람 (`creators.py`) — 작품과 작가를 잇는다 -------------------------
+# "작품과 작품을 만든 사람의 엣지가 없어. 예를 들면 세한도는 김정희가 만들었는데
+# 둘간의 엣지가 없어" (2026-09-10).
+print("\n[만든 사람 — 작품과 작가]")
+from histgraph import creators as cr_mod  # noqa: E402
+
+_tmp_cr = tempfile.TemporaryDirectory()
+_cr_table = Path(_tmp_cr.name) / "creators.tsv"
+_cr_table.write_text(
+    "# 주석\n\n"
+    "khs:1\twd:Q626484\t그림\t김정희가 1844년 제주 귀양살이 때 그렸다\n"
+    "khs:2\twd:Q37682\t없음\t세종은 편찬을 명한 임금이다\n",
+    encoding="utf-8")
+_cr_rows = cr_mod.load_table(_cr_table)
+check("표는 작품·인물·역할·근거 네 칸이다",
+      [(r.work, r.person, r.role) for r in _cr_rows]
+      == [("khs:1", "wd:Q626484", "그림"), ("khs:2", "wd:Q37682", "없음")],
+      str(_cr_rows))
+
+for _bad, _why in (
+    ("khs:1\twd:Q1\t그림\t\n", "근거가 비면 막는다"),
+    ("khs:1\twd:Q1\t만듦\t근거\n", "표에 없는 역할은 막는다"),
+    ("khs:1\twd:Q1\t그림\t근거\nkhs:1\twd:Q1\t글씨\t근거\n",
+     "같은 쌍이 두 번 적히면 막는다"),
+):
+    _p = Path(_tmp_cr.name) / "bad.tsv"
+    _p.write_text(_bad, encoding="utf-8")
+    try:
+        cr_mod.load_table(_p)
+        check(_why, False, "막지 않았다")
+    except cr_mod.CreatorsTableError:
+        check(_why, True)
+
+# **주격 조사는 이름에 붙어 있어야 한다.** 띄어쓰기를 넘겨 받으면
+# '미루어 보아 이 칠불은 …만들어졌을'의 '보아'가 사람이 된다.
+_names = {"정선": ["wd:Q489785"], "보아": ["wd:Q232449"], "김시": ["wd:Q12587920"]}
+check("이름 + 조사 + 창작 동사는 후보다",
+      "정선" in cr_mod._frames("겸재 정선이 인왕산 모습을 그린 그림으로", _names))
+check("띄어쓰기를 넘긴 '이'는 조사가 아니다",
+      "보아" not in cr_mod._frames("여건으로 보아 이 칠불은 8세기에 만들어졌다", _names))
+check("이름 뒤에 한글이 이어지면 다른 낱말이다",
+      "김시" not in cr_mod._frames("매월당 김시습이 지은 글이다", _names))
+check("이름(한자) 명단 끝의 '등이'도 후보로 받는다",
+      "정선" in cr_mod._frames("밀기(密機), 정선(鄭敾) 등이 제작하여 봉안하였다", _names))
+
+with GraphStore(Path(_tmp_cr.name) / "g.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="khs:1", type="heritage", label="김정희 필 세한도", source="khs",
+             description="추사 김정희가 1844년에 그린 그림이다."),
+        Node(id="khs:2", type="heritage", label="고려사", source="khs",
+             description="세종이 편찬을 지시한 역사서다."),
+        Node(id="wd:Q626484", type="person", label="김정희", source="wd"),
+        Node(id="wd:Q37682", type="person", label="세종", source="wd"),
+    ])
+    _cr_rep = cr_mod.apply_table(_st, _cr_rows)
+    check("표가 없던 엣지를 세운다", _cr_rep.made == 1, str(_cr_rep))
+    _made = _st.conn.execute(
+        "SELECT type, label FROM edges WHERE src = 'wd:Q626484'").fetchone()
+    check("역할이 그대로 엣지의 라벨이 된다",
+          tuple(_made) == ("created", "그림"), str(tuple(_made)))
+    check("'없음' 은 엣지를 세우지 않는다",
+          not _st.conn.execute(
+              "SELECT 1 FROM edges WHERE src = 'wd:Q37682'").fetchone())
+    # 수집이 거짓 엣지를 되살려도 편집 계층이 다시 지운다.
+    _st.upsert_edges([Edge(src="wd:Q37682", dst="khs:2", type="created", source="extract")])
+    check("수집이 되살린 거짓 관계를 편집 계층이 다시 지운다",
+          not _st.conn.execute(
+              "SELECT 1 FROM edges WHERE src = 'wd:Q37682'").fetchone())
+    check("두 번 씌워도 결과가 같다", not cr_mod.apply_table(_st, _cr_rows).made)
+    check("판정이 끝난 후보는 관문이 묻지 않는다",
+          not cr_mod.unjudged(_st, _cr_rows))
+    check("판정이 없으면 관문이 묻는다",
+          {c.name for c in cr_mod.unjudged(_st, [])} == {"김정희", "세종"},
+          str([c.name for c in cr_mod.unjudged(_st, [])]))
+_tmp_cr.cleanup()
+
+# 저장소에 실린 표가 실제 그래프와 맞는가.
+_repo_cr = cr_mod.load_table(Path("data/creators.tsv"))
+check("저장소의 판정 표에 만든 사람이 400줄 넘게 적혀 있다",
+      sum(1 for r in _repo_cr if r.role in cr_mod.ROLES) > 400,
+      str(sum(1 for r in _repo_cr if r.role in cr_mod.ROLES)))
+check("모든 역할이 ROLES 이거나 없음·삭제다",
+      {r.role for r in _repo_cr} <= cr_mod.TABLE_ROLES,
+      str({r.role for r in _repo_cr} - cr_mod.TABLE_ROLES))
+# **매체도 도착 타입이다.** 소설·시·영화에도 지은 사람이 있다.
+check("`created` 는 예술작품·유물·매체를 도착으로 받는다",
+      set(EDGE_TYPES["created"][2]) == {"artwork", "heritage", "media"},
+      str(EDGE_TYPES["created"][2]))
+# 역할이 그대로 엣지의 라벨이 되므로, 화면이 그 라벨을 부를 말을 들고 있어야
+# 한다 — 없으면 그린 것도 지은 것도 '제작' 한 더미로 뭉개진다
+# (graph-drawer.md §12.22). 새 역할을 더하면 여기서 걸린다.
+from histgraph.server import CREATOR_DIR_HEAD as _CDH  # noqa: E402
+check("만든 방식마다 방향별 이름이 있다",
+      set(cr_mod.ROLES) == set(_CDH), str(set(cr_mod.ROLES) ^ set(_CDH)))
+_cr_js = Path("web/src/lib/relations.js").read_text(encoding="utf-8")
+_cr_body = _cr_js[_cr_js.index("export const CREATED_SENTENCE = {"):]
+_cr_body = _cr_body[:_cr_body.index("};")]
+check("만든 방식마다 문장 규칙이 있다",
+      all(f"'{r}':" in _cr_body for r in cr_mod.ROLES),
+      str([r for r in cr_mod.ROLES if f"'{r}':" not in _cr_body]))
+
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

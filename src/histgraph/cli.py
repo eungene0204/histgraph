@@ -37,6 +37,7 @@ DEFAULT_CHRONOLOGY = ROOT / "data" / "chronology.tsv"
 DEFAULT_TERMS = ROOT / "data" / "terms.tsv"
 DEFAULT_RECENT = ROOT / "data" / "recent.tsv"
 DEFAULT_CLANS = ROOT / "data" / "clans.tsv"
+DEFAULT_CREATORS = ROOT / "data" / "creators.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -2089,6 +2090,47 @@ def cmd_terms(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_creators(args: argparse.Namespace) -> int:
+    """작품에 만든 사람을 잇는다 (`creators` 모듈 머리글).
+
+        uv run histgraph creators                    # 후보만 센다
+        uv run histgraph creators --scan --show 200  # 후보를 읽을 수 있게 찍는다
+        uv run histgraph creators --table            # 표를 씌우고 남은 것을 묻는다
+        uv run histgraph --db data/korea.sqlite creators --table
+    """
+    from . import corpus as cp
+    from . import creators as cr
+
+    table = cr.load_table(args.table) if args.table.exists() else []
+    corpus = cp.open_corpus(args.corpus)
+    try:
+        with GraphStore(args.db) as store:
+            if args.apply:
+                rep = cr.apply_table(store, table)
+                print(f"  표 {len(table)}줄 · 새로 세운 엣지 {rep.made} ·"
+                      f" 역할을 고친 것 {rep.relabelled} · 지운 것 {rep.deleted}")
+                for row in rep.absent:
+                    print(f"    이 그래프에 없는 줄: {row.work} → {row.person}")
+            left = cr.unjudged(store, table, corpus)
+            standing = cr.standing(store)
+    finally:
+        corpus.close()
+
+    print(f"  서 있는 `created` 엣지 {len(standing):,}건")
+    if args.scan or args.show:
+        with GraphStore(args.db) as store:
+            for c in left[:args.show or 40]:
+                print("\n  " + cr.describe(store, c))
+    if left:
+        # 관문. 수집이 작품을 더 실어 오면 만든 사람을 물어야 한다 — 조용히
+        # 넘기면 화면에서 그 작품은 다시 만든 이가 없는 것이 된다.
+        print(f"\n  ✗ 만든 사람 후보인데 표에 판정이 없는 쌍 {len(left):,} —"
+              f" {args.table} 에 적을 것 (`--scan` 으로 근거를 본다)", file=sys.stderr)
+        return 1
+    print("\n  ✓ 만든 사람 후보가 모두 판정돼 있다")
+    return 0
+
+
 def cmd_positions(args: argparse.Namespace) -> int:
     """왕조가 나눠 쓰는 임금 자리를 가른다 (`positions` 모듈 머리글).
 
@@ -3012,6 +3054,21 @@ def main(argv: list[str] | None = None) -> int:
                       help="임기 표 (기본: data/terms.tsv)")
     p_tm.add_argument("--dry-run", action="store_true", help="고치지 않고 세기만")
     p_tm.set_defaults(func=cmd_terms)
+
+    p_cr = sub.add_parser(
+        "creators", help="작품에 만든 사람을 잇는다 (`created` · 판정 표)"
+    )
+    p_cr.add_argument("--table", type=Path, default=DEFAULT_CREATORS,
+                      help="판정 표 `작품 id<TAB>인물 id<TAB>역할<TAB>근거`"
+                           " (기본: data/creators.tsv)")
+    p_cr.add_argument("--corpus", type=Path, default=None,
+                      help="말뭉치 파일 (기본 data/corpus.sqlite)")
+    p_cr.add_argument("--apply", action="store_true",
+                      help="표를 편집 계층에 적고 엣지를 세운다 (기본은 세기만)")
+    p_cr.add_argument("--scan", action="store_true",
+                      help="판정이 없는 후보를 근거와 함께 찍는다")
+    p_cr.add_argument("--show", type=int, default=0, help="찍을 후보 수")
+    p_cr.set_defaults(func=cmd_creators)
 
     p_ps = sub.add_parser(
         "positions", help="왕조가 나눠 쓰는 임금 자리를 왕조별로 가른다"

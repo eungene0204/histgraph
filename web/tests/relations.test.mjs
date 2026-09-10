@@ -309,6 +309,49 @@ console.log('\n씨족의 파');
      '전주 이씨의 본관은 전주시다');
 }
 
+// 작품을 만든 방식 (`creators.ROLES` — 그림·글씨·저술·편찬·제작·발원).
+// 라벨을 버리고 타입 이름으로만 읽으면 "정선이 인왕제색도를 만들었다"가 된다.
+console.log('\n작품을 만든 사람');
+{
+  const made = (dir, o, label) => rel({ type: 'created', dir, other: o, edge_label: label, label: '제작' });
+  const inwang = other('khs:INWANG', '인왕제색도', 'artwork', 'thing');
+  const sehando = other('khs:SEHANDO', '세한도', 'artwork', 'thing');
+  const uigam = other('khs:UIGAM', '동의보감', 'heritage', 'thing');
+  const jeongun = other('khs:JEONGUN', '동국정운', 'heritage', 'thing');
+  const jagyeongnu = other('khs:JAGYEONGNU', '자격루', 'heritage', 'thing');
+  const bulhwa = other('khs:HOEAM', '회암사명 약사여래삼존도', 'heritage', 'thing');
+
+  eq('그린 것', sentence(made('out', inwang, '그림'), { label: '정선', type: 'person' }),
+     '정선이 인왕제색도를 그렸다');
+  eq('글씨를 쓴 것', sentence(made('out', sehando, '글씨'), { label: '김정희', type: 'person' }),
+     '김정희가 세한도의 글씨를 썼다');
+  eq('지은 것', sentence(made('out', uigam, '저술'), { label: '허준', type: 'person' }),
+     '허준이 동의보감을 지었다');
+  eq('엮은 것', sentence(made('out', jeongun, '편찬'), { label: '신숙주', type: 'person' }),
+     '신숙주가 동국정운을 엮었다');
+  eq('만든 것', sentence(made('out', jagyeongnu, '제작'), { label: '장영실', type: 'person' }),
+     '장영실이 자격루를 만들었다');
+  eq('만들게 한 것', sentence(made('out', bulhwa, '발원'), { label: '문정왕후', type: 'person' }),
+     '문정왕후가 회암사명 약사여래삼존도를 만들게 했다');
+  // 작품 쪽에서 읽어도 만든 사람이 주어다
+  eq('작품 쪽에서 봐도 같은 문장',
+     sentence(made('in', other('wd:JEONGSEON', '정선'), '그림'), { label: '인왕제색도', type: 'artwork' }),
+     '정선이 인왕제색도를 그렸다');
+  // 산문 추출이 낸 옛 엣지에는 라벨이 없다
+  eq('라벨이 없으면 만들었다', sentence(made('out', inwang, null), { label: '정선', type: 'person' }),
+     '정선이 인왕제색도를 만들었다');
+
+  // 묶음 머리 — 사람 쪽은 만든 것들의 목록, 작품 쪽은 만든 사람이다
+  eq('사람 쪽 머리', relHead(made('out', inwang, '그림')), '그린 것');
+  eq('작품 쪽 머리', relHead(made('in', other('wd:JEONGSEON', '정선'), '그림')), '그린 사람');
+  eq('발원도 갈라 부른다', relHead(made('in', other('wd:MUNJEONG', '문정왕후'), '발원')), '만들게 한 사람');
+  eq('라벨 없는 제작은 타입 이름 그대로', relHead(made('out', inwang, null)), '제작');
+  // 김정희의 상세에서 '제작' 한 더미로 뭉치지 않는다
+  const gc = groupRelations([made('out', sehando, '글씨'), made('out', uigam, '저술'),
+                             made('out', jagyeongnu, '제작')]);
+  eq('만든 방식마다 묶음이 선다', gc.groups.map((x) => x.head).join(','), '글씨를 쓴 것,지은 것,만든 것');
+}
+
 // --- 인과 -----------------------------------------------------------------
 // "온톨로지 그래프이므로 인과관계를 보여줘야 한다 — 임진왜란 → 명의 쇠퇴 →
 // 여진족의 성장 → 병자호란" (2026-09-04). 엣지는 원인 → 결과, 라벨이 종류다.

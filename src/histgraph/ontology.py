@@ -86,7 +86,10 @@ EDGE_TYPES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     "occurred_during": ("발생 시기", ("event",), ("period",)),
     "born_in": ("출생지", ("person",), ("place",)),
     "died_in": ("사망지", ("person",), ("place",)),
-    "created": ("제작", ("person", "org"), ("artwork", "heritage")),
+    # 만든 사람. 도착에 `media` 가 있는 이유: 소설·시·영화도 지은 사람이 있다
+    # (『김약국의 딸들』은 박경리가 썼다). 매체를 빼 두면 `works` 가 실어 온
+    # 작품 660편이 만든 이를 영영 못 받는다 (`creators`, 2026-09-10).
+    "created": ("제작", ("person", "org"), ("artwork", "heritage", "media")),
     "located_in": ("소재지", ("heritage", "artwork", "place"), ("place",)),
     # 작품이 **실체**를 다룰 때만 depicts 다. 주제어(사랑·복수·조직범죄)는
     # about 으로 간다. 둘을 섞으면 "이 사건을 다룬 작품"이라는 질의가
