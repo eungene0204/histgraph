@@ -38,7 +38,6 @@ function today() {
 }
 
 const STORE_KEY = 'life-json';  // 옛 화면이 브라우저에 남긴 자료 (지금도 읽는다)
-const STORY_KEY = 'life-story'; // 적다 만 이야기 (분석은 몇 분이라 새로고침해도 글은 남긴다)
 // 분석이 끝나면 문서에 적어 둘 이야기 기록. 도는 동안 새로고침해도 잃지 않게
 // 브라우저에도 둔다 — 이것이 없으면 방금 적은 문단이 기록에서 빠진다.
 const NEXT_KEY = 'life-stories-next';
@@ -294,16 +293,28 @@ export default function LifeView() {
   }, [toast]);
 
   // --- 입력창에 글을 놓는다 ------------------------------------------------
+  // 칸에 선 글. **브라우저에 남기지 않는다** (2026-09-10 사용자: "지금 내 역사
+  // 입력창에 입력을 하면 마지막 입력이 남아서 보이고 있어. 사용자가 입력창을 다시
+  // 열면 그냥 placeholder만 보여줘"). 전에는 적는 대로 브라우저에 남겨 두어,
+  // 상자를 닫거나 새로고침한 뒤에 다시 열면 지난번 글이 서 있었다 — 그 글이 보낸
+  // 것인지 아닌지는 화면 어디에도 없다. **칸에 선 글은 '지금 쓰고 있는 글' 하나만
+  // 뜻한다**: 상자를 닫으면 걷고, 새로 열면 보기글뿐이다.
+  //
+  // 상자가 다시 세워지는 동안(key={draftStamp}) 글을 나르는 것이 이 칸이라, 적는
+  // 대로 여기에 담아 둔다. **상태가 아니라 ref 다** — 글자마다 화면 전체를 다시
+  // 그릴 이유가 없다.
+  const draftRef = useRef('');
   const [draftStamp, setDraftStamp] = useState(0);
   // 입력창에 글을 놓고 상자를 새로 세운다. 모달에서 옛 글을 옮겨 올 때와,
   // 못 보낸 글을 사람이 '되돌리기' 로 부를 때 같은 길을 쓴다.
   const putDraft = useCallback((text) => {
-    let cur = '';
-    try { cur = localStorage.getItem(STORY_KEY) || ''; } catch { /* 없다 */ }
-    const next = appendDraft(cur, text);
-    try { localStorage.setItem(STORY_KEY, next); } catch { /* 못 남겨도 상자는 받는다 */ }
+    draftRef.current = appendDraft(draftRef.current, text);
     setDraftStamp((n) => n + 1);
     setWriting(true);
+  }, []);
+  const closeWriting = useCallback(() => {
+    setWriting(false);
+    draftRef.current = '';
   }, []);
   const sentRef = useRef('');
   // 모델이 지금 읽고 있는 글. **칸이 이것을 보여 준다** (2026-09-09 사용자:
@@ -379,7 +390,11 @@ export default function LifeView() {
       // 고른 노드는 연표를 그 자리로 미끄러뜨리고(LifeBoard.select) 그래프도
       // 거기로 옮긴다(gv.focusOn). 첫 그래프(더한 것이 아닌 때)는 옮기지 않는다 —
       // 전부가 새 것이라 고를 하나가 없다.
-      await adopt(doc, 'local', st.added ? addedFocus(doc, st.added.ids) : null);
+      // 옮겨 갈 자리는 **연표에 새로 선 것**이 먼저다 — 옛 노드가 이제야 해를 얻어
+      // 줄에 서는 일도 있어서(life.merge `timeline_ids`), 새 노드만 보면 연표가
+      // 늘었는데도 화면이 안 움직인다.
+      await adopt(doc, 'local', st.added
+        ? addedFocus(doc, [...(st.added.timeline_ids || []), ...(st.added.ids || [])]) : null);
       await keepInAccount(doc, '내 계정에 저장했습니다');
     }
   }, [adopt, keepInAccount, takeStories, keepFailed]);
@@ -457,8 +472,8 @@ export default function LifeView() {
   }, [failed, putDraft, keepFailed]);
 
   // 예전에 적은 글을 입력창으로 옮긴다 (2026-09-08 사용자: "예전 입력을 클릭하면
-  // 우리 인생 입력창에 자동으로 복사해줘"). 상자는 브라우저에 남긴 글을 읽고
-  // 서므로 (STORY_KEY) 거기에 적고 상자를 새로 세운다. 적다 만 글은 아래에
+  // 우리 인생 입력창에 자동으로 복사해줘"). 상자는 놓아 준 글을 읽고 서므로
+  // (`draftRef`) 거기에 적고 상자를 새로 세운다. 적다 만 글은 아래에
   // 붙인다 — 쓰던 것을 삼키지 않는다 (`life.js appendDraft`).
   const pickStory = useCallback((text) => {
     putDraft(text);
@@ -779,15 +794,18 @@ export default function LifeView() {
         <div className="life-tools">
           {/* 상자를 닫아도 분석은 계속 돈다 — 단추가 그것을 말한다. */}
           <button type="button" className="life-btn" aria-pressed={writing}
-                  onClick={() => { setWriting((v) => !v); setLogOpen(false); }}>
+                  onClick={() => { if (writing) closeWriting(); else setWriting(true); setLogOpen(false); }}>
             {job?.state === 'running' ? `내 역사 읽는 중 · ${job.elapsed ?? 0}초` : '내 역사 입력하기'}
           </button>
           {/* 내가 적은 이야기 — 그래프의 원본이다. 아이콘 하나로 펴고 접는다
               (2026-09-08 사용자: "'내 역사 입력하기' 오른쪽에 아이콘 하나 만들어서
-              누르면 사용자가 입력한 사용자의 역사 히스토리를 보여줘"). */}
+              누르면 사용자가 입력한 사용자의 역사 히스토리를 보여줘").
+              **입력 상자는 건드리지 않는다** — 모달을 덮는 것은 상자를 닫는 것이
+              아니다. 닫아 버리면 적다 만 글이 걷혀(closeWriting) 옛 글을 골라 와도
+              쓰던 것이 사라진다 (2026-09-08 "쓰던 것을 삼키지 않는다"). */}
           {life && (
             <button type="button" className="clickable-icon life-log-btn" aria-pressed={logOpen}
-                    onClick={() => { setLogOpen((v) => !v); setWriting(false); }} aria-label="내가 적은 이야기"
+                    onClick={() => setLogOpen((v) => !v)} aria-label="내가 적은 이야기"
                     title="내가 적은 이야기 — 잘못 적은 것을 고칩니다">
               <StoryLogIcon />
             </button>
@@ -806,7 +824,8 @@ export default function LifeView() {
 
       {writing && <StoryBox key={draftStamp} job={job} local={local} blocking={blocking} onSubmit={onStory}
                             sent={sent} failed={failed} onRestore={restoreFailed}
-                            onClose={() => setWriting(false)} />}
+                            draft={draftRef.current} onDraft={(v) => { draftRef.current = v; }}
+                            onClose={closeWriting} />}
       {logOpen && <StoryLog stories={stories} running={job?.state === 'running'}
                             onPick={pickStory} onDrop={dropStory}
                             onClose={() => setLogOpen(false)} />}
@@ -819,15 +838,24 @@ export default function LifeView() {
         <section className="life-board" ref={rootRef}
                  style={life ? { width: `min(${boardWidth()}px, 45vw)` } : undefined}>
           <div className="life-head" />
-          <div className="life-body">
-            {booting && (
-              <div className="life-booting" role="status" aria-live="polite">
-                <span className="life-spinner" aria-hidden="true" />
-                <p>내 역사를 불러오는 중입니다…</p>
-              </div>
-            )}
-            {!life && !booting && <Empty offline={offline} onWrite={() => setWriting(true)} />}
-          </div>
+          {/* **이 두 칸에는 React 가 자식을 두지 않는다.** `LifeBoard` 가
+              `.life-head`·`.life-body` 를 `innerHTML` 로 통째로 다시 쓴다 —
+              React 가 그린 것을 같이 지우고, 그 뒤 React 가 자기 것을 거두려다
+              `removeChild` 로 터진다 (화면이 통째로 하얘진다). 그래서 사람이
+              읽는 안내는 **판 위에 얹는다**. */}
+          <div className="life-body" />
+          {(booting || !life) && (
+            <div className="life-over">
+              {booting ? (
+                <div className="life-booting" role="status" aria-live="polite">
+                  <span className="life-spinner" aria-hidden="true" />
+                  <p>내 역사를 불러오는 중입니다…</p>
+                </div>
+              ) : (
+                <Empty offline={offline} onWrite={() => setWriting(true)} />
+              )}
+            </div>
+          )}
         </section>
         {life && (
           <div className="stage-wrap">
@@ -966,11 +994,10 @@ function progressOf(job, local) {
 
 // 이야기를 적는 상자. 보기글(placeholder)이 무엇을 적을지 대신 말한다 —
 // 빈 칸에 '자유롭게 적으세요' 라고 쓰면 아무도 첫 줄을 못 적는다.
-// 적다 만 글은 브라우저에 남긴다. 분석이 몇 분이라 그동안 창을 닫는다.
-function StoryBox({ job, local, blocking, sent, failed, onRestore, onSubmit, onClose }) {
-  const [text, setText] = useState(() => {
-    try { return localStorage.getItem(STORY_KEY) || ''; } catch { return ''; }
-  });
+// **새로 서는 상자는 늘 빈 칸이다** — 놓아 준 글(`draft`)이 있을 때만 그 글이 선다
+// (기록에서 옮겨 온 것·못 보내 되돌린 것). 2026-09-10 사용자.
+function StoryBox({ job, local, blocking, sent, failed, draft, onDraft, onRestore, onSubmit, onClose }) {
+  const [text, setText] = useState(draft || '');
   const running = job?.state === 'running';
   // 칸을 비우는 것은 **보낼 때**다. 전에는 '분석이 끝났으면' 비웠는데, 그 효과가
   // **세워질 때마다** 돌았다 — 모달에서 예전 글을 눌러 옮기면 상자가 새로 서고
@@ -980,7 +1007,7 @@ function StoryBox({ job, local, blocking, sent, failed, onRestore, onSubmit, onC
   // (LifeView restoreDraft).
   const change = (v) => {
     setText(v);
-    try { localStorage.setItem(STORY_KEY, v); } catch { /* 저장 못 해도 적을 수 있다 */ }
+    onDraft(v);   // 상자가 다시 서도 쓰던 글은 이어진다 (LifeView draftRef)
   };
   // 옮겨 온 글은 **끝에 커서를 두고** 보여 준다 — 긴 글이면 어디에 붙었는지
   // 안 보이면 옮겨진 줄 모른다.
@@ -1001,7 +1028,7 @@ function StoryBox({ job, local, blocking, sent, failed, onRestore, onSubmit, onC
   const send = () => {
     onSubmit(text, '나');
     setText('');
-    try { localStorage.removeItem(STORY_KEY); } catch { /* 없다 */ }
+    onDraft('');
   };
   const done = job?.state === 'done';
   const pct = progressOf(job, local);
@@ -1176,8 +1203,11 @@ function EventDetail({ life, id, onPick, onHistory, onDrop, onEdit }) {
   // 끝이 시작과 같은 날이면 기간이 아니다 — 모델이 하루짜리 일에도 끝을 적어 둔다.
   const till = from && node.end_date && node.end_date !== node.start_date
     && dateSaid(node) && !String(from).includes('~') ? node.end_date : null;
+  // 시절은 **이 일이 무엇이었나**를 먼저 적는다 (2026-09-10 사용자, 공익 시절에 만난
+  // 사람의 상세가 '군복무'로 선 것을 보고: "오해하기 쉬운거야 타임라인은 그냥 군복무라고
+  // 써도 되지만 노드엔 연애라고 표시해줘"). 연표의 띠는 그대로 그 시절(군복무)이다.
   const when = [till ? `${from} ~ ${till}` : from,
-    t?.age != null ? `만 ${t.age}세` : null, t?.life_stage].filter(Boolean).join(' · ');
+    t?.age != null ? `만 ${t.age}세` : null, t?.node_stage || t?.life_stage].filter(Boolean).join(' · ');
   // 이름을 모르는 아이디는 화면에 내지 않는다 (lib/life.js nodeLabel) — 모델의
   // 식별자가 그대로 서는 자리가 없어야 한다 (2026-09-08 지적).
   const nameOf = (nid) => nodeLabel(byId, nid);

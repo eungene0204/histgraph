@@ -409,12 +409,14 @@ class GraphAPI:
         선조였다가 하는 우연이고, 화면을 열었을 때 '무엇의 그래프인가'를
         말해주지 못한다. 왕조 노드가 실제로 있을 때만 쓴다.
 
-        시대를 묶어 담은 그래프(조선~일제강점기)에서는 **맨 앞 시대**가
+        시대를 묶어 담은 그래프(고려~대한민국)에서는 **여는 시대**가
         중심이다. 들어가는 문이 하나여야 하고, 둘을 나란히 놓으면 화면이
-        먼저 '어느 쪽이냐'를 묻게 된다."""
-        from .scope import ERAS, eras_of
+        먼저 '어느 쪽이냐'를 묻게 된다. 그 시대는 묶음의 맨 앞과 다를 수
+        있다 (`scope.BUNDLE_ROOT`) — 맨 앞은 연표의 바닥이고 여는 시대는
+        처음 보이는 자리다. korea 묶음은 918년에서 시작해 조선에서 연다."""
+        from .scope import ERAS, opening_eras
 
-        for key in eras_of(self.era):
+        for key in opening_eras(self.era):
             era = ERAS.get(key)
             if era is None:
                 continue

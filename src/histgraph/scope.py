@@ -97,10 +97,11 @@ class Era:
 ERAS: dict[str, Era] = {
     "joseon": Era("조선", "Q28179", "조선", ["조선"], successor_events=["대한제국"],
                   successor_states=["Q28233"]),
-    # 고려는 조선 앞에 선다 — 묶음의 **맨 앞 시대**가 화면의 중심이고
-    # 연표의 바닥이다 (`server.root`·`_polities`). 조선만 있을 때는 위화도
-    # 회군(1388)·삼사(1100) 같은 고려 사건이 맥락으로만 남아 축을 늘여
-    # 놓았는데, 이제 그것들이 자기 시대에 선다 (2026-09-06 사용자 요청).
+    # 고려는 조선 앞에 선다 — 묶음의 **맨 앞 시대**가 연표의 바닥이다
+    # (`server._polities` 의 `floor`; 화면을 여는 자리는 `BUNDLE_ROOT` 가
+    # 따로 정한다). 조선만 있을 때는 위화도 회군(1388)·삼사(1100) 같은
+    # 고려 사건이 맥락으로만 남아 축을 늘여 놓았는데, 이제 그것들이 자기
+    # 시대에 선다 (2026-09-06 사용자 요청).
     "goryeo": Era("고려", "Q28208", "고려", ["고려"]),
     "silla": Era("신라", "Q28456", "신라", ["신라", "통일신라"]),
     "goguryeo": Era("고구려", "Q28370", "고구려", ["고구려"]),
@@ -138,10 +139,30 @@ BUNDLE_LABEL: dict[str, str] = {
     "korea": "고려~대한민국",
 }
 
+# **여는 자리**는 맨 앞 시대와 다르다 (2026-09-11 사용자 결정: "페이지를
+# 처음 열었을때 보이는 타임라인을 조선으로"). 맨 앞 시대는 **연표의
+# 바닥**이라 그 앞의 것을 덜어내는 자리고(`server` 의 `floor`), 여는 자리는
+# 화면을 열었을 때 서는 노드다(`server.root`). korea 묶음의 연표는 918년
+# 고려 건국에서 시작하되, 처음 보이는 자리는 조선이다 — 바닥을 조선으로
+# 올리면 고려 사건 전부가 연표에서 사라진다 (CLAUDE.md 1-3 뒷절).
+BUNDLE_ROOT: dict[str, str] = {
+    "korea": "joseon",
+}
+
 
 def eras_of(key: str) -> tuple[str, ...]:
     """묶음 이름이면 그 구성 시대들, 시대 이름이면 자기 자신."""
     return BUNDLES.get(key, (key,))
+
+
+def opening_eras(key: str) -> tuple[str, ...]:
+    """중심(`server.root`)을 고를 차례. 여는 시대를 정해 뒀으면 그것이 맨 앞이고,
+    그 시대의 왕조 노드가 그래프에 없을 때만 다음 시대로 넘어간다."""
+    eras = eras_of(key)
+    opener = BUNDLE_ROOT.get(key)
+    if opener is None or opener not in eras:
+        return eras
+    return (opener, *(e for e in eras if e != opener))
 
 
 def label_of(key: str) -> str:

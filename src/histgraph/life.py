@@ -68,10 +68,11 @@ EDGE_TYPE_KO: dict[str, str] = {
     "relative_of": "친척",
     "influenced": "영향을 줌", "inspired": "영감을 줌", "helped": "도움", "mentored_by": "스승",
     "worked_with": "함께 일함", "met": "만남",
-    # 아래 셋은 지시문에 없고 다듬기(tidy_edges)가 세운다 — 친구는 '만남'이 아니고,
-    # 주인공과 자기 사건은 '뒤'·'동안'이 아니다 (2026-09-08 사용자: "친구들은 만남이
-    # 아니라 '친구'라고 표시해야. 그리고 '뒤', '동안' 이런 설명은 도대체 뭐야?").
-    "friend_of": "친구", "experienced": "당사자", "schoolmate": "같은 학교", "at": "곳",
+    # 아래 넷은 지시문에 없고 다듬기(tidy_edges·link_people)가 세운다 — 친구는 '만남'이
+    # 아니고, 주인공과 자기 사건은 '뒤'·'동안'이 아니며 (2026-09-08 사용자: "친구들은
+    # 만남이 아니라 '친구'라고 표시해야. 그리고 '뒤', '동안' 이런 설명은 도대체 뭐야?"),
+    # 사귄 사람은 친구가 아니다 (2026-09-10 사용자, 아래 _PARTNER).
+    "friend_of": "친구", "partner_of": "연인", "experienced": "당사자", "schoolmate": "같은 학교", "at": "곳",
     "caused": "원인", "triggered": "촉발", "led_to": "이어짐", "changed": "바꿈",
     "affected": "영향", "resulted_in": "결과",
     "before": "다음", "after": "이전", "during": "동안", "overlapped": "겹침",
@@ -94,17 +95,24 @@ EDGE_TYPE_KO: dict[str, str] = {
 # 상세의 `다음 성내초등학교 전학` 을 보고: "다음 이라는 메뉴는 뭐야? 별 정보값이 없는데
 # 그냥 삭제해"). 모델이 답하는 것까지 막지는 않는다 — 주인공 → 자기 사건을 `after` 로
 # 답하기도 하고 그것은 참여(experienced)라 뜻이 있다. 그래서 버리는 자리는 `tidy_edges`
-# 의 RELAX **뒤**, 옮길 데 없이 사건 → 사건으로 남은 것뿐이다. `during`·`overlapped` 는
-# 차례가 아니라 포함·겹침이라 남는다.
-SEQUENCE_ONLY = frozenset({"before", "after"})
+# 의 RELAX **뒤**, 옮길 데 없이 사건 → 사건으로 남은 것뿐이다.
+#
+# `during`('동안')도 같은 자리로 내렸다 (2026-09-10 사용자: "노드에서 '동안'이라는 메뉴를
+# 삭제해줘"). 사건이 다른 사건·시기 **안에** 있다는 말인데, 두 사건의 해가 연표에 이미
+# 서 있어 그 포함은 눈으로 읽힌다 — 이름만 한 번 더 적는 줄이다. 뜻이 있는 `during` 은
+# RELAX 가 먼저 데려간다: 사람 ↔ 사건은 참여(experienced), 사건 → 단체·자리는 곳(at).
+# `overlapped`('겹침')는 그대로다 — 부른 적이 없다.
+SEQUENCE_ONLY = frozenset({"before", "after", "during"})
 # 사건 관계 가운데 **원인 → 결과**로 읽는 것. 화면이 개인 연표에서 인과 선으로 긋는다.
 CAUSAL_EDGES = frozenset({"caused", "triggered", "led_to", "resulted_in"})
 IMPACT_KO = {"direct": "직접", "indirect": "간접", "possible": "가능성"}
 # 인생 단계 — 지시문(life_prompt.md)의 목록에 '군복무'를 더했다 (2026-09-08 사용자:
 # "공익근무는 군복무 기간이야. 훈련소, 공익근무 역시 군복무로 인식할 수 있게 해줘").
 # 이 목록은 모델에게 주는 스키마의 enum 이기도 하다 — 여기 없으면 모델이 못 고른다.
+# '연애'도 사람이 더한 것이다 (2026-09-10 사용자, '2009년 안다영이라는 여자친구를
+# 만났어' 가 '사회생활'로 선 것을 보고: "사회생활이 아니고 연애를 한거야").
 LIFE_STAGES = ["출생", "어린 시절", "초등학교", "중학교", "고등학교", "대학", "군복무",
-               "사회생활", "창업", "가족 형성", "현재"]
+               "사회생활", "연애", "창업", "가족 형성", "현재"]
 # 단계에는 **차례**가 있다. 출생부터 군복무까지는 뒤로 돌아가지 않는다 — 스무 살에
 # '초등학교'인 삶은 없다 (2026-09-09 실측: 공익 시절에 만난 사람의 연표 항목이
 # '초등학교'로 서 있었다. 모델이 사람 노드에 단계를 아무렇게나 적은 것이다).
@@ -119,6 +127,21 @@ MILITARY = re.compile(
     r"상근예비역|방위병|의무경찰|의경대|카투사|해병대|현역|전역|소집해제|(?<![가-힣])제대(?!로)")
 # 그 단계를 **끝내는** 사건 (화면이 띠를 여기서 닫는다 — web/src/lib/life.js STAGE_END).
 STAGE_ENDS_ON = re.compile(r"전역|소집해제|(?<![가-힣])제대(?!로)|만기")
+# 연애로 읽는 사건. 말 표는 `_PARTNER`(연인 관계를 가리는 그 표)와 같은 것을 쓴다 —
+# 한 이야기가 두 자리에 같은 근거를 댄다.
+#
+# 근거가 둘이다: 사건의 이름·설명에 그 말이 있거나, **이름을 단 사람**을 이야기가
+# 연인이라 부르거나. 뒤엣것이 있어야 하는 것은 모델이 세운 만남 사건에 설명이 없기
+# 때문이다 (실측 2026-09-10: '안다영을 만남'이 설명 없이 서서 '사회생활'로 남았다).
+#
+# **여기서 군복무를 보지 않는다.** 이것은 '이 일이 연애인가'를 재는 것이고, 그 시절이
+# 무엇이었나는 아래 연표 고리가 따로 정한다 (군복무가 띠를 먼저 가져간다).
+def _romance(node: dict, story: str = "", people: list[dict] | None = None) -> bool:
+    said = f"{node.get('name') or ''} {node.get('description') or ''}"
+    if _PARTNER.search(said):
+        return True
+    names = [str(p.get("name") or "").strip() for p in (people or [])]
+    return any(nm and nm in said and _partner_says(story, nm, names) for nm in names)
 # 연표에 점으로 찍는 타입. 사람·장소·책은 이어지는 것이라 점이 아니다
 # (server.POINT_TYPES 와 같은 이유).
 EVENT_TYPES = frozenset({"PersonalEvent", "HistoricalEvent", "TurningPoint", "Crisis",
@@ -584,6 +607,72 @@ def stated_date(text: str | None, name: str | None, date: str | None, *, whole: 
     return None
 
 
+_ISO_YMD = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?$")
+_TEXT_YMD = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?")
+
+
+def _story_says_date(story: str, y: int, mo: int, d: int | None = None) -> bool:
+    """이야기가 이 달(날까지 주면 이 날)을 적었는가. '1998년 3월' · '1998-03' 둘 다."""
+    ko = rf"{y}\s*년\s*{mo}\s*월" + (rf"\s*{d}\s*일" if d else "")
+    num = rf"{y}\s*[-./]\s*0?{mo}" + (rf"\s*[-./]\s*0?{d}(?!\d)" if d else r"(?!\d)")
+    return re.search(ko, story) is not None or re.search(num, story) is not None
+
+
+def trim_dates(nodes: list[dict], story: str | None, timeline: list[dict] | None = None) -> int:
+    """이야기가 해만 말했으면 화면에 서는 것도 해까지다 — 달과 날은 지어낸 것이다.
+
+    2026-09-10 사용자: "사용자가 년도만 언급하면 노드의 기간을 년도만 표시해줘 달과
+    날짜를 추측해서 표시하지마." 모델은 해만 아는 날을 **1월 1일**로 적어 온다
+    (위키데이터도 같은 버릇이다 — CLAUDE.md §1-5). 그것을 그대로 세우면 읽는 사람에게는
+    잰 날이 된다: '2002-01-01' 은 1월 1일에 그 일이 있었다는 말이다.
+
+    근거는 이야기 안에 있어야 한다 — 이야기가 '1998년 3월'이라 적었으면 달까지 남고,
+    '1998년'이라고만 했으면 해까지다. **자르기만 하고 지우지 않는다**: 근거 없는 해를
+    비우는 것은 `gate_dates` 의 일이고, 사건은 해를 잃으면 연표에서 내려간다.
+
+    돌아오는 것은 자른 자리의 수.
+    """
+    story = str(story or "")
+    if not story.strip():
+        return 0
+    cut = 0
+    for n in nodes:
+        touched = False
+        for key in ("start_date", "end_date"):
+            m = _ISO_YMD.match(str(n.get(key) or ""))
+            if not m:
+                continue
+            y, mo = int(m.group(1)), int(m.group(2))
+            d = int(m.group(3)) if m.group(3) else None
+            if d is not None and _story_says_date(story, y, mo, d):
+                continue
+            said = f"{y:04d}-{mo:02d}" if _story_says_date(story, y, mo) else f"{y:04d}"
+            if said == n[key]:
+                continue
+            n[key] = said
+            touched = True
+            cut += 1
+        if touched and n.get("year") is not None:
+            y2, _, prec = parse_when(n.get("start_date"))
+            if y2 is not None:
+                n["year"], n["precision"] = y2, prec
+    # 연표의 '날짜 글'도 같은 자리다 — 화면의 날짜 줄은 이것이 있으면 이것을 세운다
+    # (LifeView `from`). 여기만 두면 노드는 '1997' 인데 줄에는 '1997년 3월'이 선다.
+    for t in timeline or []:
+        m = _TEXT_YMD.search(str(t.get("date_text") or ""))
+        if not m:
+            continue
+        txt = str(t["date_text"])
+        y, mo = int(m.group(1)), int(m.group(2))
+        d = int(m.group(3)) if m.group(3) else None
+        if _story_says_date(story, y, mo, d):
+            continue
+        keep = f"{y}년 {mo}월" if (d is not None and _story_says_date(story, y, mo)) else f"{y}년"
+        t["date_text"] = (txt[:m.start()] + keep + txt[m.end():]).strip() or None
+        cut += 1
+    return cut
+
+
 def gate_dates(nodes: list[dict], me: dict | None, text: str | None,
                timeline: list[dict] | None = None) -> list[str]:
     """인물·단체 노드의 날짜를 원문에 대 보고, 근거 없는 것을 비운다.
@@ -711,6 +800,13 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
     # 0. 인물의 생몰년 — 원문을 아는 자리에서는 여기서도 잰다 (옛 그래프가 들고 있는
     #    지어낸 생년은 이 길로 빠진다. 원문을 모르면 그대로 둔다.)
     gate_dates(nodes, me, text, payload.get("timeline"))
+    # 0-2. 이야기가 해만 말한 날짜는 해까지 자른다 (2026-09-10 사용자). 대는 근거는
+    #      **말한 것 전부**다 — 부르는 쪽이 주는 원문(`text`)과 그래프에 실린 이야기가
+    #      서로 다를 수 있어서다 (서버의 `/api/life/refine` 은 이 컴퓨터의 옛 원문
+    #      파일을 준다). 한쪽만 보면 사람이 적은 달을 잘라 버린다.
+    told = [story, str(text or ""), *(str(r.get("text") or "")
+                                      for r in (payload.get("stories") or []) if isinstance(r, dict))]
+    trim_dates(nodes, "\n".join(x for x in dict.fromkeys(told) if x), payload.get("timeline"))
 
     # 1. 생년 — 그리고 생일. '출생' 사건이 든 날짜가 주인공 노드의 날짜를 이긴다
     #    (birth_date_from_nodes: 모델은 해만 알면 1월 1일을 적는다).
@@ -829,9 +925,22 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
         node = by_id.get(t.get("event_id"))
         if t.get("stage_said"):
             continue
-        if node is not None and klass(node) in ("event", "period") \
-                and MILITARY.search(f"{node.get('name') or ''} {node.get('description') or ''}"):
+        if node is None or klass(node) not in ("event", "period"):
+            continue
+        love = _romance(node, story, [n for n in nodes if n.get("type") in PERSON_TYPES and n is not me])
+        if MILITARY.search(f"{node.get('name') or ''} {node.get('description') or ''}"):
+            # 띠는 군복무다 — 공익 시절도 병역이고, 그 시절에 일어난 일이다 (2026-09-09).
             t["life_stage"] = "군복무"
+        elif love:
+            t["life_stage"] = "연애"
+        # **노드가 제 이름으로 말하는 것은 따로다** (2026-09-10 사용자, 공익 시절에 만난
+        # 사람의 상세가 '군복무'로 선 것을 보고: "이건 공익생활중에 만났으니 군복무라고
+        # 써있는데 오해하기 쉬운거야 타임라인은 그냥 군복무라고 써도 되지만 노드엔 연애라고
+        # 표시해줘"). 띠는 그 시절이고, 상세의 날짜 줄은 그 일이 무엇이었나다.
+        if love:
+            t["node_stage"] = "연애"
+        elif "node_stage" in t:
+            del t["node_stage"]
     timeline.sort(key=lambda t: (t.get("year") is None, t.get("year") or 0))
     # 단계는 뒤로 가지 않는다 (ONE_WAY_STAGES) — 스무 살에 '초등학교'인 삶은 없다.
     # 창업·가족 형성·현재는 오갈 수 있으므로 되돌리지 않는다.
@@ -970,6 +1079,28 @@ def time_anchors(nodes: list[dict], me: dict | None) -> dict[str, int]:
     return out
 
 
+def _mend_meet(event: dict, edges: list[dict], me: dict, pid: str, lines: list[str]) -> None:
+    """이미 선 만남 사건의 양끝과 설명을 채운다. 만든 것은 `meet_events` 와 같은 꼴이다."""
+    conf = float(event.get("confidence") or 0.8)
+    for who, role in ((me["id"], "만남"), (pid, "함께")):
+        for e in edges:
+            if {e.get("source"), e.get("target")} != {who, event["id"]}:
+                continue
+            # 뒤집혀 왔으면 바로 세운다 — 참여는 사람 → 사건이다 (LIFE_EDGES).
+            e["source"], e["target"], e["type"], e["role"] = who, event["id"], "experienced", role
+            break
+        else:
+            edges.append({"source": who, "target": event["id"], "type": "experienced",
+                          "description": None, "confidence": conf, "role": role})
+    if not event.get("description"):
+        event["description"] = next((ln.strip() for ln in lines if _MET_STORY.search(ln)), None)
+    parts = event.setdefault("participants", []) or []
+    for who in (me["id"], pid):
+        if who not in parts:
+            parts.append(who)
+    event["participants"] = parts
+
+
 def meet_events(payload: dict, nodes: list[dict], edges: list[dict], me: dict | None,
                 story: str | None, entries: dict[str, int]) -> int:
     """'…를 만났다' 를 **사건**으로 세운다. 돌아오는 것은 새로 세운 수.
@@ -1011,10 +1142,14 @@ def meet_events(payload: dict, nodes: list[dict], edges: list[dict], me: dict | 
         if pid in family or len(name) < 2:
             continue
         ev_id = f"met_{pid}"
+        lines = _sentences_about(story, name)
         if ev_id in by_id:
+            # 모델도 같은 이름으로 만남 사건을 세운다 — 그런데 **양끝이 비거나
+            # 뒤집혀 온다** (실측 2026-09-10: '안다영을 만남'이 사건 → 나 한 줄뿐이라
+            # 상세의 '함께'에 그 사람이 없었고, 설명이 비어 시절도 '사회생활'로 남았다).
+            _mend_meet(by_id[ev_id], edges, me, pid, lines)
             _during(by_id, edges, pid, ev_id)   # 이미 세운 만남에도 시절을 잇는다
             continue
-        lines = _sentences_about(story, name)
         if year is None or not any(_MET_STORY.search(ln) for ln in lines):
             continue
         if any(name in ev for ev in named):
@@ -1126,7 +1261,9 @@ def _during(by_id: dict[str, dict], edges: list[dict], pid: str, ev_id: str) -> 
         if pid not in (src, dst) or e.get("type") not in MET_EDGES:
             continue
         other = by_id.get(dst if src == pid else src)
-        if other is None or other.get("type") not in EVENT_TYPES:
+        # 그 사람을 만남 사건 자체에 이어 둔 답도 있다 (모델). 그것을 그대로 옮기면
+        # 사건이 자기 자신에게 걸린다 — 자기순환은 어떤 뜻도 없다.
+        if other is None or other.get("type") not in EVENT_TYPES or other["id"] == ev_id:
             continue
         e["source"], e["target"], e["type"] = ev_id, other["id"], "during"
 
@@ -1309,6 +1446,35 @@ def _kin_of_other(sentence: str, name: str) -> bool:
     return re.search(re.escape(name) + r"\s*(?:의|네)?\s*(?:" + _KIN_ALT + ")" + _KIN_TAIL, sentence) is not None
 
 
+# 사귄 사이를 이름씨로 부르는 말 (`_PARTNER` 에서 동사를 뺀 것). 누구의 연인인지를
+# 가리는 데 쓴다 — '이수아의 남자친구'는 이수아가 아니라 그 사람이다.
+_PARTNER_NOUN = r"여자\s*친구|남자\s*친구|여친|남친|연인|애인|첫사랑"
+
+
+def _partner_says(story: str, name: str, names: list[str]) -> bool:
+    """이야기가 이 사람을 '여자친구'·'연인'이라 부르는가 (2026-09-10 사용자).
+
+    **이름을 부르는 그 문장만 본다.** 앞 문장까지 보면 '여자친구와 헤어졌다. 그 뒤
+    김일권을 만났다' 의 김일권이 연인이 된다 — 가족 호칭과 달리 이 말은 한 사람을
+    가리키므로, 근거가 한 문장 안에 있을 때만 세운다.
+    """
+    for para in story.split("\n"):
+        for sent in (x for x in re.split(r"[.!?。]", para) if x.strip()):
+            if name not in sent:
+                continue
+            # 그 말이 가리키는 사람이 따로 있으면 아니다 ('이수아의 남자친구')
+            if any(re.search(re.escape(nm) + r"\s*(?:의|네)?\s*(?:" + _PARTNER_NOUN + ")", sent)
+                   for nm in names if nm):
+                continue
+            if _PARTNER.search(sent):
+                return True
+    return False
+
+
+# 연인으로 올라설 수 있는 **묽은 관계**. 가족은 건드리지 않는다.
+_WEAK_TIES = frozenset({"met", "friend_of", "worked_with", "schoolmate"})
+
+
 def link_people(nodes: list[dict], edges: list[dict], me: dict | None, text: str | None) -> int:
     """주인공과 떨어진 **사람**을 잇는다. 돌아오는 것은 새로 이은 수.
 
@@ -1366,6 +1532,27 @@ def link_people(nodes: list[dict], edges: list[dict], me: dict | None, text: str
         tied.add((src, dst))
         direct.add(n["id"])
         made += 1
+    # 1-2. 연인 — 이야기가 그 사람을 '여자친구'·'연인'이라 부르면 친구가 아니다
+    #      (2026-09-10 사용자: "'남자친구'나 '여자친구' '연인' 같은 표현을 하면 관계를
+    #      연인으로 설정 해줘"). 모델은 '여자친구'의 '친구'를 보고 friend_of 로 적고,
+    #      아무 말 없이 met 로 적기도 한다 — 둘 다 여기서 올라선다.
+    all_names = [str(p["name"]).strip() for p in people]
+    for n in people:
+        if not _partner_says(story, str(n["name"]).strip(), all_names):
+            continue
+        weak = next((e for e in edges
+                     if {e.get("source"), e.get("target")} == {me["id"], n["id"]}
+                     and e.get("type") in _WEAK_TIES), None)
+        if weak is not None:
+            weak["type"] = "partner_of"
+            weak["role"] = None
+        elif n["id"] not in direct:
+            edges.append({"source": me["id"], "target": n["id"], "type": "partner_of",
+                          "description": None, "confidence": 1.0})
+            tied.add((me["id"], n["id"]))
+            direct.add(n["id"])
+            made += 1
+
     # 2. 이름이 불린 사람 — 주인공에게 닿지 않으면 만난 사이로
     reach = {me["id"]}
     grew = True
@@ -1418,6 +1605,11 @@ LIFE_EDGES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     # '친구'는 다른 관계다. schoolmate 는 '같은 학교에 다녔다'까지만 말한다.
     "friend_of": ("친구", _P, _P), "met": ("만남", _P, _P), "worked_with": ("함께 일함", _P, _P),
     "schoolmate": ("같은 학교", _P, _P), "mentored_by": ("스승", _P, _P), "helped": ("도움", _P, _P),
+    # 연인 — 사귄 사이. '여자친구'를 '친구'로 두면 그 삶에서 가장 가까운 사람이 동창과
+    # 같은 이름으로 선다 (2026-09-10 사용자: "'남자친구'나 '여자친구' '연인' 같은 표현을
+    # 하면 관계를 연인으로 설정 해줘"). 배우자는 여기 오지 않는다 — 호칭 표가 '아내'·'남편'
+    # 을 relative_of 의 역할로 단다.
+    "partner_of": ("연인", _P, _P),
     "influenced": ("영향을 줌", _P + _E + _W + _O, _P + _E), "inspired": ("영감을 줌", _P + _E + _W + _O, _P + _E),
     # 사건 참여 — 한국사의 participated_in. 방향은 사람 → 사건이고 **역할**이 선의 이름이다
     # (BIO 어휘의 principal: 그 삶의 사건의 당사자). 역할은 사건 이름의 술어(입학·졸업·
@@ -1459,6 +1651,9 @@ MAX_TARGETS = {"born_in": 1}
 RELAX: dict[tuple[str, str, str], str] = {
     **{(t, "person", "event"): "experienced" for t in ("before", "after", "during", "overlapped")},
     **{(t, "event", "person"): "experienced" for t in ("before", "after", "during", "overlapped")},
+    # 참여를 사건 → 사람으로 적어 오는 답이 있다 (실측 2026-09-10). 방향만 뒤집힌
+    # 것이라 버릴 것이 아니다 — 아래 `tidy_edges` 가 양끝을 맞바꾼다.
+    ("experienced", "event", "person"): "experienced",
     ("born_in", "person", "period"): "experienced",       # 나 → '출생'(Time) 은 출생지가 아니라 출생 사건
     **{(t, "event", c): "at" for t in ("studied_at", "worked_at", "member_of", "during", "lived_in")
        for c in ("org", "role")},
@@ -1467,7 +1662,13 @@ RELAX: dict[tuple[str, str, str], str] = {
 # RELAX 가 옮기면서 남기는 역할 — 원래 타입이 말하던 것 (studied_at → 전공 = '전공').
 RELAX_ROLE: dict[tuple[str, str], str] = {("studied_at", "role"): "전공", ("worked_at", "role"): "직업",
                                           ("born_in", "period"): "출생"}
-_SYMMETRIC = frozenset({"met", "friend_of", "worked_with", "schoolmate", "relative_of", "shared_with", "overlapped"})
+_SYMMETRIC = frozenset({"met", "friend_of", "partner_of", "worked_with", "schoolmate", "relative_of",
+                        "shared_with", "overlapped"})
+# 사귄 사이를 부르는 말. **'친구'보다 먼저 본다** — '여자친구'에는 '친구'가 들어 있어서,
+# 순서를 바꾸면 그 삶에서 가장 가까운 사람이 동창과 같은 이름으로 선다 (2026-09-10
+# 사용자: "'남자친구'나 '여자친구' '연인' 같은 표현을 하면 관계를 연인으로 설정 해줘").
+# 결혼한 뒤의 호칭(아내·남편)은 여기 없다 — 그것은 호칭 표(_KIN_TERMS)가 맡는다.
+_PARTNER = re.compile(r"여자\s*친구|남자\s*친구|여친|남친|연인|애인|사귀|교제|연애|첫사랑")
 _FRIEND = re.compile(r"친구|벗|단짝|절친|죽마고우")
 _COLLEAGUE = re.compile(r"동료|같이 일|함께 일|같은 회사|같은 팀")
 # 사건 이름 꼬리의 술어 — 당사자가 그 사건에서 한 일. 이것이 선의 이름이다
@@ -1530,6 +1731,9 @@ def tidy_edges(nodes: list[dict], edges: list[dict], me: dict | None) -> list[st
     seen: set = set()
     targets: dict[tuple[str, str], set[str]] = {}
     for e in edges:
+        # 자기순환은 어떤 뜻도 없다 (한국사 그래프에서도 지웠다 — HANDOFF 2026-09-06).
+        if e.get("source") == e.get("target"):
+            continue
         s, t = by_id.get(e.get("source")), by_id.get(e.get("target"))
         kind = e.get("type")
         role = e.get("role")
@@ -1544,13 +1748,16 @@ def tidy_edges(nodes: list[dict], edges: list[dict], me: dict | None) -> list[st
                     kind = moved
                 else:
                     issues.append(f"{kind}: {s.get('name')}({klass(s)}) → {t.get('name')}({klass(t)}) — 표 밖")
-            # 2. 만남의 실제
-            if kind == "met":
+            # 2. 만남의 실제. **연인이 친구보다 먼저다** — '여자친구'에 '친구'가 들어 있다.
+            #    이미 friend_of 로 온 것도 다시 본다 (모델이 '여자친구'를 보고 그렇게 적는다).
+            if kind in ("met", "friend_of"):
                 others = [n for n in (s, t) if n is not me]
                 text = " ".join([str(e.get("description") or ""), *(str(n.get("description") or "") for n in others)])
-                if _FRIEND.search(text):
+                if _PARTNER.search(text):
+                    kind = "partner_of"
+                elif kind == "met" and _FRIEND.search(text):
                     kind = "friend_of"
-                elif _COLLEAGUE.search(text):
+                elif kind == "met" and _COLLEAGUE.search(text):
                     kind = "worked_with"
             # 3. 함께 일함의 근거
             if (kind == "worked_with" and (e.get("confidence") or 1) < 1
@@ -2244,6 +2451,13 @@ def merge(base: dict, add: dict, text: str | None = None) -> tuple[dict, dict]:
             stats["nodes"] += 1
             stats["ids"].append(n["id"])
     stats["timeline"] += max(0, len(out.get("timeline") or []) - was_tl)
+    # **연표에 새로 선 것**은 새 노드만이 아니다 — 옛 노드가 이제야 해를 얻어
+    # 줄에 서기도 한다 ('그때가 1998년이었다'). 화면은 연표를 그리로 옮기므로
+    # (LifeView.finish) 그 자리를 새 노드와 따로 적어 둔다.
+    was_line = {t.get("event_id") for t in base.get("timeline") or [] if isinstance(t, dict)}
+    stats["timeline_ids"] = [t["event_id"] for t in out.get("timeline") or []
+                             if isinstance(t, dict) and t.get("event_id")
+                             and t["event_id"] not in was_line]
     return out, stats
 
 

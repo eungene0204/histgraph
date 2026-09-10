@@ -1,13 +1,18 @@
-// 배치 검증 — 브라우저 없이 돈다 (d3-force 는 DOM 을 쓰지 않는다).
+// 배치 검증 — 브라우저 없이 돈다 (d3-force-3d 는 DOM 을 쓰지 않는다).
 //
 //   node web/tests/layout.test.mjs
 //
-// 손으로 짠 시뮬레이션을 들어내면서 잃기 쉬운 것들을 잡아둔다: 좌표가
-// NaN 이 되는 것, 식지 않는 것, 중심이 가운데를 안 지키는 것, 노드가
-// 겹쳐 버리는 것, 이어진 노드가 안 이어진 노드보다 멀어지는 것.
-import { buildSimulation, nodeRadius, retarget } from '../src/lib/layout.js';
+// 손으로 짠 시뮬레이션 → d3-force(2D) → d3-force-3d(3D) 로 두 번 옮기면서
+// 잃기 쉬운 것들을 잡아둔다: 좌표가 NaN 이 되는 것, 식지 않는 것, 중심이
+// 원점을 안 지키는 것, 노드가 겹쳐 버리는 것, 이어진 노드가 안 이어진
+// 노드보다 멀어지는 것.
+//
+// **화면과 같은 힘을 잰다** — `layout.js buildForces` 가 만든 것을 3D 엔진에도
+// 여기에도 그대로 꽂는다. 3D 엔진(`3d-force-graph`)은 Node 에서 import 가
+// 터지지만 힘은 여기서 돈다.
+import { buildSimulation, buildForces, nodeRadius } from '../src/lib/layout.js';
 import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, dateRuler, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
-import { causalReach, causalLayout, GraphView, MUTUAL } from '../src/lib/graph-view.js';
+import { causalReach, causalLayout, GraphView, MUTUAL, labelAlpha, withAlpha } from '../src/lib/graph-view.js';
 
 let pass = 0;
 let fail = 0;
@@ -30,13 +35,18 @@ function sampleGraph(n = 40) {
       degree: i === 0 ? n : 2,
     };
     node.r = nodeRadius(node);
-    // 옛 코드와 같은 황금각 나선으로 뿌린다
+    // 화면과 같은 자리에 뿌린다 — 황금각 방위 + 황금비 극각의 공 껍질
+    // (graph-view.js setData). 무작위가 아니라 같은 자료는 같은 그림이다.
     const a = i * 2.399963;
     const d = 40 + 26 * Math.sqrt(i);
-    node.x = 400 + Math.cos(a) * d;
-    node.y = 300 + Math.sin(a) * d;
+    const cz = 1 - 2 * ((i * 0.618033988749895) % 1);
+    const sn = Math.sqrt(Math.max(0, 1 - cz * cz));
+    node.x = Math.cos(a) * sn * d;
+    node.y = Math.sin(a) * sn * d;
+    node.z = cz * d;
     node.vx = 0;
     node.vy = 0;
+    node.vz = 0;
     nodes.push(node);
   }
   // 절반은 중심에 붙는다
@@ -50,52 +60,64 @@ function run(sim, ticks = 400) {
   for (let i = 0; i < ticks; i++) sim.tick();
 }
 
-console.log('\n배치 (d3-force)');
+// 3차원 거리. 2D 의 Math.hypot(dx, dy) 자리다.
+function dist3(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+}
+
+console.log('\n배치 (d3-force-3d)');
 
 // --- 좌표가 성하다 ------------------------------------------------------
 {
   const { nodes, edges } = sampleGraph();
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0' });
   run(sim);
-  const bad = nodes.filter((n) => !Number.isFinite(n.x) || !Number.isFinite(n.y));
-  ok('400틱 뒤에도 좌표가 유한하다', bad.length === 0, `${bad.length}개가 NaN/Infinity`);
+  const bad = nodes.filter((n) => !['x', 'y', 'z'].every((c) => Number.isFinite(n[c])));
+  ok('400틱 뒤에도 세 축 좌표가 모두 유한하다', bad.length === 0, `${bad.length}개가 NaN/Infinity`);
+  const flat = nodes.every((n) => Math.abs(n.z) < 1e-6);
+  ok('그래프가 3차원으로 퍼진다 (한 평면에 눕지 않는다)', !flat);
 }
 
 // --- 식는다 -------------------------------------------------------------
 {
   const { nodes, edges } = sampleGraph();
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0' });
   const a0 = sim.alpha();
   run(sim);
   const a1 = sim.alpha();
   ok('시뮬레이션이 식는다', a1 < a0 * 0.2, `${a0.toFixed(3)} → ${a1.toFixed(3)}`);
 
   // 식은 뒤에는 노드가 사실상 멈춰 있어야 한다 — 안 멈추면 화면이 떤다
-  const before = nodes.map((n) => ({ x: n.x, y: n.y }));
+  const before = nodes.map((n) => ({ x: n.x, y: n.y, z: n.z }));
   run(sim, 30);
-  const moved = Math.max(...nodes.map((n, i) => Math.hypot(n.x - before[i].x, n.y - before[i].y)));
+  const moved = Math.max(...nodes.map((n, i) => dist3(n, before[i])));
   ok('식은 뒤 30틱에 거의 안 움직인다', moved < 1.0, `최대 ${moved.toFixed(2)}px`);
 }
 
-// --- 중심이 가운데를 지킨다 ---------------------------------------------
+// --- 중심이 원점을 지킨다 -----------------------------------------------
+// 2D 에서는 '화면 가운데(w/2, h/2) 120px 안'이었다. 3D 에서 화면 가운데는
+// **원점**이다 — 카메라가 바라보는 자리라 창이 커져도 그대로다.
 {
   const { nodes, edges } = sampleGraph();
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0' });
   run(sim);
   const c = nodes[0];
-  const off = Math.hypot(c.x - 400, c.y - 300);
-  ok('중심 노드가 화면 가운데 근처에 남는다', off < 120, `${off.toFixed(0)}px 벗어남`);
+  const off = Math.hypot(c.x, c.y, c.z);
+  ok('중심 노드가 원점 근처에 남는다', off < 120, `${off.toFixed(0)} 벗어남`);
+  // 그래프 전체의 무게중심도 원점 언저리에 있어야 카메라 맞춤이 헛돌지 않는다
+  const mid = ['x', 'y', 'z'].map((k) => nodes.reduce((a, n) => a + n[k], 0) / nodes.length);
+  ok('그래프가 원점 둘레에 머문다', Math.hypot(...mid) < 120, mid.map((v) => v.toFixed(0)).join(','));
 }
 
 // --- 겹치지 않는다 ------------------------------------------------------
 {
   const { nodes, edges } = sampleGraph();
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0' });
   run(sim);
   let worst = Infinity;
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
-      const gap = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) - nodes[i].r - nodes[j].r;
+      const gap = dist3(nodes[i], nodes[j]) - nodes[i].r - nodes[j].r;
       worst = Math.min(worst, gap);
     }
   }
@@ -106,13 +128,13 @@ console.log('\n배치 (d3-force)');
 {
   const { nodes, edges } = sampleGraph();
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0' });
   run(sim);
   const linked = new Set(edges.map((e) => `${e.s}|${e.t}`));
   let near = 0; let nearN = 0; let far = 0; let farN = 0;
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
-      const d = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
+      const d = dist3(nodes[i], nodes[j]);
       const isLinked = linked.has(`${nodes[i].id}|${nodes[j].id}`) || linked.has(`${nodes[j].id}|${nodes[i].id}`);
       if (isLinked) { near += d; nearN++; } else { far += d; farN++; }
     }
@@ -127,44 +149,48 @@ console.log('\n배치 (d3-force)');
   const nodes = ['a', 'b', 'c'].map((id, i) => {
     const n = { id, label: id, type: 'person', group: 'actor', degree: 1 };
     n.r = nodeRadius(n);
-    n.x = 400 + i * 200; n.y = 300; n.vx = 0; n.vy = 0;
+    n.x = i * 200; n.y = 0; n.z = 0; n.vx = 0; n.vy = 0; n.vz = 0;
     return n;
   });
   const edges = [
     { s: 'a', t: 'b', source: 'a', target: 'b', kind: 'same_as' },
     { s: 'b', t: 'c', source: 'b', target: 'c', kind: 'edge' },
   ];
-  const sim = buildSimulation({ nodes, edges, center: 'a', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges, center: 'a' });
   run(sim);
   const [a, b, c] = nodes;
-  const same = Math.hypot(a.x - b.x, a.y - b.y);
-  const plain = Math.hypot(b.x - c.x, b.y - c.y);
-  ok('same_as 로 묶인 쌍이 보통 엣지보다 바짝 붙는다', same < plain, `${same.toFixed(0)}px vs ${plain.toFixed(0)}px`);
+  const same = dist3(a, b);
+  const plain = dist3(b, c);
+  ok('same_as 로 묶인 쌍이 보통 엣지보다 바짝 붙는다', same < plain, `${same.toFixed(0)} vs ${plain.toFixed(0)}`);
 }
 
 // --- 고정한 노드는 안 움직인다 (드래그) --------------------------------
 {
   const { nodes, edges } = sampleGraph(20);
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
+  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0' });
   const pinned = nodes[5];
   pinned.fx = 700;
   pinned.fy = 100;
+  pinned.fz = -50;
   run(sim, 200);
-  ok('fx/fy 로 고정한 노드는 그 자리에 있다',
-     Math.abs(pinned.x - 700) < 0.001 && Math.abs(pinned.y - 100) < 0.001,
-     `(${pinned.x.toFixed(1)}, ${pinned.y.toFixed(1)})`);
+  ok('fx/fy/fz 로 못박은 노드는 그 자리에 있다 (드래그)',
+     Math.abs(pinned.x - 700) < 0.001 && Math.abs(pinned.y - 100) < 0.001 && Math.abs(pinned.z + 50) < 0.001,
+     `(${pinned.x.toFixed(1)}, ${pinned.y.toFixed(1)}, ${pinned.z.toFixed(1)})`);
 }
 
-// --- 창 크기가 바뀌면 중심도 옮겨간다 -----------------------------------
+// --- 3D 엔진에 꽂는 힘이 여기서 잰 그 힘이다 ----------------------------
+// 화면(graph-view.js `_applyForces`)은 `buildForces` 가 만든 것을
+// `fg.d3Force(이름, 힘)` 으로 꽂는다. 이름이 하나라도 빠지면 라이브러리
+// 기본 힘이 남아 화면만 다른 배치가 된다.
 {
-  const { nodes, edges } = sampleGraph(20);
-  const sim = buildSimulation({ nodes, edges: edges.map((e) => ({ ...e, source: e.s, target: e.t })), center: 'n0', width: 800, height: 600 });
-  run(sim);
-  retarget(sim, { center: 'n0', width: 1600, height: 600 });
-  sim.alpha(1);
-  run(sim, 400);
-  const off = Math.abs(nodes[0].x - 800);
-  ok('retarget 뒤 중심이 새 가운데를 따라간다', off < 150, `x=${nodes[0].x.toFixed(0)}, 목표 800`);
+  const F = buildForces({ center: 'n0' });
+  ok('힘 한 벌이 여섯 자리를 다 채운다',
+     ['charge', 'collide', 'link', 'x', 'y', 'z'].every((k) => typeof F[k] === 'function'),
+     Object.keys(F).join(','));
+  ok('중심 노드가 더 세게 끌린다',
+     F.x.strength()({ id: 'n0' }) > F.x.strength()({ id: 'n9' }));
+  ok('세 축의 끌림이 같다',
+     F.x.strength()({ id: 'n9' }) === F.z.strength()({ id: 'n9' }));
 }
 
 // --- 반지름 ------------------------------------------------------------
@@ -482,7 +508,8 @@ console.log('\n배치 (d3-force)');
 // 명성황후를 검색하면 노드는 120개 실렸는데 조명이 안 들었다 (2026-09-06).
 // same_as 묶음을 넣는 줄이 Map 에 .add 를 불러 setData 가 중간에 죽었고,
 // center·selected 가 안 잡혀 검색한 노드가 그냥 무리 속 점 하나였다.
-// 캔버스 없이 세우기 위해 브라우저 것들을 흉내낸다 — 그리기는 안 돈다.
+// 브라우저 없이 세운다 — 3D 엔진은 Node 에서 안 실리지만(늦게 싣는다) 자료를
+// 다루는 일은 그대로 돌아야 한다. 그것이 이 검사가 서 있는 자리다.
 console.log('\nsetData 와 same_as');
 {
   const noop = () => {};
@@ -529,113 +556,329 @@ console.log('\nsetData 와 same_as');
   }
 }
 
-// --- 같은 캔버스에 다시 세워도 배율이 산다 --------------------------------
-// 2026-09-08: 개인 역사 그래프가 잔상으로 뒤덮였다. StrictMode 가 같은
-// 캔버스에 GraphView 를 다시 세우면 배킹 크기가 이미 맞아 _resize 가 일찍
-// 돌아갔고, 그때 dpr 이 없어 setTransform 에 NaN 이 들어갔다 — 캔버스는
-// 변환을 통째로 무시하므로 1배로 그리고, 지우는 자리도 왼쪽 위 1/4 뿐이라
-// 나머지에 지난 프레임이 쌓인다.
-console.log('\n배율(dpr)');
+// --- 엔진이 늦게 와도 실어 둔 자료를 잃지 않는다 --------------------------
+//
+// `3d-force-graph` 는 브라우저에서만 실린다(모듈 맨 위에서 부르면 Node 에서
+// window 가 없다고 터진다). 그래서 GraphView 는 엔진을 **늦게** 싣고, 그
+// 사이에 들어온 setData·select·setDisplay 는 이 객체 안에 그대로 쌓인다.
+// 엔진이 오면(`_attach`) 통째로 옮겨 실어야 한다 — 안 그러면 App 이 만들자마자
+// 부르는 setData 가 조용히 사라져 화면이 빈 채로 남는다.
+//
+// 여기서는 가짜 엔진을 넘겨 그 길을 그대로 밟는다. 부른 것을 다 적어 두므로
+// **무엇을 어떻게 걸었는지**(힘 여섯 자리·한국어 이름표·안내 글 끄기)까지 잰다.
+console.log('\n엔진 늦게 싣기');
 {
-  const noop = () => {};
   const calls = [];
-  const ctx = new Proxy({}, {
-    get: (_t, k) => (...args) => { calls.push([k, ...args]); },
-    set: () => true,
+  const fake = () => new Proxy(function () {}, {
+    get: (_t, k) => (...args) => { calls.push([k, ...args]); return fake.self; },
+    apply: () => fake.self,
   });
-  const canvas = {
-    getContext: () => ctx, clientWidth: 800, clientHeight: 600,
-    // 이미 2배로 잡혀 있는 캔버스 — 두 번째 GraphView 가 물려받는 자리다.
-    width: 1600, height: 1200,
-    style: {}, parentElement: {}, addEventListener: noop,
-    setPointerCapture: noop, releasePointerCapture: noop,
-  };
-  const saved = { RO: globalThis.ResizeObserver, raf: globalThis.requestAnimationFrame,
-                  caf: globalThis.cancelAnimationFrame, win: globalThis.window };
-  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
-  globalThis.requestAnimationFrame = () => 0;
-  globalThis.cancelAnimationFrame = noop;
-  globalThis.window = { devicePixelRatio: 2 };
+  fake.self = fake();
+  class FakeEngine {
+    constructor(el, opts) { calls.push(['new', el, opts]); return fake.self; }
+  }
+  const three = new Proxy({}, {
+    get: (_t, k) => class { constructor(...a) { this.args = a; this.children = []; }
+      add() {} set() {} copy() {} clone() { return this; }
+      distanceTo() { return 300; } project() {} },
+  });
+  class FakeSprite { constructor(t, h, c) { this.text = t; this.textHeight = h; this.color = c;
+    this.scale = { x: 40, y: h, set() {} }; this.position = { set() {} };
+    this.material = { opacity: 1 }; } }
+
+  const holder = { clientWidth: 800, clientHeight: 600 };
+  const view = new GraphView(holder);
+  // 엔진이 오기 **전에** 자료와 설정이 들어온다 (App.load 가 이 차례다)
+  view.setData({ center: 'a', nodes: [
+    { id: 'a', label: '세종', type: 'person', group: 'actor', degree: 3 },
+    { id: 'b', label: '훈민정음', type: 'heritage', group: 'thing', degree: 1 }],
+    edges: [{ s: 'a', t: 'b', type: 'created', label: '제작', conf: 1 }] });
+  view.select('a');
+  view.setDisplay({ nodeScale: 1.5 });
+  ok('엔진 없이도 자료가 실린다', view.nodes.length === 2 && view.edges.length === 1);
+  ok('엔진 없이도 고른 노드를 든다', view.selected === 'a');
+
+  view._attach(FakeEngine, three, FakeSprite);
+  const got = calls.find((c) => c[0] === 'graphData');
+  ok('엔진이 오면 실어 둔 자료가 그대로 넘어간다',
+     got && got[1].nodes.length === 2 && got[1].links.length === 1, JSON.stringify(got?.[1]?.nodes?.length));
+  ok('링크의 양 끝은 아이디로 넘긴다 (힘이 노드로 바꿔 끼운다)',
+     got && got[1].links[0].source === 'a' && got[1].links[0].target === 'b');
+  const forces = calls.filter((c) => c[0] === 'd3Force').map((c) => c[1]);
+  ok('힘 여섯 자리를 다 꽂는다',
+     ['charge', 'collide', 'link', 'x', 'y', 'z'].every((k) => forces.includes(k)), forces.join(','));
+  ok('라이브러리 기본 가운데 힘은 걷어낸다',
+     calls.some((c) => c[0] === 'd3Force' && c[1] === 'center' && c[2] === null));
+  // 라이브러리가 내는 안내 글과 툴팁은 영어다 (CLAUDE.md §1)
+  ok('영어 안내 글을 끈다', calls.some((c) => c[0] === 'showNavInfo' && c[1] === false));
+  const tip = calls.find((c) => c[0] === 'nodeLabel');
+  ok('라이브러리 툴팁을 비운다', tip && tip[1]({ label: '세종', name: 'Sejong' }) === '');
+  ok('컨테이너 크기를 엔진에 준다', calls.some((c) => c[0] === 'width' && c[1] === 800));
+
+  // **엔진이 배치를 세우기 전에는 되데우지 않는다.**
+  //
+  // 2026-09-11 실측: `/life.html` 이 통째로 안 그려졌다
+  // (`renderer.info.render.frame` 이 1 에서 멎음). `d3ReheatSimulation` 은 그
+  // 자리에서 `engineRunning = true` 로 세우는데 배치(`state.layout`)는 자료
+  // 소화가 1ms 뒤에 만든다 — 그 사이 프레임이 없는 배치를 짚어 터지고,
+  // **터진 렌더 고리는 다음 프레임을 걸지 않는다.** 자료가 엔진보다 먼저 오는
+  // 화면에서만 나던 병이라 검사에 그 차례가 없었다. 이제 있다.
+  ok('배치가 서기 전에는 되데우지 않는다', !calls.some((c) => c[0] === 'd3ReheatSimulation'));
+  view.setForces({ repel: 2 });
+  ok('첫 틱 전에는 힘이 바뀌어도 안 데운다', !calls.some((c) => c[0] === 'd3ReheatSimulation'));
+  // 엔진이 한 바퀴 돌았다고 알린다 (onEngineTick) — 이제 배치가 있다
+  const onTick = calls.find((c) => c[0] === 'onEngineTick');
+  ok('틱 신호를 받아 둔다', typeof onTick?.[1] === 'function');
+  onTick[1]();
+  view.setForces({ repel: 3 });
+  ok('배치가 선 뒤에는 되데운다', calls.some((c) => c[0] === 'd3ReheatSimulation'));
+  view.destroy();
+  ok('걷을 때 그리기부터 세운다 (죽은 상태를 짚지 않게)',
+     calls.findIndex((c) => c[0] === 'pauseAnimation') < calls.findIndex((c) => c[0] === '_destructor')
+     || !calls.some((c) => c[0] === '_destructor'));
+}
+
+// --- 진짜 라이브러리가 우리가 부르는 이름을 다 갖고 있는가 ------------------
+//
+// 위의 가짜 엔진은 무엇이든 받아 주므로 이름을 틀려도 모른다. 그래서 여기서는
+// **진짜 `3d-force-graph`** 를 세워 같은 길(`_attach`)을 밟는다. 캅슐(kapsule)은
+// DOM 요소 없이 부르면 그리기를 시작하지 않고 메서드만 단 객체를 준다 — 그래서
+// 브라우저 없이도 이름이 맞는지 잴 수 있다. 라이브러리를 올릴 때 이름이 바뀌면
+// 여기서 먼저 걸린다 (화면에서는 "…is not a function" 으로 죽는다).
+console.log('\n라이브러리 이름 맞추기');
+{
+  const saved = { doc: globalThis.document, win: globalThis.window };
+  const el = () => ({ style: {}, dataset: {}, appendChild() {}, setAttribute() {}, addEventListener() {},
+                      classList: { add() {}, remove() {} }, children: [], innerHTML: '' });
+  globalThis.document = { createElement: el, createTextNode: (t) => ({ t }), head: el(), body: el(),
+                          documentElement: el(), addEventListener() {}, querySelector: () => null };
+  // 테마를 읽는 자리(theme.js)가 document.documentElement.dataset 를 본다
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1, document: globalThis.document };
   try {
-    const view = new GraphView(canvas);
-    ok('크기가 그대로여도 배율을 든다', view.dpr === 2, String(view.dpr));
-    calls.length = 0;
-    view._draw();
-    const t = calls.find((c) => c[0] === 'setTransform');
-    ok('변환에 NaN 이 안 간다', t && t.slice(1).every(Number.isFinite), JSON.stringify(t));
-    ok('변환이 배율 그대로', t && t[1] === 2 && t[4] === 2, JSON.stringify(t));
-    const clear = calls.find((c) => c[0] === 'clearRect');
-    ok('지우는 자리가 캔버스 전체', clear && clear[3] * view.dpr >= canvas.width && clear[4] * view.dpr >= canvas.height, JSON.stringify(clear));
+    const [fgMod, three, textMod] = await Promise.all([
+      import('3d-force-graph'), import('three'), import('three-spritetext'),
+    ]);
+    // 요소를 안 넘기면 캅슐이 그리기를 시작하지 않는다 (메서드만 달린 객체)
+    class Probe { constructor() { return fgMod.default(); } }
+    const view = new GraphView({ clientWidth: 800, clientHeight: 600 });
+    view.setData({ center: 'a',
+      nodes: [{ id: 'a', label: '가', type: 'person', group: 'actor', degree: 1 },
+        { id: 'b', label: '나', type: 'event', group: 'event', degree: 1 }],
+      edges: [{ s: 'a', t: 'b', type: 'caused', label: '원인', conf: 0.8 }] });
+    let threw = null;
+    try {
+      view._attach(Probe, three, textMod.default);
+      view.screenAt('a');            // CDP 검증이 노드를 누르는 자리
+      view.setDisplay({ nodeScale: 1.2 });
+      view.setForces({ repel: 1.5 });
+      view.setEdgeFilter(['caused']);
+      view.select('a');
+    } catch (e) { threw = e; }
+    ok('진짜 라이브러리에 우리가 부르는 이름이 다 있다', !threw, String(threw && threw.message));
     view.destroy();
+  } catch (e) {
+    console.log('    (건너뛴 까닭: ' + e.message + ')');
+    ok('3d-force-graph 를 Node 에서 못 세운다 (여기서는 건너뜀)', true, String(e.message));
   } finally {
-    globalThis.ResizeObserver = saved.RO;
-    globalThis.requestAnimationFrame = saved.raf;
-    globalThis.cancelAnimationFrame = saved.caf;
+    if (saved.doc === undefined) delete globalThis.document; else globalThis.document = saved.doc;
     if (saved.win === undefined) delete globalThis.window; else globalThis.window = saved.win;
   }
 }
 
-// --- 대칭 관계에는 화살촉이 없다 -------------------------------------------
-// 화살촉은 '누가 누구에게'를 말하는 부호다. 서로 같은 것을 뜻하는 관계(배우자,
-// 개인 역사의 친구·같은 학교)에 붙이면 없는 방향을 지어낸다. `closePath` 를 부르는
-// 곳은 drawArrow 하나뿐이라 그 횟수가 곧 그려진 화살촉 수다.
-console.log('\n화살촉 (대칭 관계)');
+// --- 부호: 굵기 · 파선 · 화살촉 ---------------------------------------------
+//
+// 3D 로 옮기며 **뜻은 그대로 두고 표현만 옮겼다**. 여기서 재는 것은 그 뜻이다:
+// 굵기는 인과만, 파선은 출처의 확실성만, 화살촉은 방향이 뜻인 관계에만.
+console.log('\n부호 (굵기 · 파선 · 화살촉)');
 {
-  const noop = () => {};
-  const calls = [];
-  const ctx = new Proxy({}, {
-    get: (_t, k) => (...args) => {
-      calls.push([k, ...args]);
-      return k === 'measureText' ? { width: String(args[0] ?? '').length * 7 } : undefined;
-    },
-    set: () => true,
+  const view = new GraphView({ clientWidth: 800, clientHeight: 600 });
+  view.setData({
+    center: 'me',
+    nodes: [{ id: 'me', label: '나', type: 'person', group: 'actor', degree: 3 },
+      { id: 'kim', label: '김일권', type: 'person', group: 'actor', degree: 2 },
+      { id: 'ev', label: '메탈리카 공연', type: 'event', group: 'event', degree: 1 }],
+    // 친구는 두 방향이 다 왔다 — 선은 한 줄이어야 한다.
+    edges: [{ s: 'me', t: 'ev', type: 'experienced', label: '관람', conf: 1 },
+      { s: 'me', t: 'kim', type: 'friend_of', label: '친구', conf: 1 },
+      { s: 'kim', t: 'me', type: 'friend_of', label: '친구', conf: 1 },
+      { s: 'kim', t: 'ev', type: 'caused', label: '계기', conf: 0.8 }],
   });
-  const canvas = {
-    getContext: () => ctx, clientWidth: 800, clientHeight: 600, width: 0, height: 0,
-    style: {}, parentElement: {}, addEventListener: noop,
-    setPointerCapture: noop, releasePointerCapture: noop,
-  };
-  const saved = { RO: globalThis.ResizeObserver, raf: globalThis.requestAnimationFrame,
-                  caf: globalThis.cancelAnimationFrame, win: globalThis.window };
-  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
-  globalThis.requestAnimationFrame = () => 0;
-  globalThis.cancelAnimationFrame = noop;
-  globalThis.window = { devicePixelRatio: 1 };
+  const at = (type) => view.edges.find((e) => e.type === type);
+  ok('방향이 있는 선에만 화살촉이 선다',
+     view.arrowLength(at('experienced')) > 0 && view.arrowLength(at('friend_of')) === 0);
+  ok('화살촉을 끄면 다 사라진다',
+     (view.setDisplay({ arrows: false }), view.arrowLength(at('experienced')) === 0));
+  view.setDisplay({ arrows: true });
+  // 두 방향이 다 와도 선은 한 줄이다 — 실측: 배우자 네 쌍이 여덟 줄로 겹쳐 있었다.
+  ok('대칭 관계는 두 방향이 와도 선 한 줄', view.edges.filter((e) => e.type === 'friend_of').length === 1,
+    String(view.edges.filter((e) => e.type === 'friend_of').length));
+  ok('대칭 표에 개인 역사의 상호 관계가 다 들어 있다',
+    ['met', 'friend_of', 'worked_with', 'schoolmate', 'shared_with', 'overlapped', 'spouse_of', 'same_as']
+      .every((t) => MUTUAL.has(t)));
+  // 대칭이지만 선 이름이 도착 쪽을 부르는 말이라('나 → 나형철 · 형') 방향에 뜻이 있다.
+  // 라벨이 '다음'인 related_to 도 앞뒤가 있다 (LABEL_DIR_HEAD).
+  ok('역할이 도착을 부르는 관계와 인과는 화살촉을 지킨다',
+    !MUTUAL.has('relative_of') && !MUTUAL.has('related_to') && !MUTUAL.has('caused')
+    && !MUTUAL.has('participated_in') && !MUTUAL.has('experienced'));
+
+  // **굵기는 인과 하나만 진다.** 2D 에서는 가리킨 선도 굵어졌지만 3D 에서는
+  // 조명이 밝기로 말한다 — 한 부호에 뜻 하나.
+  ok('인과가 다른 관계보다 굵다', view.edgeWidth(at('caused')) > view.edgeWidth(at('experienced')));
+  view.hover = 'me';
+  ok('가리켜도 굵기는 그대로다', view.edgeWidth(at('experienced')) === view.edgeWidth(at('friend_of')));
+  ok('가리키면 밝기가 갈린다',
+     view.edgeColor(at('experienced')) !== view.edgeColor(at('caused')),
+     `${view.edgeColor(at('experienced'))} vs ${view.edgeColor(at('caused'))}`);
+  view.hover = null;
+  ok('조명 밖 노드는 흐려진다 (색상은 그대로, 알파만)',
+     withAlpha('#3d84f5', 0.16) === 'rgba(61,132,245,0.16)', withAlpha('#3d84f5', 0.16));
+  // 선 굵기 배율은 굵기에 곱해진다 (설정의 '표시' 절)
+  const w0 = view.edgeWidth(at('experienced'));
+  view.setDisplay({ lineScale: 2 });
+  ok('선 굵기 배율이 그대로 먹는다', Math.abs(view.edgeWidth(at('experienced')) - w0 * 2) < 1e-9);
+  view.setDisplay({ lineScale: 1 });
+  ok('굵기는 0 이 되지 않는다 (0 이면 관이 실이 되어 무늬를 못 싣는다)',
+     (view.setDisplay({ lineScale: 0.01 }), view.edgeWidth(at('experienced')) > 0));
+  view.setDisplay({ lineScale: 1 });
+  view.destroy();
+}
+
+// --- 카메라가 노드 구름을 화면에 꽉 채운다 ---------------------------------
+//
+// 2026-09-11 실측: 반지름 650 짜리 구름에 카메라가 2308 에 서서 그래프가
+// 1084×737 화면의 가로 350px 만 썼다 (노드가 2~6px 이라 '크기 = 차수'가 안
+// 읽혔다). 라이브러리의 `zoomToFit` 은 노드에 붙인 이름표·링까지 상자에 넣고
+// 상자의 긴 변을 `atan` 으로 나눠 늘 멀찍이 선다. 그래서 우리가 직접 잰다.
+// 여기서는 **진짜 three 카메라**로 맞춘 뒤 노드를 화면에 찍어 본다.
+console.log('\n카메라 맞춤 (노드 구름이 화면을 채운다)');
+{
+  const W = 1084;
+  const H = 737;
+  const PAD = 90;                       // graph-view.js FIT_PAD
   try {
-    const view = new GraphView(canvas);
-    view.setData({
-      center: 'me',
-      nodes: [{ id: 'me', label: '나', type: 'person', group: 'actor', degree: 3 },
-        { id: 'kim', label: '김일권', type: 'person', group: 'actor', degree: 2 },
-        { id: 'ev', label: '메탈리카 공연', type: 'event', group: 'event', degree: 1 }],
-      // 친구는 두 방향이 다 왔다 — 선은 한 줄이어야 한다.
-      edges: [{ s: 'me', t: 'ev', type: 'experienced', label: '관람', conf: 1 },
-        { s: 'me', t: 'kim', type: 'friend_of', label: '친구', conf: 1 },
-        { s: 'kim', t: 'me', type: 'friend_of', label: '친구', conf: 1 },
-        { s: 'kim', t: 'ev', type: 'experienced', label: '함께', conf: 0.8 }],
+    const three = await import('three');
+    const cam = new three.PerspectiveCamera(50, W / H, 1, 20000);
+    cam.position.set(0, 0, 1200);
+    cam.lookAt(0, 0, 0);
+    cam.updateMatrixWorld();
+    let seen = null;
+    let fg;
+    const impl = {
+      camera: () => cam,
+      cameraPosition: (pos, look) => { seen = { pos, look }; return fg; },
+    };
+    fg = new Proxy(impl, { get: (t, k) => (k in t ? t[k] : () => fg) });
+    class Probe { constructor() { return fg; } }
+    // 글자를 굽는 일만 빼고 진짜 스프라이트다 (자리·크기·보임은 진짜로 잰다)
+    class FakeSprite extends three.Sprite {
+      constructor(t, h, c) {
+        super();
+        this.text = t; this.textHeight = h; this.color = c;
+        this.scale.set(h * 3, h, 1);   // 가로세로 비 3:1 인 글자 상자
+      }
+    }
+    // 상태 링은 진짜 three 스프라이트라 캔버스를 하나 굽는다
+    const ctx2d = { fillRect() {}, beginPath() {}, arc() {}, stroke() {}, fillText() {},
+                    measureText: () => ({ width: 10 }), translate() {}, save() {}, restore() {} };
+    const savedDoc = globalThis.document;
+    globalThis.document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }),
+      documentElement: { dataset: {} },   // theme.js 가 테마를 여기서 읽는다
+    };
+    const view = new GraphView({ clientWidth: W, clientHeight: H });
+    // 실측과 같은 크기의 구름 — 원점 둘레 반지름 650
+    const nodes = [];
+    for (let i = 0; i < 120; i++) {
+      nodes.push({ id: `n${i}`, label: `노드${i}`, type: 'event', group: 'event', degree: 2 });
+    }
+    view.setData({ center: 'n0', nodes, edges: [] });
+    view._attach(Probe, three, FakeSprite);
+    let k = 0;
+    for (const n of view.nodes) {                 // 공 껍질 위에 고르게
+      const a = k * 2.399963;
+      const cz = 1 - 2 * ((k * 0.618033988749895) % 1);
+      const sn = Math.sqrt(Math.max(0, 1 - cz * cz));
+      n.x = Math.cos(a) * sn * 650; n.y = Math.sin(a) * sn * 650; n.z = cz * 650;
+      k++;
+    }
+    view.autoFit = true;
+    view._fit(0);
+    ok('카메라를 옮긴다', Boolean(seen), String(seen));
+
+    // 맞춘 자리에 카메라를 세우고 노드를 화면에 찍어 본다
+    cam.position.set(seen.pos.x, seen.pos.y, seen.pos.z);
+    cam.lookAt(seen.look.x, seen.look.y, seen.look.z);
+    cam.updateMatrixWorld();
+    const V = new three.Vector3();
+    const perWorld = H / (2 * Math.tan((50 * Math.PI) / 360));
+    let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    for (const n of view.nodes) {
+      V.set(n.x, n.y, n.z);
+      const dist = V.distanceTo(cam.position);
+      V.project(cam);
+      const rpx = (n.r || 6) * perWorld / dist;
+      const sx = (V.x * 0.5 + 0.5) * W;
+      const sy = (-V.y * 0.5 + 0.5) * H;
+      left = Math.min(left, sx - rpx); right = Math.max(right, sx + rpx);
+      top = Math.min(top, sy - rpx); bottom = Math.max(bottom, sy + rpx);
+    }
+    ok('노드가 하나도 화면 밖으로 안 나간다',
+       left > -0.5 && right < W + 0.5 && top > -0.5 && bottom < H + 0.5,
+       `x[${left.toFixed(0)},${right.toFixed(0)}] y[${top.toFixed(0)},${bottom.toFixed(0)}]`);
+    ok('여백 90px 을 지킨다',
+       left > PAD - 2 && right < W - PAD + 2 && top > PAD - 2 && bottom < H - PAD + 2,
+       `x[${left.toFixed(0)},${right.toFixed(0)}] y[${top.toFixed(0)},${bottom.toFixed(0)}]`);
+    // 채운다: 어느 한 쪽은 여백 바로 안까지 닿아야 한다 (2308 짜리 병의 관문)
+    const fill = Math.max((right - left) / (W - PAD * 2), (bottom - top) / (H - PAD * 2));
+    ok('구름이 여백 안을 꽉 채운다', fill > 0.97, `${(fill * 100).toFixed(0)}%`);
+    const used = (bottom - top) / H;
+    ok('세로로도 화면의 3분의 2 넘게 쓴다', used > 0.66, `${(used * 100).toFixed(0)}%`);
+
+    // --- 첫 화면에 이름표가 선다 -------------------------------------------
+    //
+    // 2026-09-11 실측: 열자마자 보이는 그래프에 **글자가 하나도 없었다**
+    // (자리다툼은 106개가 이겼는데 거리 문턱에서 전부 0 이 됐다). 이름표가
+    // 화면에서 늘 같은 크기가 되게 다시 키우고(2D 의 `/k`), 흐림의 자를 그
+    // 그래프가 꽉 차는 거리로 바꿨다.
+    for (const n of view.nodes) view._nodeObject(n);   // 라이브러리가 소화할 때 하는 일
+    view._placeLabels();
+    const lit = view.nodes.filter((n) => view._objs.get(n.id)?.label.visible);
+    ok('첫 화면에 이름표가 여럿 선다', lit.length > 10, `${lit.length}개`);
+    console.log(`    (노드 ${view.nodes.length} 중 이름표 ${lit.length} · 카메라 ${view._fitDist.toFixed(0)})`);
+    ok('겹치는 만큼은 접는다 (전부 세우지 않는다)', lit.length < view.nodes.length,
+       `${lit.length}/${view.nodes.length}`);
+    const heights = lit.map((n) => {
+      const V2 = new three.Vector3(n.x, n.y, n.z);
+      const d = V2.distanceTo(cam.position);
+      return view._objs.get(n.id).label.scale.y * perWorld / d;
     });
-    calls.length = 0;
-    view._draw();
-    const heads = calls.filter((c) => c[0] === 'closePath').length;
-    ok('방향이 있는 선에만 화살촉이 선다 (친구 빼고 둘)', heads === 2, `화살촉 ${heads}`);
-    // 두 방향이 다 와도 선은 한 줄이다 — 실측: 배우자 네 쌍이 여덟 줄로 겹쳐 있었다.
-    ok('대칭 관계는 두 방향이 와도 선 한 줄', view.edges.filter((e) => e.type === 'friend_of').length === 1,
-      String(view.edges.filter((e) => e.type === 'friend_of').length));
-    ok('대칭 표에 개인 역사의 상호 관계가 다 들어 있다',
-      ['met', 'friend_of', 'worked_with', 'schoolmate', 'shared_with', 'overlapped', 'spouse_of', 'same_as']
-        .every((t) => MUTUAL.has(t)));
-    // 대칭이지만 선 이름이 도착 쪽을 부르는 말이라('나 → 나형철 · 형') 방향에 뜻이 있다.
-    // 라벨이 '다음'인 related_to 도 앞뒤가 있다 (LABEL_DIR_HEAD).
-    ok('역할이 도착을 부르는 관계와 인과는 화살촉을 지킨다',
-      !MUTUAL.has('relative_of') && !MUTUAL.has('related_to') && !MUTUAL.has('caused')
-      && !MUTUAL.has('participated_in') && !MUTUAL.has('experienced'));
+    const off = heights.filter((h) => Math.abs(h - 11) > 0.6 && Math.abs(h - 12.5) > 0.6);
+    ok('이름표는 화면에서 늘 같은 크기다 (11px · 초점 12.5px)', off.length === 0,
+       `어긋난 것 ${off.length}개 — ${heights.slice(0, 3).map((h) => h.toFixed(1)).join(', ')}`);
     view.destroy();
-  } finally {
-    globalThis.ResizeObserver = saved.RO;
-    globalThis.requestAnimationFrame = saved.raf;
-    globalThis.cancelAnimationFrame = saved.caf;
-    if (saved.win === undefined) delete globalThis.window; else globalThis.window = saved.win;
+    if (savedDoc === undefined) delete globalThis.document; else globalThis.document = savedDoc;
+  } catch (e) {
+    ok('three 를 Node 에서 못 세운다 (여기서는 건너뜀)', false, String(e.message));
   }
+}
+
+// --- 이름표는 멀어지면 흐려진다 ---------------------------------------------
+// 2D 의 '텍스트 흐림 문턱'을 3D 로 옮긴 것. 자가 배율에서 **카메라 거리**로
+// 바뀌었을 뿐, 손잡이(textFade 0~1)의 뜻은 그대로다.
+console.log('\n이름표 흐림 (거리)');
+{
+  // 자는 **그 그래프가 화면에 꽉 차는 거리**다 (절대 거리가 아니다). 그래프마다
+  // 크기가 다르고 처음 열리는 거리도 그만큼 다르다 — 절대 거리(1000)를 걸었더니
+  // 노드 120개짜리 첫 화면이 2308 에서 열려 이름표가 하나도 안 떴다 (2026-09-11).
+  const fit = 1400;
+  ok('꽉 찬 거리에서는 늘 또렷하다 (첫 화면)',
+     labelAlpha(fit, 0.3, fit) === 1 && labelAlpha(fit, 0, fit) === 1);
+  ok('그래프가 커도 첫 화면은 같다', labelAlpha(4000, 0.3, 4000) === 1);
+  ok('물러나면 사라진다', labelAlpha(fit * 2, 0.3, fit) === 0);
+  ok('그 사이는 서서히', labelAlpha(fit * 1.4, 0.3, fit) > 0 && labelAlpha(fit * 1.4, 0.3, fit) < 1);
+  ok('문턱을 올리면 더 가까이 가야 보인다', labelAlpha(fit, 1, fit) < labelAlpha(fit, 0, fit));
+  ok('문턱 1 은 절반 거리까지 다가가야 뜬다', labelAlpha(fit * 0.5, 1, fit) > 0);
+  ok('문턱 0 은 물러나도 더 오래 버틴다', labelAlpha(fit * 1.4, 0, fit) > labelAlpha(fit * 1.4, 0.3, fit));
 }
 
 // --- 재위 띠는 취임한 날에 앉는다 -------------------------------------------

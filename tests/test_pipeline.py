@@ -1723,6 +1723,25 @@ with tempfile.TemporaryDirectory() as tmp:
     check("그래도 시작점은 나온다", isinstance(empty_api.seeds(5), list))
     store.close()
 
+with tempfile.TemporaryDirectory() as tmp:
+    # 묶음은 **여는 시대**에서 열고, 연표의 바닥은 맨 앞 시대 그대로다
+    # (2026-09-11 사용자 결정). 둘을 하나로 묶으면 조선에서 여는 순간
+    # 고려 사건이 연표에서 통째로 사라진다.
+    from histgraph.scope import eras_of, opening_eras
+    store = GraphStore(Path(tmp) / "bundle.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:Q28208", type="org", label="고려", source="wd", start_date="0918-01-01"),
+        Node(id="wd:Q28179", type="org", label="조선", source="wd", start_date="1392-08-13"),
+    ])
+    bundle_api = GraphAPI(store, era="korea")
+    check("묶음은 여는 시대에서 연다", bundle_api.root() == "wd:Q28179")
+    check("연표의 바닥은 맨 앞 시대 그대로", eras_of("korea")[0] == "goryeo")
+    check("여는 시대가 없는 묶음은 맨 앞이 중심",
+          opening_eras("joseon") == ("joseon",))
+    check("여는 시대를 뺀 나머지는 차례가 그대로",
+          opening_eras("korea") == ("joseon", "goryeo", "ilje", "daehan"))
+    store.close()
+
 # --- 연표 ---------------------------------------------------------------
 # 그래프는 무엇이 무엇과 이어져 있는지만 말한다. 왼쪽 연표가 "몇 년쯤,
 # 무엇 뒤 무엇 앞"을 맡는데, 여기서 틀리면 화면이 없는 연도를 지어낸다.
@@ -5727,6 +5746,29 @@ with tempfile.TemporaryDirectory() as tmp:
     kim = next(n for n in refined["nodes"] if n["id"] == "kim")
     check("refine 도 원문을 알면 지어낸 생년을 뺀다", (kim["start_date"], kim["year"]) == (None, 1997), str(kim))
 
+    # 사건의 달·날도 같은 규칙이다 (2026-09-10 사용자: "사용자가 년도만 언급하면 노드의
+    # 기간을 년도만 표시해줘 달과 날짜를 추측해서 표시하지마"). 모델은 해만 아는 날을
+    # 1월 1일로 적어 온다 — 그대로 세우면 읽는 사람에게는 잰 날이 된다. **자르기만 한다**:
+    # 사건은 해를 잃으면 연표에서 내려간다.
+    when_story = ("1997년에 잠실고등학교에 입학했다. 1998년 4월에 서울로 이사했다.\n"
+                  "2010년 5월 8일에 결혼했다.")
+    when_nodes = [{"id": "hs", "type": "PersonalEvent", "name": "고등학교 입학", "start_date": "1997-03-02",
+                   "year": 1997, "precision": "exact"},
+                  {"id": "mv", "type": "PersonalEvent", "name": "서울 이사", "start_date": "1998-04",
+                   "year": 1998, "precision": "exact"},
+                  {"id": "wd", "type": "PersonalEvent", "name": "결혼", "start_date": "2010-05-08",
+                   "end_date": "2010-05-08", "year": 2010, "precision": "exact"}]
+    when_tl = [{"event_id": "hs", "date_text": "1997년 3월 2일"}, {"event_id": "wd", "date_text": "2010년 5월 8일"}]
+    life_mod.trim_dates(when_nodes, when_story, when_tl)
+    when = {n["id"]: (n.get("start_date"), n.get("precision")) for n in when_nodes}
+    check("해만 말한 사건은 해까지 (1997-03-02 → 1997)", when["hs"] == ("1997", "year"), str(when))
+    check("달까지 말했으면 달까지 남는다", when["mv"][0] == "1998-04", str(when))
+    check("날까지 말했으면 그대로", when["wd"][0] == "2010-05-08", str(when))
+    check("연표의 날짜 글도 같이 자른다 — 화면의 날짜 줄은 이것을 먼저 본다",
+          [t.get("date_text") for t in when_tl] == ["1997년", "2010년 5월 8일"], str(when_tl))
+    check("이야기를 모르면 자르지 않는다",
+          life_mod.trim_dates([{"id": "x", "start_date": "1997-03-02"}], None) == 0)
+
     # 해를 안 말한 만남 — 나이와 시절로 셈해서 **사건으로 세운다** (2026-09-09 사용자:
     # "'만20세', '공익생활'이라고 언급 했으면 이미 존재하는 역사를 보면 충분히 유추 할
     # 수 있었는데 그걸 못했어"). 실측한 모델 답 그대로다: 사람 노드 하나와, 옛 그래프의
@@ -5776,17 +5818,78 @@ with tempfile.TemporaryDirectory() as tmp:
     check("만남은 나와 그 사람 둘 다에 이어진다",
           {(e["source"], e["target"], e.get("role")) for e in met_out["edges"]}
           >= {("me", "met_gf", "만남"), ("gf", "met_gf", "함께")}, str(met_out["edges"]))
-    check("'그 시절에 만났다' 는 그 사건을 겪은 것이 아니라 그 사이의 일이다 (during)",
-          {(e["source"], e["target"], e["type"]) for e in met_out["edges"]}
-          >= {("met_gf", "duty", "during")}
-          and not any(e["source"] == "gf" and e["target"] == "duty" for e in met_out["edges"]),
+    # 만남을 그 시절 사건에 잇던 `during` 은 이제 화면에 안 선다 (2026-09-10 사용자:
+    # "노드에서 '동안'이라는 메뉴를 삭제해줘"). **고치는 일은 그대로다** — 정혜림이
+    # 공익근무를 한 것으로 서지 않는 것이 이 규칙의 값이고, 만남이 그 시절 안에 있다는
+    # 것은 두 해가 연표에 나란히 서서 말한다.
+    check("'그 시절에 만났다' 로 그 사람이 그 사건을 겪은 것이 되지 않는다",
+          not any(e["source"] == "gf" and e["target"] == "duty" for e in met_out["edges"])
+          and not any({e["source"], e["target"]} == {"met_gf", "duty"} for e in met_out["edges"]),
           str(met_out["edges"]))
     met_tl = {t["event_id"]: t for t in met_out["timeline"]}
+    # 띠는 군복무여도 **노드가 말하는 것은 연애다** (2026-09-10 사용자: "타임라인은 그냥
+    # 군복무라고 써도 되지만 노드엔 연애라고 표시해줘"). 하나가 둘을 겸하지 못한다.
+    check("공익 시절의 만남도 노드로는 연애라고 적는다",
+          met_tl["met_gf"].get("node_stage") == "연애", str(met_tl.get("met_gf")))
+    check("연애가 아닌 일에는 그 칸이 없다", "node_stage" not in met_tl["duty"], str(met_tl.get("duty")))
     check("만남이 연표에 서고 단계는 앞뒤에서 온다 (공익 시절의 만남은 '군복무')",
           "met_gf" in met_tl and (met_tl["met_gf"]["year"], met_tl["met_gf"]["age"],
                                   met_tl["met_gf"]["life_stage"]) == (2002, 20, "군복무"),
           str(met_tl.get("met_gf")))
     check("사람은 연표에 서지 않는다 (그 자리가 곧 생년이 된다)", "gf" not in met_tl, str(list(met_tl)))
+    # 연애 — 사귄 사람을 만난 사건은 '사회생활'이 아니다 (2026-09-10 사용자, '2009년
+    # 안다영이라는 여자친구를 만났어' 가 '사회생활'로 선 것을 보고: "사회생활이 아니고
+    # 연애를 한거야"). **군복무를 먼저 본다** — 공익 시절의 만남은 위에서 '군복무'다.
+    love_base = {"nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1982", "year": 1982, "confidence": 1.0},
+                           {"id": "job", "type": "PersonalEvent", "name": "첫 직장 입사", "start_date": "2007", "year": 2007, "confidence": 1.0}],
+                 "edges": [{"source": "me", "target": "job", "type": "experienced", "confidence": 1.0}],
+                 "timeline": [{"event_id": "job", "life_stage": "사회생활", "year": 2007}],
+                 "subject": {"id": "me", "name": "나", "birth_year": 1982}, "stories": []}
+    love_text = "2009년 안다영이라는 여자친구를 만났어."
+    love_raw = {"nodes": [{"id": "ada", "type": "Person", "name": "안다영", "confidence": 0.9},
+                          {"id": "ev", "type": "PersonalEvent", "name": "안다영과의 만남",
+                           "description": "2009년 안다영이라는 여자친구를 만났다.",
+                           "start_date": "2009-01-01", "end_date": "2009-12-31", "confidence": 1.0}],
+                "edges": [{"source": "me", "target": "ada", "type": "met", "confidence": 1.0},
+                          {"source": "me", "target": "ev", "type": "experienced", "confidence": 1.0}],
+                "timeline": [{"event_id": "ev", "life_stage": "사회생활", "date_text": "2009년"}]}
+    love_val, _ = life_mod.validate(love_raw, subject=love_base["subject"], text=love_text,
+                                    known=life_mod.known_ids(love_base))
+    love_out, _ = life_mod.merge(love_base, love_val, love_text)
+    love_ev = next(n for n in love_out["nodes"] if n["id"] == "ev")
+    love_tl = {t["event_id"]: t for t in love_out["timeline"]}
+    check("해만 말했으면 시작도 끝도 그 해다 (2009-01-01 ~ 2009-12-31 → 2009)",
+          (love_ev["start_date"], love_ev["end_date"]) == ("2009", "2009"), str(love_ev))
+    check("사귄 사람을 만난 사건의 시절은 '연애'다", love_tl["ev"]["life_stage"] == "연애", str(love_tl["ev"]))
+    check("그 사람과의 관계는 연인이다",
+          any(e["type"] == "partner_of" and {e["source"], e["target"]} == {"me", "ada"} for e in love_out["edges"]),
+          str(love_out["edges"]))
+    check("'연애'는 모델이 고를 수 있는 시절이기도 하다 (스키마의 enum)", "연애" in life_mod.LIFE_STAGES)
+    # 모델이 직접 세운 만남 사건은 **설명이 없고 양끝이 뒤집혀** 온다 (실측 2026-09-10:
+    # '안다영을 만남'이 사건 → 나 한 줄뿐이라 상세의 '함께'에 그 사람이 없었고, 설명이
+    # 비어 시절도 '사회생활'로 남았다). 이야기가 그 사람을 부른 문장으로 셋을 다 채운다.
+    made_base = {"nodes": [{"id": "person_1", "type": "Person", "name": "나", "start_date": "1982", "year": 1982, "confidence": 1.0},
+                           {"id": "ada", "type": "Person", "name": "안다영", "year": 2009, "confidence": 1.0},
+                           {"id": "met_ada", "type": "PersonalEvent", "name": "안다영을 만남",
+                            "start_date": "2009-01-01", "end_date": "2009-12-31", "year": 2009, "confidence": 0.8}],
+                 "edges": [{"source": "person_1", "target": "ada", "type": "met", "confidence": 1.0},
+                           {"source": "met_ada", "target": "person_1", "type": "experienced", "role": "함께", "confidence": 1.0},
+                           {"source": "met_ada", "target": "met_ada", "type": "during", "confidence": 1.0}],
+                 "timeline": [{"event_id": "met_ada", "life_stage": "사회생활", "year": 2009}],
+                 "subject": {"id": "person_1", "name": "나", "birth_year": 1982},
+                 "stories": [{"at": "2026-09-10", "text": "2009년 안다영이라는 여자친구를 만났어."}]}
+    mended = life_mod.refine(made_base)
+    mev = next(n for n in mended["nodes"] if n["id"] == "met_ada")
+    mrel = {(e["source"], e["target"]): (e["type"], e.get("role")) for e in mended["edges"]}
+    check("만난 그 사람이 사건에 이어진다 — 상세의 '함께'가 그 줄이다",
+          mrel.get(("ada", "met_ada")) == ("experienced", "함께"), str(mrel))
+    check("뒤집혀 온 참여는 사람 → 사건으로 바로 선다 (역할도 '만남')",
+          mrel.get(("person_1", "met_ada")) == ("experienced", "만남") and ("met_ada", "person_1") not in mrel, str(mrel))
+    check("자기순환은 남지 않는다", ("met_ada", "met_ada") not in mrel, str(mrel))
+    check("빈 설명은 이야기가 그 사람을 부른 문장으로 채운다",
+          "여자친구" in str(mev.get("description")), str(mev.get("description")))
+    check("설명이 채워지니 시절도 '연애'다",
+          mended["timeline"][0]["life_stage"] == "연애", str(mended["timeline"]))
     check("refine 이 세운 것도 '더한 수'에 센다", met_stats["nodes"] >= 1, str(met_stats))
     check("더한 노드의 id 를 알려 준다 — 화면이 그리로 간다",
           "met_gf" in met_stats["ids"] and "gf" in met_stats["ids"], str(met_stats["ids"]))
@@ -6389,6 +6492,7 @@ with tempfile.TemporaryDirectory() as tmp:
                   {"source": "hs", "target": "me", "type": "during", "confidence": 1.0},
                   {"source": "me", "target": "fail", "type": "after", "confidence": 1.0},
                   {"source": "gr", "target": "hs", "type": "before", "confidence": 1.0},
+                  {"source": "fail", "target": "hs", "type": "during", "confidence": 1.0},
                   {"source": "hs", "target": "sch", "type": "studied_at", "confidence": 1.0},
                   {"source": "hs", "target": "major", "type": "studied_at", "confidence": 1.0},
                   {"source": "mv", "target": "usa", "type": "moved_to", "confidence": 1.0},
@@ -6406,12 +6510,48 @@ with tempfile.TemporaryDirectory() as tmp:
     check("사건 → 주인공으로 뒤집혀 온 것도 주인공 → 사건 experienced 로", mk.get(("me", "hs")) == "experienced" and ("hs", "me") not in mk, str(mk))
     check("친구라고 적힌 만남은 friend_of, 동료는 worked_with, 아무 말 없으면 met 그대로",
           mk[("me", "kim")] == "friend_of" and mk[("me", "lee")] == "worked_with" and mk[("me", "na")] == "met", str(mk))
+    # 연인 — '여자친구'에는 '친구'가 들어 있어서, 순서를 안 지키면 그 삶에서 가장 가까운
+    # 사람이 동창과 같은 이름으로 선다 (2026-09-10 사용자: "'남자친구'나 '여자친구'
+    # '연인' 같은 표현을 하면 관계를 연인으로 설정 해줘").
+    lover = [{"id": "me", "type": "Person", "name": "나", "confidence": 1.0},
+             {"id": "sua", "type": "Person", "name": "이수아", "confidence": 1.0, "description": "대학 때 사귄 여자친구"},
+             {"id": "kim", "type": "Person", "name": "김일권", "confidence": 1.0, "description": "고등학교 때 단짝 친구"}]
+    le = [{"source": "me", "target": "sua", "type": "met", "confidence": 1.0},
+          {"source": "me", "target": "kim", "type": "met", "confidence": 1.0}]
+    life_mod.tidy_edges(lover, le, lover[0])
+    lk = {(e["source"], e["target"]): e["type"] for e in le}
+    check("'여자친구'라 적힌 만남은 친구가 아니라 연인이다",
+          lk[("me", "sua")] == "partner_of" and lk[("me", "kim")] == "friend_of", str(lk))
+    le2 = [{"source": "me", "target": "sua", "type": "friend_of", "confidence": 1.0}]
+    life_mod.tidy_edges(lover, le2, lover[0])
+    check("모델이 '친구'로 적어 온 것도 다시 본다", le2[0]["type"] == "partner_of", str(le2))
+    check("연인은 한 방향만 남는다 (대칭)", "partner_of" in life_mod._SYMMETRIC)
+    # 설명에 아무 말이 없어도 **이야기**가 그렇게 부르면 잇는다 (link_people).
+    def _lover(story, edges=None):
+        ns = [{"id": "me", "type": "Person", "name": "나", "start_date": "1982"},
+              {"id": "sua", "type": "Person", "name": "이수아"},
+              {"id": "kim", "type": "Person", "name": "김일권"}]
+        es = edges if edges is not None else []
+        life_mod.link_people(ns, es, ns[0], story)
+        return {(e["source"], e["target"]): e["type"] for e in es}
+    check("이야기가 '사귀었다'고 하면 연인이다", _lover("이수아와 2010년부터 사귀었다.")[("me", "sua")] == "partner_of")
+    check("모델이 만남으로 적어 둔 것을 이야기가 올린다",
+          _lover("이수아는 내 여자친구였다.",
+                 [{"source": "me", "target": "sua", "type": "met", "confidence": 1.0}])[("me", "sua")] == "partner_of")
+    check("남의 연인은 내 연인이 아니다 ('김일권의 여자친구 이수아')",
+          _lover("김일권의 여자친구 이수아도 그 자리에 있었다.")[("me", "sua")] == "met")
+    check("한 문장 안의 근거만 본다 ('여자친구와 헤어졌다. 그 뒤 김일권을 만났다')",
+          _lover("여자친구와 헤어졌다. 그 뒤 김일권을 만났다.").get(("me", "kim")) == "met")
     check("일한 곳 없이 미룬 '함께 일함'은 같은 학교면 schoolmate (둘 다 그 학교에 이어진 뒤)", mk[("kim", "park")] == "schoolmate", str(mk))
     check("양방향 met 은 하나만 남는다", ("na", "me") not in mk and ("me", "na") in mk)
     # 차례만 말하는 엣지는 세우지 않는다 (2026-09-08 사용자: "다음 이라는 메뉴는 뭐야?
     # 별 정보값이 없는데 그냥 삭제해") — 그 차례는 연표가 이미 연도로 그린다. 옮길 데가
     # 있는 것(주인공 → 자기 사건의 after)은 위에서 참여로 남으므로 버리는 것은 사건 → 사건뿐.
     check("사건 → 사건의 before 는 세우지 않는다 (차례는 연표가 그린다)", ("gr", "hs") not in mk, str(mk))
+    # 2026-09-10 사용자: "노드에서 '동안'이라는 메뉴를 삭제해줘". 사건이 다른 사건 안에
+    # 있다는 말인데 두 해가 연표에 나란히 서 있어 눈으로 읽힌다. 뜻이 있는 during 은
+    # 위에서 이미 옮겨 갔다 (사람 ↔ 사건은 참여, 사건 → 단체·자리는 곳).
+    check("사건 → 사건의 during 도 세우지 않는다", ("fail", "hs") not in mk, str(mk))
     check("사건 → 학교·전공의 studied_at 은 재학이 아니라 그 곳(at)이다 — 온톨로지의 출발 갈래가 사람뿐",
           mk[("hs", "sch")] == "at" and mk[("hs", "major")] == "at", str(mk))
     mr = {(e["source"], e["target"]): e.get("role") for e in m["edges"]}
@@ -6504,6 +6644,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("연표는 해 순으로 다시 서고 앞뒤가 이어진다",
           [t["event_id"] for t in merged["timeline"]] == ["ev_move", "ev_univ"] and merged["timeline"][0]["next_event"] == "ev_univ"
           and merged["timeline"][1]["previous_event"] == "ev_move", str(merged["timeline"]))
+    # 화면은 연표를 **새로 선 자리**로 옮긴다 (LifeView.finish · life.js addedFocus).
+    check("연표에 새로 선 것을 따로 적어 준다", added["timeline_ids"] == ["ev_univ"], str(added))
+    # 옛 노드가 이제야 해를 얻어 줄에 서기도 한다 — 새 노드가 하나도 없어도 연표는 늘었다.
+    dated_add, _ = life_mod.validate(
+        {"nodes": [{"id": "seoul", "type": "Residence", "name": "서울 관악구", "start_date": "1998", "confidence": 1.0}],
+         "edges": [], "timeline": [{"event_id": "seoul", "life_stage": "중학교"}]},
+        subject=base["subject"])
+    _dm, dated = life_mod.merge(base, dated_add)
+    check("새 노드가 없어도 연표에 선 것은 적힌다",
+          dated["ids"] == [] and dated["timeline_ids"] == ["seoul"], str(dated))
     check("분석은 없던 것만 붙는다 (전환점 서울 이사는 옛 것 그대로)",
           [(t["event"], t["turning_point_score"]) for t in merged["turning_points"]] == [("ev_move", 7), ("ev_univ", 6)], str(merged["turning_points"]))
     check("물음은 새 것으로", merged["follow_up_questions"] == ["새 물음"])
@@ -6561,7 +6711,8 @@ with tempfile.TemporaryDirectory() as tmp:
             time.sleep(0.02)
         st2 = job.status()
         check("더한 결과는 옛 주인공을 지키고 더한 수를 알린다",
-              st2["state"] == "done" and st2["added"] == {"nodes": 0, "edges": 0, "timeline": 0, "connections": 0, "ids": []}
+              st2["state"] == "done" and st2["added"] == {"nodes": 0, "edges": 0, "timeline": 0,
+                                                          "connections": 0, "ids": [], "timeline_ids": []}
               and st2["payload"]["subject"]["id"] == st["payload"]["subject"]["id"] and "그래프는 이미 있다" in made.user, str(st2)[:300])
         check("원문은 파일에 이어 둔다", (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기\n\n더")
         st, body = _life_dispatch(api, "/api/life/job", {})

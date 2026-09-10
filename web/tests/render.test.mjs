@@ -69,9 +69,12 @@ let appHtml = '';
   globalThis.fetch = () => Promise.reject(new Error('서버 렌더링에서는 안 부른다'));
   appHtml = renderToString(h(App));
   ok('App 이 터지지 않고 그려진다', appHtml.length > 0);
-  ok('머리·본문·캔버스 자리가 있다',
+  // 그래프 자리는 2026-09-11 부터 `<canvas>` 가 아니라 **빈 상자**다 — 3D
+  // 엔진(3d-force-graph)이 그 안에 제 캔버스를 만들어 넣는다. 재는 것은
+  // 그대로다: 그 상자가 없으면 그래프가 설 자리가 없다.
+  ok('머리·본문·그래프 자리가 있다',
      appHtml.includes('class="top"') && appHtml.includes('class="layout')
-     && appHtml.includes('<canvas'), appHtml.slice(0, 200));
+     && appHtml.includes('id="canvas"'), appHtml.slice(0, 200));
   ok('연표 자리에 tl-head/tl-body 가 있다',
      appHtml.includes('tl-head') && appHtml.includes('tl-body'));
   ok('검색창이 있다', appHtml.includes('검색'));
@@ -543,17 +546,29 @@ let detailHtml = '';
   ok('삭제는 기록에서 빼고 바로 남긴다',
      /const dropStory = useCallback/.test(lifeSrc2)
      && /stories: list[\s\S]{0,400}keepInAccount\(doc\)/.test(lifeSrc2));
-  // 누른 글은 입력창으로 간다 — 상자는 브라우저에 남긴 글을 읽고 서므로
+  // 누른 글은 입력창으로 간다 — 상자는 놓아 준 글(draftRef)을 읽고 서므로
   // 거기에 적고 상자를 새로 세운다 (key 가 바뀐다).
   ok('누른 글이 입력창으로 옮겨 간다',
-     lifeSrc2.includes('appendDraft(cur, text)') && lifeSrc2.includes('localStorage.setItem(STORY_KEY, next)')
+     lifeSrc2.includes('appendDraft(draftRef.current, text)') && /draft=\{draftRef\.current\}/.test(lifeSrc2)
      && /<StoryBox key=\{draftStamp\}/.test(lifeSrc2));
+  // 2026-09-10 사용자: "사용자가 입력창을 다시 열면 그냥 placeholder만 보여줘".
+  // 적다 만 글을 브라우저에 남기면 닫았다 열어도·새로고침해도 지난번 글이 선다 —
+  // 그것이 보낸 글인지 아닌지는 화면 어디에도 없다. 칸에 선 글은 이번에 쓰는 글뿐이고,
+  // 상자를 닫으면 걷는다. **기록 모달은 상자를 닫지 않는다** — 옛 글을 골라 오는
+  // 길이라 쓰던 글을 삼키면 안 된다 (2026-09-08).
+  ok('적다 만 글은 브라우저에 남지 않는다',
+     !lifeSrc2.includes("'life-story'") && !/STORY_KEY/.test(lifeSrc2)
+     && /const closeWriting = useCallback\(\(\) => \{[\s\S]{0,120}draftRef\.current = '';/.test(lifeSrc2));
+  ok('상자를 닫는 세 자리가 다 걷는다 — 기록 모달은 빼고',
+     /onClose=\{closeWriting\}/.test(lifeSrc2)
+     && /if \(writing\) closeWriting\(\); else setWriting\(true\)/.test(lifeSrc2)
+     && /onClick=\{\(\) => setLogOpen\(\(v\) => !v\)\}/.test(lifeSrc2));
   // 2026-09-08 사용자: "입력을 클릭해도 입력창에 복사가 안 되는 경우가 있어."
   // 상자가 **세워질 때** 칸을 비우던 효과가 방금 옮긴 글을 지웠다. 비우는 것은
   // 보낼 때 한 번이고, 못 보낸 글은 되돌린다.
   ok('상자는 세워질 때 칸을 비우지 않는다',
      !/job\?\.state !== 'done'\)\s*return;/.test(lifeSrc2)
-     && /const send = \(\) => \{[\s\S]{0,200}removeItem\(STORY_KEY\)/.test(lifeSrc2));
+     && /const send = \(\) => \{[\s\S]{0,200}onDraft\(''\);/.test(lifeSrc2));
   // 2026-09-09 사용자: "'입력' 버튼을 누르면 해당 내용은 입력창에서 삭제 해줘".
   // 못 보낸 글도 칸으로 도로 들어가지 않는다 — 화면이 들고 있다가 '되돌리기'
   // 단추로 내어 준다. 그래야 칸에 선 글이 '아직 안 보낸 글' 하나를 뜻한다.

@@ -33,9 +33,10 @@ export const EDGE_TYPE_KO = {
   parent_of: '부모', child_of: '자녀', grandparent_of: '조부모', ancestor_of: '조상', relative_of: '친척',
   influenced: '영향을 줌', inspired: '영감을 줌', helped: '도움', mentored_by: '스승',
   worked_with: '함께 일함', met: '만남',
-  // 아래 셋은 지시문에 없고 다듬기(tidyEdges · life.py tidy_edges)가 세운다 — 친구는
-  // '만남'이 아니고, 주인공과 자기 사건은 '뒤'·'동안'이 아니다 (2026-09-08 사용자 지적).
-  friend_of: '친구', experienced: '당사자', schoolmate: '같은 학교', at: '곳',
+  // 아래 넷은 지시문에 없고 다듬기(tidyEdges·linkPeople · life.py 의 같은 이름)가
+  // 세운다 — 친구는 '만남'이 아니고, 주인공과 자기 사건은 '뒤'·'동안'이 아니며
+  // (2026-09-08 사용자 지적), 사귄 사람은 친구가 아니다 (2026-09-10 사용자, 아래 PARTNER).
+  friend_of: '친구', partner_of: '연인', experienced: '당사자', schoolmate: '같은 학교', at: '곳',
   caused: '원인', triggered: '촉발', led_to: '이어짐', changed: '바꿈', affected: '영향', resulted_in: '결과',
   before: '다음', after: '이전', during: '동안', overlapped: '겹침',
   born_in: '출생지', lived_in: '거주', moved_to: '이주', visited: '방문', grew_up_in: '성장지',
@@ -53,8 +54,10 @@ export const EDGE_TYPE_KO = {
 // 원인 → 결과로 읽는 관계. 개인 연표에서 오른쪽 여백의 꺾인 선이 된다.
 export const CAUSAL_EDGES = new Set(['caused', 'triggered', 'led_to', 'resulted_in']);
 export const IMPACT_KO = { direct: '직접', indirect: '간접', possible: '가능성' };
+// '연애'도 사람이 더한 것이다 (2026-09-10 사용자, '2009년 안다영이라는 여자친구를
+// 만났어' 가 '사회생활'로 선 것을 보고: "사회생활이 아니고 연애를 한거야").
 export const LIFE_STAGES = ['출생', '어린 시절', '초등학교', '중학교', '고등학교', '대학', '군복무',
-  '사회생활', '창업', '가족 형성', '현재'];
+  '사회생활', '연애', '창업', '가족 형성', '현재'];
 // 군복무로 읽는 말 (life.py MILITARY 와 같다). 현역만이 아니다 — 공익근무요원·
 // 사회복무요원·상근예비역·방위병·의무경찰도 병역이고, 훈련소 입소부터 소집해제까지가
 // 그 기간이다 (2026-09-08 사용자: "공익근무는 군복무 기간이야. 훈련소, 공익근무 역시
@@ -67,7 +70,8 @@ export const STAGE_ORDER = new Map(LIFE_STAGES.map((s, i) => [s, i]));
 export const ONE_WAY_STAGES = new Set(LIFE_STAGES.slice(0, LIFE_STAGES.indexOf('군복무') + 1));
 // 그 단계를 **끝내는** 사건 — 띠를 여기서 닫는다. 없으면 띠는 다음 단계가 시작할
 // 때까지 이어져 2년 복무가 4년으로 칠해진다.
-export const STAGE_END = { 군복무: /전역|소집해제|(?<![가-힣])제대(?!로)|만기/ };
+export const STAGE_END = { 군복무: /전역|소집해제|(?<![가-힣])제대(?!로)|만기/,
+  연애: /결혼|약혼|이별|헤어|파혼/ };
 // 연표에 점으로 찍는 타입. 사람·장소·책은 이어지는 것이라 점이 아니다.
 export const EVENT_TYPES = new Set(['PersonalEvent', 'HistoricalEvent', 'TurningPoint', 'Crisis',
   'Achievement', 'Failure', 'Decision', 'Memory']);
@@ -182,6 +186,10 @@ export const LIFE_EDGES = {
   parent_of: ['부모', P, P], child_of: ['자녀', P, P], grandparent_of: ['조부모', P, P], ancestor_of: ['조상', P, P], relative_of: ['친척', P, P],
   friend_of: ['친구', P, P], met: ['만남', P, P], worked_with: ['함께 일함', P, P], schoolmate: ['같은 학교', P, P],
   mentored_by: ['스승', P, P], helped: ['도움', P, P],
+  // 연인 — 사귄 사이. '여자친구'를 '친구'로 두면 그 삶에서 가장 가까운 사람이 동창과
+  // 같은 이름으로 선다 (2026-09-10 사용자). 배우자는 여기 오지 않는다 — 호칭 표가
+  // '아내'·'남편'을 relative_of 의 역할로 단다.
+  partner_of: ['연인', P, P],
   influenced: ['영향을 줌', [...P, ...E, ...W, ...O], [...P, ...E]], inspired: ['영감을 줌', [...P, ...E, ...W, ...O], [...P, ...E]],
   // 사건 참여 — 한국사의 participated_in. 사람 → 사건이고 역할(role)이 선의 이름이다.
   experienced: ['당사자', P, [...E, ...T]],   // 도착에 period: 모델이 '출생'을 Time 으로 세운다
@@ -212,20 +220,48 @@ export const MAX_TARGETS = { born_in: 1 };
 // 화면에 세우지 않는 관계 — life.py SEQUENCE_ONLY 와 같은 표. `before`('다음')·`after`
 // ('이전')는 사건 사이의 **차례**만 말하는데 그 차례는 연표가 이미 연도로 그린다
 // (2026-09-08 사용자: "다음 이라는 메뉴는 뭐야? 별 정보값이 없는데 그냥 삭제해").
+// `during`('동안')도 같은 자리다 (2026-09-10 사용자: "노드에서 '동안'이라는 메뉴를
+// 삭제해줘") — 사건이 다른 사건·시기 안에 있다는 말인데 두 해가 연표에 나란히 서
+// 있어 눈으로 읽힌다. 뜻이 있는 것은 RELAX 가 먼저 데려간다 (사람 ↔ 사건은 참여,
+// 사건 → 단체·자리는 곳).
 // 모델이 답하는 것은 막지 않는다 — 주인공 → 자기 사건을 after 로 답하기도 하고 그것은
 // 참여라 뜻이 있다. 버리는 자리는 RELAX **뒤** 한 곳이라 계정·브라우저에 남은 옛
 // 그래프도 새로고침으로 여기서 사라진다.
-export const SEQUENCE_ONLY = new Set(['before', 'after']);
+export const SEQUENCE_ONLY = new Set(['before', 'after', 'during']);
 const TIME_EDGES = ['before', 'after', 'during', 'overlapped'];
 export const RELAX = new Map([
   ...TIME_EDGES.map((t) => [`${t}|person|event`, 'experienced']),
   ...TIME_EDGES.map((t) => [`${t}|event|person`, 'experienced']),
+  // 참여를 사건 → 사람으로 적어 오는 답이 있다 (실측 2026-09-10). 방향만 뒤집힌
+  // 것이라 버릴 것이 아니다 — 아래 tidyEdges 가 양끝을 맞바꾼다.
+  ['experienced|event|person', 'experienced'],
   ['born_in|person|period', 'experienced'],
   ...['studied_at', 'worked_at', 'member_of', 'during', 'lived_in'].flatMap((t) => [[`${t}|event|org`, 'at'], [`${t}|event|role`, 'at']]),
   ...['studied_at', 'worked_at', 'member_of'].flatMap((t) => [[`${t}|period|org`, 'at'], [`${t}|period|role`, 'at']]),
 ]);
 const RELAX_ROLE = { 'studied_at|role': '전공', 'worked_at|role': '직업', 'born_in|period': '출생' };
-const SYMMETRIC = new Set(['met', 'friend_of', 'worked_with', 'schoolmate', 'relative_of', 'shared_with', 'overlapped']);
+const SYMMETRIC = new Set(['met', 'friend_of', 'partner_of', 'worked_with', 'schoolmate', 'relative_of', 'shared_with', 'overlapped']);
+// 사귄 사이를 부르는 말. **'친구'보다 먼저 본다** — '여자친구'에는 '친구'가 들어 있어서,
+// 순서를 바꾸면 그 삶에서 가장 가까운 사람이 동창과 같은 이름으로 선다 (2026-09-10
+// 사용자). 결혼한 뒤의 호칭(아내·남편)은 여기 없다 — 그것은 호칭 표(KIN_TERMS)가 맡는다.
+const PARTNER = /여자\s*친구|남자\s*친구|여친|남친|연인|애인|사귀|교제|연애|첫사랑/;
+// 연애로 읽는 사건 (life.py _romance 와 같다). 근거가 둘이다: 사건의 이름·설명에 그 말이
+// 있거나, **이름을 단 사람**을 이야기가 연인이라 부르거나. 뒤엣것이 있어야 하는 것은
+// 모델이 세운 만남 사건에 설명이 없기 때문이다 (실측 2026-09-10: '안다영을 만남'이
+// 설명 없이 서서 '사회생활'로 남았다).
+//
+// **여기서 군복무를 보지 않는다.** 이것은 '이 일이 연애인가'를 재는 것이고, 그 시절이
+// 무엇이었나는 아래 연표가 따로 정한다 (군복무가 띠를 먼저 가져간다).
+export function romance(node, story = '', people = []) {
+  const said = `${node?.name || ''} ${node?.description || ''}`;
+  if (PARTNER.test(said)) return true;
+  const names = people.map((p) => String(p?.name || '').trim());
+  return names.some((nm) => nm && said.includes(nm) && partnerSays(story, nm, names));
+}
+// 그 말을 이름씨로만 쓴 것 (동사를 뺐다) — 누구의 연인인지를 가리는 데 쓴다.
+const PARTNER_NOUN = '여자\\s*친구|남자\\s*친구|여친|남친|연인|애인|첫사랑';
+// 연인으로 올라설 수 있는 묽은 관계. 가족은 건드리지 않는다.
+const WEAK_TIES = new Set(['met', 'friend_of', 'worked_with', 'schoolmate']);
 const FRIEND = /친구|벗|단짝|절친|죽마고우/;
 const COLLEAGUE = /동료|같이 일|함께 일|같은 회사|같은 팀/;
 // 사건 이름 꼬리의 술어 — 당사자가 그 사건에서 한 일 (한국사의 역할 머리말 '주도'·'지휘' 자리)
@@ -361,6 +397,21 @@ export function linkPeople(nodes, edges, me, text) {
     direct.add(n.id);
     made += 1;
   }
+  // 연인 — 이야기가 그 사람을 '여자친구'·'연인'이라 부르면 친구가 아니다 (2026-09-10
+  // 사용자). **이름을 부르는 그 문장만 본다** — 앞 문장까지 보면 '여자친구와 헤어졌다.
+  // 그 뒤 김일권을 만났다' 의 김일권이 연인이 된다.
+  const allNames = people.map((p) => String(p.name).trim());
+  for (const n of people) {
+    if (!partnerSays(story, String(n.name).trim(), allNames)) continue;
+    const weak = edges.find((e) => WEAK_TIES.has(e.type)
+      && ((e.source === me.id && e.target === n.id) || (e.source === n.id && e.target === me.id)));
+    if (weak) { weak.type = 'partner_of'; weak.role = null; continue; }
+    if (direct.has(n.id)) continue;
+    edges.push({ source: me.id, target: n.id, type: 'partner_of', description: null, confidence: 1 });
+    tied.push([me.id, n.id]);
+    direct.add(n.id);
+    made += 1;
+  }
   const reach = new Set([me.id]);
   let grew = true;
   while (grew) {
@@ -377,6 +428,19 @@ export function linkPeople(nodes, edges, me, text) {
     made += 1;
   }
   return made;
+}
+
+// 이야기가 이 사람을 '여자친구'·'연인'이라 부르는가. 그 말이 가리키는 사람이 따로
+// 있으면('이수아의 남자친구') 아니다.
+export function partnerSays(story, name, names = []) {
+  for (const para of String(story || '').split('\n')) {
+    for (const sent of para.split(/[.!?。]/)) {
+      if (!sent.includes(name)) continue;
+      if (names.some((nm) => nm && new RegExp(`${escapeRe(nm)}\\s*(?:의|네)?\\s*(?:${PARTNER_NOUN})`).test(sent))) continue;
+      if (PARTNER.test(sent)) return true;
+    }
+  }
+  return false;
 }
 
 // --- 함께한 사람 -------------------------------------------------------------
@@ -486,6 +550,8 @@ export function tidyEdges(nodes, edges, me, issues = []) {
   const seen = new Set();
   const targets = new Map();
   for (const raw of edges) {
+    // 자기순환은 어떤 뜻도 없다 (한국사 그래프에서도 지웠다).
+    if (raw.source === raw.target) continue;
     const e = { ...raw };
     let s = byId.get(e.source); let t = byId.get(e.target);
     let kind = e.type;
@@ -497,10 +563,13 @@ export function tidyEdges(nodes, edges, me, issues = []) {
         if (moved) { role = role || RELAX_ROLE[`${kind}|${klass(t)}`] || null; kind = moved; }
         else issues.push(`${kind}: ${s.name}(${klass(s)}) → ${t.name}(${klass(t)}) — 표 밖`);
       }
-      if (kind === 'met') {
+      // 연인이 친구보다 먼저다 — '여자친구'에 '친구'가 들어 있다. 모델이 그것을 보고
+      // friend_of 로 적어 온 것도 다시 본다.
+      if (kind === 'met' || kind === 'friend_of') {
         const text = [e.description, ...[s, t].filter((n) => n !== me).map((n) => n.description)].filter(Boolean).join(' ');
-        if (FRIEND.test(text)) kind = 'friend_of';
-        else if (COLLEAGUE.test(text)) kind = 'worked_with';
+        if (PARTNER.test(text)) kind = 'partner_of';
+        else if (kind === 'met' && FRIEND.test(text)) kind = 'friend_of';
+        else if (kind === 'met' && COLLEAGUE.test(text)) kind = 'worked_with';
       }
       if (kind === 'worked_with' && (e.confidence ?? 1) < 1 && !works.has(s.id) && !works.has(t.id)
         && [...(schools.get(s.id) || [])].some((id) => schools.get(t.id)?.has(id))) kind = 'schoolmate';
@@ -586,7 +655,7 @@ export const EDGE_WEIGHT = {
   inspired_by: W_CAUSE, triggered_by: W_CAUSE,
   parent_of: W_PERSON, child_of: W_PERSON, grandparent_of: W_PERSON,
   ancestor_of: W_PERSON, relative_of: W_PERSON, mentored_by: W_PERSON,
-  worked_with: W_PERSON, helped: W_PERSON, friend_of: W_PERSON,
+  worked_with: W_PERSON, helped: W_PERSON, friend_of: W_PERSON, partner_of: W_PERSON,
   met: W_BELONG, schoolmate: W_BELONG, studied_at: W_BELONG, worked_at: W_BELONG,
   member_of: W_BELONG, played: W_BELONG, learned: W_BELONG, built_skill: W_BELONG,
   read: W_BELONG, watched: W_BELONG, listened_to: W_BELONG, used: W_BELONG,
@@ -842,6 +911,8 @@ export function normalize(raw) {
     out.edges = tidyEdges(nodes, out.edges, subj);
   }
   const timeline = [];
+  // 이야기가 연인이라 부르는 사람을 가리는 데 쓴다 (romance) — 주인공을 뺀 사람들.
+  const lovers = nodes.filter((n) => PERSON_TYPES.has(n.type) && n !== subj);
   for (const t of raw.timeline || []) {
     if (!t || !byId.has(t.event_id)) continue;
     // 주인공은 연표의 항목이 아니라 연표 그 자체다 — 자기 노드가 0세 자리에 서면
@@ -852,8 +923,17 @@ export function normalize(raw) {
     if (!LIFE_STAGES.includes(item.life_stage)) { item.life_stage = null; item.stage_said = false; }
     // 훈련소 입소부터 소집해제까지는 병역이지 사회생활이 아니다 (life.py refine 3 과 같다)
     // — **사람이 고른 시절은 건드리지 않는다** (stage_said: 아래 editNode 가 적는다).
-    if (!item.stage_said && ['event', 'period'].includes(klass(node))
-      && MILITARY.test(`${node.name || ''} ${node.description || ''}`)) item.life_stage = '군복무';
+    if (!item.stage_said && ['event', 'period'].includes(klass(node))) {
+      const love = romance(node, storyText(raw), lovers);
+      // 띠는 군복무다 — 공익 시절도 병역이고, 그 시절에 일어난 일이다 (2026-09-09).
+      if (MILITARY.test(`${node.name || ''} ${node.description || ''}`)) item.life_stage = '군복무';
+      else if (love) item.life_stage = '연애';
+      // **노드가 제 이름으로 말하는 것은 따로다** (2026-09-10 사용자: "타임라인은 그냥
+      // 군복무라고 써도 되지만 노드엔 연애라고 표시해줘"). 띠는 그 시절이고, 상세의
+      // 날짜 줄은 그 일이 무엇이었나다.
+      if (love) item.node_stage = '연애';
+      else delete item.node_stage;
+    } else if (item.stage_said) delete item.node_stage;
     // 해의 출처 차례: 항목의 날짜 글 → 나이(생년을 알 때) → 노드의 날짜 (life.py 와 같다)
     if (item.year == null) item.year = parseWhen(item.date_text, birth).year;
     if (item.year == null && item.age != null && birth != null) item.year = birth + item.age;
@@ -1522,12 +1602,39 @@ export class LifeBoard {
   reveal(id, behavior = 'smooth') {
     const ys = this.marksFor(id);
     if (!ys.length) return false;
-    const mid = (Math.min(...ys) + Math.max(...ys)) / 2;
+    this.center((Math.min(...ys) + Math.max(...ys)) / 2, behavior);
+    return true;
+  }
+
+  // 캔버스 안의 y 를 판 한가운데로.
+  center(y, behavior = 'auto') {
     const off = this.body.querySelector('.life-canvas')?.offsetTop || 0;   // 머리(태어나기 전)만큼
-    const top = clamp(off + mid - this.body.clientHeight / 2, 0,
+    const top = clamp(off + y - this.body.clientHeight / 2, 0,
       Math.max(0, this.body.scrollHeight - this.body.clientHeight));
     this.body.scrollTo({ top, behavior });
-    return true;
+  }
+
+  // 지금 판 위쪽에 서 있는 **해**. 판이 커지거나 작아지면 자의 눈금이 다시 잡히므로
+  // (`buildScale` 은 판 높이로 잰다) 픽셀 자리를 그대로 되돌리면 보고 있던 해가
+  // 딴 데로 간다 — 방금 더한 2013년을 비추다가 입력 상자를 닫으면 1998년이
+  // 서 있었다. 다시 그릴 때는 픽셀이 아니라 이 해를 지킨다.
+  //
+  // 재는 자리가 **위 모서리**인 것은, 이 함수를 부르는 때가 판의 높이가 이미
+  // 바뀐 뒤(ResizeObserver)라서다 — 한가운데로 재면 새 높이의 절반을 옛 자에
+  // 대게 되어 엉뚱한 해가 나온다. 위 모서리는 높이와 무관하다.
+  viewYear() {
+    if (!this.layoutData) return null;
+    const off = this.body.querySelector('.life-canvas')?.offsetTop || 0;
+    const y = this.body.scrollTop - off;
+    if (y <= 0) return null;   // 아직 머리(태어나기 전)를 보고 있다 — 지킬 해가 없다
+    return yearAt(this.layoutData, y);
+  }
+
+  // 그 해를 판 위쪽에 세운다 (viewYear 의 거꾸로).
+  toYear(year) {
+    const off = this.body.querySelector('.life-canvas')?.offsetTop || 0;
+    this.body.scrollTop = clamp(off + this.layoutData.at(year), 0,
+      Math.max(0, this.body.scrollHeight - this.body.clientHeight));
   }
 
   marksFor(id) {
@@ -1542,6 +1649,8 @@ export class LifeBoard {
       this.body.innerHTML = '<p class="tl-empty">해를 아는 사건이 없어 연표를 세울 수 없습니다.</p>';
       return;
     }
+    // 다시 그리기 **전에** 지금 보고 있는 해를 적어 둔다 (viewYear 는 옛 자로 잰다).
+    const keep = this.viewYear();
     this.layoutData = lay;
     const top = this.body.scrollTop;
     this.body.innerHTML = renderLife(lay, { selected, subjectName: life.subject?.name });
@@ -1551,6 +1660,8 @@ export class LifeBoard {
       // 첫 그림은 미끄러지지 않는다('auto') — 열자마자 움직이면 읽는 사람이
       // 무엇이 지나갔는지 모른다.
       if (!(selected && this.reveal(selected, 'auto'))) this.body.scrollTop = 0;
+    } else if (keep != null) {
+      this.toYear(keep);   // 판이 달라져도 보던 해는 그 자리에
     } else {
       this.body.scrollTop = top;
     }
@@ -1558,6 +1669,24 @@ export class LifeBoard {
 }
 
 // --- 잔손 -------------------------------------------------------------------
+// 자 위의 자리(픽셀)를 해로 되읽는다 — `lifeLayout.at` 의 거꾸로다. 눈금은 해마다
+// 폭이 다르므로(사건이 몰린 해가 늘어난다) 사이는 그 해의 폭으로 나눠 소수로 준다.
+export function yearAt(lay, y) {
+  const pos = lay?.axis?.pos;
+  if (!pos || !pos.length) return null;
+  const last = pos.length - 1;
+  if (y <= pos[0]) return lay.from;
+  if (y >= pos[last]) return lay.to;
+  let lo = 0;
+  let hi = last;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1;
+    if (pos[mid] <= y) lo = mid; else hi = mid;
+  }
+  const span = pos[lo + 1] - pos[lo];
+  return lay.from + lo + (span > 0 ? (y - pos[lo]) / span : 0);
+}
+
 // 달까지 아는 날짜의 해. 'YYYY-MM' 부터가 달을 아는 것이다 — 'YYYY' 는 해뿐이라
 // 여기서는 없는 것으로 친다.
 export function monthYear(date) {

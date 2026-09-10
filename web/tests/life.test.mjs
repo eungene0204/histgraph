@@ -10,9 +10,9 @@ import {
   ladder,
   graphPayload, graphMeta, nodeWeight, EDGE_WEIGHT, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
-  addedFocus, addedNames,
+  addedFocus, addedNames, yearAt,
   linkPeople, kinIn, markYs,
-  NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY,
+  NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY, romance, STAGE_END,
 } from '../src/lib/life.js';
 import { searchNodes } from '../src/lib/life.js';
 import { isTyping } from '../src/lib/keys.js';
@@ -195,6 +195,37 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('스무 살의 항목이 초등학교로 되돌아가지 않는다', ss.gf === '군복무', JSON.stringify(ss));
   ok('뒤가 없으면 빈 단계는 채우지 않는다', ss.mv === null, JSON.stringify(ss));
   ok("'공익생활'도 군복무로 읽는다", MILITARY.test('공익생활을 하던 시절'));
+  // 연애 — 사귄 사람을 만난 사건은 '사회생활'이 아니다 (2026-09-10 사용자: "사회생활이
+  // 아니고 연애를 한거야"). **군복무를 먼저 본다** — 공익 시절의 만남은 위에서 '군복무'다.
+  const love = normalize({
+    nodes: [{ id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'job', type: 'PersonalEvent', name: '첫 직장 입사', start_date: '2007', confidence: 1 },
+      { id: 'ev', type: 'PersonalEvent', name: '안다영과의 만남', start_date: '2009', confidence: 1,
+        description: '2009년 안다영이라는 여자친구를 만났다.' }],
+    edges: [],
+    timeline: [{ event_id: 'job', life_stage: '사회생활', year: 2007 },
+      { event_id: 'ev', life_stage: '사회생활', year: 2009 }],
+  });
+  const ls = Object.fromEntries(love.timeline.map((t) => [t.event_id, t.life_stage]));
+  ok("사귄 사람을 만난 사건의 시절은 '연애'다", ls.ev === '연애' && ls.job === '사회생활', JSON.stringify(ls));
+  // 공익 시절에 만난 사람 — **띠는 군복무, 노드는 연애다** (2026-09-10 사용자: "타임라인은
+  // 그냥 군복무라고 써도 되지만 노드엔 연애라고 표시해줘"). 하나가 둘을 겸하지 못한다.
+  const duty = normalize({
+    nodes: [{ id: 'me', type: 'Person', name: '나', start_date: '1982', confidence: 1 },
+      { id: 'ev', type: 'PersonalEvent', name: '정혜림을 만남', start_date: '2002', confidence: 1,
+        description: '공익생활을 하던 시절 만20살때 여자친구를 만났고, 이름은 정혜림 이었다' }],
+    edges: [], timeline: [{ event_id: 'ev', life_stage: '사회생활', year: 2002 }],
+  });
+  ok('공익 시절의 만남은 띠로는 군복무다', duty.timeline[0].life_stage === '군복무', JSON.stringify(duty.timeline[0]));
+  ok('그래도 그 노드가 말하는 것은 연애다', duty.timeline[0].node_stage === '연애', JSON.stringify(duty.timeline[0]));
+  ok('연애가 아닌 일에는 그 칸이 없다', ls.job === '사회생활' && !love.timeline.find((t) => t.event_id === 'job').node_stage);
+  // 설명이 비어도 **이름을 단 사람**이 연인이면 연애다 — 모델이 세운 만남 사건에는
+  // 설명이 없다 (실측 2026-09-10: '안다영을 만남'이 '사회생활'로 남았다).
+  ok('설명이 없어도 이름을 단 사람이 연인이면 연애다',
+    romance({ name: '안다영을 만남' }, '2009년 안다영이라는 여자친구를 만났어.', [{ name: '안다영' }]));
+  ok('그냥 아는 사람의 만남은 연애가 아니다',
+    !romance({ name: '김일권을 만남' }, '1997년 김일권을 만났다.', [{ name: '김일권' }]));
+  ok("'연애' 띠는 결혼·이별에서 닫는다", STAGE_END['연애'].test('결혼') && STAGE_END['연애'].test('이별'));
 
   // 더한 것으로 화면이 옮겨 간다 (2026-09-09 사용자: "모델이 해석을 끝냈으면 그래프와
   // 연표에 바로 적용되야 하는데"). 연표에 서는 것(해를 아는 사건)이 먼저, 이른 것부터.
@@ -210,6 +241,22 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('더한 것이 없으면 움직이지 않는다', addedFocus(madeDoc, []) === null && addedFocus(madeDoc, undefined) === null);
   ok('무엇이 늘었는지 이름으로 적는다',
     JSON.stringify(addedNames(madeDoc, ['e2', 'e1', 'p'])) === JSON.stringify(['정혜림을 만남', '제주도 혼자 여행']));
+
+  // 옮겨 간 자리를 **다시 그려도 지킨다**. 자의 눈금은 판 높이로 잡히므로
+  // (buildScale) 입력 상자가 닫히며 판이 커지면 픽셀 자리는 딴 해가 된다 —
+  // 실측: 방금 더한 2013년을 비추다가 상자를 닫으면 1998년이 서 있었다.
+  // 판이 지키는 것은 픽셀이 아니라 **해**다 (LifeBoard.viewYear·toYear).
+  const short = lifeLayout({ life, context, bodyH: 516, today: 2026 });
+  const tall = lifeLayout({ life, context, bodyH: 792, today: 2026 });
+  ok('판이 커지면 자도 길어진다', tall.H > short.H, `${short.H} → ${tall.H}`);
+  const trips = [1990, 2002.5, 2013.2, 2024.9].map((y) => Math.abs(yearAt(short, short.at(y)) - y));
+  ok('자리를 해로 되읽는다 (lifeLayout.at 의 거꾸로)', Math.max(...trips) < 1e-6, trips.join(' · '));
+  // 짧은 판에서 보던 해가 긴 판에서도 같은 해다 (자리는 달라도)
+  const wasY = short.at(2013.2);
+  const nowY = tall.at(yearAt(short, wasY));
+  ok('판이 달라져도 보던 해는 그대로', Math.abs(yearAt(tall, nowY) - 2013.2) < 1e-6, String(yearAt(tall, nowY)));
+  ok('자 밖은 자의 끝으로 자른다',
+    yearAt(short, -100) === short.from && yearAt(short, short.H + 100) === short.to);
 
   const ab = stageBands(army, 2026).map((b) => `${b.stage} ${b.start}~${b.end}`);
   ok('띠는 소집해제한 해에 닫는다 (2년 복무가 4년이 되지 않게)',
@@ -272,6 +319,7 @@ console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만�
       { source: 'hs', target: 'me', type: 'during', confidence: 1 },
       { source: 'me', target: 'fail', type: 'after', confidence: 1 },
       { source: 'gr', target: 'hs', type: 'before', confidence: 1 },
+      { source: 'fail', target: 'hs', type: 'during', confidence: 1 },
       { source: 'hs', target: 'sch', type: 'studied_at', confidence: 1 },
       { source: 'hs', target: 'major', type: 'studied_at', confidence: 1 },
       { source: 'mv', target: 'usa', type: 'moved_to', confidence: 1 },
@@ -289,6 +337,36 @@ console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만�
   const mr = new Map(messy.edges.map((e) => [`${e.source}>${e.target}`, e.role || null]));
   ok('주인공 → 자기 사건의 시간 관계는 참여(experienced) — 뒤·동안이 아니다', mk.get('me>mv') === 'experienced' && mk.get('me>hs') === 'experienced' && !mk.has('hs>me'));
   ok('친구라 적힌 만남은 friend_of · 동료는 worked_with · 말 없으면 met', mk.get('me>kim') === 'friend_of' && mk.get('me>lee') === 'worked_with' && mk.get('me>na') === 'met');
+  // 연인 — '여자친구'에 '친구'가 들어 있어서 순서를 안 지키면 동창과 같은 이름으로 선다
+  // (2026-09-10 사용자: "'남자친구'나 '여자친구' '연인' 같은 표현을 하면 관계를 연인으로
+  // 설정 해줘"). 서버(life.py tidy_edges·link_people)와 같은 규칙이다.
+  {
+    const who = [{ id: 'me', type: 'Person', name: '나', confidence: 1 },
+      { id: 'sua', type: 'Person', name: '이수아', confidence: 1, description: '대학 때 사귄 여자친구' },
+      { id: 'kim', type: 'Person', name: '김일권', confidence: 1, description: '고등학교 때 단짝 친구' }];
+    const tid = (es) => new Map(tidyEdges(who, es, who[0]).map((e) => [`${e.source}>${e.target}`, e.type]));
+    const one = tid([{ source: 'me', target: 'sua', type: 'met', confidence: 1 },
+      { source: 'me', target: 'kim', type: 'met', confidence: 1 }]);
+    ok("'여자친구'라 적힌 만남은 친구가 아니라 연인이다",
+      one.get('me>sua') === 'partner_of' && one.get('me>kim') === 'friend_of', [...one].join(' '));
+    ok("모델이 '친구'로 적어 온 것도 다시 본다",
+      tid([{ source: 'me', target: 'sua', type: 'friend_of', confidence: 1 }]).get('me>sua') === 'partner_of');
+    // 설명에 아무 말이 없어도 이야기가 그렇게 부르면 잇는다 (linkPeople)
+    const lover = (story, es = []) => {
+      const ns = [{ id: 'me', type: 'Person', name: '나', start_date: '1982' },
+        { id: 'sua', type: 'Person', name: '이수아' }, { id: 'kim', type: 'Person', name: '김일권' }];
+      linkPeople(ns, es, ns[0], story);
+      return new Map(es.map((e) => [`${e.source}>${e.target}`, e.type]));
+    };
+    ok("이야기가 '사귀었다'고 하면 연인이다", lover('이수아와 2010년부터 사귀었다.').get('me>sua') === 'partner_of');
+    ok('모델이 만남으로 적어 둔 것을 이야기가 올린다',
+      lover('이수아는 내 여자친구였다.', [{ source: 'me', target: 'sua', type: 'met', confidence: 1 }]).get('me>sua') === 'partner_of');
+    ok("남의 연인은 내 연인이 아니다 ('김일권의 여자친구 이수아')",
+      lover('김일권의 여자친구 이수아도 그 자리에 있었다.').get('me>sua') === 'met');
+    ok("한 문장 안의 근거만 본다 ('여자친구와 헤어졌다. 그 뒤 김일권을 만났다')",
+      lover('여자친구와 헤어졌다. 그 뒤 김일권을 만났다.').get('me>kim') === 'met');
+    ok("선 위의 말은 '연인'", edgeLabel('partner_of', 'Person', 'Person') === '연인');
+  }
   ok('일한 곳 없이 미룬 함께 일함은 같은 학교면 schoolmate', mk.get('kim>park') === 'schoolmate');
   ok('양방향 met 은 하나만', !mk.has('na>me') && messy.edges.length === 14);
   // 섬 — '성내중학교 졸업'은 다른 사건하고만 이어져 있었다 (2026-09-08 사용자:
@@ -299,7 +377,19 @@ console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만�
   // 별 정보값이 없는데 그냥 삭제해") — 그 차례는 연표가 이미 연도로 그린다. 옮길 데가
   // 있는 것(주인공 → 자기 사건의 after)은 참여로 남으므로 버리는 것은 사건 → 사건뿐이다.
   ok('사건 → 사건의 before 는 세우지 않는다 (차례는 연표가 그린다)', !mk.has('gr>hs'));
+  // 2026-09-10 사용자: "노드에서 '동안'이라는 메뉴를 삭제해줘". 사건이 다른 사건 안에
+  // 있다는 말은 두 해가 연표에 나란히 서서 이미 한다. 뜻이 있는 during 은 위에서
+  // 옮겨 갔다 (사람 ↔ 사건은 참여, 사건 → 단체·자리는 곳).
+  ok("사건 → 사건의 during 도 세우지 않는다 ('동안' 메뉴)", !mk.has('fail>hs'));
   ok('사건 → 학교·전공의 studied_at 은 그 곳(at)으로 옮긴다', mk.get('hs>sch') === 'at' && mk.get('hs>major') === 'at');
+  // 방향만 뒤집혀 온 참여는 바로 세운다. 자기순환은 버린다 (실측 2026-09-10).
+  {
+    const ns = [{ id: 'me', type: 'Person', name: '나' }, { id: 'ev', type: 'PersonalEvent', name: '안다영을 만남' }];
+    const es = tidyEdges(ns, [{ source: 'ev', target: 'me', type: 'experienced', role: '함께', confidence: 1 },
+      { source: 'ev', target: 'ev', type: 'during', confidence: 1 }], ns[0]);
+    ok('사건 → 사람의 참여는 사람 → 사건으로 바로 선다',
+      es.length === 1 && es[0].source === 'me' && es[0].target === 'ev', JSON.stringify(es));
+  }
   ok('사람 → 사건의 역할은 사건 이름의 술어 (이주·입학), 없으면 사건의 종류(실패); 옮긴 전공은 역할 "전공"',
     [mr.get('me>mv'), mr.get('me>hs'), mr.get('me>fail'), mr.get('hs>major')].join(',') === '이주,입학,실패,전공', [...mr].join(' '));
   const pay = graphPayload(messy, 'me');
@@ -399,8 +489,8 @@ console.log('\n개인 역사 — 그래프 (역사 그래프와 같은 캔버스
     Object.keys(EDGE_TYPE_KO).filter((t) => EDGE_WEIGHT[t] === undefined).join(','));
   ok('무게 표에 이름 없는 관계가 없다', Object.keys(EDGE_WEIGHT).every((t) => EDGE_TYPE_KO[t] !== undefined),
     Object.keys(EDGE_WEIGHT).filter((t) => EDGE_TYPE_KO[t] === undefined).join(','));
-  // 캔버스가 실제로 받는다 (DOM 없이 — layout.test 와 같은 흉내)
-  const canvas = { clientWidth: 800, clientHeight: 600, getContext: () => null, addEventListener() {}, style: {} };
+  // 캔버스가 실제로 받는다 (DOM 없이 — 3D 엔진은 안 실리고 자료만 돈다)
+  const canvas = { clientWidth: 800, clientHeight: 600, addEventListener() {}, style: {} };
   let gv = null;
   try { gv = new GraphView(canvas, {}); } catch { gv = null; }
   if (gv) {

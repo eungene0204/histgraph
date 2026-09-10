@@ -1,16 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { GraphView } from '../lib/graph-view.js';
 
-// 캔버스는 React 가 그리지 않는다. 초당 60번 다시 그려지는 곳이라 가상
+// 그래프는 React 가 그리지 않는다. 초당 60번 다시 그려지는 곳이라 가상
 // DOM 을 통과시킬 이유가 없다 — React 는 자리를 잡아주고 GraphView 의
-// 수명만 관리한다.
+// 수명만 관리한다. 2026-09-11 부터 그 자리는 `<canvas>` 가 아니라 **빈
+// 상자**다: 3D 엔진(`3d-force-graph`)이 그 안에 자기 캔버스를 만들어 넣는다.
+// id 는 그대로 `canvas` 다 — style.css 가 그 이름으로 크기를 준다.
 // `onReady(view)` 는 GraphView 를 **만들 때마다** 부른다. 개발 모드의 StrictMode 가
 // 마운트 직후 한 번 떼었다 다시 붙이는데, 그때 새로 만든 캔버스는 비어 있다 —
 // 부모가 효과 한 번으로 setData 를 실어 두면 그 자료는 떼어진 첫 캔버스에 남고
 // 화면의 캔버스는 빈 채다 (실측 2026-09-07: 개인 역사 그래프가 5173 에서만 안
 // 보였다). 자료를 든 쪽이 이 신호로 다시 싣는다.
 export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, onReady, settings, note, empty, offline }) {
-  const canvasRef = useRef(null);
+  const holdRef = useRef(null);
   // **콜백을 ref 에 담아 넘긴다.** 그냥 넘기면 onSelect 가 바뀔 때마다
   // GraphView 를 새로 만들어야 하고, 그러면 매번 배치가 처음부터 다시
   // 튄다. 안에서는 늘 최신 것을 부르되 인스턴스는 하나로 둔다.
@@ -18,7 +20,7 @@ export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, onReady
   handlers.current = { onSelect, onExpand, onCausalExit, onReady };
 
   useEffect(() => {
-    const view = new GraphView(canvasRef.current, {
+    const view = new GraphView(holdRef.current, {
       onSelect: (node) => handlers.current.onSelect(node),
       onExpand: (node) => handlers.current.onExpand(node),
       onCausalExit: () => handlers.current.onCausalExit?.(),
@@ -56,9 +58,9 @@ export function GraphCanvas({ viewRef, onSelect, onExpand, onCausalExit, onReady
   return (
     <main className="stage">
       {/* **id 를 지우지 말 것.** style.css 가 `#canvas` 로 크기(100%)와
-          touch-action:none 을 준다. 빼면 캔버스가 기본 300×150 으로 줄어
-          클릭 좌표가 어긋나고, 포인터 제스처를 브라우저가 가로챈다. */}
-      <canvas id="canvas" ref={canvasRef} />
+          touch-action:none 을 준다. 빼면 3D 엔진이 크기 0 인 상자에 캔버스를
+          만들어 아무것도 안 보이고, 포인터 제스처를 브라우저가 가로챈다. */}
+      <div id="canvas" ref={holdRef} />
       {note && <div className="stage-note">{note}</div>}
       {/* 자료 서버가 죽어 있으면 화면은 '아무것도 안 고른 상태'와 똑같이
           비어 보인다. 그 둘을 가려 적는다 — 안 그러면 그래프와 연표가
