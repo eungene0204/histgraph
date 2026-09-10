@@ -2840,6 +2840,79 @@ def neon_env() -> str:
     return neon.ENV_URL
 
 
+def cmd_datakey(args: argparse.Namespace) -> int:
+    """내 역사를 잠그는 **큰 열쇠**. 만들고, 어디가 잠겼는지 세고, 다시 잠근다.
+
+        uv run histgraph datakey                 # 지금 상태 (아무것도 안 바꾼다)
+        uv run histgraph datakey --new           # 새 열쇠 한 줄 (직접 .env 에 붙인다)
+        uv run histgraph datakey --seal          # 로컬 표의 평문·옛 봉투를 다시 잠근다
+        uv run histgraph datakey --seal --prod   # 배포 표(Neon)에 같은 일을
+
+    **열쇠는 이 명령이 .env 에 쓰지 않는다.** 배포 환경변수와 같은 값이어야
+    하는데, 한쪽에만 조용히 들어가면 다른 쪽이 못 여는 봉투가 생긴다. 사람이
+    두 곳에 같이 붙이는 것이 맞다 (`HISTGRAPH_DATA_KEY`).
+
+    열쇠를 갈 때는 옛 것을 `HISTGRAPH_DATA_KEY_OLD` 에 두고 `--seal` 을 돌린다 —
+    다 잠근 뒤에 옛 것을 지운다."""
+    import json
+
+    from . import accounts, secretbox
+
+    if args.new:
+        print("  새 열쇠 — .env 와 배포 환경변수에 **같은 값**으로 넣으세요:\n")
+        print(f"  {secretbox.ENV_KEY}={secretbox.new_key()}\n")
+        print("  이미 잠가 둔 것이 있으면 옛 열쇠를 "
+              f"{secretbox.ENV_OLD} 에 남긴 채 `datakey --seal` 을 돌리세요.")
+        return 0
+
+    on = secretbox.enabled()
+    print(f"  열쇠: {'있음 (' + secretbox.current_id() + ')' if on else '없음 — 평문으로 담깁니다'}")
+    if not on:
+        print(f"  ({secretbox.ENV_KEY} 가 없습니다. `histgraph datakey --new` 로 만드세요.)")
+
+    try:
+        store = accounts.prod_store() if args.prod else accounts.LocalStore()
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        return 1
+    where = "배포(Neon)" if args.prod else f"로컬 {accounts.LOCAL_DB.name}"
+
+    try:
+        rows = store.query("select user_id, doc from life_docs", [])
+    except accounts.StoreError as err:
+        print(f"  ✗ {err}")
+        return 1
+    now = secretbox.current_id()
+    boxed = [r for r in rows if secretbox.sealed(_as_doc(r["doc"]))]
+    stale = [r for r in boxed if _as_doc(r["doc"]).get("kid") != now]
+    print(f"  {where}: 내 역사 {len(rows)}건 — 봉투 {len(boxed)} · 평문 {len(rows) - len(boxed)}"
+          + (f" · 옛 열쇠 {len(stale)}" if stale else ""))
+
+    if not args.seal:
+        if rows and (len(boxed) < len(rows) or stale):
+            print("  (다시 잠그려면 --seal)")
+        return 0
+    try:
+        done, kept = secretbox.reseal(store)
+    except secretbox.SecretError as err:
+        print(f"  ✗ {err}")
+        return 1
+    print(f"  ✓ 다시 잠근 것 {done}건 · 그대로 둔 것 {kept}건")
+    return 0
+
+
+def _as_doc(raw: object) -> dict:
+    """jsonb 가 문자열로 오기도 한다."""
+    import json
+
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
 def cmd_accounts(args: argparse.Namespace) -> int:
     """가입자 표를 세운다·본다. 그래프 DB 와는 다른 곳에 산다 (Neon).
 
@@ -3347,6 +3420,12 @@ def main(argv: list[str] | None = None) -> int:
     p_ls.add_argument("--force", action="store_true",
                       help="받는 쪽에만 있는 것이 사라져도 덮는다")
     p_ls.set_defaults(func=cmd_lifesync)
+
+    p_dk = sub.add_parser("datakey", help="내 역사를 잠그는 열쇠 — 만들고 다시 잠근다")
+    p_dk.add_argument("--new", action="store_true", help="새 열쇠 한 줄을 찍는다 (파일은 안 건드린다)")
+    p_dk.add_argument("--seal", action="store_true", help="평문·옛 봉투를 지금 열쇠로 다시 잠근다")
+    p_dk.add_argument("--prod", action="store_true", help="배포 표(Neon)를 본다")
+    p_dk.set_defaults(func=cmd_datakey)
 
     p_ac = sub.add_parser("accounts", help="가입자 표 (Neon) — 세우고 세어 본다")
     p_ac.add_argument("--init", action="store_true", help="표를 만든다 (없을 때만)")

@@ -65,7 +65,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import accounts
+from . import accounts, secretbox
 
 log = logging.getLogger(__name__)
 
@@ -780,7 +780,11 @@ def withdraw(req: Request) -> Response:
 
 
 def life_doc(req: Request) -> Response:
-    """내 역사 문서. 지금은 브라우저에만 있어 기기를 바꾸면 사라진다."""
+    """내 역사 문서. **표에 드는 것은 봉투다** (`secretbox` — 2026-09-11 결정).
+
+    세션으로 문은 잠겨 있지만 표를 통째로 떠 가는 길은 그 문을 안 지난다.
+    그래서 담을 때 잠그고 꺼낼 때 푼다 — 화면은 달라지는 것이 없다.
+    열쇠가 없는 자리에서는 예전처럼 평문으로 담긴다."""
     user = require_user(req)
     if req.method == "GET":
         row = db().one("select doc, updated_at from life_docs where user_id = $1",
@@ -790,7 +794,8 @@ def life_doc(req: Request) -> Response:
         doc = row["doc"]
         if isinstance(doc, str):       # jsonb 가 문자열로 오는 경우
             doc = json.loads(doc)
-        return Response.json({"doc": doc, "updated_at": row.get("updated_at")})
+        return Response.json({"doc": secretbox.unseal(doc),
+                              "updated_at": row.get("updated_at")})
 
     if req.method == "DELETE":
         check_write(req)
@@ -803,13 +808,15 @@ def life_doc(req: Request) -> Response:
     if not isinstance(doc, dict):
         raise AuthError("저장할 내용이 없습니다.")
     raw = json.dumps(doc, ensure_ascii=False)
+    # 한도는 **문서**에 건다. 봉투는 base64 라 3분의 1쯤 커지는데, 그것 때문에
+    # 사람이 적을 수 있는 양이 줄어들 이유는 없다.
     if len(raw.encode("utf-8")) > MAX_LIFE:
         raise AuthError("문서가 너무 큽니다 (512KB 까지).")
     db().query(
         """insert into life_docs (user_id, doc) values ($1, $2::jsonb)
            on conflict (user_id) do update
               set doc = excluded.doc, updated_at = now()""",
-        [user["id"], raw],
+        [user["id"], json.dumps(secretbox.seal(doc), ensure_ascii=False)],
     )
     return Response.json({"ok": True})
 
@@ -920,6 +927,11 @@ def route(req: Request) -> Response | None:
     except AuthError as err:
         status = 401 if str(err) == "로그인이 필요합니다." else 400
         return Response.json({"error": str(err)}, status)
+    except secretbox.SecretError as err:
+        # 열쇠가 없거나 갈렸다. **비었다고 답하지 않는다** — 화면이 그것을
+        # '자료 없음'으로 읽으면 다음 저장이 빈 것으로 덮어쓴다.
+        log.error("내 역사 봉투를 열지 못함: %s", err)
+        return Response.json({"error": str(err)}, 503)
     except accounts.StoreError as err:
         log.warning("가입자 표 접근 실패: %s", err)
         return Response.json({"error": "가입자 정보에 닿지 못했습니다."}, 503)

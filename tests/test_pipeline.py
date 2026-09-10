@@ -6892,6 +6892,81 @@ with tempfile.TemporaryDirectory() as tmp:
     check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
 
 
+print("\n[내 역사 봉투 — 표에 드는 것은 읽을 수 없는 글자다 (secretbox)]")
+# 여기서 재는 것은 **틀리면 삶이 새거나 사라지는** 자리다. 네트워크도 DB 도 안 쓴다.
+import json as _js0  # noqa: E402
+import os as _os0  # noqa: E402
+
+import histgraph.secretbox as _sb  # noqa: E402
+
+_keep_box = {k: _os0.environ.get(k) for k in (_sb.ENV_KEY, _sb.ENV_OLD)}
+try:
+    _os0.environ.pop(_sb.ENV_OLD, None)
+    _doc = {"subject": {"name": "홍길동"},
+            "stories": ["1985년 서울에서 태어났다"], "nodes": [{"id": "me"}]}
+
+    # 열쇠가 없으면 예전처럼 평문이다 — 열쇠 없는 컴퓨터에서 내 역사를 못 쓰게
+    # 만들지 않는다. 평문은 평문대로 읽힌다.
+    _os0.environ.pop(_sb.ENV_KEY, None)
+    check("열쇠가 없으면 잠그지 않는다", _sb.enabled() is False and _sb.seal(_doc) == _doc)
+    check("평문은 그대로 읽는다", _sb.unseal(_doc) == _doc)
+
+    _os0.environ[_sb.ENV_KEY] = _sb.new_key()
+    _box1 = _sb.seal(_doc)
+    check("열쇠가 있으면 봉투에 넣는다", _sb.sealed(_box1) and _box1["enc"] == _sb.FORMAT)
+    check("봉투 안에 원문이 없다",
+          "서울" not in _js0.dumps(_box1, ensure_ascii=False)
+          and "홍길동" not in _js0.dumps(_box1, ensure_ascii=False))
+    check("본인은 그대로 되읽는다", _sb.unseal(_box1) == _doc)
+    check("같은 문서를 두 번 잠가도 글자가 다르다 (nonce)",
+          _sb.seal(_doc)["doc"] != _box1["doc"])
+    check("작은 열쇠도 문서마다 다르다", _sb.seal(_doc)["key"] != _box1["key"])
+    check("이미 봉투면 두 번 싸지 않는다", _sb.seal(_box1) is _box1)
+
+    # 한 글자만 고쳐도 열지 않는다 (봉인을 먼저 본다).
+    _bad = dict(_box1)
+    _tail = _bad["doc"]
+    _bad["doc"] = _tail[:-2] + ("AA" if _tail[-2:] != "AA" else "AB")
+    _caught = ""
+    try:
+        _sb.unseal(_bad)
+    except _sb.SecretError as _e:
+        _caught = str(_e)
+    check("한 글자라도 손대면 열지 않는다", bool(_caught), _caught)
+
+    # 남의 열쇠로는 못 연다.
+    _mine = _os0.environ[_sb.ENV_KEY]
+    _os0.environ[_sb.ENV_KEY] = _sb.new_key()
+    _caught2 = ""
+    try:
+        _sb.unseal(_box1)
+    except _sb.SecretError as _e:
+        _caught2 = str(_e)
+    check("다른 열쇠로는 열지 못한다 (빈 문서를 주지 않는다)", bool(_caught2), _caught2)
+
+    # 열쇠를 갈면 옛 것을 OLD 에 두어 읽기를 잇는다.
+    _os0.environ[_sb.ENV_OLD] = _mine
+    check("옛 열쇠는 OLD 에서 읽는다", _sb.unseal(_box1) == _doc)
+    check("어느 열쇠로 잠갔는지 봉투에 적힌다 (열쇠는 새지 않는다)",
+          _box1["kid"] != _sb.current_id() and _mine not in _js0.dumps(_box1))
+
+    # 열쇠 글자는 짧으면 열쇠가 아니다.
+    _os0.environ[_sb.ENV_KEY] = "짧은열쇠"
+    _short = ""
+    try:
+        _sb.enabled()
+        _sb.seal(_doc)
+    except _sb.SecretError as _e:
+        _short = str(_e)
+    check("짧은 열쇠는 받지 않는다", _sb.enabled() is False)
+finally:
+    for _k, _v in _keep_box.items():
+        if _v is None:
+            _os0.environ.pop(_k, None)
+        else:
+            _os0.environ[_k] = _v
+
+
 print("\n[가입·로그인 — 세션·CSRF·열린 리다이렉트 (auth)]")
 # 네트워크도 DB 도 안 쓴다. 여기서 재는 것은 **틀리면 계정이 털리는 자리**다.
 import json as _js  # noqa: E402
@@ -7209,6 +7284,47 @@ try:
     _auth.route(req("DELETE", "/api/my/life", cookies=jar, extra=csrf_head))
     check("지우면 비었다고 답한다",
           _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)["life"] is False)
+
+    # 5-1) **표에 드는 것은 봉투다** (2026-09-11 사용자 결정). 세션으로 문은
+    # 잠겨 있어도 표를 통째로 떠 가는 길은 그 문을 안 지난다.
+    import histgraph.secretbox as _box  # noqa: E402
+
+    _os.environ[_box.ENV_KEY] = _box.new_key()
+    _auth.route(req("PUT", "/api/my/life", cookies=jar, extra=csrf_head,
+                    body='{"doc":{"nodes":[{"id":"me","name":"\ud64d\uae38\ub3d9"}],'
+                         '"stories":["1985\ub144 \uc11c\uc6b8\uc5d0\uc11c \ud0dc\uc5b4\ub0ac\ub2e4"]}}'.encode()))
+    _row = store.one("select doc from life_docs where user_id = $1", [user["id"]])
+    check("표에 이야기 원문이 남지 않는다",
+          "서울" not in _row["doc"] and "홍길동" not in _row["doc"]
+          and _js.loads(_row["doc"])["enc"] == _box.FORMAT, _row["doc"][:80])
+    _back = _js.loads(_auth.route(req("GET", "/api/my/life", cookies=jar)).body)
+    check("본인은 그대로 읽는다 (화면은 달라지지 않는다)",
+          _back["doc"]["stories"] == ["1985년 서울에서 태어났다"], str(_back)[:120])
+    check("담아 둔 것이 있다는 답은 그대로",
+          _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)["life"] is True)
+    # 열쇠를 잃으면 **비었다고 답하지 않는다** — 그러면 화면이 '자료 없음'으로
+    # 읽고 다음 저장이 빈 것으로 덮어써 삶이 사라진다.
+    _keep_key = _os.environ.pop(_box.ENV_KEY)
+    _lost = _auth.route(req("GET", "/api/my/life", cookies=jar))
+    check("열쇠가 없으면 빈 문서가 아니라 503 으로 말한다",
+          _lost.status == 503 and "doc" not in _js.loads(_lost.body), str(_lost.body)[:120])
+    _os.environ[_box.ENV_KEY] = _keep_key
+    # 옛 열쇠로 담은 것은 새 열쇠로 다시 잠근다 (`datakey --seal`).
+    _os.environ[_box.ENV_OLD] = _keep_key
+    _os.environ[_box.ENV_KEY] = _box.new_key()
+    _lost2 = _auth.route(req("GET", "/api/my/life", cookies=jar))
+    check("열쇠를 갈아도 옛 봉투는 읽힌다 (OLD)",
+          _lost2.status == 200 and _js.loads(_lost2.body)["doc"]["stories"][0].startswith("1985"))
+    _done, _kept = _box.reseal(store)
+    _now = _js.loads(store.one("select doc from life_docs where user_id = $1", [user["id"]])["doc"])
+    check("다시 잠그면 새 열쇠의 봉투가 된다",
+          _done == 1 and _kept == 0 and _now["kid"] == _box.current_id())
+    _os.environ.pop(_box.ENV_OLD)
+    check("옛 열쇠를 지워도 읽힌다 (다 옮겨졌다)",
+          _js.loads(_auth.route(req("GET", "/api/my/life", cookies=jar)).body)
+          ["doc"]["nodes"][0]["name"] == "홍길동")
+    _os.environ.pop(_box.ENV_KEY)
+    _auth.route(req("DELETE", "/api/my/life", cookies=jar, extra=csrf_head))
     _auth.route(req("PUT", "/api/my/life", cookies=jar, extra=csrf_head,
                     body='{"doc":{"nodes":[{"id":"me","name":"나"}]}}'.encode()))
 

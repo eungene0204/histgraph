@@ -223,19 +223,30 @@ def find_user(store, email: str | None = None, sub: str | None = None) -> dict |
 
 
 def life_of(store, user: dict) -> tuple[dict | None, str | None]:
-    """그 사람의 내 역사 문서와 마지막으로 고친 때. 없으면 (None, None)."""
+    """그 사람의 내 역사 문서와 마지막으로 고친 때. 없으면 (None, None).
+
+    표에 봉투로 들어 있으면 열어서 준다 (`secretbox`). **두 곳의 큰 열쇠가
+    같아야 옮길 수 있다** — 로컬 `.env` 와 배포 환경변수에 같은 값을 둔다."""
     import json
+
+    from . import secretbox
 
     row = store.one("select doc, updated_at from life_docs where user_id = $1", [user["id"]])
     if not row:
         return None, None
     doc = row["doc"]
-    return (json.loads(doc) if isinstance(doc, str) else doc), row.get("updated_at")
+    doc = json.loads(doc) if isinstance(doc, str) else doc
+    return secretbox.unseal(doc), row.get("updated_at")
 
 
 def put_life(store, user: dict, doc: dict) -> int:
-    """내 역사 문서를 얹는다. 돌아오는 것은 보낸 바이트 수 (512KB 까지)."""
+    """내 역사 문서를 얹는다. 돌아오는 것은 **문서**의 바이트 수 (512KB 까지).
+
+    표에 드는 것은 봉투다 (`secretbox.seal` — 열쇠가 없으면 평문 그대로).
+    한도는 봉투가 아니라 문서에 건다."""
     import json
+
+    from . import secretbox
 
     raw = json.dumps(doc, ensure_ascii=False)
     size = len(raw.encode("utf-8"))
@@ -245,5 +256,5 @@ def put_life(store, user: dict, doc: dict) -> int:
         """insert into life_docs (user_id, doc) values ($1, $2::jsonb)
            on conflict (user_id) do update
               set doc = excluded.doc, updated_at = now()""",
-        [user["id"], raw])
+        [user["id"], json.dumps(secretbox.seal(doc), ensure_ascii=False)])
     return size
