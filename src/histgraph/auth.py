@@ -188,6 +188,22 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def owner_tag(user_id: int) -> str:
+    """이 사람의 자료에 적어 둘 **주인 표**. 브라우저가 들고 있어도 되는 값이다.
+
+    개인 역사는 서버뿐 아니라 **브라우저(localStorage)에도** 한 벌 남는다.
+    그런데 브라우저는 사람을 가리지 않는다 — 갑이 쓰고 나간 컴퓨터에서 을이
+    열면 같은 자리를 읽는다. 그래서 남기는 자료마다 주인을 적어 두고, 지금
+    보는 사람과 다르면 **읽지도 올리지도 않고 지운다** (`web/src/lib/lifestore.js`).
+
+    표는 사용자 번호의 HMAC 이다. 되돌릴 수 없고(번호·이메일이 새지 않는다),
+    같은 사람이면 기기와 세션이 달라도 같은 값이다 — 기기를 옮겨도 자기
+    자료를 알아본다. **세션 열쇠가 바뀌면 표도 바뀐다**: 그때는 브라우저에
+    남은 것이 남의 것으로 보여 지워지고, 계정에 있는 것으로 되살아난다."""
+    mac = hmac.new(_secret(), b"owner:" + str(user_id).encode(), hashlib.sha256)
+    return b64u(mac.digest())[:22]
+
+
 def parse_cookies(header: str | None) -> dict[str, str]:
     """`Cookie:` 한 줄을 사전으로. 값에 `=` 가 들어 있어도 첫 `=` 에서만 자른다."""
     out: dict[str, str] = {}
@@ -436,6 +452,27 @@ def require_user(req: Request) -> dict:
     if not user:
         raise AuthError("로그인이 필요합니다.")
     return user
+
+
+def life_viewer(req: Request, *, local: bool = False) -> str | None:
+    """이 요청에게 **개인 역사를 내주어도 되는가.** 되면 주인 표, 안 되면 None.
+
+    개인 역사가 서버를 지나는 자리는 넷이다 — 계정에 담고 꺼내는 둘
+    (`/api/my/life`, 세션으로 갈린다), 이야기를 모델에게 묻는 하나
+    (`/api/life/analyze`), 그리고 **결과와 원문을 내주는 둘**
+    (`/api/life/job`·`/api/life/story`). 마지막 둘은 세션을 안 보던 자리라
+    여기서 같은 문을 세운다.
+
+    - 로그인이 켜져 있으면 **로그인한 사람에게만** 내준다. 표는 그 사람의
+      것이라 남의 결과를 받을 수 없다.
+    - 로그인이 아직 안 켜진 자리(로컬 개발)에서는 **이 컴퓨터에서 온 요청만**
+      받는다 (`local`). `serve --host 0.0.0.0` 으로 띄우면 같은 망의 다른
+      사람이 이 컴퓨터 주인의 이야기를 그대로 읽을 수 있기 때문이다.
+      배포는 언제나 `local=False` 다 — 남의 컴퓨터에서 오는 요청뿐이다."""
+    if enabled():
+        user = current_user(req)
+        return owner_tag(user["id"]) if user else None
+    return "" if local else None
 
 
 def check_write(req: Request) -> None:
@@ -718,6 +755,10 @@ def me(req: Request) -> Response:
         # 문서는 노드가 있어야 저장되고(LifeView.adopt), 다 지우면 줄째 지워진다.
         "life": db().one("select 1 as one from life_docs where user_id = $1",
                          [user["id"]]) is not None,
+        # 브라우저에 남긴 내 역사에 적어 둘 **주인 표** (`owner_tag`). 화면은
+        # 자기 표가 적힌 자료만 읽고, 다른 표가 적혀 있으면 지운다 — 한 컴퓨터를
+        # 여럿이 쓸 때 앞사람의 삶이 뒷사람 화면에 서지 않게 하는 자리다.
+        "owner": owner_tag(user["id"]),
     })
 
 

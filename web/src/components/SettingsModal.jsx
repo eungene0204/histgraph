@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { auth } from '../lib/auth.js';
+import { forgetLife } from '../lib/lifestore.js';
 
 // 설정 상자. 계정 메뉴의 '설정'이 이것을 세운다 (2026-09-09 사용자: "설정버튼을
 // 누르면 서브메뉴로 가지 말고 사진처럼 모달을 보여줘").
@@ -58,6 +59,9 @@ export function SettingsModal({ user, onClose }) {
     setBusy(what);
     try {
       await fn();
+      // 로그아웃이든 탈퇴든 세션이 사라진다 — 브라우저에 남은 내 역사도
+      // 함께 지운다. 탈퇴는 계정에서도 지워지므로 여기 남으면 지운 것이 아니다.
+      forgetLife();
       location.reload();     // 세션이 사라졌다 — 화면을 처음부터 다시 그린다
     } catch (err) {
       setBusy('');

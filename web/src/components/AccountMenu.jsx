@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { auth } from '../lib/auth.js';
+import { forgetLife } from '../lib/lifestore.js';
 import { GoogleMark } from './LoginModal.jsx';
 import { SettingsModal } from './SettingsModal.jsx';
 
@@ -87,6 +88,11 @@ export function AccountMenu() {
     setBusy('logout');
     try {
       await auth.logout();
+      // **나가면서 이 브라우저에 남은 내 역사를 지운다.** 계정에는 그대로
+      // 있어 다시 들어오면 되살아나고, 다음에 이 컴퓨터를 쓰는 사람에게는
+      // 아무것도 남지 않는다 (2026-09-11). 주인 표가 이미 한 겹 막지만,
+      // 남의 삶을 기기에 남겨 둘 이유가 없다.
+      forgetLife();
       location.reload();     // 세션이 사라졌다 — 화면을 처음부터 다시 그린다
     } catch (err) {
       setBusy('');

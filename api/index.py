@@ -40,7 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 # 배포에서만 `/console` 이 ImportError 로 떨어진다.
 from histgraph import accounts, auth, console, pages  # noqa: E402,F401
 from histgraph.server import (  # noqa: E402
-    LIFE_MAX_BODY, LIFE_POSTS, GraphAPI, dispatch, life_post,
+    LIFE_GETS, LIFE_MAX_BODY, LIFE_POSTS, GraphAPI, dispatch, life_post,
 )
 
 log = logging.getLogger("histgraph.api")
@@ -110,7 +110,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         로컬 서버와 다른 것은 셋이다 — 답이 나올 때까지 **한 요청 안에서 돈다**
         (서버리스에는 다음 요청까지 살아 있는 스레드가 없다), **파일을 남기지
         않는다** (디스크는 읽기 전용이고 남의 삶을 우리 서버에 두지 않는다),
-        그리고 **로그인한 사람의 것만 받는다** (`_life_gate`)."""
+        그리고 **로그인한 사람의 것만 받는다** (`_life_viewer`)."""
         path = _path(urlparse(self.path))
         raw = self._read_body(LIFE_MAX_BODY if path in LIFE_POSTS else auth.MAX_BODY)
         if self._try_auth(raw):
@@ -118,37 +118,45 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         if path not in LIFE_POSTS:
             self._json(405, {"error": "허용되지 않는 방법입니다."})
             return
-        if self._life_gate(raw):
-            return
-        status, payload = life_post(api, path, raw, blocking=True, save=False)
+        viewer = self._life_viewer(raw, write=True)
+        if viewer is None:
+            return                      # 위에서 답했다
+        status, payload = life_post(api, path, raw, blocking=True, save=False,
+                                    owner=viewer)
         self._json(status, payload)
 
-    def _life_gate(self, raw: bytes) -> bool:
-        """내 역사는 로그인한 사람의 것이다. 막았으면 True (여기서 답했다).
+    def _life_viewer(self, raw: bytes = b"", *, write: bool = False) -> str | None:
+        """개인 역사를 내줄 상대의 **주인 표**. 못 내주면 여기서 답하고 None.
 
-        **여기서는 가입이 꺼져 있으면 아예 안 받는다.** 로컬 서버와 반대다 —
-        거기서는 설정이 없다고 내 역사를 못 쓰게 되면 안 되지만(README '내
-        역사만 로그인을 요구한다'), 열린 인터넷에서 문을 안 잠그면 아무나
-        남의 이름으로 우리 모델을 부른다. 켜져 있으면 세션과 표를 함께 본다:
-        표가 없으면 남의 사이트가 이 사람의 브라우저로 요청을 쏠 수 있다."""
+        **배포에는 '이 컴퓨터' 가 없다** — 오는 요청은 전부 남의 컴퓨터에서
+        온다. 그래서 로그인이 꺼져 있으면 아예 안 받는다 (`local=False`).
+        로컬 서버와 반대다: 거기서는 설정이 없다고 내 역사를 못 쓰게 되면
+        안 되지만(README '내 역사만 로그인을 요구한다'), 열린 인터넷에서
+        문을 안 잠그면 아무나 남의 이름으로 우리 모델을 부른다.
+
+        `write` 는 상태를 바꾸는 요청이다 — 표(CSRF)를 함께 본다. 없으면
+        남의 사이트가 이 사람의 브라우저로 요청을 쏠 수 있다."""
         if not auth.enabled():
             self._json(503, {"error": "로그인이 아직 열리지 않아 내 역사를 쓸 수 없습니다."})
-            return True
+            return None
         url = urlparse(self.path)
         req = auth.Request(self.command, _path(url), parse_qs(url.query),
                            dict(self.headers.items()), raw)
         try:
-            auth.require_user(req)
-            auth.check_write(req)
+            viewer = auth.life_viewer(req)
+            if viewer is None:
+                raise auth.AuthError("로그인이 필요합니다.")
+            if write:
+                auth.check_write(req)
         except auth.AuthError as err:
             status = 401 if str(err) == "로그인이 필요합니다." else 400
             self._json(status, {"error": str(err)})
-            return True
+            return None
         except accounts.StoreError as err:
             log.warning("가입자 표 접근 실패: %s", err)
             self._json(503, {"error": "가입자 정보에 닿지 못했습니다."})
-            return True
-        return False
+            return None
+        return viewer
 
     def do_PUT(self) -> None:  # noqa: N802
         self._auth_only()
@@ -160,20 +168,28 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
 
     def do_GET(self) -> None:  # noqa: N802
         url = urlparse(self.path)
+        path = _path(url)
+        viewer = None
         try:
             if self._try_auth():
                 return
             # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`). rewrite 가 `/api/n/…`
             # 으로 바꿔 넘기므로 같은 표(pages.route)가 양쪽을 다 받는다.
-            page = pages.route(api, _path(url))
+            page = pages.route(api, path)
             if page is not None:
                 self._send(*page)
                 return
-            status, payload = dispatch(api, _path(url), parse_qs(url.query))
+            # 개인 역사를 내주는 둘은 로그인한 사람에게만, 그리고 **엣지에
+            # 재우지 않고** 답한다 (`LIFE_GETS`).
+            if path in LIFE_GETS:
+                viewer = self._life_viewer()
+                if viewer is None:
+                    return              # 위에서 답했다
+            status, payload = dispatch(api, path, parse_qs(url.query), viewer)
         except (ValueError, KeyError) as err:
             status, payload = 400, {"error": f"{type(err).__name__}: {err}"}
 
-        self._json(status, payload, cache=True)
+        self._json(status, payload, cache=path not in LIFE_GETS)
 
     def _json(self, status: int, payload: object, *, cache: bool = False) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

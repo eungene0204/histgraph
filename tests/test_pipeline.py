@@ -6687,35 +6687,38 @@ with tempfile.TemporaryDirectory() as tmp:
     # 하나)가 아니라 서버가 쓰는 것처럼 경로로 연 api 를 준다.
     tapi = _LifeAPI(Path(tmp) / "korea.sqlite", era="korea")
     try:
+        # 분석에는 **임자가 있다** — 띄운 사람의 표를 함께 적고, 표가 다른
+        # 사람에게는 결과를 내주지 않는다 (`status(viewer)`, 2026-09-11 점검).
+        WHO = "이-사람의-표"
         job = _LifeJob()
-        idle = job.status()
+        idle = job.status(WHO)
         check("분석 전에는 idle", idle["state"] == "idle")
         # 화면이 '글이 이 컴퓨터 밖으로 나가지 않는다'고 적어도 되는지가
         # 이 값으로 갈린다 (LifeView 의 `local`).
         check("어느 모델로 읽는지 같이 알린다", idle["backend"] in ("mlx", "openrouter"))
-        check("이야기를 주면 띄운다", job.start(tapi, "이야기", name="시험"))
+        check("이야기를 주면 띄운다", job.start(tapi, "이야기", name="시험", owner=WHO))
         for _ in range(200):
-            if job.status()["state"] != "running":
+            if job.status(WHO)["state"] != "running":
                 break
             time.sleep(0.02)
-        st = job.status()
+        st = job.status(WHO)
         check("끝나면 화면이 쓸 그래프를 준다",
               st["state"] == "done" and st["payload"]["subject"]["name"] == "나" and st["file"] == "시험.json", str(st)[:200])
         check("저장까지 한다 (data/life 밖으로 안 나간다)", (life_mod.LIFE_DIR / "시험.json").is_file()
               and (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기")
         check("모델에게 그래프의 사건 이름을 보인다", "대한민국의 IMF 구제금융 요청" in made.user)
-        check("있는 그래프를 주면 거기에 더한다", job.start(tapi, "더", name="시험", base=st["payload"]))
+        check("있는 그래프를 주면 거기에 더한다", job.start(tapi, "더", name="시험", base=st["payload"], owner=WHO))
         for _ in range(200):
-            if job.status()["state"] != "running":
+            if job.status(WHO)["state"] != "running":
                 break
             time.sleep(0.02)
-        st2 = job.status()
+        st2 = job.status(WHO)
         check("더한 결과는 옛 주인공을 지키고 더한 수를 알린다",
               st2["state"] == "done" and st2["added"] == {"nodes": 0, "edges": 0, "timeline": 0,
                                                           "connections": 0, "ids": [], "timeline_ids": []}
               and st2["payload"]["subject"]["id"] == st["payload"]["subject"]["id"] and "그래프는 이미 있다" in made.user, str(st2)[:300])
         check("원문은 파일에 이어 둔다", (life_mod.LIFE_DIR / "시험.txt").read_text(encoding="utf-8") == "이야기\n\n더")
-        st, body = _life_dispatch(api, "/api/life/job", {})
+        st, body = _life_dispatch(api, "/api/life/job", {}, WHO)
         check("/api/life/job 이 상태를 준다 (배포에서는 늘 idle)", st == 200 and "state" in body)
         class _Slow(_FakeLife):
             def complete_json(self, *a, **kw):
@@ -6724,10 +6727,10 @@ with tempfile.TemporaryDirectory() as tmp:
         made2 = _Slow()
         _backends.build_backend = lambda kind, model=None: made2
         job2 = _LifeJob()
-        job2.start(tapi, "이야기", name="시험2")
-        check("한 번에 하나만 돈다 (MLX 는 자리를 두 벌 못 잡는다)", job2.start(tapi, "또", name="시험3") is False)
+        job2.start(tapi, "이야기", name="시험2", owner=WHO)
+        check("한 번에 하나만 돈다 (MLX 는 자리를 두 벌 못 잡는다)", job2.start(tapi, "또", name="시험3", owner=WHO) is False)
         for _ in range(200):
-            if job2.status()["state"] != "running":
+            if job2.status(WHO)["state"] != "running":
                 break
             time.sleep(0.02)
     finally:
@@ -6762,10 +6765,18 @@ with tempfile.TemporaryDirectory() as tmp:
         st, body = _life_post(tapi, "/api/life/refine",
                               _j0.dumps({"subject": {"id": "me"}, "nodes": [], "edges": []}).encode("utf-8"))
         check("다듬는 길은 모델 없이 200", st == 200 and "nodes" in body, str(body)[:120])
-        st, body = _life_post(tapi, "/api/life/analyze", b'{"text": "\uc774\uc57c\uae30"}')
+        MINE = "\uc774-\uc0ac\ub78c\uc758-\ud45c"
+        st, body = _life_post(tapi, "/api/life/analyze", b'{"text": "\uc774\uc57c\uae30"}',
+                              owner=MINE)
         check("로컬은 띄우고 202 로 물러난다", st == 202 and body["state"] == "running", str(body)[:120])
+        # 띄운 사람에게만 그렇다. 옆 사람이 물으면 남의 일은 없는 것으로 온다.
+        check("남에게는 그 분석이 보이지 않는다",
+              _LIFE_JOBS.status("\ub0a8\uc758-\ud45c")["state"] == "idle")
+        # **끝날 때까지 기다리는 것도 띄운 사람의 표로 묻는다.** 남의 표로
+        # 물으면 늘 idle 이라 고리가 바로 빠지고, 살아 있는 스레드가 이 시험이
+        # 되돌려 놓은 뒤의 `LIFE_DIR`(= 진짜 data/life)에 파일을 쓴다.
         for _ in range(200):
-            if _LIFE_JOBS.status()["state"] != "running":
+            if _LIFE_JOBS.status(MINE)["state"] != "running":
                 break
             time.sleep(0.02)
     finally:
@@ -7211,14 +7222,18 @@ try:
     _vapi = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_vapi)
 
-    def gate(cookies="", extra=None):
-        """배포 함수의 `_life_gate` 를 그대로 부른다 → (막았나, (상태, 몸))."""
+    def gate(cookies="", extra=None, path="/api/life/analyze", write=True):
+        """배포 함수의 문(`_life_viewer`)을 그대로 부른다.
+
+        돌아오는 것은 (막았나, (상태, 몸), 주인 표) 다 — 지나간 사람에게는
+        표가 나오고, 그 표로 분석 결과의 임자가 갈린다."""
         h = _vapi.handler.__new__(_vapi.handler)
-        h.command, h.path = "POST", "/api/life/analyze"
+        h.command, h.path = ("POST" if write else "GET"), path
         h.headers = {"Host": "127.0.0.1:8100", "Cookie": cookies, **(extra or {})}
         said = []
         h._json = lambda status, payload: said.append((status, payload))
-        return h._life_gate(b'{"text": "\uc774\uc57c\uae30"}'), (said[0] if said else (None, None))
+        who = h._life_viewer(b'{"text": "\uc774\uc57c\uae30"}' if write else b"", write=write)
+        return who is None, (said[0] if said else (None, None)), who
 
     check("배포 함수가 개인 역사의 POST 를 받는다",
           _vapi.LIFE_POSTS == ("/api/life/analyze", "/api/life/refine"))
@@ -7248,23 +7263,115 @@ try:
     check("배포 번들이 패키지가 읽는 파일을 걷어내지 않는다 (두 자리 다)",
           not _cut and any(q.name == "life_prompt.md" for q in _needed), str(_cut))
     check("배포 번들이 패키지가 읽는 파일을 이름 대어 싣는다", not _missed, str(_missed))
-    blocked, (st, body) = gate()
+    blocked, (st, body), _ = gate()
     check("로그인 없이 이야기를 보내면 401",
           blocked is True and st == 401 and body["error"] == "로그인이 필요합니다.", str((st, body)))
-    blocked, (st, body) = gate(cookies=jar)
+    blocked, (st, body), _ = gate(cookies=jar)
     check("로그인해도 표가 없으면 400 (남의 사이트가 쏜 요청)",
           blocked is True and st == 400, str((st, body)))
-    blocked, _ = gate(cookies=jar, extra=csrf_head)
-    check("로그인하고 표가 맞으면 지나간다", blocked is False)
+    blocked, _, who = gate(cookies=jar, extra=csrf_head)
+    check("로그인하고 표가 맞으면 지나간다", blocked is False and bool(who))
+    # **결과를 내주는 GET 둘도 같은 문을 지난다** (2026-09-11 점검). 전에는
+    # 세션을 안 봐서, 돌던 분석의 결과가 물어보는 아무에게나 나갔다.
+    check("배포 함수가 개인 역사의 GET 둘을 가려 낸다",
+          _vapi.LIFE_GETS == ("/api/life/job", "/api/life/story"))
+    blocked, (st, body), _ = gate(path="/api/life/job", write=False)
+    check("로그인 없이 남의 분석 결과를 물으면 401", blocked is True and st == 401)
+    blocked, _, who2 = gate(cookies=jar, path="/api/life/job", write=False)
+    check("읽기에는 표(CSRF)까지 요구하지 않는다", blocked is False and who2 == who)
     # 로컬 서버와 반대다 — 열린 인터넷에서 문을 안 잠그면 아무나 우리 모델을 부른다.
     _keep_cid = _os.environ.pop("GOOGLE_CLIENT_ID", None)
     try:
-        blocked, (st, body) = gate(cookies=jar, extra=csrf_head)
+        blocked, (st, body), _ = gate(cookies=jar, extra=csrf_head)
         check("가입이 안 열린 배포에서는 내 역사를 아예 안 받는다 (503)",
               blocked is True and st == 503 and "로그인이 아직" in body["error"], str((st, body)))
     finally:
         if _keep_cid is not None:
             _os.environ["GOOGLE_CLIENT_ID"] = _keep_cid
+
+    # 5-3) **주인 표** — 브라우저에 남긴 자료가 누구 것인지 재는 값.
+    # 2026-09-11 점검: 한 컴퓨터를 나눠 쓰면 갑이 로그아웃해도 `life-json` 이
+    # 남아, 을이 로그인하면 갑의 연표가 서고 을의 계정으로 저장까지 됐다.
+    # 화면 쪽 규칙은 `web/tests/lifestore.test.mjs` 가 잰다.
+    _me = _js.loads(_auth.route(req("GET", "/api/me", cookies=jar)).body)
+    check("/api/me 가 주인 표를 준다", isinstance(_me.get("owner"), str) and len(_me["owner"]) >= 16)
+    check("주인 표에 이메일도 번호도 새지 않는다",
+          "Boss" not in _me["owner"] and "example" not in _me["owner"]
+          and str(user["id"]) not in _me["owner"], _me["owner"])
+    check("같은 사람이면 언제 물어도 같은 표",
+          _auth.owner_tag(user["id"]) == _me["owner"])
+    check("사람이 다르면 표가 다르다",
+          _auth.owner_tag(user["id"] + 1) != _me["owner"])
+    _keep_sec = _os.environ["HISTGRAPH_SESSION_SECRET"]
+    _os.environ["HISTGRAPH_SESSION_SECRET"] = "q" * 48
+    check("열쇠가 바뀌면 표도 바뀐다 (브라우저에 남은 것은 남의 것으로 보여 지워진다)",
+          _auth.owner_tag(user["id"]) != _me["owner"])
+    _os.environ["HISTGRAPH_SESSION_SECRET"] = _keep_sec
+
+    # 개인 역사를 내줄 상대인가 — 두 껍데기가 부르기 전에 재는 한 규칙.
+    check("로그인한 사람에게는 그 사람의 표",
+          _auth.life_viewer(req("GET", "/api/life/job", cookies=jar)) == _me["owner"])
+    check("로그인하지 않았으면 내주지 않는다",
+          _auth.life_viewer(req("GET", "/api/life/job")) is None)
+    check("남의 쿠키로도 내주지 않는다",
+          _auth.life_viewer(req("GET", "/api/life/job", cookies="hg_session=지어낸값")) is None)
+    _keep_cid2 = _os.environ.pop("GOOGLE_CLIENT_ID", None)
+    try:
+        check("로그인이 안 켜진 자리에서는 이 컴퓨터에서 온 것만 받는다",
+              _auth.life_viewer(req("GET", "/api/life/story"), local=True) == ""
+              and _auth.life_viewer(req("GET", "/api/life/story"), local=False) is None)
+    finally:
+        if _keep_cid2 is not None:
+            _os.environ["GOOGLE_CLIENT_ID"] = _keep_cid2
+
+    # 5-4) **돌고 있는 분석은 띄운 사람의 것이다.** 이 객체는 서버가 사는
+    # 동안 살아 있어서, 임자를 안 적으면 갑의 삶이 을의 `/api/life/job` 에
+    # 실려 나간다 (로컬 서버는 한 대를 여럿이 볼 수 있다).
+    import histgraph.server as _srv  # noqa: E402
+
+    _jobs = _srv.LifeAnalysis()
+    _jobs._state = {"state": "done", "payload": {"nodes": [{"id": "me", "name": "갑"}]},
+                    "notes": ["갑의 이야기"]}
+    _jobs._owner = "갑의표"
+    check("띄운 사람은 결과를 받는다", _jobs.status("갑의표").get("payload") is not None)
+    _theirs = _jobs.status("을의표")
+    check("남은 결과를 한 조각도 못 받는다",
+          _theirs.get("payload") is None and _theirs.get("notes") is None
+          and _theirs["state"] == "idle", str(_theirs))
+    check("로그인 안 한 사람도 마찬가지", _jobs.status(None).get("payload") is None)
+    check("남에게는 돌고 있다는 것조차 자기 일이 아니다",
+          _srv.LifeAnalysis().status("아무개")["state"] == "idle")
+    # 화면이 보는 자리(`/api/life/job`)도 같은 표를 지난다.
+    _keep_jobs = _srv.LIFE_JOBS
+    _srv.LIFE_JOBS = _jobs
+    try:
+        check("dispatch 가 묻는 사람의 표를 그대로 넘긴다",
+              _srv.dispatch(None, "/api/life/job", {}, "갑의표")[1].get("payload") is not None
+              and _srv.dispatch(None, "/api/life/job", {}, "을의표")[1].get("payload") is None)
+    finally:
+        _srv.LIFE_JOBS = _keep_jobs
+
+    # 5-5) 로컬 서버의 문. `serve --host 0.0.0.0` 으로 띄우면 같은 망의 다른
+    # 사람이 이 컴퓨터 주인의 이야기 원문(`/api/life/story`)을 읽을 수 있었다.
+    def local_gate(cookies="", client="127.0.0.1", path="/api/life/story"):
+        h = _srv.Handler.__new__(_srv.Handler)
+        h.command, h.path = "GET", path
+        h.headers = {"Host": "127.0.0.1:8100", "Cookie": cookies}
+        h.client_address = (client, 51000)
+        said = []
+        h._json = lambda payload, status=200: said.append((status, payload))
+        return h._life_viewer(), (said[0] if said else (None, None))
+
+    check("로컬 서버도 로그인한 사람에게만 내준다",
+          local_gate(cookies=jar)[0] == _me["owner"]
+          and local_gate()[0] is None and local_gate()[1][0] == 401)
+    _keep_cid3 = _os.environ.pop("GOOGLE_CLIENT_ID", None)
+    try:
+        check("로그인이 안 켜졌으면 이 컴퓨터에서만 (--host 0.0.0.0 을 막는다)",
+              local_gate()[0] == "" and local_gate(client="192.168.0.9")[0] is None)
+    finally:
+        if _keep_cid3 is not None:
+            _os.environ["GOOGLE_CLIENT_ID"] = _keep_cid3
 
     # 6) 로그아웃 — **서버에서** 지운다
     out = _auth.route(req("POST", "/api/auth/logout", cookies=jar, extra=csrf_head))

@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import auth, pages, summaries
+from . import accounts, auth, pages, summaries
 from .labels import screen_alias
 from .ontology import EDGE_TYPES, NODE_TYPES, type_label
 from .provenance import desc_origin
@@ -1341,19 +1341,35 @@ def _life_story(doc: dict) -> str | None:
 
 
 class LifeAnalysis:
-    """이야기 → 개인 그래프. 한 번에 하나, 상태는 화면이 물어 간다."""
+    """이야기 → 개인 그래프. 한 번에 하나, 상태는 화면이 물어 간다.
+
+    **결과에는 주인이 있다.** 이 객체는 서버가 사는 동안 살아 있어서, 적어
+    두는 것이 곧 '누구든 물어보면 주는 자리'가 된다 — 갑의 삶이 을의
+    `/api/life/job` 에 실려 나가는 길이다. 그래서 띄운 사람의 표(`auth.owner_tag`)
+    를 함께 적고, **표가 다른 사람에게는 결과를 빼고** 돌고 있다는 것만 알린다."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._state: dict = {"state": "idle"}
+        self._owner: str | None = None
 
-    def status(self) -> dict:
+    def status(self, viewer: str | None = None) -> dict:
         """지금 상태. **어느 모델로 읽는지도 같이 준다** — 화면이 '글이 이
-        컴퓨터 밖으로 나가지 않는다'고 적어도 되는지가 그것으로 갈린다."""
+        컴퓨터 밖으로 나가지 않는다'고 적어도 되는지가 그것으로 갈린다.
+
+        `viewer` 는 묻는 사람의 주인 표다 (`auth.life_viewer`). 띄운 사람과
+        다르면 결과(`payload`·`notes`·`error`)를 **한 조각도 싣지 않는다** —
+        도는 중인지 아닌지까지만 답한다."""
         from .backends import default_life_backend
 
         with self._lock:
             st = dict(self._state)
+            owner = self._owner
+        if viewer is None or viewer != owner:
+            # **남의 일은 아예 없는 것으로 본다.** '돌고 있다'고만 알려도
+            # 화면이 남의 분석을 자기 것으로 알고 기다린다 — 그동안 이 사람은
+            # 자기 이야기를 넣지도 못한다. 넣으려 하면 409 가 한국어로 말한다.
+            st = {"state": "idle"}
         started = st.pop("started", None)
         if st.get("state") == "running" and started is not None:
             st["elapsed"] = int(time.time() - started)
@@ -1366,7 +1382,8 @@ class LifeAnalysis:
         return st
 
     def start(self, api: GraphAPI, text: str, name: str = "나",
-              backend: str = "", base: dict | None = None) -> bool:
+              backend: str = "", base: dict | None = None,
+              owner: str | None = None) -> bool:
         """분석을 띄운다. 이미 돌고 있으면 False.
 
         백엔드를 안 주면 `.env` 를 보고 고른다 — 열쇠가 있으면 OpenRouter
@@ -1380,6 +1397,7 @@ class LifeAnalysis:
                 return False
             self._state = {"state": "running", "started": time.time(), "backend": kind,
                            "step": FIRST_STEP.get(kind, "모델에게 묻는 중")}
+            self._owner = owner
         threading.Thread(target=self._run, args=(api, text, name, kind, base),
                          name="life-analyze", daemon=True).start()
         return True
@@ -1505,6 +1523,11 @@ LIFE_JOBS = LifeAnalysis()
 # 셋뿐이고 전부 인자로 나온다: 답을 기다리는가(`blocking`), 파일을 남기는가
 # (`save`), 그리고 로그인을 요구하는가(부르는 쪽이 미리 잰다).
 LIFE_POSTS = ("/api/life/analyze", "/api/life/refine")
+# **개인 역사를 내주는 GET 둘.** 여기 실리는 것은 한 사람의 삶이라 세션을 본다
+# (`auth.life_viewer` — 두 껍데기가 부르기 전에 잰다) 그리고 **캐시에 재우지
+# 않는다**: 배포는 `/api` 를 기본으로 엣지에 하루 재우는데, 그 규칙이 이 둘에
+# 닿으면 한 사람의 연표가 다음 사람에게 배달된다 (`/api/me` 와 같은 이유).
+LIFE_GETS = ("/api/life/job", "/api/life/story")
 # 개인 역사의 몸은 가입 요청보다 크다 — 이야기에 **지금까지 만든 그래프**(`base`,
 # 계정 한도 512KB)가 함께 실린다. 가입 쪽 한도로 재면 오래 쓴 사람의 두 번째
 # 이야기가 조용히 빈 몸이 되어 '이야기가 비어 있습니다' 로 떨어진다.
@@ -1512,7 +1535,8 @@ LIFE_MAX_BODY = 2 << 20
 
 
 def life_post(api: GraphAPI, path: str, raw: bytes, *,
-              blocking: bool = False, save: bool = True) -> tuple[int, dict]:
+              blocking: bool = False, save: bool = True,
+              owner: str | None = None) -> tuple[int, dict]:
     """개인 역사의 POST 를 처리하고 `(상태코드, 몸)` 을 돌려준다.
 
     `blocking` 이면 분석이 끝날 때까지 돌고 **끝난 상태 문서를 그대로** 준다.
@@ -1558,9 +1582,9 @@ def life_post(api: GraphAPI, path: str, raw: bytes, *,
                              base, save=save)
         return (200 if state.get("state") == "done" else 500), state
 
-    if not LIFE_JOBS.start(api, text, name, kind, base=base):
+    if not LIFE_JOBS.start(api, text, name, kind, base=base, owner=owner):
         return 409, {"error": "이미 분석 중입니다."}
-    return 202, LIFE_JOBS.status()
+    return 202, LIFE_JOBS.status(owner)
 
 
 def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
@@ -1577,7 +1601,7 @@ def safe_static_path(url_path: str, root: Path = WEB_ROOT) -> Path | None:
 
 
 def dispatch(
-    api: GraphAPI, path: str, q: dict[str, list[str]]
+    api: GraphAPI, path: str, q: dict[str, list[str]], viewer: str | None = None
 ) -> tuple[int, object]:
     """엔드포인트 하나를 골라 (상태코드, 응답) 을 돌려준다.
 
@@ -1631,7 +1655,7 @@ def dispatch(
     # 분석이 도는 중인지. 배포에서는 늘 'idle' 이다 — 거기서는 답이 POST 하나에
     # 실려 오므로 물어볼 것이 없다 (`blocking` 이 참으로 온다).
     if path == "/api/life/job":
-        return 200, LIFE_JOBS.status()
+        return 200, LIFE_JOBS.status(viewer)
     # 이 컴퓨터에 남은 이야기 원문. 화면의 '내가 적은 이야기' 상자가 **옛
     # 그래프를 위해** 한 번 묻는다 (2026-09-08 사용자: "누르면 사용자가 입력한
     # 사용자의 역사 히스토리를 보여줘. 그래서 잘못된 입력을 고칠 수 있게 해줘").
@@ -1717,6 +1741,33 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(resp.body)
         return True
 
+    # --- 개인 역사의 문 ------------------------------------------------
+    # 그래프는 누구나 본다. **개인 역사만은 아니다** — 이 셋(`/api/life/analyze`
+    # ·`/api/life/job`·`/api/life/story`)에 실리는 것은 한 사람의 삶이라,
+    # 지나가는 사람이 누구인지를 먼저 잰다. 배포에도 같은 문이 있다
+    # (`api/index.py` 의 `_life_gate`) — 규칙은 `auth.life_viewer` 하나다.
+
+    def _loopback(self) -> bool:
+        """이 컴퓨터에서 온 요청인가. `serve --host 0.0.0.0` 이면 아닐 수 있다."""
+        return (self.client_address or ("",))[0] in auth.LOOPBACK
+
+    def _life_viewer(self) -> str | None:
+        """개인 역사를 내줄 상대의 주인 표. 내줄 수 없으면 **여기서 답하고** None."""
+        url = urlparse(self.path)
+        req = auth.Request(self.command, url.path, parse_qs(url.query),
+                           dict(self.headers.items()))
+        try:
+            viewer = auth.life_viewer(req, local=self._loopback())
+        except accounts.StoreError as err:
+            log.warning("가입자 표 접근 실패: %s", err)
+            self._json({"error": "가입자 정보에 닿지 못했습니다."}, 503)
+            return None
+        if viewer is None:
+            self._json({"error": "내 역사는 로그인한 사람의 것입니다."
+                        if auth.enabled() else
+                        "내 역사는 이 컴퓨터에서만 볼 수 있습니다."}, 401)
+        return viewer
+
     def do_PUT(self) -> None:  # noqa: N802
         if not self._try_auth(self._read_body()):
             self._json({"error": "unknown endpoint", "path": self.path}, 404)
@@ -1738,7 +1789,10 @@ class Handler(BaseHTTPRequestHandler):
         if path not in LIFE_POSTS:
             self._json({"error": "unknown endpoint", "path": path}, 404)
             return
-        status, payload = life_post(self.api, path, raw)
+        viewer = self._life_viewer()
+        if viewer is None:
+            return                      # 위에서 답했다
+        status, payload = life_post(self.api, path, raw, owner=viewer)
         self._json(payload, status)
 
     def do_GET(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler 규약)
@@ -1752,7 +1806,20 @@ class Handler(BaseHTTPRequestHandler):
             if page is not None:
                 self._page(*page)
             elif url.path.startswith("/api/"):
-                status, payload = dispatch(self.api, url.path, parse_qs(url.query))
+                viewer = None
+                if url.path in LIFE_GETS:
+                    viewer = self._life_viewer()
+                    if viewer is None:
+                        return          # 위에서 답했다
+                    # **이 컴퓨터에 남은 이야기 원문은 이 컴퓨터에서만 읽는다.**
+                    # 그 파일(`data/life/<이름>.txt`)은 계정이 아니라 폴더에
+                    # 붙어 있어 누가 로그인했는지로는 못 가른다 — 가를 수 있는
+                    # 것은 '어디서 왔는가' 하나뿐이다.
+                    if url.path == "/api/life/story" and not self._loopback():
+                        self._json({"error": "내 역사는 이 컴퓨터에서만 볼 수 있습니다."}, 401)
+                        return
+                status, payload = dispatch(self.api, url.path, parse_qs(url.query),
+                                           viewer)
                 self._json(payload, status)
             else:
                 self._static(url.path)

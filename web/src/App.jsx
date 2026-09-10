@@ -9,6 +9,7 @@ import { ThemeToggle } from './components/ThemeToggle.jsx';
 import { AccountMenu } from './components/AccountMenu.jsx';
 import { LoginModal } from './components/LoginModal.jsx';
 import { auth } from './lib/auth.js';
+import { readLife, ownerOf } from './lib/lifestore.js';
 import { COPYRIGHT } from './lib/site.js';
 
 // 시대 이름은 **서버가 준다** (`meta.era_label`). 여기 표를 두면 시대를
@@ -22,8 +23,9 @@ export const CAUSAL_DIAGRAM = false;
 // 개인 역사 장이 이 빌드에 있는가 — vite.config.js. 서버 렌더 테스트(esbuild)
 // 에는 import.meta.env 가 없으므로 없는 것으로 친다.
 const LIFE_PAGE = Boolean(import.meta.env?.VITE_LIFE);
-// 로그인 없이 적은 내 역사가 남는 자리 (LifeView 의 STORE_KEY 와 같은 열쇠).
-const LIFE_STORE_KEY = 'life-json';
+// 브라우저에 남은 내 역사는 **주인 표를 지나서만** 읽는다 (lib/lifestore.js).
+// 여기서 재는 것은 '내 역사' 단추를 빛낼지 하나뿐이지만, 읽는 길이 둘이면
+// 규칙도 둘이 된다 — 한 길로 모은다.
 
 function hashId() {
   return location.hash ? decodeURIComponent(location.hash.slice(1)) : '';
@@ -292,8 +294,7 @@ export default function App() {
       setMine(me);
       if (!me.user) { setLifeEmpty(true); return; }
       if (me.life) { setLifeEmpty(false); return; }
-      let kept = null;
-      try { kept = JSON.parse(localStorage.getItem(LIFE_STORE_KEY) || 'null'); } catch { /* 비었다 */ }
+      const kept = readLife(ownerOf(me));
       if (alive) setLifeEmpty(!kept?.nodes?.length);
     })();
     return () => { alive = false; };

@@ -8,6 +8,7 @@ import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
 import { DetailPanel } from './DetailPanel.jsx';
 import { api } from '../lib/api.js';
+import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, STORE_KEY, NEXT_KEY, FAIL_KEY } from '../lib/lifestore.js';
 import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
@@ -37,15 +38,11 @@ function today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const STORE_KEY = 'life-json';  // 옛 화면이 브라우저에 남긴 자료 (지금도 읽는다)
-// 분석이 끝나면 문서에 적어 둘 이야기 기록. 도는 동안 새로고침해도 잃지 않게
-// 브라우저에도 둔다 — 이것이 없으면 방금 적은 문단이 기록에서 빠진다.
-const NEXT_KEY = 'life-stories-next';
-// 보냈는데 모델이 못 읽은 글. **입력창이 아니라 여기에 둔다** (2026-09-09 사용자:
-// "'입력' 버튼을 누르면 해당 내용은 입력창에서 삭제 해줘") — 누른 글이 칸에 도로
-// 서 있으면 보낸 것인지 아닌지 알 수가 없다. 잃지는 않으므로 상자가 '되돌리기'
-// 단추로 내어 준다. 새로고침해도 남게 브라우저에 둔다.
-const FAIL_KEY = 'life-failed';
+// 브라우저에 남기는 자리 셋(`STORE_KEY` 문서 · `NEXT_KEY` 보낸 이야기 ·
+// `FAIL_KEY` 모델이 못 읽은 글)은 `lib/lifestore.js` 가 들고 있다. **여기서
+// localStorage 를 직접 부르지 않는다** — 거기에 '누구의 것인가'를 재는 규칙이
+// 붙어 있고, 그것을 지나지 않는 길이 하나라도 있으면 한 컴퓨터를 나눠 쓰는
+// 사람에게 앞사람의 삶이 선다 (2026-09-11 점검, lifestore 머리글).
 
 // 입력 상자의 보기글. 무엇을 적어야 하는지는 설명보다 예가 빠르다 —
 // **해와 곳, 가족, 이사, 학교, 일, 만남, 그때의 마음.** 지어낸 사람들이다.
@@ -258,7 +255,14 @@ export default function LifeView() {
   }, []);
   useEffect(() => () => { if (keptTimer.current) clearTimeout(keptTimer.current); }, []);
 
-  useEffect(() => { auth.me().then(setAccount); }, []);
+  // 지금 화면을 보는 사람의 **주인 표**. 브라우저에 남기는 것마다 여기에
+  // 적힌 표가 함께 간다 (lifestore). 비어 있는 동안(신원을 아직 모르는 동안)
+  // 에는 **브라우저에서 아무것도 읽지 않는다** — 모르는 채로 재면 자기 자료를
+  // 남의 것으로 알고 지운다.
+  const ownerRef = useRef('');
+  useEffect(() => {
+    auth.me().then((me) => { ownerRef.current = ownerOf(me); setAccount(me); });
+  }, []);
 
   // 로그인이 안 된 자리에서는 아무 일도 안 한다. 말(`msg`)을 주면 된 뒤에
   // 팝업으로 알리고, 안 주면 조용히 올린다 (부팅·'입력' 처럼 사람이 저장을
@@ -270,15 +274,15 @@ export default function LifeView() {
   const nextRef = useRef(null);
   const rememberStories = useCallback((list) => {
     nextRef.current = list;
-    try { localStorage.setItem(NEXT_KEY, JSON.stringify(list)); } catch { /* 없어도 돈다 */ }
+    writeSide(NEXT_KEY, JSON.stringify(list), ownerRef.current);
   }, []);
   const takeStories = useCallback(() => {
     let list = nextRef.current;
     if (!list) {
-      try { list = JSON.parse(localStorage.getItem(NEXT_KEY) || 'null'); } catch { list = null; }
+      try { list = JSON.parse(readSide(NEXT_KEY, ownerRef.current) || 'null'); } catch { list = null; }
     }
     nextRef.current = null;
-    try { localStorage.removeItem(NEXT_KEY); } catch { /* 없다 */ }
+    writeSide(NEXT_KEY, '', ownerRef.current);
     return Array.isArray(list) && list.length ? list : null;
   }, []);
 
@@ -327,15 +331,12 @@ export default function LifeView() {
   // 보낸 글은 칸에서 지운다. 모델이 답을 못 주면 **칸에 도로 넣지 않고** 여기에
   // 둔다 — 상자가 오류 옆에 '적은 글 되돌리기' 를 세우고, 누르면 그때 칸으로
   // 간다. 답이 온 자리에서는 비운다 (그 글은 이미 기록에 들었다).
-  const [failed, setFailed] = useState(() => {
-    try { return localStorage.getItem(FAIL_KEY) || ''; } catch { return ''; }
-  });
+  // **첫 그림에서 읽지 않는다.** 이 자리에 남은 글이 누구 것인지는 `/api/me`
+  // 를 받은 뒤에야 알 수 있다 (부팅이 읽어 넣는다).
+  const [failed, setFailed] = useState('');
   const keepFailed = useCallback((text) => {
     setFailed(text || '');
-    try {
-      if (text) localStorage.setItem(FAIL_KEY, text);
-      else localStorage.removeItem(FAIL_KEY);
-    } catch { /* 못 남겨도 이번 자리에서는 되돌릴 수 있다 */ }
+    writeSide(FAIL_KEY, text || '', ownerRef.current);
   }, []);
 
   // 자료를 받아들이는 한 길. 날것이든 서버를 거친 것이든 normalize 를 지난다.
@@ -349,9 +350,7 @@ export default function LifeView() {
     setSelected((cur) => goes || (cur && norm.nodes.some((n) => n.id === cur) ? cur : null));
     setStories(Array.isArray(raw.stories) ? raw.stories : []);
     rawRef.current = raw;
-    if (from === 'local') {
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(raw)); } catch { /* 저장 못 해도 본다 */ }
-    }
+    if (from === 'local') writeLife(raw, ownerRef.current);
     const span = yearsOf(norm);
     if (span) {
       const ctx = await getJson(`/api/context?from=${span[0]}&to=${span[1]}`).catch(() => null);
@@ -497,7 +496,7 @@ export default function LifeView() {
     if (!rawRef.current) return;
     const doc = { ...rawRef.current, stories: list };
     rawRef.current = doc;
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch { /* 못 남겨도 본다 */ }
+    writeLife(doc, ownerRef.current);
     await keepInAccount(doc);
   }, [keepInAccount]);
 
@@ -520,14 +519,21 @@ export default function LifeView() {
         // 계정을 못 읽은 것(네트워크)과 계정이 빈 것을 가른다 — 못 읽었는데
         // 브라우저의 옛 자료를 올리면 계정에 있던 새 것을 덮는다.
         const me = await auth.me();
+        // **여기서 주인이 정해진다.** 이 줄보다 앞에서 브라우저를 읽는 길은
+        // 없어야 한다 — 신원을 모르는 채로 재면 남의 것과 내 것을 못 가른다.
+        ownerRef.current = ownerOf(me);
         let mine = null, read = false;
         if (me.user) {
           try { mine = await auth.life.load(); read = true; } catch { /* 못 읽었다 */ }
         }
         if (!alive) return;
+        // 못 보낸 글도 주인이 같을 때만 되살린다.
+        const back = readSide(FAIL_KEY, ownerRef.current);
+        if (back) setFailed(back);
         if (mine?.doc && await adopt(await refined(mine.doc), 'account')) return;
-        let kept = null;
-        try { kept = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch { /* 비었다 */ }
+        // 브라우저에 남은 것은 **주인이 맞을 때만** 온다. 남의 것이면
+        // readLife 가 그 자리에서 지운다 (lifestore).
+        const kept = readLife(ownerRef.current);
         if (kept && await adopt(await refined(kept), 'local')) {
           // 브라우저에만 있던 것을 계정으로 옮기는 길. 단추가 하던 일이다.
           if (me.user && read) await keepInAccount(rawRef.current);
@@ -541,6 +547,10 @@ export default function LifeView() {
     })();
     // 창을 닫았다 다시 열어도 돌던 분석은 서버에서 계속 돈다.
     (async () => {
+      // 신원부터 (auth.me 는 화면 전체가 한 번만 묻고 나눠 쓴다). 서버도
+      // **자기가 띄운 분석만** 알려 준다 — 남의 것은 없는 것으로 온다
+      // (server.LifeAnalysis.status).
+      ownerRef.current = ownerOf(await auth.me());
       const st = await getJson('/api/life/job').catch(() => null);
       if (!alive || !st) return;
       setLocal(st.backend !== 'openrouter' && st.backend !== 'anthropic');
@@ -552,7 +562,7 @@ export default function LifeView() {
       // 남겨 둔 마지막 문단이 그것이다 (rememberStories).
       let last = '';
       try {
-        const list = JSON.parse(localStorage.getItem(NEXT_KEY) || 'null');
+        const list = JSON.parse(readSide(NEXT_KEY, ownerRef.current) || 'null');
         if (Array.isArray(list) && list.length) last = list[list.length - 1]?.text || '';
       } catch { /* 없으면 칸은 빈 채로 돈다 */ }
       setJob(st); setSent(last); setWriting(true); watchJob();
@@ -577,7 +587,7 @@ export default function LifeView() {
       // **찾자마자 계정에 올린다.** 다음 저장까지 미루면, 그 사이에 아무것도
       // 안 한 사람의 계정에는 이야기가 없다 — 다른 컴퓨터에서 열면 빈 목록이다.
       // 브라우저에도 같이 남긴다 (부팅이 계정 다음으로 읽는 자리).
-      try { localStorage.setItem(STORE_KEY, JSON.stringify(rawRef.current)); } catch { /* 못 남겨도 본다 */ }
+      writeLife(rawRef.current, ownerRef.current);
       await keepInAccount(rawRef.current);
     })();
   }, [life, stories.length, keepInAccount]);
@@ -697,8 +707,8 @@ export default function LifeView() {
   }, [world, worldSide]);
 
   const forget = () => {
-    try { localStorage.removeItem(STORE_KEY); } catch { /* 없다 */ }
-    setLife(null); setContext(null); setSelected(null);
+    forgetLife();          // 문서·이야기 기록·못 보낸 글·주인 표까지 한 번에
+    setLife(null); setContext(null); setSelected(null); setStories([]); setFailed('');
   };
 
   // --- 노드 하나를 지운다 --------------------------------------------------
