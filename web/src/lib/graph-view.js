@@ -1326,13 +1326,14 @@ export function causalReach(edges, id, shown = () => true) {
   return { nodes, edges: keys };
 }
 
-// 연도 한 줄. '1592-04-13' → '1592', '-0057-01-01' → '기원전 57'. 모르면 ''.
+// 연도 한 줄. '1592-04-13' → '1592', '-0057-01-01' → '기원전 58'. 모르면 ''.
 function yearOf(date) {
   if (!date) return '';
   const m = String(date).match(/^(-?)(\d{1,4})/);
   if (!m) return '';
   const y = parseInt(m[2], 10);
-  return m[1] ? `기원전 ${y}` : String(y);
+  // 기원전은 한 해 옮겨 적는다 (`timeline.bce_text` 머리글).
+  return m[1] ? `기원전 ${y + 1}` : String(y);
 }
 
 // `/api/chain` 의 나무를 열로 세운다. 가운데(0열)가 고른 노드, 왼쪽(-1, -2…)

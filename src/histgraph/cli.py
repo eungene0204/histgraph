@@ -1009,6 +1009,16 @@ def cmd_scope(args: argparse.Namespace) -> int:
     # 묶음 이름이 곧 파일 이름이다 (serve --era 가 같은 규칙으로 찾는다).
     out = args.out or str(ROOT / "data" / f"{'+'.join(args.era)}.sqlite")
 
+    # **주소는 원본에서 짓고 파생본이 물려받는다** (`slugs` 모듈 머리글).
+    # 파생본에서 새로 지으면 이름이 겹치던 노드 하나가 거기 없어서 남은
+    # 쪽이 맨 이름을 차지하고, 같은 노드가 두 주소를 갖는다. 그래서 뽑기
+    # **전에** 원본에서 한 번 짓는다 — 새로 수집한 노드에는 주소가 없다.
+    from . import slugs as slugs_mod
+    with GraphStore(args.db) as store:
+        slugs_mod.ensure_table(store.conn)
+        minted = slugs_mod.assign(store.conn)
+        unslugged = slugs_mod.missing(store.conn)
+
     with GraphStore(args.db) as store:
         result = scope_mod.extract(store, args.era, out, hops=args.hops,
                                    drop_isolated=not args.keep_isolated,
@@ -3330,11 +3340,13 @@ def main(argv: list[str] | None = None) -> int:
     p_ct.set_defaults(func=cmd_central)
 
     p_sc = sub.add_parser("scope", help="시대(또는 시대 묶음)를 별도 그래프로 추출")
+    # 고를 수 있는 이름은 `scope` 가 아는 것 전부다. 손으로 적어 두면 시대를
+    # 늘릴 때마다 여기를 잊는다 (2026-09-11 에 고대 시대 여섯을 늘렸다).
+    from .scope import BUNDLES as _BUNDLES, ERAS as _ERAS
     p_sc.add_argument("era", nargs="+",
-                      choices=["joseon", "goryeo", "silla", "goguryeo", "baekje",
-                               "ilje", "korea"],
+                      choices=[*_ERAS, *_BUNDLES],
                       help="시대 여럿을 주면 한 DB 에 담는다. 'korea' 는 "
-                           "고려~대한민국 묶음")
+                           "고조선~대한민국 묶음")
     p_sc.add_argument("--out", default=None,
                       help="출력 DB (기본: data/{시대}.sqlite)")
     p_sc.add_argument("--hops", type=int, default=1, help="씨앗에서 확장할 홉 수")

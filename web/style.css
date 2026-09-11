@@ -771,6 +771,24 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 .tl-reign.k-death { transform: translateY(-50%); }
 .tl-reign.k-death i { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); opacity: .8; }
 
+/* 접힌 구간 — 표시도 재위 띠도 없는 해가 화면 한 장을 넘으면 그 구간이
+   접힌다 (timeline.js `buildScale` 의 `fold`). 접었다는 것이 보여야 하므로
+   위아래를 파선으로 막고 **몇 년을 접었는지 글자로 적는다.** 바탕은 비워
+   둔다 — 그 사이를 지나는 왕조 막대(고조선 기원전 2333~108)가 가려지면
+   접힌 구간에 나라가 있었다는 것까지 지우는 셈이 된다. */
+.tl-fold {
+  position: absolute; left: var(--lane, 0px); right: 8px;
+  display: flex; align-items: center;
+  border-top: 1px dashed var(--background-modifier-border);
+  border-bottom: 1px dashed var(--background-modifier-border);
+  pointer-events: none;
+}
+.tl-fold span {
+  margin-left: 58px;          /* 연도 칸(38) + gap(6) + 14 — .tl-name 과 같은 자리 */
+  font-size: 10.5px; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 .tl-empty { padding: 14px 12px; color: var(--text-faint); font-size: 12px; line-height: 1.6; }
 
 /* --- 상세 (오른쪽 사이드바 — 문서 한 장처럼 읽힌다) --- */

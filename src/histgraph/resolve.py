@@ -29,6 +29,15 @@ ADMIN_SUFFIX = re.compile(r"(특별자치시|특별자치도|광역시|특별시
 # 국가유산청 시대명 -> Wikidata 왕조 QID.
 # ccceName 은 '조선시대' 처럼 '시대' 가 붙어 오고, Wikidata 는 '조선'이다.
 PERIOD_TO_POLITY: dict[str, str] = {
+    # 고대 (2026-09-11). 유산 시대 라벨에도 그대로 나오는 이름들이다 —
+    # '삼국시대(가야)'·'고조선'. 원삼국·후삼국은 나라가 아니라 시기라
+    # `POLITY_NODE_TYPE` 이 period 로 세운다.
+    "고조선": "Q28405",
+    "원삼국 시대": "Q716528",
+    "가야": "Q28084",
+    "후삼국 시대": "Q698268",
+    "후백제": "Q698239",
+    "태봉": "Q699871",
     "고구려": "Q28370",
     "백제": "Q28428",
     "신라": "Q28456",
@@ -44,7 +53,11 @@ PERIOD_TO_POLITY: dict[str, str] = {
 # (§ontology 의 from_period 주석) org 로 세우지만, 일제강점기는 왕조가 아니라
 # 기간이다. 통치 주체인 일본 제국을 시대 이름으로 쓸 수는 없으므로 —
 # '일제강점기의 사건'과 '일본 제국의 사건'은 다른 말이다 — period 로 세운다.
-POLITY_NODE_TYPE: dict[str, str] = {"일제강점기": "period"}
+POLITY_NODE_TYPE: dict[str, str] = {
+    "일제강점기": "period",
+    "원삼국 시대": "period",
+    "후삼국 시대": "period",
+}
 
 
 def normalize_place(label: str) -> str:

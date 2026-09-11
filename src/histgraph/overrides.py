@@ -79,7 +79,8 @@ def _check_field(target: str, field_name: str) -> None:
         ok = (field_name in NODE_COLUMNS or field_name.startswith("props.")
               or field_name.startswith("alias:") or field_name == "merged_into")
     elif target == "edge":
-        ok = field_name in EDGE_COLUMNS or field_name.startswith("props.") or field_name == "deleted"
+        ok = (field_name in EDGE_COLUMNS or field_name.startswith("props.")
+              or field_name in ("deleted", "moved_to"))
     else:
         raise OverrideError(f"target 은 node 또는 edge: {target!r}")
     if not ok:
@@ -322,6 +323,35 @@ def _apply_edge(conn, key: str, fld: str, value, when: str, rep: ReapplyReport) 
         if not value:
             return 0
         return conn.execute(f"DELETE FROM edges WHERE {where}", params).rowcount
+    if fld == "moved_to":
+        # **'이 엣지는 저리로 갔다'** — 노드의 `merged_into` 와 같은 말이다
+        # (2026-09-11). 자리를 옮긴 엣지를 `deleted` 로 적으면 다음 수집이
+        # 들고 온 **새 값까지 함께 버린다**: 왕 시드를 다시 돌려 재위 날짜를
+        # 새로 읽어 와도 일반 자리로 들어오는 길이 막혀 있어, 옮겨 둔 자리의
+        # 띠가 영영 비어 있었다 (혁거세 거서간·온조왕·수로왕 등 15명).
+        if not value or value == dst:
+            return 0
+        moved = 0
+        for r in conn.execute(f"SELECT rowid, * FROM edges WHERE {where}", params).fetchall():
+            twin = conn.execute(
+                "SELECT rowid FROM edges WHERE src=? AND dst=? AND type=? AND source=?",
+                (src, value, etype, r["source"]),
+            ).fetchone()
+            if twin is None:
+                conn.execute("UPDATE edges SET dst = ? WHERE rowid = ?", (value, r["rowid"]))
+            else:
+                # 이미 그 자리에 줄이 있으면 **비어 있는 칸만** 채우고 옛 줄을
+                # 지운다. 적혀 있는 날짜를 덮지 않는다 — 표가 적어 준 것일 수 있다.
+                conn.execute(
+                    """UPDATE edges
+                          SET start_date = COALESCE(NULLIF(start_date,''), ?),
+                              end_date   = COALESCE(NULLIF(end_date,''), ?)
+                        WHERE rowid = ?""",
+                    (r["start_date"], r["end_date"], twin["rowid"]),
+                )
+                conn.execute("DELETE FROM edges WHERE rowid = ?", (r["rowid"],))
+            moved += 1
+        return moved
     if fld in EDGE_COLUMNS:
         rows = conn.execute(f"SELECT rowid, {fld} FROM edges WHERE {where}", params).fetchall()
         changed = 0

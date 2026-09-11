@@ -1735,11 +1735,14 @@ with tempfile.TemporaryDirectory() as tmp:
     ])
     bundle_api = GraphAPI(store, era="korea")
     check("묶음은 여는 시대에서 연다", bundle_api.root() == "wd:Q28179")
-    check("연표의 바닥은 맨 앞 시대 그대로", eras_of("korea")[0] == "goryeo")
+    # 바닥은 고조선이다 (2026-09-11). 그 앞에 시대가 없다.
+    check("연표의 바닥은 맨 앞 시대 그대로", eras_of("korea")[0] == "gojoseon")
     check("여는 시대가 없는 묶음은 맨 앞이 중심",
           opening_eras("joseon") == ("joseon",))
     check("여는 시대를 뺀 나머지는 차례가 그대로",
-          opening_eras("korea") == ("joseon", "goryeo", "ilje", "daehan"))
+          opening_eras("korea")[0] == "joseon"
+          and opening_eras("korea")[1:] == tuple(
+              e for e in eras_of("korea") if e != "joseon"))
     store.close()
 
 # --- 연표 ---------------------------------------------------------------
@@ -3036,10 +3039,11 @@ with tempfile.TemporaryDirectory() as tmp:
     from histgraph import scope as sc  # noqa: E402
 
     check("묶음은 시대 여럿으로 풀린다",
-          sc.eras_of("korea") == ("goryeo", "joseon", "ilje", "daehan"))
+          sc.eras_of("korea") == ("gojoseon", "wonsamguk", "goguryeo", "baekje", "silla", "gaya",
+           "balhae", "husamguk", "goryeo", "joseon", "ilje", "daehan"))
     check("시대 이름은 자기 자신으로 풀린다", sc.eras_of("joseon") == ("joseon",))
     # 화면 머리말은 서버가 준다. 모르는 키에 영어를 내보내면 안 된다.
-    check("묶음 이름은 한국어다", sc.label_of("korea") == "고려~대한민국")
+    check("묶음 이름은 한국어다", sc.label_of("korea") == "고조선~대한민국")
     check("모르는 시대는 빈 이름", sc.label_of("없는시대") == "")
 
     store = GraphStore(Path(tmp) / "era.sqlite")
@@ -3414,9 +3418,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("정체 태그가 대한민국인 사건은 씨앗이다", "wd:E1" in seeds)
     check("시대보다 앞선 사건은 태그가 있어도 씨앗이 아니다", "wd:E2" not in seeds)
     check("시드 표에서 온 사건은 날짜가 없어도 씨앗이다", "wd:E3" in seeds)
-    check("고려~대한민국이 한 묶음이다",
-          sc2.eras_of("korea") == ("goryeo", "joseon", "ilje", "daehan")
-          and sc2.label_of("korea") == "고려~대한민국")
+    check("고조선~대한민국이 한 묶음이다",
+          sc2.eras_of("korea") == ("gojoseon", "wonsamguk", "goguryeo", "baekje", "silla", "gaya",
+           "balhae", "husamguk", "goryeo", "joseon", "ilje", "daehan")
+          and sc2.label_of("korea") == "고조선~대한민국")
     store.close()
 
 # --- 국사편찬위원회 정본 (한국사연대기 · 실록) --------------------------------
@@ -8118,14 +8123,36 @@ with GraphStore(Path(_tmp_pos.name) / "g.sqlite") as _st:
           and not _st.conn.execute(
               "SELECT 1 FROM nodes WHERE id = 'ex:role:조선 왕'").fetchone())
 
-    # 수집이 일반 자리 엣지를 되살려도 편집 계층이 다시 지운다.
+    # 수집이 일반 자리 엣지를 되살려도 편집 계층이 그것을 **옮긴 자리로 보낸다**.
+    # 지우면 그 수집이 들고 온 새 값까지 함께 버린다 (2026-09-11: 왕 시드를
+    # 다시 돌려 읽어 온 재위 날짜가 닿지 못해 임금 15명의 띠가 비어 있었다).
     _st.upsert_edges([
         Edge(src="wd:Q334312", dst="wd:Q12087706", type="held_position", source="wd",
              label="직위")])
-    check("되살아난 일반 자리 엣지는 편집 계층이 다시 지운다",
+    check("되살아난 일반 자리 엣지는 일반 자리에 남지 않는다",
           _st.conn.execute(
               "SELECT COUNT(*) FROM edges WHERE src = ? AND dst = 'wd:Q12087706'",
               ("wd:Q334312",)).fetchone()[0] == 0)
+    check("옮긴 자리의 재위 띠는 그대로다 (빈 값이 덮지 않는다)",
+          tuple(_st.conn.execute(
+              "SELECT start_date, end_date FROM edges WHERE src = ? AND dst = ?",
+              ("wd:Q334312", _seat)).fetchone()) == ("0918-06-15", "0943-07-04"))
+
+    # 다시 수집한 **새 날짜**는 옮긴 자리까지 따라온다. 광개토왕은 시대 엣지가
+    # 없어 아직 일반 자리에 있으므로, 시대 엣지를 주고 한 번 더 가른다.
+    _st.upsert_edges([
+        Edge(src="wd:Q498791", dst="wd:Q28208", type="from_period", source="wd")])
+    pos_mod.split(_st)
+    _gseat = pos_mod.seat_id("고려")
+    _st.upsert_edges([
+        Edge(src="wd:Q498791", dst="wd:Q12087706", type="held_position", source="kowiki",
+             start_date="0391-01-01", end_date="0413-01-01", props={"reign": "monarch"})])
+    _moved = _st.conn.execute(
+        "SELECT start_date, end_date FROM edges WHERE src = ? AND dst = ? AND source = 'kowiki'",
+        ("wd:Q498791", _gseat)).fetchone()
+    check("다시 수집한 재위 날짜는 옮긴 자리로 따라온다",
+          _moved is not None and tuple(_moved) == ("0391-01-01", "0413-01-01"),
+          str(tuple(_moved) if _moved else None))
 
     _again = pos_mod.split(_st)
     check("두 번 돌려도 결과가 같다", not _again.moved, str(_again.moved))
@@ -8206,10 +8233,15 @@ _tmp_tm.cleanup()
 
 # 저장소에 실린 표가 실제 그래프와 맞는가 (관문이 도는지).
 _repo_terms = tm_mod.load_table(Path("data/terms.tsv"))
-check("저장소의 임기 표는 대통령 14명을 적고 있다", len(_repo_terms) == 14,
+check("저장소의 임기 표는 대통령 14명을 적고 있다",
+      sum(1 for r in _repo_terms if r.seat == "wd:Q6296418") == 14,
       str(len(_repo_terms)))
-check("모든 줄이 대한민국 대통령 자리다",
-      {r.seat for r in _repo_terms} == {"wd:Q6296418"})
+# 임금도 한 줄 적을 수 있다 (2026-09-11). 왕 문서의 인포박스가 재위의 시작을
+# '?' 로 적어 둔 임금(문무왕)은 띠가 서지 않아 정본에서 찾아 적었다. 관문이
+# 묻는 것은 여전히 대통령뿐이다 (`terms.GUARDED`).
+check("대통령 아닌 줄은 임금 자리다",
+      {r.seat for r in _repo_terms} - {"wd:Q6296418"} == {"ex:role:신라 왕"},
+      str({r.seat for r in _repo_terms}))
 
 # --- 사람이 세우는 사건: 자료가 항목으로 갖고 있지 않은 일 ---------------------
 # "현대사 역사에 프로야구 개막이 없네?" (2026-09-11). 문서가 없으면 시드로는

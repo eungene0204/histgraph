@@ -348,7 +348,8 @@ export function fmtDate(v) {
   const m = String(v).match(/^(-?)(\d{1,4})/);
   if (!m) return '';
   const y = +m[2];
-  return m[1] ? `기원전 ${y}년` : `${y}년`;
+  // 기원전은 한 해 옮겨 적는다 (`timeline.bce_text` 머리글).
+  return m[1] ? `기원전 ${y + 1}년` : `${y}년`;
 }
 
 

@@ -388,7 +388,8 @@ def _year(value: str | None) -> str:
         digits += ch
     if not digits:
         return ""
-    return f"기원전 {int(digits)}년" if neg else f"{int(digits)}년"
+    # 기원전은 한 해 옮겨 적는다 (`timeline.bce_text` 머리글).
+    return f"기원전 {int(digits) + 1}년" if neg else f"{int(digits)}년"
 
 
 def _year_num(value: str | None) -> int | None:

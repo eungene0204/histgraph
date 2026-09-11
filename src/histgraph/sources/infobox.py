@@ -220,6 +220,8 @@ _START_TMPL = re.compile(
     r"\{\{\s*시작일[^}|]*\|\s*(\d{3,4})\s*(?:\|\s*(\d{1,2}))?\s*(?:\|\s*(\d{1,2}))?"
 )
 _YEAR_IN = re.compile(r"(\d{3,4})\s*년")
+# 기원전은 앞말로 안다. 한두 자리 해도 받는다 ('기원전 18년').
+_BCE_YEAR = re.compile(r"(기원전|서기전)\s*(\d{1,4})\s*년")
 _MONTH_DAY = re.compile(r"(\d{1,2})\s*월\s*(?:(\d{1,2})\s*일)?")
 
 
@@ -239,18 +241,25 @@ def infobox_date(value: str) -> str | None:
         return f"{int(y):04d}-{int(mo or 1):02d}-{int(d or 1):02d}"
     head = _PAREN.sub(" ", value)
     head = re.split(r"~|∼|―|—|–|부터", head)[0]
-    ym = _YEAR_IN.search(head)
+    # **기원전을 먼저 본다.** 앞말을 안 보면 '기원전 109년'이 서기 109년이
+    # 되어 고조선-한 전쟁이 한나라보다 뒤에 선다 (2026-09-11 실측). 한두
+    # 자리 해도 여기서는 받는다 — '기원전'이 붙어 있으면 재위년이 아니다.
+    bce = _BCE_YEAR.search(head)
+    ym = bce or _YEAR_IN.search(head)
     if not ym:
         return None
-    year = int(ym.group(1))
+    year = int(ym.group(2) if bce else ym.group(1))
     if not 1 <= year <= 2100:
         return None
+    if bce:
+        year = 1 - year          # XSD 셈법 (`timeline.bce_text` 머리글)
     month = day = 1
     if md := _MONTH_DAY.search(head[ym.end():]):
         m2, d2 = int(md.group(1)), int(md.group(2) or 1)
         if 1 <= m2 <= 12 and 1 <= d2 <= 31:
             month, day = m2, d2
-    return f"{year:04d}-{month:02d}-{day:02d}"
+    head_text = f"{year:04d}" if year > 0 else f"-{-year:04d}"
+    return f"{head_text}-{month:02d}-{day:02d}"
 
 
 # 왕 문서의 재위 칸. `재위N` 은 `작위N` 과 짝이다 — 같은 번호끼리 한 벌이고,
@@ -264,14 +273,28 @@ _REIGN_RANGE = re.compile(r"~|∼|―|—|–")
 REIGN_TITLE_WORD = "국왕"
 
 
+# 재위 칸의 해. **`_YEAR_IN` 과 달리 한두 자리도 받는다** — 고대의 임금은
+# 즉위한 해가 한두 자리다 (온조왕 기원전 18년, 대무신왕 18년, 수로왕 42년).
+# 세 자리를 밑으로 둔 것은 사건 날짜 칸에서 재위년('세종 25년')을 거르려던
+# 규칙인데, 왕 문서의 재위 칸에는 서기 연도만 온다.
+#
+# **기원전도 받는다.** 이 칸은 사람이 '기원전 57년'으로 적고, 날짜 칸은
+# XSD 셈법이라 한 해 옮겨 적는다 (`timeline.bce_text` 머리글).
+_REIGN_YEAR = re.compile(r"(기원전|서기전)?\s*(\d{1,4})\s*년")
+
+
 def _reign_point(part: str) -> str | None:
-    """'1095년 11월 12일' -> '1095-11-12'. 달까지만 알면 달까지."""
-    ym = _YEAR_IN.search(part)
+    """'1095년 11월 12일' -> '1095-11-12'. 달까지만 알면 달까지.
+
+    '기원전 57년' -> '-0056' (XSD 셈법에 0년이 있다)."""
+    ym = _REIGN_YEAR.search(part)
     if not ym:
         return None
-    year = int(ym.group(1))
+    year = int(ym.group(2))
     if not 1 <= year <= 2100:
         return None
+    if ym.group(1):
+        year = 1 - year
     month = day = None
     if md := _MONTH_DAY.search(part[ym.end():]):
         m2, d2 = int(md.group(1)), int(md.group(2) or 0)
@@ -279,7 +302,7 @@ def _reign_point(part: str) -> str | None:
             month = m2
             if 1 <= d2 <= 31:
                 day = d2
-    out = f"{year:04d}"
+    out = f"{year:04d}" if year > 0 else f"-{-year:04d}"
     if month:
         out += f"-{month:02d}"
         if day:
@@ -737,9 +760,12 @@ def ingest(
         ids = [f"wd:{q}" for q in set(qids.values())]
         for i in range(0, len(ids), 500):
             batch = ids[i : i + 500]
-            marks = ",".join("?" * len(batch))
+            # 이름을 `marks` 로 두면 위에서 읽어 둔 인포박스 표식
+            # (`marks[노드] = (fate, side)`)을 덮어쓴다 — 실측: 그 뒤
+            # `marks.get(...)` 이 문자열에서 get 을 찾다 죽었다.
+            holes = ",".join("?" * len(batch))
             for row in store.conn.execute(
-                f"SELECT id, type, start_date, end_date FROM nodes WHERE id IN ({marks})",
+                f"SELECT id, type, start_date, end_date FROM nodes WHERE id IN ({holes})",
                 batch,
             ):
                 known[row["id"]] = row["type"]

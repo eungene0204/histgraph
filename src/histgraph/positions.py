@@ -51,6 +51,10 @@ from .sources.wikidata import POLITIES
 GENERIC_SEATS: dict[str, str] = {
     "wd:Q12087706": "왕",
     "wd:Q116": "군주",
+    # Wikidata 에는 '왕' 항목이 둘이다 (2026-09-11 실측). 고대 임금의 P39 가
+    # 이쪽으로 오는 일이 있어 — 동명성왕·무령왕·문무왕·지마 이사금·발해 고왕 —
+    # 여기 없으면 그 다섯이 왕조 자리로 못 옮겨지고 일반 '왕'에 남는다.
+    "wd:Q12097": "왕",
 }
 
 # 왕조 전용 자리인데 이름·타입이 어긋난 것: 노드 id -> (이름 또는 None, 타입).
@@ -60,6 +64,7 @@ SEAT_FIXES: dict[str, tuple[str | None, str]] = {
     # 타입은 바로잡아 둔다.
     "wd:Q116": (None, "role"),
     "wd:Q12087706": (None, "role"),
+    "wd:Q12097": (None, "role"),
 }
 
 WANG = "왕"
@@ -91,13 +96,31 @@ def _reigned(row) -> bool:
         return False
 
 
+# 한 자리를 두 이름으로 부르는 것들. 통일신라의 임금은 신라의 임금이고
+# (문무왕 뒤로도 왕위는 하나다), 금관가야·대가야의 임금은 가야의 임금이다.
+# 이 표가 없으면 같은 왕위가 '신라 왕'과 '통일신라 왕'으로 갈라 선다.
+SEAT_MERGE: dict[str, str] = {
+    "통일신라": "신라",
+    "금관가야": "가야",
+    "대가야": "가야",
+    "위만조선": "고조선",
+}
+
+
 def _polity_of(conn, person_id: str) -> str | None:
     """그 사람의 왕조. 시대 엣지가 가리키는 이름 중 왕조 이름인 것.
 
     시대 노드는 '고려'(정체)와 '조선시대'(연표 눈금) 둘 다 온다. 왕조
     이름과 **정확히 같은 것**만 받는다 — '조선시대'를 잘라 쓰면 '대한제국'
     같은 이름이 어디로 갈지 규칙이 흐려진다. 왕조가 둘 이상이면 모른다고
-    답한다 (짐작으로 옮기지 않는다)."""
+    답한다 (짐작으로 옮기지 않는다).
+
+    **둘 이상일 때 국적이 가른다** (2026-09-11). 고대 임금은 시대 엣지가
+    여럿이다 — 동명성왕은 고구려와 부여에, 경순왕은 신라와 고려에 걸려
+    있고 둘 다 참이다(부여에서 왔고, 나라를 넘긴 뒤 고려 사람이 되었다).
+    어느 나라의 임금이었나는 국적(`props.polity`)이 말한다. 짐작이 아니라
+    **시드 표와 Wikidata 가 적어 준 것**이고, 시대 엣지에 없는 나라를
+    끌어오지는 않는다."""
     names = {
         r[0]
         for r in conn.execute(
@@ -106,8 +129,18 @@ def _polity_of(conn, person_id: str) -> str | None:
             (person_id,),
         )
     }
-    found = names & set(POLITIES.values())
-    return next(iter(found)) if len(found) == 1 else None
+    found = {SEAT_MERGE.get(n, n) for n in names & set(POLITIES.values())}
+    if len(found) == 1:
+        return next(iter(found))
+    if len(found) > 1:
+        row = conn.execute(
+            "SELECT json_extract(props,'$.polity') FROM nodes WHERE id = ?",
+            (person_id,),
+        ).fetchone()
+        own = SEAT_MERGE.get(row[0], row[0]) if row and row[0] else None
+        if own in found:
+            return own
+    return None
 
 
 def _move_edge(conn, row, new_dst: str) -> None:
@@ -142,8 +175,10 @@ def _move_edge(conn, row, new_dst: str) -> None:
     conn.execute("DELETE FROM edges WHERE src = ? AND dst = ? AND type = ?",
                  (row["src"], row["dst"], row["type"]))
     overrides_mod.forget(conn, "edge", old_key)
-    # 다음 수집이 일반 자리 엣지를 되살려도 저장소가 여기서 다시 지운다.
-    overrides_mod.record(conn, "edge", old_key, "deleted", True, "positions",
+    # 다음 수집이 일반 자리 엣지를 되살리면 저장소가 그것을 **여기로 옮긴다**.
+    # `deleted` 로 적으면 새로 읽어 온 재위 날짜까지 함께 버린다
+    # (`overrides._apply_edge` 의 `moved_to` 주석).
+    overrides_mod.record(conn, "edge", old_key, "moved_to", new_dst, "positions",
                          f"{new_dst} 로 옮긴 임금 자리")
 
 

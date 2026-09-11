@@ -59,6 +59,11 @@ const ZOOM = 16;
 // 안전판. 시대를 나누지 않은 전체 그래프는 기원전까지 걸쳐 있어 이 눈금에서
 // 끝없이 길어진다.
 const MAX_HEIGHT = 40000;
+// 접은 구간이 받는 높이. 몇 년을 접었든 늘 같다 — 접힌 자리의 높이가
+// 길이를 말하면 그것도 비례인 척하는 셈이다. 길이는 글자가 말한다
+// ('세울 것이 없는 2,112년'). 라벨 네 줄쯤이라 눈에 띄고, 굴려 지나는
+// 데는 한 호흡이면 된다.
+const FOLD_H = 120;
 
 // 눈금 — 해를 픽셀로 옮기는 자. **띠도 라벨도 이 자 하나만 쓴다.**
 //
@@ -67,22 +72,77 @@ const MAX_HEIGHT = 40000;
 // 몰린 해만 라벨이 다 설 만큼 늘어난다. 그래서 100년이 1년처럼 보이는 일도
 // 없고, 라벨이 제 해를 떠나는 일도 없다.
 //
+// **아무것도 없는 구간이 화면 절반을 넘으면 접는다** (`fold`, 2026-09-11).
+// korea 묶음에 고대가 들어오며 바닥이 918년에서 기원전 2333년으로 내려갔고,
+// 기원전 2332~221년에는 표시도 재위 띠도 하나가 없다 (실측: 첫 표시와 둘째
+// 표시가 6,713px — 화면 일곱 장 — 떨어져 있었다). 비례를 곧이곧대로 지키면
+// 읽는 사람은 빈 화면 일곱 장을 굴려야 다음 표시를 만난다. 문턱이 화면
+// 절반인 것은 **빈 채로 굴리는 거리가 한 화면을 넘지 않게** 하려는 것이다 —
+// 한 화면으로 두면 다음 표시가 화면 밖에 남아 '여기서 끝났나' 로 읽힌다.
+//
+// **접는 것이지 솎는 것이 아니다** (CLAUDE.md §1-3 뒷절). 표시는 하나도
+// 빠지지 않는다 — 비어 있는 해만 제 몫을 내놓는다. 접을 수 있는 것은
+// 표시도 띠(`spans`)도 없는 구간뿐이고, 접었다는 것은 `folds` 로 돌려주어
+// 화면이 글자로 적는다 — 아무 표시 없이 줄이면 기원전 2333년과 기원전
+// 109년이 붙어 있는 것으로 읽힌다.
+//
+// **접은 해는 자를 나눠 갖지 않는다.** 남은 해가 `base` 를 나눠 가지므로
+// 고대를 넣었다고 조선의 눈금이 4분의 1로 줄지 않는다 (실측 3.0 → 5.9px/년).
+// 자가 촘촘해지면 접을 구간이 더 생길 수 있어 자리가 굳을 때까지 되짚는다 —
+// 접힌 구간은 늘기만 하므로 몇 번 안에 멈춘다.
+//
 // DOM 을 안 쓰는 순수 함수다 — 축과 라벨이 어긋나는지는 브라우저 없이
 // 재야 한다 (tests/layout.test.mjs).
-export function buildScale(marks, { from, to, base }) {
+export function buildScale(marks, { from, to, base, spans = [], fold = 0 }) {
   const span = Math.max(to - from, 1);
   // 그 해가 라벨에 내줘야 할 높이. 라벨은 이 안에서만 선다.
   const need = new Float64Array(span + 1);
   for (const m of marks) need[clamp(m.year, from, to) - from] += GAP;
 
-  const total = (rate) => {
+  // 비어 있는 구간 — 표시도 띠도 없는 해가 잇댄 자리. 재위 띠가 걸친 해는
+  // 비어 있지 않다 (접으면 띠가 뭉개진다). 띠는 켜고 끌 수 있지만 접는
+  // 자리는 그것과 무관하다 — 띠를 껐다고 연표가 다시 접히면 보던 자리를
+  // 잃는다.
+  const runs = emptyRuns(need, span, spans, from, to);
+
+  const folded = new Set();
+  const foldYears = () => {
+    let n = 0;
+    for (const r of folded) n += r.j - r.i;
+    return n;
+  };
+  const rateOf = () => base / Math.max(span - foldYears(), 1);
+  let rate = rateOf();
+  if (fold > 0) {
+    // 접으면 자가 촘촘해지고, 촘촘해지면 접을 것이 더 생긴다. 접힌 구간은
+    // 늘기만 하니 되짚다 보면 멈춘다 (구간 수보다 많이 돌지 않는다).
+    for (let k = 0; k <= runs.length; k++) {
+      let grew = false;
+      for (const r of runs) {
+        if (!folded.has(r) && (r.j - r.i) * rate > fold) { folded.add(r); grew = true; }
+      }
+      if (!grew) break;
+      rate = rateOf();
+    }
+  }
+
+  // 접힌 해의 몫. 한 구간이 FOLD_H 를 해 수만큼 나눠 가지므로 자는 그
+  // 안에서도 이어진다 — 픽셀을 해로 되짚는 길(`yearAt`)이 끊기지 않는다.
+  const each = new Float64Array(span);
+  const inFold = new Uint8Array(span);
+  for (const r of folded) {
+    const h = FOLD_H / (r.j - r.i);
+    for (let i = r.i; i < r.j; i++) { inFold[i] = 1; each[i] = h; }
+  }
+
+  const total = (r) => {
     let sum = PAD_TOP + PAD_BOTTOM;
-    for (let i = 0; i < span; i++) sum += Math.max(rate, need[i]);
+    for (let i = 0; i < span; i++) sum += inFold[i] ? each[i] : Math.max(r, need[i]);
     return sum;
   };
   // 늘리다 보면 끝없이 길어질 수 있다 (기원전까지 걸친 전체 그래프).
   // 라벨 자리는 줄일 수 없으니 **빈 해의 몫**만 깎아 상한에 맞춘다.
-  let rate = base / span;
+  // (접은 자리는 이미 가장 짧으므로 여기서 더 깎지 않는다.)
   if (total(rate) > MAX_HEIGHT) {
     let lo = 0;
     let hi = rate;
@@ -96,8 +156,39 @@ export function buildScale(marks, { from, to, base }) {
 
   const pos = new Float64Array(span + 1);
   pos[0] = PAD_TOP;
-  for (let i = 0; i < span; i++) pos[i + 1] = pos[i] + Math.max(rate, need[i]);
-  return { from, to, H: pos[span] + PAD_BOTTOM, pos };
+  for (let i = 0; i < span; i++) {
+    pos[i + 1] = pos[i] + (inFold[i] ? each[i] : Math.max(rate, need[i]));
+  }
+  const folds = [...folded]
+    .sort((a, b) => a.i - b.i)
+    .map((r) => ({
+      from: from + r.i, to: from + r.j - 1, years: r.j - r.i,
+      y: pos[r.i], h: pos[r.j] - pos[r.i],
+    }));
+  return { from, to, H: pos[span] + PAD_BOTTOM, pos, folds };
+}
+
+// 표시도 띠도 없는 해가 잇댄 구간 [i, j). `spans` 는 [시작해, 끝해] 쌍이다
+// (재위 띠 — 몰년 점까지가 띠의 몸이다).
+function emptyRuns(need, span, spans, from, to) {
+  const busy = new Uint8Array(span);
+  for (let i = 0; i < span; i++) if (need[i] > 0) busy[i] = 1;
+  for (const [a, b] of spans || []) {
+    if (a == null) continue;
+    const lo = clamp(Math.floor(a), from, to) - from;
+    const hi = clamp(Math.ceil(b == null ? a : b), from, to) - from;
+    for (let i = lo; i <= hi && i < span; i++) busy[i] = 1;
+  }
+  const runs = [];
+  let i = 0;
+  while (i < span) {
+    if (busy[i]) { i++; continue; }
+    let j = i;
+    while (j < span && !busy[j]) j++;
+    runs.push({ i, j });
+    i = j;
+  }
+  return runs;
 }
 
 // 라벨 자리. marks 는 sortMarks 로 세운 차례여야 한다 — 같은 해는 그
@@ -462,7 +553,14 @@ export class TimelineRail {
     const visible = sortMarks(marks, d.causes);
 
     // 시대 전체가 한 화면에 드는 높이의 ZOOM 배가 '빈 해'의 몫이다.
-    this.axis = buildScale(visible, { from, to, base: (bodyH - PAD_TOP - PAD_BOTTOM) * ZOOM });
+    //
+    // **빈 구간은 화면 절반까지만 내준다** — 그보다 길면 접는다. 그래서
+    // 표시와 표시 사이에서 빈 채로 굴리는 거리는 한 화면을 넘지 않는다.
+    // 재위 띠가 걸친 해는 비어 있지 않으므로, 띠를 켜고 끄는 것과 무관하게
+    // 늘 같은 자리가 접힌다 (띠를 껐다고 다시 접히면 보던 자리를 잃는다).
+    const spans = reigns.map((r) => [r.start, Math.max(r.end ?? r.start, r.death ?? r.end ?? r.start)]);
+    const screen = Math.max(bodyH - PAD_TOP - PAD_BOTTOM, 1);
+    this.axis = buildScale(visible, { from, to, base: screen * ZOOM, spans, fold: screen / 2 });
     const H = this.axis.H;
     const place = placeMarks(visible, this.axis).map(({ m, y }) => ({ m, ty: y }));
     // 재위 띠는 날짜를 안다. 그 해에 선 사건들 사이의 차례로 앉힌다
@@ -516,15 +614,16 @@ export class TimelineRail {
       ? reignBand(reigns, at, { id: d.id, year: d.year })
       : { svg: '', items: '', named: 0 };
 
+    const folds = this.axis.folds || [];
     this.body.innerHTML = `
       <div class="tl-canvas${causeWires ? ' has-cause' : ''}" style="height:${H}px; --lane:${lane}px">
         <svg class="tl-wires" width="100%" height="${H}" aria-hidden="true">
-          <line x1="${AX}" y1="${PAD_TOP - 8}" x2="${AX}" y2="${H - PAD_BOTTOM + 8}"
-                stroke="var(--line)" stroke-width="1"/>
+          ${axisLine(AX, PAD_TOP - 8, H - PAD_BOTTOM + 8, folds)}
           ${band.svg}
           ${wires}
           ${causeWires}
         </svg>
+        ${foldItems(folds)}
         ${band.items}
         ${items}
       </div>`;
@@ -731,6 +830,58 @@ export function causeWire(yFrom, yTo, W) {
                 stroke-linejoin="round" stroke-linecap="round" opacity=".9"/>`;
 }
 
+// --- 접힌 구간 ------------------------------------------------------------
+//
+// **접었으면 접었다고 보여야 한다.** 아무 표시 없이 줄이면 기원전 2333년과
+// 기원전 109년이 잇닿은 해로 읽힌다. 그래서 접은 자리는 (1) 축을 끊고
+// (2) 위아래를 파선으로 막고 (3) **몇 년을 접었는지 글자로 적는다** —
+// 색이나 높이로 말하지 않는다 (graph-drawer §0.3·§0.4).
+
+// 축은 접힌 자리에서 끊긴다. 이어 그으면 그 구간도 여느 해처럼 지나간
+// 것으로 읽힌다.
+export function axisLine(x, y0, y1, folds = []) {
+  const segs = [];
+  let y = y0;
+  for (const f of folds) {
+    const a = Math.max(f.y, y0);
+    const b = Math.min(f.y + f.h, y1);
+    if (b <= a) continue;
+    if (a > y) segs.push([y, a]);
+    y = b;
+  }
+  if (y < y1) segs.push([y, y1]);
+  return segs.map(([a, b]) =>
+    `<line x1="${x}" y1="${a.toFixed(1)}" x2="${x}" y2="${b.toFixed(1)}"
+           stroke="var(--line)" stroke-width="1"/>`).join('');
+}
+
+// 접은 구간에 적는 말. **몇 년인지와 왜 접었는지를 적는다** — '비어 있다'는
+// 그 시대에 아무 일도 없었다는 말이 아니라 우리 연표에 세울 것이 없다는
+// 말이라, 글자도 그렇게 적는다.
+export function foldText(f) {
+  return `세울 것이 없는 ${Number(f.years).toLocaleString('ko-KR')}년`;
+}
+
+export function foldTitle(f) {
+  return `${yr(f.from)}부터 ${yr(f.to)}까지 ${Number(f.years).toLocaleString('ko-KR')}년`
+    + ' — 연표에 세울 표시도 재위 띠도 없어 접었습니다';
+}
+
+// 파선은 접힌 구간 안쪽으로 물러서서 긋는다. 구간의 끝에 딱 맞추면 그
+// 자리에 선 표시의 글자를 가로지른다 — 표시는 제 해에 가운데를 맞춰 서므로
+// 위아래로 반 줄씩 걸친다 (실측: '전109 고조선-한 전쟁' 위로 파선이 지나갔다).
+const FOLD_INSET = 10;
+
+function foldItems(folds = []) {
+  return folds.map((f) => {
+    const top = f.y + FOLD_INSET;
+    const h = Math.max(f.h - FOLD_INSET * 2, 2);
+    return `
+      <div class="tl-fold" style="top:${top.toFixed(1)}px; height:${h.toFixed(1)}px"
+           title="${esc(foldTitle(f))}"><span>${esc(foldText(f))}</span></div>`;
+  }).join('');
+}
+
 // 띠 칸은 좁다. 왕조 접두어는 띠 전체가 같은 왕조라 떼어도 헷갈리지
 // 않는다 ('조선 세종' -> '세종'). 도구말에는 온 이름이 남는다.
 const DYNASTY_HEAD = /^(고구려|백제|신라|가야|발해|후백제|태봉|고려|조선|대한제국|대한민국)\s+/;
@@ -819,13 +970,15 @@ function seatHint(reigns) {
   return `왼쪽에 ${who} 기간을 막대로 세웁니다`;
 }
 
+// 기원전은 날짜 칸의 셈법(XSD, 0년이 있다)에서 한 해 옮겨 적는다 —
+// `-0036` 은 기원전 37년이다 (`timeline.bce_text` 머리글).
 function yr(y) {
-  return y < 0 ? `기원전 ${-y}년` : `${y}년`;
+  return y < 0 ? `기원전 ${1 - y}년` : `${y}년`;
 }
 
 // 축 옆 칸은 좁다. 기원전은 접두어를 줄여 쓴다.
 function shortYear(y) {
-  return y < 0 ? `전${-y}` : String(y);
+  return y < 0 ? `전${1 - y}` : String(y);
 }
 
 // 부분 날짜에서 달만. '1592-04-15' -> '4월', '1592' -> '' (달을 모른다).

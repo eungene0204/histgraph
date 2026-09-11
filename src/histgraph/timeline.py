@@ -39,6 +39,22 @@ YEAR = re.compile(r"(?<!\d)(\d{3,4})\s*년?")
 # 기원전 표기
 BCE = re.compile(r"(?:기원전|서기전|B\.?C\.?)\s*(\d{1,4})")
 
+# **기원전은 한 해가 어긋난다** (2026-09-11). 날짜 칸에 드는 것은 Wikidata 가
+# RDF 로 내보낸 XSD 날짜이고, 그 셈법에는 **0년이 있다** — `-0036` 은 기원전
+# 36년이 아니라 **기원전 37년**(고구려 건국)이다. 고조선 `-2332` = 기원전
+# 2333년, 신라 `-0056` = 기원전 57년, 백제 `-0017` = 기원전 18년도 그렇게
+# 맞는다. 그래서 화면에 적는 해와 날짜 칸의 숫자는 1 만큼 다르다.
+#
+# 고치는 자리를 **적는 자리 하나로** 둔다 — 날짜를 셈하는 쪽(`_year_of`·
+# 정렬·관문)은 그대로 XSD 를 쓰고, 사람에게 보일 때만 옮긴다. 거꾸로
+# 고치면(저장을 옮기면) 연도 노드의 `time:` 아이디와 날짜 칸이 어긋나
+# 자기순환이 생긴다.
+
+
+def bce_text(year: int) -> str:
+    """화면에 적을 해. 기원전은 XSD 셈법에서 한 해 옮긴다."""
+    return f"기원전 {1 - year}년" if year < 0 else f"{year}년"
+
 
 def parse_years(label: str) -> list[int]:
     """라벨에서 연도를 뽑는다. 범위 표기면 여러 개가 나온다.
@@ -48,7 +64,8 @@ def parse_years(label: str) -> list[int]:
     '조선시대 초기 15세기' -> []  (세기는 특정 연도가 아니다)
     """
     if bce := BCE.search(label):
-        return [-int(bce.group(1))]
+        # 사람이 적은 '기원전 37년' 은 날짜 칸에서 -0036 이다 (`bce_text`).
+        return [1 - int(bce.group(1))]
     years = [int(m) for m in YEAR.findall(label)]
     # 왕 재위 연차('태조 7년')와 서기 연도를 구분한다. 3자리 미만 값이나
     # 미래 연도는 연차·권차 같은 다른 숫자다.
@@ -57,7 +74,7 @@ def parse_years(label: str) -> list[int]:
 
 def year_node(year: int) -> Node:
     """정규 연도 노드. id 는 `time:1398` 형식으로 고정한다."""
-    label = f"기원전 {abs(year)}년" if year < 0 else f"{year}년"
+    label = bce_text(year)
     return Node(
         id=f"time:{year}",
         type="period",
@@ -80,7 +97,9 @@ def _year_of(date_str: str | None) -> int | None:
     if not head.isdigit():
         return None
     y = int(head)
-    if not (1 <= y <= 2100):
+    # 기원전은 더 멀리 간다 — 고조선의 시작이 -2332(기원전 2333년)다.
+    # 서기 쪽 상한(2100)은 그대로 둔다: 앞날의 해는 자료가 지저분한 것이다.
+    if not (1 <= y <= (5000 if neg else 2100)):
         return None
     return -y if neg else y
 

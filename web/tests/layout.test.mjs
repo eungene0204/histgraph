@@ -11,7 +11,7 @@
 // 여기에도 그대로 꽂는다. 3D 엔진(`3d-force-graph`)은 Node 에서 import 가
 // 터지지만 힘은 여기서 돈다.
 import { buildSimulation, buildForces, nodeRadius } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, dateRuler, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, dateRuler, axisLine, foldText, foldTitle, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
 import { causalReach, causalLayout, GraphView, MUTUAL, labelAlpha, withAlpha } from '../src/lib/graph-view.js';
 
 let pass = 0;
@@ -314,8 +314,8 @@ console.log('\n배치 (d3-force-3d)');
      yearCell({ year: 1592, date: '1592-07-08' }, { year: 1592, date: '1592-04-13' }).text === '7월');
   ok('해가 바뀌면 다시 해를 적는다',
      yearCell({ year: 1381, date: '1381-03' }, a).text === '1381');
-  ok('기원전은 접두어를 줄여 적는다',
-     yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '전57');
+  ok('기원전은 접두어를 줄여 적는다 (XSD 셈법에서 한 해 옮긴다)',
+     yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '전58');
 }
 
 // --- 연도는 달보다 위에 선다 (2026-09-08 지적) ------------------------------
@@ -500,7 +500,7 @@ console.log('\n배치 (d3-force-3d)');
   ok('이름 아래 연도가 선다', at('BJ').names[1] === '1636' && at('X').names.length === 1, JSON.stringify(at('BJ').names));
   ok('원인·결과 수를 센다', L.causes === 3 && L.effects === 3, `${L.causes} ${L.effects}`);
   ok('열 목록은 왼쪽부터', L.depths.join(',') === '-3,-2,-1,0,1,2');
-  ok('기원전은 글자로', causalLayout({ center: 'a', causes: [it('b', '원인')], effects: [], nodes: { a: { id: 'a', label: '가', type: 'event', start: '-0057-01-01' }, b: { id: 'b', label: '나', type: 'event' } } }).nodes.find((n) => n.id === 'a').names[1] === '기원전 57');
+  ok('기원전은 글자로', causalLayout({ center: 'a', causes: [it('b', '원인')], effects: [], nodes: { a: { id: 'a', label: '가', type: 'event', start: '-0057-01-01' }, b: { id: 'b', label: '나', type: 'event' } } }).nodes.find((n) => n.id === 'a').names[1] === '기원전 58');
   ok('인과가 없으면 도면도 없다', causalLayout({ center: 'a', causes: [], effects: [], nodes: {} }) === null);
 }
 
@@ -986,6 +986,123 @@ console.log('\n이름표 흐림 (거리)');
   const top = Number(/top:([\d.]+)px/.exec(band.items)[1]);
   ok('대통령의 이름이 그 해 6월 자리에 선다', Math.abs(top - inaug) < 0.06,
      `${top} vs ${inaug}`);
+}
+
+// --- 빈 구간은 접는다 — 솎지 않는다 ------------------------------------------
+//
+// korea 묶음에 고대가 들어오며 연표 바닥이 918년에서 기원전 2333년으로
+// 내려갔다. 기원전 2331~220년에는 표시도 재위 띠도 하나가 없는데 비례를
+// 곧이곧대로 지키면 그 사이가 6,713px — 화면 일곱 장 — 이 된다 (실측
+// 2026-09-11). 표시를 빼는 것이 아니라 **빈 해만 제 몫을 내놓는다.**
+{
+  // 실제 자료와 같은 꼴: 고조선(전2333, 구간 전108까지) 하나가 홀로 서고,
+  // 그 다음 표시는 2,224년 뒤다. 준왕(전219~전193)의 재위 띠가 그 사이에
+  // 걸쳐 있다 — 거기는 비어 있지 않다.
+  const from = -2335;
+  const to = 2029;
+  const marks = [{ year: -2332, end: -107, label: '고조선', type: 'org', group: 'actor', kind: 'era', date: '' }];
+  for (let y = -108; y <= 2020; y += 7) marks.push({ year: y, label: `사건${y}`, date: '' });
+  for (let i = 0; i < 38; i++) marks.push({ year: 1592, label: `전투${i}`, date: `1592-${String(i % 12 + 1).padStart(2, '0')}-01` });
+  const reigns = [{ id: '준왕', start: -219, end: -193 }];
+  const spans = reigns.map((r) => [r.start, r.end]);
+
+  const bodyH = 905;
+  const screen = bodyH - 18 - 64;
+  const base = screen * 16;
+  const sorted = sortMarks(marks);
+  const flat = buildScale(sorted, { from, to, base });                           // 접기 전
+  const scale = buildScale(sorted, { from, to, base, spans, fold: screen / 2 }); // 접은 뒤 (화면과 같은 문턱)
+
+  ok('접기를 켜지 않으면 접히지 않는다', (flat.folds || []).length === 0);
+  ok('빈 구간이 화면 절반을 넘으면 접힌다', scale.folds.length > 0,
+     `${scale.folds.length}곳`);
+
+  const f = scale.folds.find((g) => g.years > 1000);
+  ok('접힌 자리는 표시와 표시 사이의 빈 해뿐이다', f && f.from === -2331 && f.to === -220,
+     f ? `${f.from} ~ ${f.to}` : '없다');
+  ok('재위 띠가 걸친 해는 접지 않는다 — 접으면 띠가 뭉개진다',
+     scale.folds.every((g) => g.to < -219 || g.from > -193),
+     JSON.stringify(scale.folds.map((g) => [g.from, g.to])));
+  ok('접은 구간에 표시가 하나도 안 들어간다',
+     marks.every((m) => scale.folds.every((g) => m.year < g.from || m.year > g.to)));
+
+  // **솎지 않는다.** 표시는 하나도 빠지지 않고, 라벨은 제 해의 칸 안에 선다.
+  const place = placeMarks(sorted, scale);
+  const yOf = (y) => scale.pos[y - from];
+  ok('표시는 하나도 빠지지 않는다', place.length === marks.length,
+     `${place.length} / ${marks.length}`);
+  const stray = place.filter((p) => p.y < yOf(p.m.year) - 0.001 || p.y >= yOf(p.m.year + 1) - 0.001);
+  ok('접은 뒤에도 라벨은 제 해의 칸 안에 선다', stray.length === 0,
+     stray.length ? `${stray[0].m.label} ${stray[0].m.year}년이 칸 밖` : '');
+  const gaps = place.slice(1).map((p, i) => p.y - place[i].y);
+  ok('접은 뒤에도 라벨끼리 30px 아래로 붙지 않는다', Math.min(...gaps) >= 30 - 0.001,
+     `최소 ${Math.min(...gaps).toFixed(1)}px`);
+
+  // 자는 접힌 자리에서도 이어진다 — 픽셀을 해로 되짚는 길(`yearAt`)이
+  // 끊기면 훑기 막대와 '보던 해 지키기'가 길을 잃는다.
+  let mono = true;
+  for (let i = 1; i < scale.pos.length; i++) if (!(scale.pos[i] > scale.pos[i - 1])) mono = false;
+  ok('자는 접힌 자리에서도 끊기지 않는다 (언제나 늘어난다)', mono);
+
+  // 첫 표시와 둘째 표시 사이 — 접기 전 6,713px 이 화면 한 장 아래로 내려온다.
+  // (그 사이에 준왕의 재위 띠가 걸쳐 있어 접힌 자리가 둘로 갈린다.)
+  const d0 = place[1].y - place[0].y;
+  ok('첫 표시와 둘째 표시 사이가 화면 한 장 아래다', d0 < screen,
+     `${d0.toFixed(0)}px (화면 ${screen}px)`);
+  ok('접기 전보다 여덟 배 넘게 가까워진다', d0 < (flat.pos[-108 - from] - flat.pos[-2332 - from]) / 8,
+     `${d0.toFixed(0)}px ← ${(flat.pos[-108 - from] - flat.pos[-2332 - from]).toFixed(0)}px`);
+  ok('그래도 붙어 있지는 않다 — 접은 자리가 눈에 보일 만큼은 남는다', d0 > 60,
+     `${d0.toFixed(0)}px`);
+
+  // **접은 해는 자를 나눠 갖지 않는다.** 남은 해가 base 를 나눠 가지므로
+  // 고대를 넣었다고 조선의 눈금이 4분의 1로 줄지 않는다.
+  const rateAfter = yOf(1501) - yOf(1500);
+  const rateBefore = flat.pos[1501 - from] - flat.pos[1500 - from];
+  ok('접은 해는 자를 나눠 갖지 않는다 (조선의 눈금이 되살아난다)',
+     rateAfter > rateBefore * 1.5,
+     `${rateBefore.toFixed(2)} → ${rateAfter.toFixed(2)}px/년`);
+
+  // 접었다는 것은 글자가 말한다 — 색도 높이도 아니다.
+  ok('몇 년을 접었는지 글자로 적는다', foldText(f) === '세울 것이 없는 2,112년', foldText(f));
+  // 화면에 적는 해는 연표의 다른 자리와 같은 표기다 (`yr` — 천문 연도에서
+  // 한 해를 민다: 자리 -2331 은 기원전 2332년).
+  ok('도구말은 어디부터 어디까지인지 말한다',
+     foldTitle(f).startsWith('기원전 2332년부터 기원전 221년까지') && foldTitle(f).includes('접었습니다'),
+     foldTitle(f));
+  ok('접힘 글자에 한글 아닌 말이 없다', !/[A-Za-z]/.test(foldText(f) + foldTitle(f)));
+
+  // 축은 접힌 자리에서 끊긴다 — 이어 그으면 여느 해처럼 지나간 것으로 읽힌다.
+  const line = axisLine(46, 10, scale.H - 56, scale.folds);
+  const ys = [...line.matchAll(/y1="([\d.]+)" x2="\d+" y2="([\d.]+)"/g)].map((m) => [+m[1], +m[2]]);
+  ok('축은 접힌 자리마다 끊긴다', ys.length === scale.folds.length + 1, `${ys.length}도막`);
+  ok('끊긴 자리가 접은 구간이다',
+     Math.abs(ys[0][1] - scale.folds[0].y) < 0.1
+     && Math.abs(ys[1][0] - (scale.folds[0].y + scale.folds[0].h)) < 0.1,
+     `${ys.map((v) => v.join('~')).join(' / ')}`);
+  ok('접은 구간 안으로 축이 들어가지 않는다',
+     ys.every(([a, b]) => scale.folds.every((g) => b <= g.y + 0.1 || a >= g.y + g.h - 0.1)));
+  ok('접힌 곳이 없으면 축은 한 줄이다',
+     [...axisLine(46, 10, 900, []).matchAll(/<line/g)].length === 1);
+}
+
+// 짧은 빈 구간은 접지 않는다 — 비례가 먼저다. 접는 것은 읽는 사람이 빈
+// 화면을 굴려야 할 때뿐이다.
+{
+  const from = 1900;
+  const to = 2000;
+  const marks = [{ year: 1905, label: '앞', date: '' }, { year: 1950, label: '뒤', date: '' }];
+  const screen = 800;
+  // 실제 연표의 자 언저리 — 8px/년 (`base`/span). 45년은 360px 이라 화면
+  // 한 장에 든다.
+  const scale = buildScale(sortMarks(marks), { from, to, base: 8 * (to - from), fold: screen / 2 });
+  ok('빈 45년이 화면 절반을 못 넘으면 접지 않는다', scale.folds.length === 0,
+     JSON.stringify(scale.folds));
+
+  // 같은 자료라도 자가 촘촘해지면 같은 구간이 화면 한 장을 넘는다.
+  const tight = buildScale(sortMarks(marks), { from, to, base: 8 * (to - from) * 4, fold: screen / 2 });
+  ok('자가 촘촘해지면 같은 구간도 접힌다',
+     tight.folds.some((f) => f.from === 1906 && f.to === 1949),
+     JSON.stringify(tight.folds.map((f) => [f.from, f.to])));
 }
 
 console.log('\n==============================================');
