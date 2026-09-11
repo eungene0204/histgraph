@@ -186,8 +186,15 @@ def cmd_events(args: argparse.Namespace) -> int:
 
     `monarch` 는 인물 표인데 재위 구간까지 함께 만든다 (`ingest_monarchs`) —
     고려 임금은 Wikidata 에 재위 문장이 거의 없어서 `reigns` 가 채우지
-    못한다. 세는 타입은 인물이다."""
+    못한다. 세는 타입은 인물이다.
+
+    `--table` 은 다른 표다 (`data/events.tsv`, `handmade`) — **문서가 없어서
+    시드로는 못 담는 일**을 사람이 적어 세운다. 네트워크가 필요 없고, 원본과
+    파생본에 한 번씩 돌린다."""
     from .sources import wikipedia
+
+    if args.table:
+        return _events_table(args)
 
     tables = {
         "event": ("kowiki:event", wikipedia.EVENT_SEEDS),
@@ -235,6 +242,34 @@ def cmd_events(args: argparse.Namespace) -> int:
         for kind in dict.fromkeys(node_type.get(k, k) for k in args.kinds):
             print(f"  {NODE_TYPES[kind]} 노드: {before.get(kind, 0):,} → {after.get(kind, 0):,}")
     return 0
+
+
+def _events_table(args: argparse.Namespace) -> int:
+    """`data/events.tsv` — 사람이 세우는 사건 (`handmade` 모듈 머리글)."""
+    from . import handmade
+
+    path = args.table_path or (ROOT / "data" / "events.tsv")
+    try:
+        table = handmade.load_table(path)
+    except handmade.EventsTableError as exc:
+        print(f"  표를 읽지 못했습니다: {exc}")
+        return 1
+    with GraphStore(args.db) as store:
+        rep = handmade.apply(store, table, dry_run=args.dry_run)
+    head = "세울 사건" if args.dry_run else "세운 사건"
+    print(f"  표 {len(table)}줄 · {head} {len(rep.made)}건 · 그대로 {rep.kept}건"
+          f" · 관계 {rep.edges}건")
+    for label in rep.made:
+        print(f"    + {label}")
+    # 세어서 보여만 주는 것 둘. 짐작으로 노드를 만들거나 합치지 않는다.
+    for label, other in rep.collided:
+        print(f"  ⚠ 같은 이름이 이미 있어 안 세웠습니다: {label} ({other})"
+              f" — 합치는 것은 dedupe 쪽입니다")
+    for label, name, target in rep.absent:
+        print(f"  · 대상이 그래프에 없어 건너뛴 관계: {label} {name} {target}")
+    if args.dry_run:
+        print("\n  (미리보기라 아직 아무것도 바꾸지 않았습니다)")
+    return 1 if rep.collided else 0
 
 
 def cmd_infobox(args: argparse.Namespace) -> int:
@@ -2993,6 +3028,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="수집할 시드 표 (기본: 사건·단체·개념)")
     p_ev.add_argument("--eras", nargs="*", default=None,
                       help="이 시대만 (예: 일제강점기 대한제국). 기본은 전부")
+    p_ev.add_argument("--table", action="store_true",
+                      help="문서가 없어 사람이 적은 사건을 세운다 (data/events.tsv, 네트워크 불필요)")
+    p_ev.add_argument("--table-path", type=Path, default=None, help="그 표의 자리")
+    p_ev.add_argument("--dry-run", action="store_true", help="--table 미리보기")
     p_ev.set_defaults(func=cmd_events)
 
     p_ib = sub.add_parser("infobox", help="위키백과 인포박스에서 관계 추출 (LLM 불필요)")

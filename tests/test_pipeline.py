@@ -8052,6 +8052,103 @@ check("저장소의 임기 표는 대통령 14명을 적고 있다", len(_repo_t
 check("모든 줄이 대한민국 대통령 자리다",
       {r.seat for r in _repo_terms} == {"wd:Q6296418"})
 
+# --- 사람이 세우는 사건: 자료가 항목으로 갖고 있지 않은 일 ---------------------
+# "현대사 역사에 프로야구 개막이 없네?" (2026-09-11). 문서가 없으면 시드로는
+# 못 담는다 — 그 자리를 표가 맡는다 (`handmade`).
+from histgraph import handmade as hm_mod  # noqa: E402
+from histgraph.koreanize import has_hangul as _hm_hangul  # noqa: E402
+from histgraph.provenance import desc_origin as _hm_origin  # noqa: E402
+from histgraph.scope import ERAS as _HM_ERAS  # noqa: E402
+import json as _hm_json  # noqa: E402
+
+print("\n[사람이 세우는 사건]")
+
+_tmp_hm = tempfile.TemporaryDirectory()
+_hm_table = Path(_tmp_hm.name) / "events.tsv"
+_hm_table.write_text(
+    "# 주석\n\n"
+    "프로야구 개막\t1982-03-27\t대한민국"
+    "\t참여:wd:Q14362=전두환이 시구했다;장소:wd:Q8684=서울에서 열렸다"
+    "\t1982년 3월 27일 한국 프로야구가 시작되었다.\t민백 '프로야구'"
+    " https://encykorea.aks.ac.kr/Article/E0060462\n",
+    encoding="utf-8")
+_hm_rows = hm_mod.load_table(_hm_table)
+check("표는 이름·날짜·시대·관계·설명·근거 여섯 칸이다",
+      [(r.label, r.start, r.era, len(r.rels)) for r in _hm_rows]
+      == [("프로야구 개막", "1982-03-27", "대한민국", 2)], str(_hm_rows))
+check("노드 id 는 이름에서 온다", _hm_rows[0].node_id == "kr:event:프로야구 개막")
+
+_ok = ("이름\t1982\t대한민국\t-\t설명이 있다\t근거\n")
+for _bad, _why in (
+    ("이름\t1982\t대한민국\t-\t\t근거\n", "설명이 비면 막는다 (§1-3)"),
+    ("이름\t1982\t대한민국\t-\t설명이 있다\t\n", "근거가 비면 막는다"),
+    ("Opening Day\t1982\t대한민국\t-\t설명이 있다\t근거\n", "이름에 한글이 없으면 막는다 (§1)"),
+    ("이름\t1982년\t대한민국\t-\t설명이 있다\t근거\n", "날짜가 아니면 막는다"),
+    ("이름\t1982\t대한민국\t동행:wd:Q1=근거\t설명이 있다\t근거\n", "모르는 관계는 막는다"),
+    ("이름\t1982\t대한민국\t참여:wd:Q1\t설명이 있다\t근거\n",
+     "관계에 근거가 없으면 막는다 (화면에 그 관계의 근거로 뜬다)"),
+    (_ok + _ok, "같은 이름이 두 번 적히면 막는다"),
+):
+    _p = Path(_tmp_hm.name) / "bad.tsv"
+    _p.write_text(_bad, encoding="utf-8")
+    try:
+        hm_mod.load_table(_p)
+        check(_why, False, "막지 않았다")
+    except hm_mod.EventsTableError:
+        check(_why, True)
+
+with GraphStore(Path(_tmp_hm.name) / "g.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="wd:Q14362", type="person", label="전두환", source="wd"),
+        Node(id="wd:Q8684", type="place", label="서울특별시", source="wd"),
+    ])
+    _rep = hm_mod.apply(_st, _hm_rows)
+    _n = _st.conn.execute(
+        "SELECT type, label, start_date, description, props FROM nodes"
+        " WHERE id = 'kr:event:프로야구 개막'").fetchone()
+    check("사건으로 서고 날짜와 설명을 갖는다",
+          (_n["type"], _n["start_date"]) == ("event", "1982-03-27") and _n["description"],
+          str(tuple(_n)[:3]))
+    check("시대를 적어 둔다 — `scope` 가 그것으로 고른다",
+          _hm_json.loads(_n["props"])["seed_era"] == "대한민국")
+    # 근거 칸의 주소가 곧 화면의 출처 한 줄이다 (§1 의 예외 하나).
+    _origin = _hm_origin("hand", _hm_json.loads(_n["props"]), None)
+    check("근거의 주소로 출처 한 줄을 세운다",
+          _origin and _origin["name"] == "한국민족문화대백과사전", str(_origin))
+    _es = {(r["src"], r["dst"], r["type"]): _hm_json.loads(r["props"])
+           for r in _st.conn.execute("SELECT src, dst, type, props FROM edges")}
+    check("참여는 사람에서 사건으로 들어온다",
+          ("wd:Q14362", "kr:event:프로야구 개막", "participated_in") in _es, str(list(_es)))
+    check("장소는 사건에서 나간다",
+          ("kr:event:프로야구 개막", "wd:Q8684", "occurred_at") in _es, str(list(_es)))
+    check("관계마다 제 근거가 붙는다",
+          _es[("wd:Q14362", "kr:event:프로야구 개막", "participated_in")]["evidence"]
+          == "전두환이 시구했다")
+    check("두 번 씌워도 같다", not hm_mod.apply(_st, _hm_rows).made)
+
+    # 대상이 없으면 짐작으로 만들지 않는다 — 세어서 보여 준다.
+    _miss = hm_mod.load_table(_hm_table)[0]
+    _miss = hm_mod.Row(_miss.label, _miss.start, _miss.end, _miss.era,
+                       (("관련", "wd:Q404404", "없는 노드다"),), _miss.desc, _miss.note)
+    check("그래프에 없는 대상은 건너뛰고 센다",
+          [t for _, _, t in hm_mod.apply(_st, [_miss]).absent] == ["wd:Q404404"])
+
+    # 같은 이름이 이미 있으면 세우지 않는다 (§1-4 — 합치는 것은 dedupe 쪽).
+    _st.upsert_nodes([Node(id="wd:Q999", type="event", label="다른 개막", source="wd")])
+    _dup = hm_mod.Row("다른 개막", "1982", "", "대한민국", (), "설명", "근거")
+    check("이름이 겹치면 세우지 않고 보고한다",
+          [l for l, _ in hm_mod.apply(_st, [_dup]).collided] == ["다른 개막"])
+_tmp_hm.cleanup()
+
+# 저장소에 실린 표가 실제 그래프와 맞는가.
+_repo_hm = hm_mod.load_table(Path("data/events.tsv"))
+check("저장소의 사건 표는 전부 한국어 이름이다",
+      all(_hm_hangul(r.label) and _hm_hangul(r.desc) for r in _repo_hm))
+check("표의 시대는 전부 `scope.ERAS` 의 이름이다",
+      {r.era for r in _repo_hm} <= {e.polity_label for e in _HM_ERAS.values()},
+      str({r.era for r in _repo_hm}))
+
+
 print("\n[무게 — 무엇을 먼저 보여줄 것인가 (central)]")
 from histgraph import central as ct_mod  # noqa: E402
 

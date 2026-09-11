@@ -521,6 +521,39 @@ uv run histgraph --db data/korea.sqlite creators --apply
 않으면 아무도 참값을 모른다 — 그 자리는 사람이 '편집'으로 적거나, 해를 적은
 문장을 다시 넣는다 (§1-12 의 '빠진 것은 세어서 보여 준다').
 
+## 1-14. 자료에 항목이 없는 일은 사람이 표에 적어 세운다
+
+2026-09-11 지적: "현대사 역사에 프로야구 개막이 없네? 추가 해줘." 없는 것이
+맞았고, **빠뜨린 것이 아니라 담을 자리가 없었다.** 사건 시드
+(`wikipedia.EVENT_SEEDS`)는 **문서 이름을 적는 표**라 문서가 없는 일은 못
+담는다. 프로야구 개막이 그렇다 — 위키백과에는 리그 문서(`KBO 리그`)와 시즌
+문서(`1982년 한국프로야구`)뿐이고 시즌 문서는 스포츠라 `prune` 이 지운다.
+민백에는 글이 있지만 항목이 '프로야구'(개념)여서 **1982년 3월 27일에 선 일**이
+아니다. 정본이 문장으로는 적었는데 항목으로는 없는 것이다.
+
+그 마지막 자리가 `data/events.tsv` 이고 씌우는 것은
+`uv run histgraph events --table` 이다 (네트워크 불필요). 원본과 파생본에 한 번씩:
+
+```
+uv run histgraph events --table
+uv run histgraph --db data/korea.sqlite events --table
+uv run histgraph timeline        # 연도 노드에 잇는다 (두 DB 다)
+uv run histgraph central         # 무게 다시 재기 (§2)
+```
+
+    이름<TAB>날짜<TAB>시대<TAB>관계:대상 id=근거;…<TAB>설명<TAB>근거
+
+- **문서가 있는 일은 시드로 간다.** 거기 적으면 설명도 주소도 문서가 들고
+  온다. 이 표는 짧을수록 좋다.
+- **설명은 사람이 적고, 자료 이름을 그 안에 적지 않는다** (§1). 출처 한 줄은
+  근거 칸의 **주소**를 보고 화면이 세운다 (민백·국편·위키백과를 주소로 가른다).
+  주소가 없으면 우리 말이라 출처 줄도 없다.
+- **관계마다 제 근거를 적는다** — 그 글이 화면에 그 관계의 근거로 뜬다 (§1-6).
+  관계 이름은 다섯이다: 장소·참여·관련·원인·결과.
+- **같은 이름이 이미 있으면 세우지 않고 묻는다** (종료 코드 1). 같은 일이면
+  그쪽이 이미 있고, 다른 일이면 괄호로 갈라 적는다 (§1-2·§1-4). 관계의 대상이
+  그래프에 없으면 그 엣지만 건너뛰고 센다 — 짐작으로 노드를 만들지 않는다.
+
 ## 2. 그래프를 다시 만들 때
 
 수집·`scope` 뒤에 **무게를 다시 잰다** (`uv run histgraph central`, 몇 초).
@@ -531,7 +564,7 @@ uv run histgraph --db data/korea.sqlite creators --apply
 수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 고친 값은
 **편집 계층(`overrides` 표)**에 남아 저장소가 쓸 때마다 다시 씌운다 (2026-09-05,
 README "편집 계층" 절) — `relabel`·`redescribe`·`describe`·`nikh`·`precision`·
-`reigns`·`dedupe`·`chronology`·`founding`·`roles --table`·`positions`·`terms`·`creators` 가 거기 적는다. 그래서 수집 뒤에 그 열을 **잊어도 고친
+`reigns`·`dedupe`·`chronology`·`founding`·`roles --table`·`positions`·`terms`·`creators`·`events --table` 가 거기 적는다. 그래서 수집 뒤에 그 열을 **잊어도 고친
 값은 돌아온다.** 다시 돌리는 것은 새로 고칠 것이 생겼을 때다. 그 다음
 `scope korea` 로 파생본을 만든다. `dedupe`·`untangle`(`related_to` 갈라 내기)은
 수집이 새 노드·새 `related_to` 를 내므로 수집 뒤마다 돌린다. **SQL 로
