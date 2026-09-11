@@ -719,8 +719,15 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 }
 .tl-mark:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 .tl-y {
-  flex: none; width: 38px; text-align: right;
+  flex: none; position: relative; width: 38px; text-align: right;
   font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums;
+}
+/* 기원전 — 접두어를 줄여 쓰지 않는다 (2026-09-12 사용자: "그냥 '기원전' 이라고
+   써줘"). '기원전 2333' 은 38px 칸에 한 줄로 안 드니 접두어를 숫자 **위에**
+   올린다: 숫자는 제자리에 남아 오른쪽 정렬과 이름의 기준선이 그대로다. */
+.tl-bce {
+  position: absolute; right: 0; bottom: 100%;
+  font-size: 8.5px; letter-spacing: -.02em; white-space: nowrap;
 }
 .tl-name {
   margin-left: 14px;                 /* 38(연도) + 6(gap) + 14 = 58 = DOT_X */

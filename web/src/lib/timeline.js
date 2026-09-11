@@ -604,7 +604,7 @@ export class TimelineRail {
       return `
       <button class="tl-mark k-${m.kind}" data-id="${esc(m.id)}" style="top:${ty.toFixed(1)}px"
               title="${esc(markName(m))} · ${esc(whenText(m))}">
-        <span class="tl-y${cell.repeat ? ' rep' : ''}">${esc(cell.text)}</span>
+        <span class="tl-y${cell.repeat ? ' rep' : ''}">${yearHtml(cell.text)}</span>
         <span class="tl-name">${esc(markName(m))}</span>
         ${m.rel ? `<span class="tl-rel${isCause(m) ? ' is-cause' : ''}">${esc(relHead(m.rel))}</span>` : ''}
       </button>`;
@@ -744,7 +744,7 @@ export function reignBand(reigns, at, self = {}) {
     labels.push({
       y: y1, prio: 0,
       html: `<button class="tl-reign${on ? ' k-on' : ''}" data-id="${esc(r.id)}" style="top:${y1.toFixed(1)}px"
-               title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${shortYear(r.start)}~${r.ongoing ? '' : shortYear(r.end)}</i></button>`,
+               title="${esc(tip)}"><b>${esc(shortName(r.label))}</b><i>${yearRange(r.start, r.ongoing ? null : r.end)}</i></button>`,
     });
     // 퇴위 뒤에도 산 임금만 몰년을 따로 적는다. 재위 중에 죽었으면
     // 위 막대 라벨의 뒷 숫자가 이미 몰년이라 두 번 적는 셈이 된다.
@@ -976,9 +976,32 @@ function yr(y) {
   return y < 0 ? `기원전 ${1 - y}년` : `${y}년`;
 }
 
-// 축 옆 칸은 좁다. 기원전은 접두어를 줄여 쓴다.
+// 축 옆 칸은 좁지만 **접두어를 줄이지 않는다** (2026-09-12 사용자: "고조선
+// 건국을 전2333 이라고 했는데 기원전을 말한거지? 그냥 '기원전' 이라고 써줘").
+// '전2333' 은 읽는 사람이 무슨 '전'인지 되묻게 만든다 — 그래프·인과 도면은
+// 이미 '기원전 2333' 으로 적고 있었다 (`graph-view.yearOf`). 38px 짜리 연도
+// 칸에 한 줄로는 안 드는 것은 화면이 접두어를 숫자 위에 올려 푼다 (`yearHtml`).
 function shortYear(y) {
-  return y < 0 ? `전${1 - y}` : String(y);
+  return y < 0 ? `기원전 ${1 - y}` : String(y);
+}
+
+// 두 해를 잇는 칸(재위·왕조 띠)은 기원전을 **앞에서 한 번만** 적는다 —
+// '기원전 2333~기원전 108' 은 같은 말을 두 번 하고 70px 칸을 넘긴다.
+function yearRange(start, end) {
+  if (end == null) return `${shortYear(start)}~`;
+  return start < 0 && end < 0
+    ? `기원전 ${1 - start}~${1 - end}`
+    : `${shortYear(start)}~${shortYear(end)}`;
+}
+
+// 연도 칸에 드는 글자. 숫자는 제자리(오른쪽 정렬·이름과 같은 기준선)에 두고
+// **접두어만 그 위에** 올린다 (`.tl-bce`). 여기서 글자를 씌우므로 부르는
+// 자리에서 다시 씌우지 않는다.
+const BCE_CELL = /^기원전 (\d+)$/;
+export function yearHtml(text) {
+  const t = typeof text === 'number' ? shortYear(text) : String(text ?? '');
+  const m = BCE_CELL.exec(t);
+  return m ? `<span class="tl-bce">기원전</span>${m[1]}` : esc(t);
 }
 
 // 부분 날짜에서 달만. '1592-04-15' -> '4월', '1592' -> '' (달을 모른다).

@@ -15,7 +15,7 @@
 // 브라우저에 붙는 부분(LifeBoard)을 가른다 — 배치가 어긋나는지는 브라우저
 // 없이 재야 한다.
 
-import { buildScale, placeMarks, reignBand, causeWire, dateRuler, yearCells, CAUSE_WIRE, REIGN_COLOR } from './timeline.js';
+import { buildScale, placeMarks, reignBand, causeWire, dateRuler, yearCells, yearHtml, CAUSE_WIRE, REIGN_COLOR } from './timeline.js';
 
 export const NODE_TYPE_KO = {
   Person: '인물', FamilyMember: '가족', Ancestor: '조상', Relationship: '관계',
@@ -1519,7 +1519,7 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
     const href = m.kind === 'extra' ? '' : ` href="/#${encodeURIComponent(m.id)}"`;
     return `<${tag} class="tl-mark life-h${m.linked ? ' is-linked' : ''}${m.id === selected ? ' k-self' : ''}"${href} data-id="${esc(m.id)}"
       style="left:${xH}px; width:${HW - 8}px; top:${ty.toFixed(1)}px" title="${esc(m.label)} · ${m.year}년">
-      <span class="tl-y${cell.repeat ? ' rep' : ''}">${cell.text}</span><span class="tl-name">${esc(m.label)}</span>${extra}</${tag}>`;
+      <span class="tl-y${cell.repeat ? ' rep' : ''}">${yearHtml(cell.text)}</span><span class="tl-name">${esc(m.label)}</span>${extra}</${tag}>`;
   }).join('');
 
   // 연도 칸은 시대 연표와 같은 규칙이다 (yearCells) — 그 해의 첫 줄이 해를 적고
@@ -1533,7 +1533,7 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
     const rough = m.precision === 'decade' || m.precision === 'age' ? '<span class="tl-rel">어림</span>' : '';
     return `<button type="button" class="tl-mark life-p${m.id === selected ? ' k-self' : ''}" data-id="${esc(m.id)}"
       style="left:${xP}px; width:${PW - 28}px; top:${ty.toFixed(1)}px" title="${esc(m.label)} · ${m.year}년">
-      <span class="tl-y${cell.repeat ? ' rep' : ''}">${cell.text}</span><span class="tl-name">${esc(m.label)}</span>${age}${rough}</button>`;
+      <span class="tl-y${cell.repeat ? ' rep' : ''}">${yearHtml(cell.text)}</span><span class="tl-name">${esc(m.label)}</span>${age}${rough}</button>`;
   }).join('');
 
   // 태어나기 전의 역사 — 축 위가 아니라 캔버스 머리에 한 줄씩. 무엇과 이어졌는지 함께 적는다.
@@ -1542,7 +1542,7 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
     const who = (m.links || []).map((c) => `${IMPACT_KO[c.impact_type]} · ${c.description}`).join(' / ');
     const tag = m.kind === 'extra' ? 'span' : 'a';
     const href = m.kind === 'extra' ? '' : ` href="/#${encodeURIComponent(m.id)}"`;
-    return `<div class="life-before-row"><span class="tl-y">${m.year}</span><${tag} class="life-before-name"${href} data-id="${esc(m.id)}">${esc(m.label)}</${tag}><span class="life-before-why">${esc(who)}</span></div>`;
+    return `<div class="life-before-row"><span class="tl-y">${yearHtml(m.year)}</span><${tag} class="life-before-name"${href} data-id="${esc(m.id)}">${esc(m.label)}</${tag}><span class="life-before-why">${esc(who)}</span></div>`;
   }).join('');
   // 캔버스 위에 따로 선다(흐름 배치) — 축 위에 얹으면 첫 해의 표시와 겹친다.
   const beforeBlock = before

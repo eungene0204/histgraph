@@ -11,7 +11,7 @@
 // 여기에도 그대로 꽂는다. 3D 엔진(`3d-force-graph`)은 Node 에서 import 가
 // 터지지만 힘은 여기서 돈다.
 import { buildSimulation, buildForces, nodeRadius } from '../src/lib/layout.js';
-import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, isCause, causeWire, reignBand, dateRuler, axisLine, foldText, foldTitle, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
+import { buildScale, placeMarks, sortMarks, seatCount, markName, yearCell, yearCells, yearHtml, isCause, causeWire, reignBand, dateRuler, axisLine, foldText, foldTitle, CAUSE_WIRE, dateContains } from '../src/lib/timeline.js';
 import { causalReach, causalLayout, GraphView, MUTUAL, labelAlpha, withAlpha } from '../src/lib/graph-view.js';
 
 let pass = 0;
@@ -314,8 +314,13 @@ console.log('\n배치 (d3-force-3d)');
      yearCell({ year: 1592, date: '1592-07-08' }, { year: 1592, date: '1592-04-13' }).text === '7월');
   ok('해가 바뀌면 다시 해를 적는다',
      yearCell({ year: 1381, date: '1381-03' }, a).text === '1381');
-  ok('기원전은 접두어를 줄여 적는다 (XSD 셈법에서 한 해 옮긴다)',
-     yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '전58');
+  ok('기원전은 접두어를 줄이지 않는다 (XSD 셈법에서 한 해 옮긴다)',
+     yearCell({ year: -57, date: '-0057' }, { year: -57, date: '-0057' }).text === '기원전 58');
+  // 38px 칸에 한 줄로 안 드는 것은 접두어를 숫자 위에 올려 푼다 (`.tl-bce`).
+  ok('연도 칸은 접두어만 따로 올린다',
+     yearHtml('기원전 2333') === '<span class="tl-bce">기원전</span>2333'
+     && yearHtml(-2332) === '<span class="tl-bce">기원전</span>2333'
+     && yearHtml('1592') === '1592', yearHtml('기원전 2333'));
 }
 
 // --- 연도는 달보다 위에 선다 (2026-09-08 지적) ------------------------------
@@ -995,7 +1000,7 @@ console.log('\n이름표 흐림 (거리)');
 // 곧이곧대로 지키면 그 사이가 6,713px — 화면 일곱 장 — 이 된다 (실측
 // 2026-09-11). 표시를 빼는 것이 아니라 **빈 해만 제 몫을 내놓는다.**
 {
-  // 실제 자료와 같은 꼴: 고조선(전2333, 구간 전108까지) 하나가 홀로 서고,
+  // 실제 자료와 같은 꼴: 고조선(기원전 2333, 구간 기원전 108까지) 하나가 홀로 서고,
   // 그 다음 표시는 2,224년 뒤다. 준왕(전219~전193)의 재위 띠가 그 사이에
   // 걸쳐 있다 — 거기는 비어 있지 않다.
   const from = -2335;
