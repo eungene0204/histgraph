@@ -759,6 +759,12 @@ class GraphAPI:
             # 것과, 아직 받아오지 않아 비어 있는 것은 다른 이야기다.
             "no_kowiki": bool(props.get("no_kowiki")),
             "url": row["url"],
+            # 매체의 갈래(영화·드라마·책). 주소의 첫 칸이 되고
+            # (`slugs.MEDIA_SEGMENTS`) 로봇에게도 이 갈래로 말한다.
+            "form": props.get("form"),
+            # 그림 한 장 (국가유산청이 준다). 링크를 펼칠 때 세우는 자리에만
+            # 쓴다 — 남의 그림을 본문에 거는 것은 다른 이야기다.
+            "image": props.get("image"),
             "kowiki_url": props.get("kowiki_url"),
             "merged_from": props.get("merged_from") or [],
             "aliases": aliases,
@@ -1702,10 +1708,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _page(self, status: int, ctype: str, body: str) -> None:
-        raw = body.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
+    def _page(self, page) -> None:
+        """글로 읽는 장 한 장 (`pages.Page`). 옛 주소는 301 로 새 주소를
+        가리킨다 — 색인에 올라 있는 주소를 끊지 않으려면 헤더가 필요하다."""
+        raw = page.body.encode("utf-8")
+        self.send_response(page.status)
+        self.send_header("Content-Type", page.ctype)
+        if page.location:
+            self.send_header("Location", page.location)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -1802,9 +1812,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`)이 먼저다. 정적 파일보다
             # 앞에 둬야 web/public 에 같은 이름이 생겨도 이쪽이 이긴다.
-            page = pages.route(self.api, url.path)
+            page = pages.route(self.api, url.path, parse_qs(url.query))
             if page is not None:
-                self._page(*page)
+                self._page(page)
             elif url.path.startswith("/api/"):
                 viewer = None
                 if url.path in LIFE_GETS:

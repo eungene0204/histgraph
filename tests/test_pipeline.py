@@ -2266,7 +2266,34 @@ with tempfile.TemporaryDirectory() as tmp:
     # 세우지 않는다. 연대 있는 사건을 살리는 규칙보다 이쪽이 앞선다.
     check("설명이 없으면 연대를 알아도 빠진다",
           dest.conn.execute(
+              "SELECT 1 FROM nodes WHERE id='wd:EV1'").fetchone() is not None
+          and dest.conn.execute(
               "SELECT 1 FROM nodes WHERE id='wd:EV3'").fetchone() is None)
+    # 주소도 함께 옮겨간다 — 파생본에서 새로 지으면 이름이 겹치던 노드
+    # 하나가 여기 없는 탓에 같은 노드가 두 주소를 갖는다 (`slugs.py`).
+    from histgraph import slugs as _sg  # noqa: E402
+    _sg.assign(store.conn)
+    scope_extract(store, "joseon", str(out_db))
+    dest.close()
+    dest = GraphStore(out_db)
+    check("주소가 원본에서 파생본으로 따라간다",
+          _sg.path_for(dest.conn, "wd:EV1") == _sg.path_for(store.conn, "wd:EV1")
+          and _sg.path_for(dest.conn, "wd:EV1") is not None,
+          str(_sg.path_for(dest.conn, "wd:EV1")))
+    # **이미 나간 주소가 원본의 주소를 이긴다.** 파생본은 저장소에 실려
+    # 배포되므로 여기 든 주소가 곧 색인에 올라 있는 주소다 — 다시 만들면서
+    # 버리면 남의 검색 결과에 걸린 주소가 죽는다.
+    dest.conn.execute("UPDATE slugs SET slug = '옛이름' WHERE node_id = 'wd:EV1'")
+    dest.conn.commit()
+    dest.close()
+    scope_extract(store, "joseon", str(out_db))
+    dest = GraphStore(out_db)
+    check("다시 만들어도 이미 나간 주소가 지금 주소로 남는다",
+          _sg.path_for(dest.conn, "wd:EV1").endswith("/옛이름"),
+          str(_sg.path_for(dest.conn, "wd:EV1")))
+    check("원본의 주소는 옛 주소로 남아 그 장을 가리킨다",
+          _sg.lookup(dest.conn, "사건", "갑오개혁") == ("wd:EV1", False),
+          str(_sg.lookup(dest.conn, "사건", "갑오개혁")))
     dest.close()
 
     # 뼈대는 설명이 없어도 남는다 — 연표의 눈금과 직위가 사라지면 축과
@@ -4592,7 +4619,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("화면은 새로 쓴 글을 받는다", d["description"].startswith("이순신은 1545년에"), d["description"][:60])
     check("출처 줄은 '바탕으로 새로 쓴 글'이라 말한다",
           d["desc_origin"]["rewritten"] is True
-          and "문서를 바탕으로 새로 쓴 글입니다" in _pages.node_page(api, "wd:LSS")[1])
+          and "문서를 바탕으로 새로 쓴 글입니다" in _pages.node_page(api, "wd:LSS").body)
     check("떨어진 노드는 도입부로 물러난다",
           api.node("wd:UNK")["description"].startswith("강항(姜沆)은") and api.node("wd:UNK")["desc_origin"] is None)
     check("정본은 줄인 글 그대로",
@@ -4622,6 +4649,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 print("\n[글로 읽는 장]")
 with tempfile.TemporaryDirectory() as tmp:
+    import json as _json
     import re as _re
 
     from histgraph import pages
@@ -4654,12 +4682,26 @@ with tempfile.TemporaryDirectory() as tmp:
         Node(id="ex:X", type="person", label="이름뿐", source="extract"),
         Node(id="wd:SL/A", type="event", label="빗금 든 것", source="wd",
              description="주소 한 칸에 담기지 않는 이름이다."),
+        # 이름이 겹치는 딴 사람. 차수가 낮은 쪽이 연대를 덧붙여 갈린다.
+        Node(id="wd:S2", type="person", label="세종", source="wd",
+             start_date="1512", description="같은 이름의 딴 사람이다."),
+        Node(id="wd:JOSEON", type="period", label="조선", source="wd",
+             description="1392년부터 1897년까지의 왕조다."),
+        Node(id="wd:HUN", type="event", label="훈민정음 반포", source="wd",
+             start_date="1446-10-09", description="훈민정음을 반포한 일이다."),
+        Node(id="wd:SIX", type="event", label="4군 6진 개척", source="wd",
+             start_date="1433", description="북쪽 국경을 넓힌 일이다."),
     ])
     store.upsert_edges([
         Edge(src="wd:S", dst="wd:T", type="child_of", source="wd"),
         Edge(src="wd:M", dst="wd:S", type="child_of", source="wd"),
         Edge(src="wd:S", dst="wd:H", type="related_to", source="wd"),
+        Edge(src="wd:S", dst="wd:JOSEON", type="from_period", source="wd"),
+        Edge(src="wd:S", dst="wd:HUN", type="participated_in", source="wd"),
+        Edge(src="wd:S", dst="wd:SIX", type="participated_in", source="wd"),
     ])
+    from histgraph import slugs as _slugs
+    _slugs.assign(store.conn)
     api = _GraphAPI(store, era="korea")
 
     def _visible(html: str) -> str:
@@ -4674,33 +4716,61 @@ with tempfile.TemporaryDirectory() as tmp:
         text = text.replace(pages.COPYRIGHT, " ").replace("histgraph", " ")
         return set(_re.findall(r"[A-Za-z]{2,}", text))
 
-    status, ctype, body = pages.route(api, "/n/wd:S")
+    # --- 주소 ---------------------------------------------------------
+    # 주소는 타입과 이름으로 짓는다 (`slugs.py`). 한글이다 — 주소창도
+    # 사람이 읽는 자리라 §1 이 그대로 걸린다 (2026-09-11 사용자 결정).
+    check("주소를 타입과 이름으로 짓는다",
+          _slugs.path_for(store.conn, "wd:S") == "/인물/세종"
+          and _slugs.path_for(store.conn, "wd:HUN") == "/사건/훈민정음-반포",
+          str(_slugs.path_for(store.conn, "wd:S")))
+    # 타입이나 매체 갈래가 늘면 주소의 첫 칸도 같이 늘어야 한다 — 안 늘면
+    # 그 갈래의 장이 통째로 옛 주소로만 열리고 사이트맵에서 빠진다.
+    from histgraph.ontology import FORMS as _FORMS, NODE_TYPES as _NT
+    check("타입과 매체 갈래마다 주소의 첫 칸이 있다",
+          set(_slugs.SEGMENTS) | {"media"} == set(_NT)
+          and set(_slugs.MEDIA_SEGMENTS) == set(_FORMS),
+          f"{sorted(set(_NT) - set(_slugs.SEGMENTS) - {'media'})}"
+          f" · {sorted(set(_FORMS) ^ set(_slugs.MEDIA_SEGMENTS))}")
+    check("주소에 한글 아닌 글이 없다",
+          not [r for r in store.conn.execute("SELECT slug FROM slugs")
+               if _re.search(r"[A-Za-z]{2,}", r["slug"])])
+    check("이름이 겹치면 연대로 가른다",
+          _slugs.path_for(store.conn, "wd:S2") == "/인물/세종-1512년",
+          str(_slugs.path_for(store.conn, "wd:S2")))
+    # 빗금 든 id 는 주소 한 칸에 담기지 않아 옛 주소에서는 링크가 죽었다.
+    # 이름으로 지으면 그 함정이 없다.
+    check("빗금 든 id 도 제 주소를 받는다",
+          _slugs.path_for(store.conn, "wd:SL/A") == "/사건/빗금-든-것")
+
+    page = pages.route(api, "/인물/세종")
+    body = page.body
     text = _visible(body)
-    check("노드 장이 열린다", status == 200 and ctype.startswith("text/html"))
+    check("노드 장이 열린다", page.status == 200 and page.ctype.startswith("text/html"))
     check("이름·갈래·생몰이 글로 적힌다",
           "세종" in text and "인물" in text and "1397년 ~ 1450년" in text, text[:200])
     check("설명의 도입부가 본문에 들어 있다", "훈민정음을 창제하고" in text)
     # 원문 전체를 옮기면 스크랩이다. 절 본문은 내지 않고 위키 문법도 세우지 않는다.
     check("절 본문은 내지 않는다", "막동" not in text and "== " not in text, text[:400])
     check("이 사이트의 말이 먼저 온다 — 무엇이고 몇 건과 이어졌는지",
-          "세종은 인물입니다. " in text and "모두 3건과 이어져 있습니다" in text
-          and text.index("인물입니다") < text.index("훈민정음"), text[:400])
+          "세종은 조선의 인물입니다. " in text and "모두 6건과 이어져 있습니다" in text
+          and text.index("인물입니다") < text.index("훈민정음을"), text[:400])
     check("다른 이름이 적힌다", "이도" in text)
     # 출처는 설명 아래 한 줄. §1 의 유일한 예외 — 라이선스 의무다.
     check("출처와 라이선스가 설명 아래 한 줄로 선다",
           "한국어 위키백과 문서를 줄인 글입니다 · 크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0" in text
-          and text.index("훈민정음") < text.index("문서를 줄인 글입니다"), text[:600])
+          and text.index("훈민정음을") < text.index("문서를 줄인 글입니다"), text[:600])
     check("출처 이름과 라이선스가 링크다",
           'href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"' in body
           and 'href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"' in body)
     # 방향이 뒤집히면 아버지가 자식이 된다 — child_of 는 나가는 쪽이 부모다.
     check("부모와 자녀가 갈려 있다",
           text.index("부모") < text.index("태종") and "자녀" in text, text)
-    check("이웃으로 가는 링크가 있다",
-          'href="/n/wd%3AT"' in body and 'href="/n/wd%3AM"' in body)
+    check("이웃으로 가는 링크가 이름 주소로 간다",
+          'href="/%EC%9D%B8%EB%AC%BC/%ED%83%9C%EC%A2%85"' in body
+          and 'href="/%EC%9D%B8%EB%AC%BC/%EB%AC%B8%EC%A2%85"' in body, body[:200])
     check("관계망으로 돌아가는 길이 있다", 'href="/#wd%3AS"' in body)
     check("정본 주소를 스스로 말한다",
-          '<link rel="canonical" href="https://www.histgraph.space/n/wd%3AS">' in body)
+          '<link rel="canonical" href="https://www.histgraph.space/%EC%9D%B8%EB%AC%BC/%EC%84%B8%EC%A2%85">' in body)
     check("광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
     # 방문 통계는 화면 네 장과 이 장이 **같은 파일 하나**를 부른다. 측정 ID 를
     # 여기 박으면 화면과 어긋나므로, 부르는 것은 주소뿐이다
@@ -4717,18 +4787,82 @@ with tempfile.TemporaryDirectory() as tmp:
           pages.COPYRIGHT in text and '<div class="copy">' in body
           and ".copy { text-align: center" in body, text[-120:])
 
+    # --- 장의 짜임 ----------------------------------------------------
+    check("속성처럼 읽히는 관계는 앞의 표로 올라간다",
+          "주요 사실" in text and text.index("주요 사실") < text.index("이어진 것"), text[:900])
+    check("시대가 그 표의 첫 줄이다", "시대 조선" in text, text[text.index("주요 사실"):][:120])
+    check("연표가 해 순으로 선다",
+          "연표" in text and text.index("1433년") < text.index("1446년"), text)
+    check("이어진 것은 상대의 갈래로 갈라 세운다",
+          "관련 인물" in text and "관련 사건" in text
+          and text.index("관련 인물") < text.index("관련 사건"), text)
+    check("제목이 장마다 다르다 — 이름·시대·갈래·시기",
+          "<title>세종 — 조선의 인물 (1397년 ~ 1450년) | histgraph</title>" in body,
+          body[body.index("<title>"):][:120])
+    check("설명 칸은 이 사이트의 말로 시작한다 — 빈 장이 없다",
+          '<meta name="description" content="세종은 조선의 인물입니다.' in body)
+
+    # --- 빵부스러기 ---------------------------------------------------
+    _crumb = _visible(body[body.index('<p class="crumb">'):body.index("<h1>")])
+    check("빵부스러기가 한글로 선다 — 홈 › 갈래 › 시대 › 이름",
+          _crumb == "홈 › 인물 › 조선 › 세종"
+          and 'href="/%EC%9D%B8%EB%AC%BC/"' in body, _crumb)
+    check("빵부스러기를 로봇에게도 적는다",
+          '"@type":"BreadcrumbList"' in body and '"name":"인물"' in body)
+
+    # --- 로봇이 읽는 것 (JSON-LD·여는 그림) ----------------------------
+    _ld = _json.loads(_re.search(
+        r'<script type="application/ld\+json">(.+?)</script>', body, _re.S).group(1))
+    _graph = {x["@type"]: x for x in _ld["@graph"]}
+    check("장과 그 장이 다루는 것을 따로 적는다",
+          set(_graph) == {"WebPage", "Person"}
+          and _graph["WebPage"]["mainEntity"]["@id"] == _graph["Person"]["@id"])
+    check("사람은 생몰을 ISO 로 적는다",
+          _graph["Person"]["birthDate"] == "1397-04-10"
+          and _graph["Person"]["deathDate"] == "1450-02-17")
+    check("가족은 뜻이 맞는 자리에 적는다",
+          _graph["Person"]["parent"][0]["name"] == "태종"
+          and _graph["Person"]["children"][0]["name"] == "문종")
+    check("이어진 것을 절대 주소로 적는다",
+          any(u.startswith("https://www.histgraph.space/") for u in _graph["WebPage"]["relatedLink"]))
+    check("링크를 펼칠 때 세울 그림이 있다",
+          '<meta property="og:image" content="https://www.histgraph.space/og.png">' in body
+          and '<meta name="twitter:card" content="summary_large_image">' in body)
+    check("구조화 데이터는 화면에 한 자도 안 세운다", "schema.org" not in text)
+
+    _ev = pages.route(api, "/사건/훈민정음-반포").body
+    _evld = {x["@type"]: x for x in _json.loads(_re.search(
+        r'<script type="application/ld\+json">(.+?)</script>', _ev, _re.S).group(1))["@graph"]}
+    check("사건은 Event 로, 참여자는 attendee 로 적는다",
+          _evld["Event"]["startDate"] == "1446-10-09"
+          and _evld["Event"]["attendee"][0]["name"] == "세종", str(_evld["Event"])[:200])
+
+    # --- 옛 주소는 끊지 않는다 -----------------------------------------
+    old = pages.route(api, "/n/wd:S")
+    check("옛 주소는 새 주소로 301 로 보낸다",
+          old.status == 301
+          and old.location == "/%EC%9D%B8%EB%AC%BC/%EC%84%B8%EC%A2%85",
+          f"{old.status} {old.location}")
+    # 주소를 아직 못 받은 노드(`slugs.assign` 전)를 새 주소로 보내면 그
+    # 주소가 없어 로봇이 301 과 404 사이를 돈다. 그때는 옛 주소가 장이다.
+    store.conn.execute("DELETE FROM slugs WHERE node_id = 'ex:X'")
+    check("주소를 못 받은 노드는 옛 주소로 그대로 열린다 — 고리를 돌지 않는다",
+          pages.route(api, "/n/ex:X").status == 200)
+    _slugs.assign(store.conn)
+
     # 설명이 없는 장은 이름과 목록뿐이다. 색인에 올리면 읽을 것이 있는
     # 장까지 그 속에 묻힌다 — 왜 비었는지만 적고 물러난다.
-    status, _, body = pages.route(api, "/n/ex:X")
+    page = pages.route(api, "/인물/이름뿐")
     check("설명 없는 장은 색인에 올리지 않는다",
-          status == 200 and 'content="noindex,follow"' in body)
-    check("빈 설명의 이유를 적는다", "산문에서 이름만 추출된 노드라" in _visible(body))
+          page.status == 200 and 'content="noindex,follow"' in page.body)
+    check("빈 설명의 이유를 적는다", "산문에서 이름만 추출된 노드라" in _visible(page.body))
 
     # 문턱: 요약이 짧거나 이어진 것이 적으면 색인에 안 올린다. 태종은
     # 설명 한 줄에 관계 하나 — 목록일 뿐이다.
-    status, _, body = pages.route(api, "/n/wd:T")
-    check("얇은 장은 색인에 올리지 않는다", 'content="noindex,follow"' in body)
-    check("얇은 장도 읽을 수는 있다", status == 200 and "조선의 제3대 국왕이다." in _visible(body))
+    page = pages.route(api, "/인물/태종")
+    check("얇은 장은 색인에 올리지 않는다", 'content="noindex,follow"' in page.body)
+    check("얇은 장도 읽을 수는 있다",
+          page.status == 200 and "조선의 제3대 국왕이다." in _visible(page.body))
 
     # 요약 규칙 자체. 위키 문법과 마침표 없는 절 제목 앞까지가 도입부다.
     check("요약은 첫 절 제목 앞에서 멈춘다",
@@ -4759,26 +4893,46 @@ with tempfile.TemporaryDirectory() as tmp:
           _origin("wd", {"kowiki_url": "https://ko.wikipedia.org/wiki/x"})["name"] == "한국어 위키백과")
     check("표식이 없으면 모른다고 한다 — 틀린 출처보다 낫다", _origin("wd", {}) is None)
 
-    status, _, body = pages.route(api, "/n/없는것")
-    check("없는 노드는 404 이고 색인에 안 올린다",
-          status == 404 and "noindex" in body)
+    page = pages.route(api, "/인물/없는사람")
+    check("없는 주소는 404 이고 색인에 안 올린다",
+          page.status == 404 and "noindex" in page.body)
 
-    status, ctype, body = pages.route(api, "/sitemap.xml")
+    # --- 사이트맵 ------------------------------------------------------
+    page = pages.route(api, "/sitemap.xml")
+    check("사이트맵은 갈래마다 갈라 든다",
+          page.ctype.startswith("application/xml") and "<sitemapindex" in page.body
+          and "/sitemap-person-1.xml" in page.body and "/sitemap-pages-1.xml" in page.body,
+          page.body)
+    person = pages.route(api, "/sitemap-person-1.xml").body
     check("사이트맵은 노드 장과 같은 문턱을 건다",
-          "/n/wd%3AS" in body and "/n/ex%3AX" not in body and "/n/wd%3AT" not in body, body)
-    check("사이트맵에 목록 장과 방침·약관이 있다",
-          "/n/</loc>" in body and "/privacy.html" in body and "/terms.html" in body)
-    # 주소 한 칸(:id)에 담기지 않는 id 는 링크가 죽는다. 죽은 주소를
-    # 사이트맵에 실으면 로봇이 그것부터 물어 온다.
-    check("빗금 든 id 는 사이트맵에서 뺀다", "SL" not in body)
+          "/%EC%9D%B8%EB%AC%BC/%EC%84%B8%EC%A2%85" in person
+          and "%EC%9D%B4%EB%A6%84%EB%BF%90" not in person
+          and "%ED%83%9C%EC%A2%85" not in person, person)
+    pages_map = pages.route(api, "/sitemap-pages-1.xml").body
+    check("목록 장과 방침·약관이 사이트맵에 있다",
+          "/n/</loc>" in pages_map and "/privacy.html" in pages_map
+          and "/terms.html" in pages_map and "/%EC%9D%B8%EB%AC%BC/</loc>" in pages_map,
+          pages_map)
+    check("빈 쪽은 내지 않는다", pages.route(api, "/sitemap-person-9.xml") is None)
 
-    status, _, body = pages.route(api, "/n/")
-    text = _visible(body)
-    check("목록 장은 읽을 것이 있는 장만 세운다",
-          status == 200 and "인물" in text and "세종" in text and "태종" not in text, text[:200])
-    check("목록 장에도 영어가 없다 — 저작권 한 줄 말고는",
+    # --- 갈래 목록 장 --------------------------------------------------
+    page = pages.route(api, "/인물/")
+    text = _visible(page.body)
+    check("갈래 목록 장이 열린다",
+          page.status == 200 and "세종" in text and "태종" not in text, text[:200])
+    check("갈래 목록 장에도 영어가 없다", not _foreign(text), str(_foreign(text)))
+    check("갈래 목록 장은 제 주소를 정본으로 말한다",
+          '<link rel="canonical" href="https://www.histgraph.space/%EC%9D%B8%EB%AC%BC/">' in page.body)
+    check("빈 쪽을 만들지 않는다", pages.route(api, "/인물/", {"p": ["9"]}).status == 404)
+
+    page = pages.route(api, "/n/")
+    text = _visible(page.body)
+    check("어귀 장은 읽을 것이 있는 장만 세운다",
+          page.status == 200 and "인물" in text and "세종" in text and "태종" not in text, text[:200])
+    check("어귀 장이 갈래 목록으로 이어진다", 'href="/%EC%9D%B8%EB%AC%BC/"' in page.body)
+    check("어귀 장에도 영어가 없다 — 저작권 한 줄 말고는",
           not _foreign(text), str(_foreign(text)))
-    check("목록 장에도 저작권 한 줄이 선다", pages.COPYRIGHT in text)
+    check("어귀 장에도 저작권 한 줄이 선다", pages.COPYRIGHT in text)
     # **정적 장과 리액트 화면이 같은 문장을 세운다** (2026-09-09 사용자: "© 2026
     # histgraph 왜 이거만 보이지? 뒷 문장 어디감?"). 두 상수는 서로 다른 언어에
     # 사는 같은 한 줄이라, 한쪽만 고치면 화면마다 저작권이 달라진다.
@@ -4786,12 +4940,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("화면 쪽 저작권 상수가 글자 하나까지 같다",
           f"export const COPYRIGHT = '{pages.COPYRIGHT}';" in _site, _site[-200:])
 
-    # 배포에서는 rewrite 가 `/api/n/…` 으로 바꿔 넘긴다 — 같은 표가 받아야 한다.
-    check("배포 경로(/api/n/…)도 같은 장을 낸다",
-          pages.route(api, "/api/n/wd:S")[0] == 200)
+    # 배포에서는 rewrite 가 `/api/…` 으로 바꿔 넘긴다 — 같은 표가 받아야 한다.
+    check("배포 경로(/api/…)도 같은 장을 낸다",
+          pages.route(api, "/api/인물/세종").status == 200
+          and pages.route(api, "/api/sitemap.xml").status == 200)
     check("다른 경로는 건드리지 않는다",
           pages.route(api, "/api/meta") is None
           and pages.route(api, "/privacy.html") is None
+          and pages.route(api, "/assets/index.js") is None
           and pages.route(api, "/") is None)
     store.close()
 
@@ -5563,7 +5719,10 @@ if True:
     ev = api.node("wd:COUP")
     heads = [(r["other"]["label"], r["type"], r["edge_label"]) for r in ev["relations"]]
     check("피해는 참여 바로 뒤에 선다", heads[:2] == [("태종", "participated_in", "주도"), ("정도전", "related_to", "피해")], str(heads))
-    check("정적 페이지의 묶음 머리도 역할이다", [h for h, _ in _pg._groups(ev["relations"])][:2] == ["주도", "피해"])
+    _sec = _pg._sections(ev["relations"])
+    check("정적 페이지의 묶음 머리도 역할이다",
+          _sec[0][0] == "관련 인물" and [h for h, _ in _sec[0][1]][:2] == ["주도", "피해"],
+          str([(t, [h for h, _ in r]) for t, r in _sec]))
     g = api.graph("wd:COUP")
     labels = {(e["s"], e["t"]): e["label"] for e in g["edges"]}
     # 2026-09-07 전수 조사: '삭제'로 적어 정말 끊어 놓은 쌍이 114 였고 그중

@@ -13,9 +13,10 @@ from pathlib import Path
 from urllib.request import pathname2url
 
 from . import overrides as overrides_mod
+from . import slugs as slugs_mod
 from .ontology import Edge, Node
 
-SCHEMA = overrides_mod.SCHEMA + """
+SCHEMA = overrides_mod.SCHEMA + slugs_mod.SCHEMA + """
 CREATE TABLE IF NOT EXISTS nodes (
     id          TEXT PRIMARY KEY,
     type        TEXT NOT NULL,

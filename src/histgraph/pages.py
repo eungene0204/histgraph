@@ -1,4 +1,4 @@
-"""사람과 로봇이 **글로** 읽는 노드 페이지 (`/n/<id>`).
+"""사람과 로봇이 **글로** 읽는 장 (`/인물/세종`·`/사건/임진왜란`).
 
 화면(`web/`)은 자바스크립트가 그리는 관계망이라, 검색 로봇과 광고 심사의
 눈에는 빈 화면이다 — `index.html` 이 내주는 것은 `<div id="root">` 하나뿐이고
@@ -11,7 +11,8 @@
 바꾸는 규칙(`relations.js` 의 SENTENCE)은 옮겨 오지 않았다 — 같은 규칙을 두
 벌 두면 한쪽만 고쳐진다.
 
-여기도 §1 이 그대로 걸린다: 사람이 읽는 자리에 영어를 쓰지 않는다. 자료
+여기도 §1 이 그대로 걸린다: 사람이 읽는 자리에 영어를 쓰지 않는다. **주소도
+사람이 읽는 자리다** — 그래서 주소의 칸도 한글이다 (`slugs.py`). 자료
 출처는 **설명 아래 한 줄**에만 적는다 — 라이선스 의무라서 두는 예외다
 (provenance.py). 다른 자리에는 여전히 안 적는다.
 
@@ -21,15 +22,29 @@
 백과사전을 긁어 온 페이지였다. 그래서 지금은 (1) 설명은 첫 몇 문장까지만,
 (2) 이 사이트만 아는 것 — 언제의 무엇이고 무엇과 몇 건이나 이어졌는지 — 를
 이 사이트의 말로 먼저 적고, (3) 그 둘이 다 얇은 장은 색인에 올리지 않는다.
+
+장의 짜임은 넷이다 (2026-09-11):
+
+    이름 · 갈래 · 시기      제목과 그 아래 한 줄
+    이 사이트의 말 · 요약    무엇이고 몇 건과 이어졌는지, 그다음 원문 요약
+    주요 사실 · 연표        속성처럼 읽히는 관계(시대·소재지·직위)와 연도가 있는 이웃
+    이어진 것              관련 인물 · 사건 · 장소 · 유산과 작품 · 시대와 자리
+
+로봇이 읽는 것은 그 위에 얹는다 — `JSON-LD`(Schema.org)·정본 주소·여는 그림·
+빵부스러기. **화면에는 한 자도 더 세우지 않는다**: 그것들은 `<script>`·
+`<meta>` 안에 있고 사람이 보는 글자가 아니다.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from html import escape
-from urllib.parse import quote
+from typing import NamedTuple
+from urllib.parse import quote, unquote
 
+from . import slugs
 from .ontology import NODE_TYPES
 
 # 링크를 절대 주소로 적어야 하는 자리(정본 주소·사이트맵). 배포 도메인이
@@ -39,6 +54,15 @@ SITE = os.environ.get("HISTGRAPH_SITE", "https://www.histgraph.space").rstrip("/
 # 광고. 화면 세 장(`web/index.html`·`privacy.html`·`terms.html`)에 걸어 둔
 # 것과 같은 번호다.
 ADS_CLIENT = "ca-pub-8335444243080631"
+
+# 서치 콘솔이 주인을 확인하는 표. 없으면 아무것도 안 적는다 — 빈 값을
+# 적으면 구글이 그 자리를 보고 '표가 틀렸다'고 답한다.
+VERIFICATION = os.environ.get("HISTGRAPH_SITE_VERIFICATION", "").strip()
+
+# 카카오톡·슬랙·트위터가 링크를 펼칠 때 세우는 그림. 노드마다 제 그림이
+# 있으면 그것을 쓰고(유산은 국가유산청이 준다), 없으면 이 한 장이다.
+OG_IMAGE = f"{SITE}/og.png"
+OG_IMAGE_ALT = "histgraph — 한국사 관계망"
 
 # 저작권 한 줄. **화면에 영어를 두지 않는 규칙(CLAUDE.md §1)의 두 번째
 # 예외다** (2026-09-09 사용자 결정: "원문 그대로"). 저작권 표시는 나라를
@@ -96,6 +120,18 @@ _HEADING = re.compile(r"^=+[ \t]*.+?[ \t]*=+[ \t]*$", re.M)
 # 괄호 안의 '(음력 4월 10일)~1450년 3월 30일)' 같은 마침표 없는 구절은
 # 여기 안 걸리므로 문장 중간이 잘리지 않는다.
 _SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
+
+
+class Page(NamedTuple):
+    """장 하나. `location` 은 301 일 때만 찬다.
+
+    옛 주소(`/n/wd:Q12345`)를 끊지 않고 새 주소로 보내려면 헤더가 있어야
+    한다 — 튜플 셋으로는 그 말을 할 수 없어 자리를 하나 늘렸다."""
+
+    status: int
+    ctype: str
+    body: str
+    location: str | None = None
 
 
 def summarize(text: str | None, limit: int = SUMMARY_MAX) -> str:
@@ -209,6 +245,11 @@ body {
 .top .back { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--text-muted); }
 .top a:hover .back { color: var(--color-accent); }
 main { max-width: var(--file-line-width); margin: 0 auto; padding: 36px 22px 70px; }
+/* 빵부스러기. 로봇은 아래 JSON-LD 로 읽고 사람은 이 줄로 읽는다. */
+.crumb { color: var(--text-faint); font-size: 12px; margin: 0 0 14px; }
+.crumb a { color: var(--text-muted); text-decoration: none; }
+.crumb a:hover { color: var(--color-accent); }
+.crumb span { margin: 0 6px; color: var(--text-faint); }
 h1 { color: var(--text-normal); font-size: 1.8em; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 8px; }
 h1 .also { color: var(--text-muted); font-weight: 400; font-size: .65em; margin-left: 8px; }
 .kind { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
@@ -223,8 +264,11 @@ h1 .also { color: var(--text-muted); font-weight: 400; font-size: .65em; margin-
   background: rgba(255,255,255,.04); border-left: 3px solid #555555; border-radius: var(--radius-s); padding: 10px 14px;
 }
 .aka { color: var(--text-muted); font-size: 13px; margin: 0 0 8px; }
+h2 a { color: inherit; text-decoration: none; }
+h2 a:hover { color: var(--color-accent); }
 h2 { color: var(--text-normal); font-size: 1.25em; font-weight: 600; line-height: 1.3; margin: 34px 0 12px; }
-h3 { color: var(--text-faint); font-size: 12px; font-weight: 600; margin: 18px 0 6px; }
+h3 { color: var(--text-muted); font-size: 13.5px; font-weight: 600; margin: 26px 0 2px; }
+.head { color: var(--text-faint); font-size: 12px; font-weight: 600; margin: 14px 0 4px; }
 ul { list-style: none; margin: 0; padding: 0; }
 li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; margin: 0 -6px; border-radius: var(--radius-s); font-size: 15px; }
 li:hover { background: var(--background-modifier-hover); }
@@ -232,12 +276,27 @@ li a { color: var(--text-normal); text-decoration: none; }
 li a:hover { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
 li .meta { color: var(--text-faint); font-size: 12px; }
 .more { color: var(--text-faint); font-size: 12.5px; padding: 4px 0; }
+/* 주요 사실 — 속성처럼 읽히는 관계(시대·소재지·직위)를 표로 세운다. */
+.facts { margin: 0 0 4px; }
+.facts div { display: flex; gap: 12px; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius-s); font-size: 15px; }
+.facts div:hover { background: var(--background-modifier-hover); }
+.facts dt { flex: none; width: 84px; color: var(--text-faint); font-size: 12.5px; padding-top: 2px; }
+.facts dd { margin: 0; color: var(--text-normal); }
+.facts dd a { color: var(--text-normal); text-decoration: none; }
+.facts dd a:hover { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.facts dd span { color: var(--text-faint); }
+/* 연표 — 해와 이름 두 칸. */
+.marks li { align-items: baseline; }
+.marks .when { flex: none; width: 84px; color: var(--text-faint); font-size: 12.5px; }
 .open {
   display: inline-block; margin-top: 26px; padding: 7px 14px;
   border: 1px solid var(--background-modifier-border); border-radius: 5px;
   color: var(--text-muted); text-decoration: none; font-size: 13px;
 }
 .open:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.pager { display: flex; gap: 14px; margin-top: 30px; font-size: 13px; }
+.pager a { color: var(--text-muted); text-decoration: none; }
+.pager a:hover { color: var(--color-accent); }
 .foot {
   max-width: var(--file-line-width); margin: 0 auto; padding: 0 22px 60px;
   color: var(--text-faint); font-size: 12px;
@@ -259,6 +318,62 @@ _GROUP = {"person": "actor", "org": "actor", "event": "event",
           "media": "thing", "period": "frame", "role": "frame",
           "concept": "frame"}
 
+# --- Schema.org ------------------------------------------------------------
+# 로봇이 이 장을 무엇으로 읽을지. **타입을 새로 만들지 않는다** — 우리
+# 온톨로지의 아홉 타입을 Schema.org 의 가장 가까운 이름에 댄다. 없으면
+# `Thing` 이다: 틀린 이름을 대는 것보다 낫다 (구조화 데이터는 틀리면
+# 검색 결과에서 통째로 버려진다).
+SCHEMA_TYPE = {
+    "person": "Person",
+    "event": "Event",
+    "place": "Place",
+    "org": "Organization",
+    "heritage": "CreativeWork",
+    "artwork": "CreativeWork",
+    "period": "Thing",
+    "role": "Thing",
+    "concept": "DefinedTerm",
+}
+# 매체는 갈래가 곧 종류다 (`ontology.FORMS`).
+SCHEMA_FORM = {"film": "Movie", "series": "TVSeries", "documentary": "Movie",
+               "animation": "Movie", "book": "Book", "comic": "CreativeWork",
+               "game": "VideoGame", "music": "MusicRecording", "stage": "CreativeWork"}
+
+# 날짜로 내보낼 수 있는 꼴만 (`1592`·`1592-04`·`1592-04-13`·`-0220`).
+_ISO_DATE = re.compile(r"^-?\d{4}(-\d{2}(-\d{2})?)?$")
+
+# 속성처럼 읽히는 관계. 목록 더미에 섞어 두면 '조선'과 '황희'가 같은 무게로
+# 선다 — 앞의 표로 올리고 아래 목록에서는 뺀다. (종류, 방향) → 이름.
+FACT_HEADS = {
+    ("from_period", "out"): "시대",
+    ("born_in", "out"): "출생지",
+    ("died_in", "out"): "사망지",
+    ("located_in", "out"): "소재지",
+    ("occurred_at", "out"): "장소",
+    ("held_position", "out"): "직위",
+    ("member_of", "out"): "소속",
+    ("created", "in"): "만든 사람",
+}
+FACT_ORDER = ["시대", "장소", "소재지", "출생지", "사망지", "직위", "소속", "만든 사람"]
+# 한 사실에 이만큼까지. 직위가 열둘인 사람이 있는데 표가 화면을 넘기면
+# 그 아래 것을 아무도 못 본다.
+FACT_MAX = 6
+
+# '이어진 것'을 가르는 큰 칸. **상대가 무엇인가**로 가른다 — 관계 이름
+# (부모·주도·소재지)만으로 묶으면 인물과 시대가 한 줄 걸러 섞인다.
+SECTIONS: list[tuple[str, tuple[str, ...]]] = [
+    ("관련 인물", ("person",)),
+    ("관련 사건", ("event",)),
+    ("관련 단체", ("org",)),
+    ("관련 장소", ("place",)),
+    ("관련 유산과 작품", ("heritage", "artwork", "media")),
+    ("시대와 자리", ("period", "role", "concept")),
+]
+# 연표에 점으로 찍는 타입. 사람·장소는 이어지는 것이라 한 점에 못 찍는다
+# (`server` 의 연표와 같은 판단).
+MARK_TYPES = ("event", "heritage", "artwork", "media", "org", "period")
+MARK_MAX = 24
+
 
 def _year(value: str | None) -> str:
     """'1397-01-01' → '1397년'. 기원전은 앞말을 붙여 적는다."""
@@ -274,6 +389,20 @@ def _year(value: str | None) -> str:
     if not digits:
         return ""
     return f"기원전 {int(digits)}년" if neg else f"{int(digits)}년"
+
+
+def _year_num(value: str | None) -> int | None:
+    if not value:
+        return None
+    text = str(value)
+    digits = ""
+    for ch in text.lstrip("-"):
+        if not ch.isdigit():
+            break
+        digits += ch
+    if not digits:
+        return None
+    return -int(digits) if text.startswith("-") else int(digits)
 
 
 def _why_empty(node: dict) -> str:
@@ -301,43 +430,75 @@ def _head(rel: dict) -> str:
     return DIR_HEAD.get(rel["type"], {}).get(rel["dir"]) or rel["label"]
 
 
-def _groups(relations: list[dict]) -> list[tuple[str, list[dict]]]:
-    """관계를 묶음으로 정리한다. 종류·방향이 머리이고, 한 묶음 안에서 같은
-    상대는 한 줄이다 — 시대와 시점이 둘 다 걸린 해가 두 번 나오지 않게."""
-    out: list[tuple[str, list[dict]]] = []
-    index: dict[str, int] = {}
+def _facts(relations: list[dict]) -> tuple[list[tuple[str, list[dict]]], list[dict]]:
+    """속성처럼 읽히는 관계를 앞의 표로 올린다. (표, 남은 관계).
+
+    **라벨이 따로 적힌 관계는 올리지 않는다** — '직위'라도 편집 계층이
+    '이 사람이 오른 자리'라고 더 정확히 적어 두었으면 그 말이 이긴다."""
+    picked: dict[str, list[dict]] = {}
+    rest: list[dict] = []
     for rel in relations or []:
+        name = FACT_HEADS.get((rel["type"], rel["dir"]))
+        if name is None or (rel.get("edge_label") in LABEL_DIR_HEAD):
+            rest.append(rel)
+            continue
+        bucket = picked.setdefault(name, [])
+        if not any(r["other"]["id"] == rel["other"]["id"] for r in bucket):
+            bucket.append(rel)
+    table = [(n, picked[n]) for n in FACT_ORDER if n in picked]
+    return table, rest
+
+
+def _sections(relations: list[dict]) -> list[tuple[str, list[tuple[str, list[dict]]]]]:
+    """관계를 큰 칸(상대의 갈래) → 묶음(관계 이름)으로 정리한다.
+
+    한 묶음 안에서 같은 상대는 한 줄이다 — 시대와 시점이 둘 다 걸린 해가
+    두 번 나오지 않게. 묶음의 차례는 **역할이 먼저**다 (§1-6: 피해·주도는
+    사건의 얼굴이라 '관련' 더미에 묻히면 안 된다), 그다음 큰 묶음 순이다.
+    """
+    bucket_of: dict[str, str] = {}
+    for title, types in SECTIONS:
+        for t in types:
+            bucket_of[t] = title
+    grouped: dict[str, dict[str, list[dict]]] = {}
+    order: dict[str, dict[str, int]] = {}
+    for rel in relations or []:
+        title = bucket_of.get(rel["other"]["type"], SECTIONS[-1][0])
         head = _head(rel)
-        if head not in index:
-            index[head] = len(out)
-            out.append((head, []))
-        bucket = out[index[head]][1]
+        heads = grouped.setdefault(title, {})
+        bucket = heads.setdefault(head, [])
+        order.setdefault(title, {}).setdefault(head, len(heads))
         if any(r["other"]["id"] == rel["other"]["id"] for r in bucket):
             continue
         bucket.append(rel)
+    out = []
+    for title, _types in SECTIONS:
+        heads = grouped.get(title)
+        if not heads:
+            continue
+        ranked = sorted(
+            heads.items(),
+            key=lambda kv: (0 if kv[0] in ROLE_HEADS else 1,
+                            -len(kv[1]), order[title][kv[0]]),
+        )
+        out.append((title, ranked))
     return out
 
 
-def _lead(title: str, kind: str,
-          groups: list[tuple[str, list[dict]]], total: int) -> str:
+def _lead(title: str, kind: str, era: str,
+          sections: list[tuple[str, list[tuple[str, list[dict]]]]],
+          facts: list[tuple[str, list[dict]]], total: int) -> str:
     """이 사이트의 말로 적는 첫 문단. 원문을 옮기지 않고 관계망이 아는
     것만 말한다 — 언제의 무엇이고, 무엇과 몇 건이나 이어졌는지.
 
     '조선 세종은 조선의 인물입니다. 자녀 18 · 사건 9 · 시기 3 등 모두 87건과
     이어져 있습니다.' 생몰은 바로 위 갈래 줄에 있으니 되풀이하지 않는다.
     """
-    era = ""
-    for head, rels in groups:
-        if head == "시기":
-            named = [r["other"]["label"] for r in rels
-                     if not str(r["other"]["id"]).startswith("time:")]
-            if named:
-                era = f"{named[0]}의 "
-            break
     first = f"{title}{_josa(title, '은', '는')} {era}{kind}입니다."
     if not total:
         return first
-    heads = [(head, len(rels)) for head, rels in groups]
+    heads = [(head, len(rels)) for _title, ranked in sections for head, rels in ranked]
+    heads += [(name, len(rels)) for name, rels in facts]
     heads.sort(key=lambda x: -x[1])
     shown = " · ".join(f"{head} {n}" for head, n in heads[:4])
     rest = " 등" if len(heads) > 4 else ""
@@ -364,19 +525,182 @@ def _origin_line(origin: dict | None) -> str:
     return text
 
 
-def _link(other: dict) -> str:
+def href(path: str) -> str:
+    """주소 한 줄. 한글은 퍼센트로 적는다 — 브라우저는 풀어서 보여 주고
+    사이트맵·`canonical` 은 이 꼴이라야 규격에 맞는다. 물음표 뒤(`?p=2`)는
+    주소가 아니라 물음이라 그대로 둔다."""
+    base, sep, tail = path.partition("?")
+    return escape(quote(base, safe="/") + sep + tail)
+
+
+def _url_of(node_id: str, paths: dict[str, str]) -> str:
+    """그 노드로 가는 길. 주소를 아직 못 받은 노드는 `/n/<id>` 로 물러난다
+    (`slugs.assign` 을 안 돌린 DB 에서도 링크가 죽지 않게)."""
+    return paths.get(node_id) or f"/n/{node_id}"
+
+
+def _link(other: dict, paths: dict[str, str]) -> str:
     color = GROUP_COLOR.get(other.get("group"), "var(--frame)")
     kind = other.get("type_label") or NODE_TYPES.get(other.get("type"), "")
     return (
         f'<li><span class="dot" style="background:{color}"></span>'
-        f'<a href="/n/{quote(other["id"], safe="")}">{escape(other["label"])}</a>'
+        f'<a href="{href(_url_of(other["id"], paths))}">{escape(other["label"])}</a>'
         f'<span class="meta">{escape(kind)}</span></li>'
     )
 
 
+def _crumbs(items: list[tuple[str, str | None]]) -> str:
+    """빵부스러기 한 줄. (이름, 주소) — 마지막 칸은 주소가 없다."""
+    parts = []
+    for name, url in items:
+        parts.append(f'<a href="{href(url)}">{escape(name)}</a>' if url
+                     else f"<b>{escape(name)}</b>")
+    return '<p class="crumb">' + '<span>›</span>'.join(parts) + "</p>"
+
+
+def _crumb_ld(items: list[tuple[str, str | None]], canonical: str) -> dict:
+    return {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": i + 1, "name": name,
+             "item": (SITE + quote(url, safe="/")) if url else canonical}
+            for i, (name, url) in enumerate(items)
+        ],
+    }
+
+
+def _ld_block(*, canonical: str, title: str, description: str,
+              crumbs: list[tuple[str, str | None]], entity: dict | None = None,
+              related: list[str] | None = None) -> str:
+    """로봇이 읽는 구조화 데이터 한 덩이 (`@graph`).
+
+    장(WebPage)과 그 장이 다루는 것(entity)을 따로 적고 `mainEntity` 로
+    잇는다. 둘을 한 덩이로 적으면 '세종이라는 이름의 웹페이지'가 된다.
+    """
+    page: dict = {
+        "@type": "WebPage",
+        "@id": f"{canonical}#page",
+        "url": canonical,
+        "name": title,
+        "description": description,
+        "inLanguage": "ko",
+        "isPartOf": {"@type": "WebSite", "@id": f"{SITE}/#site",
+                     "name": "histgraph", "url": f"{SITE}/"},
+        "breadcrumb": _crumb_ld(crumbs, canonical),
+    }
+    if related:
+        page["relatedLink"] = related
+    graph = [page]
+    if entity is not None:
+        page["mainEntity"] = {"@id": entity["@id"]}
+        graph.append(entity)
+    return ('<script type="application/ld+json">'
+            + json.dumps({"@context": "https://schema.org", "@graph": graph},
+                         ensure_ascii=False, separators=(",", ":"))
+            + "</script>")
+
+
+def _entity_ld(node: dict, canonical: str, summary: str,
+               facts: list[tuple[str, list[dict]]],
+               sections: list[tuple[str, list[tuple[str, list[dict]]]]],
+               paths: dict[str, str], image: str | None) -> dict:
+    """이 장이 다루는 것 하나. 관계는 **뜻이 맞는 자리에만** 적는다 —
+    Schema.org 에 없는 관계를 억지로 대면 구조화 데이터 전체가 버려진다."""
+    kind = SCHEMA_TYPE.get(node["type"], "Thing")
+    if node["type"] == "media":
+        kind = SCHEMA_FORM.get(node.get("form") or "", "CreativeWork")
+    ld: dict = {
+        "@type": kind,
+        "@id": f"{canonical}#entity",
+        "name": node["names"][0] if node.get("names") else node["label"],
+        "url": canonical,
+        "mainEntityOfPage": {"@id": f"{canonical}#page"},
+    }
+    if summary:
+        ld["description"] = summary
+    if image:
+        ld["image"] = image
+    other_names = [n for n in (node.get("names") or [])[1:]] + list(node.get("aliases") or [])
+    if other_names:
+        ld["alternateName"] = other_names[:12]
+    start, end = node.get("start"), node.get("end")
+    if kind == "Person":
+        if _ISO_DATE.match(str(start or "")):
+            ld["birthDate"] = start
+        if _ISO_DATE.match(str(end or "")):
+            ld["deathDate"] = end
+    elif kind in ("Event", "Organization"):
+        key = ("startDate", "endDate") if kind == "Event" else ("foundingDate", "dissolutionDate")
+        if _ISO_DATE.match(str(start or "")):
+            ld[key[0]] = start
+        if _ISO_DATE.match(str(end or "")):
+            ld[key[1]] = end
+    # 출처 — 우리가 옮겨 적은 글이면 어디서 왔는지 기계에도 말한다. 화면의
+    # 출처 한 줄(§1 의 예외)과 **같은 값**이고 새로 여는 자리가 아니다.
+    origin = node.get("desc_origin") or {}
+    if origin.get("url"):
+        ld["sameAs"] = [origin["url"]]
+
+    def ref(rel: dict, as_type: str | None = None) -> dict:
+        other = rel["other"]
+        out = {"@type": as_type or SCHEMA_TYPE.get(other["type"], "Thing"),
+               "name": other["label"],
+               "url": SITE + quote(_url_of(other["id"], paths), safe="/")}
+        return out
+
+    by_fact = {name: rels for name, rels in facts}
+    for name, prop, as_type in (("출생지", "birthPlace", "Place"),
+                                ("사망지", "deathPlace", "Place"),
+                                ("소재지", "contentLocation", "Place"),
+                                ("장소", "location", "Place"),
+                                ("소속", "memberOf", "Organization"),
+                                ("만든 사람", "creator", "Person")):
+        rels = by_fact.get(name)
+        if not rels:
+            continue
+        if kind == "Person" and prop == "memberOf":
+            ld[prop] = [ref(r, as_type) for r in rels[:FACT_MAX]]
+        elif prop in ("birthPlace", "deathPlace", "location", "contentLocation"):
+            if kind == "Person" and prop in ("birthPlace", "deathPlace"):
+                ld[prop] = ref(rels[0], as_type)
+            elif kind == "Event" and prop == "location":
+                ld[prop] = ref(rels[0], as_type)
+            elif prop == "contentLocation" and kind in ("CreativeWork", "Movie", "TVSeries",
+                                                        "Book", "VideoGame", "MusicRecording"):
+                ld[prop] = ref(rels[0], as_type)
+        elif prop == "creator" and kind not in ("Person", "Organization", "Place"):
+            ld[prop] = [ref(r, as_type) for r in rels[:FACT_MAX]]
+
+    # 사람·단체의 가족·참여는 뜻이 그대로 맞는 자리가 있다.
+    heads = {head: rels for _title, ranked in sections for head, rels in ranked}
+    if kind == "Person":
+        for head, prop in (("부모", "parent"), ("자녀", "children"), ("배우자", "spouse")):
+            if heads.get(head):
+                ld[prop] = [ref(r, "Person") for r in heads[head][:GROUP_MAX]]
+    if kind == "Event":
+        people = [r for head, rels in heads.items() for r in rels
+                  if r["other"]["type"] in ("person", "org")
+                  and (head in ROLE_HEADS or head == "참여")]
+        if people:
+            ld["attendee"] = [ref(r) for r in people[:GROUP_MAX]]
+    return ld
+
+
 def _shell(title: str, description: str, canonical: str, body: str,
-           noindex: bool = False) -> str:
-    robots = '<meta name="robots" content="noindex,follow">\n' if noindex else ""
+           noindex: bool = False, *, ld: str = "", image: str | None = None,
+           keywords: str = "", prev_url: str = "", next_url: str = "") -> str:
+    robots = ('<meta name="robots" content="noindex,follow">\n' if noindex else
+              '<meta name="robots" content="index,follow,max-image-preview:large">\n')
+    picture = image or OG_IMAGE
+    head = [robots]
+    if keywords:
+        head.append(f'<meta name="keywords" content="{escape(keywords)}">\n')
+    if VERIFICATION:
+        head.append(f'<meta name="google-site-verification" content="{escape(VERIFICATION)}">\n')
+    if prev_url:
+        head.append(f'<link rel="prev" href="{prev_url}">\n')
+    if next_url:
+        head.append(f'<link rel="next" href="{next_url}">\n')
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -384,12 +708,20 @@ def _shell(title: str, description: str, canonical: str, body: str,
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{escape(title)}</title>
 <meta name="description" content="{escape(description)}">
-{robots}<link rel="canonical" href="{canonical}">
+{"".join(head)}<link rel="canonical" href="{canonical}">
 <meta property="og:type" content="article">
+<meta property="og:site_name" content="histgraph">
 <meta property="og:url" content="{canonical}">
 <meta property="og:title" content="{escape(title)}">
 <meta property="og:description" content="{escape(description)}">
+<meta property="og:image" content="{escape(picture)}">
+<meta property="og:image:alt" content="{escape(OG_IMAGE_ALT)}">
 <meta property="og:locale" content="ko_KR">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{escape(title)}">
+<meta name="twitter:description" content="{escape(description)}">
+<meta name="twitter:image" content="{escape(picture)}">
+{ld}
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={ADS_CLIENT}"
         crossorigin="anonymous"></script>
 <script async src="/analytics.js"></script>
@@ -404,7 +736,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 {body}
 
 <footer class="foot">
-  <a href="/">histgraph</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
+  <a href="/">histgraph</a><span>·</span><a href="/n/">글로 읽기</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
   <div class="copy">{COPYRIGHT}</div>
 </footer>
 
@@ -413,20 +745,122 @@ def _shell(title: str, description: str, canonical: str, body: str,
 """
 
 
-def node_page(api, node_id: str) -> tuple[int, str]:
-    """`/n/<id>` 한 장. (상태, 본문)"""
+def _moved(new: str) -> Page:
+    """옛 주소 → 새 주소. **간 곳은 경로로 적는다** — 도메인까지 박으면
+    로컬 서버가 배포된 사이트로 사람을 보낸다."""
+    where = quote(new, safe="/")
+    return Page(301, "text/html; charset=utf-8",
+                f'<!doctype html><meta charset="utf-8">'
+                f'<link rel="canonical" href="{SITE}{where}">'
+                f'<p><a href="{escape(where)}">옮겨진 주소로 갑니다</a></p>',
+                where)
+
+
+def _html(status: int, body: str) -> Page:
+    return Page(status, "text/html; charset=utf-8", body)
+
+
+def _not_found(path: str) -> Page:
+    canonical = f"{SITE}{quote(path, safe='/')}"
+    return _html(404, _shell(
+        "찾을 수 없는 항목 — histgraph",
+        "이 주소에 해당하는 항목이 없습니다.",
+        canonical,
+        '<main><h1>찾을 수 없습니다</h1>'
+        '<p class="empty">이 주소에 해당하는 항목이 없습니다. 이름이 바뀌었거나 '
+        '다른 항목으로 합쳐졌을 수 있습니다.</p>'
+        '<a class="open" href="/n/">글로 읽는 장에서 찾아보기</a></main>',
+        noindex=True,
+    ))
+
+
+def _dates(conn, ids) -> dict[str, tuple[str | None, str | None]]:
+    """이웃들의 날짜. 관계 줄마다 물으면 한 장에 수백 번 묻는다."""
+    out: dict[str, tuple[str | None, str | None]] = {}
+    unique = list(dict.fromkeys(ids))
+    for i in range(0, len(unique), 400):
+        batch = unique[i:i + 400]
+        marks = ",".join("?" * len(batch))
+        for r in conn.execute(
+            f"SELECT id, start_date, end_date FROM nodes WHERE id IN ({marks})", batch):
+            out[r["id"]] = (r["start_date"], r["end_date"])
+    return out
+
+
+def _marks(relations: list[dict], dates: dict) -> list[tuple[int, str, dict]]:
+    """연표에 세울 이웃. **연도를 아는 일과 만들어진 것만** 세운다 — 사람을
+    한 점에 찍으면 거짓을 말한다 (`server` 의 연표와 같은 규칙)."""
+    out: list[tuple[int, str, dict]] = []
+    seen: set[str] = set()
+    for rel in relations:
+        other = rel["other"]
+        if other["type"] not in MARK_TYPES or other["id"] in seen:
+            continue
+        # 연표의 눈금 노드(`time:1397`)는 세우지 않는다 — '1397년에 1397년'
+        # 이라고 적히고, 그 해에 무슨 일이 있었는지는 한 자도 안 말한다.
+        if str(other["id"]).startswith("time:"):
+            continue
+        start, end = dates.get(other["id"], (None, None))
+        year = _year_num(start)
+        if year is None:
+            continue
+        seen.add(other["id"])
+        span = _year(start) + (f" ~ {_year(end)}" if _year(end) and end != start else "")
+        out.append((year, span, other))
+    out.sort(key=lambda x: (x[0], x[2]["label"]))
+    return out[:MARK_MAX]
+
+
+# 제목·빵부스러기에 세울 시대 이름의 길이. '조선'·'고려'·'일제강점기'는
+# 그 장이 언제 것인지 한 낱말로 말하지만, 유물에 걸린 '조선 태조 7년(1398)'
+# 은 제목을 통째로 먹는다 — 그건 시대가 아니라 날짜다.
+ERA_MAX = 8
+
+
+def _era_of(facts: list[tuple[str, list[dict]]]) -> dict | None:
+    """이 장이 어느 시대 것인가. 연표의 눈금(`time:`)과 긴 날짜 표기는
+    시대 이름이 아니므로 세지 않는다. 여럿이면 짧은 쪽 — 왕대보다 왕조다."""
+    for name, rels in facts:
+        if name != "시대":
+            continue
+        named = [r["other"] for r in rels
+                 if not str(r["other"]["id"]).startswith("time:")
+                 and len(r["other"]["label"]) <= ERA_MAX]
+        if named:
+            return min(named, key=lambda o: (len(o["label"]), o["label"]))
+        return None
+    return None
+
+
+def _clip(text: str, limit: int = 157) -> str:
+    """검색 결과에 뜨는 두 줄. 낱말 가운데서 끊지 않는다 — 끊긴 조각은
+    읽는 사람에게 잘린 문서로 보인다."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    return (cut.rsplit(" ", 1)[0] if " " in cut[limit - 24:] else cut).rstrip(" ,·") + "…"
+
+
+def _title_of(name: str, kind: str, era: str, span: str) -> str:
+    """검색 결과의 첫 줄. **장마다 달라야 한다** — 같은 제목이 여럿이면
+    구글이 그중 하나만 남기고 나머지를 접는다. 그래서 이름 뒤에 시대·갈래·
+    시기를 붙여 '세종 — 조선의 인물 (1397년 ~ 1450년) | histgraph' 로 적는다."""
+    tail = f"{era}{kind}"
+    if span:
+        tail += f" ({span})"
+    return f"{name} — {tail} | histgraph"
+
+
+def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
+    """노드 한 장. `canonical_path` 는 이 장의 정본 주소 (`/인물/세종`)."""
     node = api.node(node_id)
     if node is None:
-        return 404, _shell(
-            "찾을 수 없는 항목 — histgraph",
-            "이 주소에 해당하는 항목이 없습니다.",
-            f"{SITE}/n/{quote(node_id, safe='')}",
-            '<main><h1>찾을 수 없습니다</h1>'
-            '<p class="empty">이 주소에 해당하는 항목이 없습니다. 이름이 바뀌었거나 '
-            '다른 항목으로 합쳐졌을 수 있습니다.</p>'
-            '<a class="open" href="/">관계망에서 찾아보기</a></main>',
-            noindex=True,
-        )
+        return _not_found(canonical_path or f"/n/{node_id}")
+
+    conn = api.store.conn
+    path = canonical_path or slugs.path_for(conn, node_id) or f"/n/{node_id}"
+    canonical = f"{SITE}{quote(path, safe='/')}"
 
     names = node.get("names") or [node["label"]]
     title = names[0]
@@ -438,7 +872,29 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     color = GROUP_COLOR.get(node.get("group"), "var(--frame)")
     desc = (node.get("description") or "").strip()
 
-    parts = ["<main>"]
+    relations = node.get("relations") or []
+    other_ids = [r["other"]["id"] for r in relations]
+    paths = slugs.paths_for(conn, other_ids)
+    dates = _dates(conn, other_ids)
+    facts, rest = _facts(relations)
+    sections = _sections(rest)
+    total = sum(len(rels) for _t, ranked in sections for _h, rels in ranked)
+    total += sum(len(rels) for _n, rels in facts)
+    summary = summarize(desc)
+    era_node = _era_of(facts)
+    era = f"{era_node['label']}의 " if era_node else ""
+
+    segment = path.split("/")[1] if path.count("/") >= 2 else ""
+    if segment not in slugs.SEGMENT_TYPE:
+        segment = slugs.segment_of(node["type"], {"form": node.get("form")}) or ""
+    crumbs: list[tuple[str, str | None]] = [("홈", "/")]
+    if segment in slugs.SEGMENT_TYPE:
+        crumbs.append((segment, f"/{segment}/"))
+    if era_node:
+        crumbs.append((era_node["label"], _url_of(era_node["id"], paths)))
+    crumbs.append((title, None))
+
+    parts = ["<main>", _crumbs(crumbs)]
     parts.append(
         f'<h1>{escape(title)}'
         + (f'<span class="also">{escape(also)}</span>' if also else "")
@@ -448,13 +904,11 @@ def node_page(api, node_id: str) -> tuple[int, str]:
         f'<p class="kind"><span class="dot" style="background:{color}"></span>'
         f'{escape(kind)}' + (f' · {escape(span)}' if span else "") + "</p>"
     )
-    groups = _groups(node.get("relations") or [])
-    total = sum(len(rels) for _, rels in groups)
-    summary = summarize(desc)
 
     # 이 사이트의 말이 먼저다 — 언제의 무엇이고 무엇과 이어졌는지는 원문이
     # 아니라 관계망이 아는 것이다. 그다음에 원문 요약이 온다.
-    parts.append(f'<p class="lead">{escape(_lead(title, kind, groups, total))}</p>')
+    lead = _lead(title, kind, era, sections, facts, total)
+    parts.append(f'<p class="lead">{escape(lead)}</p>')
     if summary:
         parts.append(f'<p class="desc">{escape(summary)}</p>')
         origin = _origin_line(node.get("desc_origin"))
@@ -467,14 +921,38 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     if aliases:
         parts.append(f'<p class="aka">다른 이름 · {escape(" · ".join(aliases))}</p>')
 
+    if facts:
+        parts.append("<h2>주요 사실</h2><dl class=\"facts\">")
+        for name, rels in facts:
+            links = " · ".join(
+                f'<a href="{href(_url_of(r["other"]["id"], paths))}">'
+                f'{escape(r["other"]["label"])}</a>' for r in rels[:FACT_MAX])
+            if len(rels) > FACT_MAX:
+                links += f' <span>외 {len(rels) - FACT_MAX}</span>'
+            parts.append(f"<div><dt>{escape(name)}</dt><dd>{links}</dd></div>")
+        parts.append("</dl>")
+
+    marks = _marks(relations, dates)
+    if len(marks) >= 2:
+        parts.append('<h2>연표</h2><ul class="marks">')
+        for _year_n, when, other in marks:
+            color2 = GROUP_COLOR.get(other.get("group"), "var(--frame)")
+            parts.append(
+                f'<li><span class="when">{escape(when)}</span>'
+                f'<span class="dot" style="background:{color2}"></span>'
+                f'<a href="{href(_url_of(other["id"], paths))}">{escape(other["label"])}</a></li>')
+        parts.append("</ul>")
+
     if total:
         parts.append(f"<h2>이어진 것 {total}</h2>")
-        for head, rels in groups:
-            parts.append(f"<h3>{escape(head)}</h3><ul>")
-            parts.extend(_link(r["other"]) for r in rels[:GROUP_MAX])
-            parts.append("</ul>")
-            if len(rels) > GROUP_MAX:
-                parts.append(f'<p class="more">외 {len(rels) - GROUP_MAX}개</p>')
+        for section, ranked in sections:
+            parts.append(f"<h3>{escape(section)}</h3>")
+            for head, rels in ranked:
+                parts.append(f'<p class="head">{escape(head)}</p><ul>')
+                parts.extend(_link(r["other"], paths) for r in rels[:GROUP_MAX])
+                parts.append("</ul>")
+                if len(rels) > GROUP_MAX:
+                    parts.append(f'<p class="more">외 {len(rels) - GROUP_MAX}개</p>')
     else:
         parts.append('<h2>이어진 것</h2><p class="empty">연결된 관계가 없습니다.</p>')
 
@@ -483,21 +961,42 @@ def node_page(api, node_id: str) -> tuple[int, str]:
     )
     parts.append("</main>")
 
+    # 유산의 그림은 국가유산청이 준다. 링크를 펼칠 때만 쓰고 장에 걸지는
+    # 않는다 — 남의 그림을 본문에 세우는 것은 다른 이야기다.
+    image = node.get("image") or None
+    if image and image.startswith("http://"):
+        image = "https://" + image[len("http://"):]
+
     # 얇은 장은 색인에 올리지 않는다 (`indexable` — 사이트맵과 같은 문턱).
     # 이름과 목록만 있는 장이 검색 결과에 깔리면 읽을 것이 있는 장까지 같이
     # 묻힌다.
-    meta = summary[:150] if summary else f"{title} — {kind}. 이어진 것 {total}."
-    return 200, _shell(
-        f"{title} — histgraph",
+    meta = _clip(f"{lead} {summary}" if summary else lead)
+    words = [title, *names[1:], *aliases[:4], kind]
+    if era:
+        words.append(era.rstrip("의 "))
+    words += [r["other"]["label"] for _n, rels in facts for r in rels[:2]]
+    keywords = ", ".join(dict.fromkeys(w for w in words if w))[:250]
+
+    related = [SITE + quote(_url_of(r["other"]["id"], paths), safe="/")
+               for _t, ranked in sections for _h, rels in ranked for r in rels[:6]][:24]
+    entity = _entity_ld(node, canonical, summary, facts, sections, paths, image)
+    ld = _ld_block(canonical=canonical, title=_title_of(title, kind, era, span),
+                   description=meta, crumbs=crumbs, entity=entity, related=related)
+
+    return _html(200, _shell(
+        _title_of(title, kind, era, span),
         meta,
-        f"{SITE}/n/{quote(node['id'], safe='')}",
+        canonical,
         "\n".join(parts),
         noindex=not indexable(summary, total),
-    )
+        ld=ld, image=image, keywords=keywords,
+    ))
 
 
 # 목록 장이 갈래마다 몇 개씩 세우는지. 사람이 한 화면에서 훑을 수 있는 만큼.
 INDEX_EACH = 60
+# 갈래별 목록 장은 한 쪽에 이만큼. 로봇이 여기서 각 장으로 들어간다.
+PAGE_SIZE = 100
 
 # 목록 장에 세울 갈래와 그 머리말. 시대·직위(frame)는 두지 않는다 —
 # '조선'·'영의정' 은 읽을거리가 아니라 다른 항목을 묶는 틀이다.
@@ -508,96 +1007,301 @@ INDEX_KINDS = [
     ("place", "장소"),
 ]
 
+# 갈래마다 목록 장 머리에 적는 한 줄. 빈 목록에 이름만 세우면 '얇은 장'이다.
+SEGMENT_LEAD = {
+    "인물": "한국사의 인물들입니다. 이름을 누르면 그 사람이 언제 사람이고 누구와 무엇으로 이어졌는지 봅니다.",
+    "사건": "한국사에서 일어난 일들입니다. 무엇이 그 일을 불렀고 그 일이 무엇을 불렀는지 함께 봅니다.",
+    "장소": "한국사의 장소들입니다. 그곳에서 일어난 일과 그곳에 있는 것으로 이어집니다.",
+    "단체": "나라와 왕조, 관청과 문중입니다. 그곳에 속한 사람과 시대로 이어집니다.",
+    "유산": "국보와 보물, 사적과 유물입니다. 만든 사람과 있는 곳, 만들어진 때로 이어집니다.",
+    "작품": "그림과 글씨, 지어진 것들입니다.",
+    "시대": "한국사의 시대와 해입니다. 그 시기에 선 사람과 일로 이어집니다.",
+    "직위": "관직과 칭호입니다. 그 자리에 오른 사람들로 이어집니다.",
+    "개념": "제도와 사상, 풍습입니다.",
+    "영화": "한국사를 다룬 영화입니다. 어느 인물과 어느 사건을 다루는지로 이어집니다.",
+    "드라마": "한국사를 다룬 드라마입니다. 어느 인물과 어느 사건을 다루는지로 이어집니다.",
+    "다큐멘터리": "한국사를 다룬 다큐멘터리입니다.",
+    "애니메이션": "한국사를 다룬 애니메이션입니다.",
+    "책": "한국사를 다룬 책입니다.",
+    "만화": "한국사를 다룬 만화입니다.",
+    "게임": "한국사를 다룬 게임입니다.",
+    "음악": "한국사와 이어진 음악입니다.",
+    "무대": "한국사를 다룬 무대입니다.",
+}
 
-def index_page(api) -> tuple[int, str]:
+
+def _segment_rows(api, segment: str, *, limit: int | None = None,
+                  offset: int = 0) -> tuple[list, int]:
+    """그 갈래에서 **색인에 올릴 만한** 장들. (줄, 전부 몇 개인가)
+
+    문턱(`indexable`)은 요약을 봐야 알 수 있는데 노드가 만 개다. 그래서
+    SQL 로 먼저 걷어낸다 — 요약은 설명보다 길어질 수 없으므로 설명 길이가
+    문턱보다 짧으면 요약도 짧다. 남은 것만 파이썬이 정확히 잰다."""
+    node_type, form = slugs.SEGMENT_TYPE[segment]
+    where = ["n.type = ?", "COALESCE(n.description,'') <> ''",
+             "LENGTH(n.description) >= ?", "s.slug IS NOT NULL"]
+    args: list = [node_type, MIN_SUMMARY]
+    if form:
+        where.append("json_extract(n.props, '$.form') = ?")
+        args.append(form)
+    elif node_type == "media":
+        where.append("COALESCE(json_extract(n.props, '$.form'), '') = ''")
+    rows = [
+        r for r in api.store.conn.execute(
+            f"""SELECT * FROM (
+                  SELECT n.id, n.label, n.type, n.description, s.segment, s.slug,
+                         (SELECT COUNT(*) FROM edges e
+                           WHERE e.src = n.id OR e.dst = n.id) AS degree
+                    FROM nodes n
+                    LEFT JOIN slugs s ON s.node_id = n.id AND s.current = 1
+                   WHERE {' AND '.join(where)}
+                 )
+                 WHERE degree >= ?
+                 ORDER BY degree DESC, label""",
+            (*args, MIN_RELATIONS),
+        )
+        if indexable(summarize(r["description"]), r["degree"])
+    ]
+    total = len(rows)
+    if limit is not None:
+        rows = rows[offset:offset + limit]
+    return rows, total
+
+
+def segment_page(api, segment: str, page: int = 1) -> Page:
+    """`/인물/` — 한 갈래의 목록. 로봇이 여기서 각 장으로 들어간다."""
+    if segment not in slugs.SEGMENT_TYPE:
+        return _not_found(f"/{segment}/")
+    page = max(1, page)
+    rows, total = _segment_rows(api, segment, limit=PAGE_SIZE,
+                                offset=(page - 1) * PAGE_SIZE)
+    if not rows and page > 1:
+        return _not_found(f"/{segment}/")
+    last = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    base = f"/{segment}/"
+    canonical = f"{SITE}{quote(base, safe='/')}" + (f"?p={page}" if page > 1 else "")
+    lead = SEGMENT_LEAD.get(segment, "")
+
+    crumbs: list[tuple[str, str | None]] = [("홈", "/"), (segment, None)]
+    parts = ["<main>", _crumbs(crumbs), f"<h1>{escape(segment)}</h1>"]
+    # 수는 제목이 아니라 그 아래 한 줄이다. '장'으로 센다 — 인물은 명,
+    # 사건은 건, 장소는 곳이라 갈래마다 세는 말이 다르다.
+    count = f"모두 {total:,}장" + (f" · {page}쪽 / {last}쪽" if last > 1 else "")
+    parts.append(f'<p class="kind">{escape(count)}</p>')
+    if lead:
+        parts.append(f'<p class="lead">{escape(lead)}</p>')
+    parts.append("<ul>")
+    parts.extend(
+        _link({"id": r["id"], "label": r["label"], "type": r["type"],
+               "group": _GROUP.get(r["type"], "frame")},
+              {r["id"]: slugs.path(r["segment"], r["slug"])} if r["slug"] else {})
+        for r in rows
+    )
+    parts.append("</ul>")
+    if not rows:
+        parts.append('<p class="empty">아직 읽을 것이 있는 장이 없습니다.</p>')
+
+    prev_url = next_url = ""
+    pager = []
+    if page > 1:
+        prev_path = base if page == 2 else f"{base}?p={page - 1}"
+        prev_url = f"{SITE}{quote(base, safe='/')}" + ("" if page == 2 else f"?p={page - 1}")
+        pager.append(f'<a href="{href(prev_path)}">← 앞쪽</a>')
+    if page < last:
+        next_path = f"{base}?p={page + 1}"
+        next_url = f"{SITE}{quote(base, safe='/')}?p={page + 1}"
+        pager.append(f'<a href="{href(next_path)}">다음쪽 →</a>')
+    if pager:
+        parts.append('<p class="pager">' + "".join(pager) + "</p>")
+    parts.append('<a class="open" href="/n/">다른 갈래 보기 →</a>')
+    parts.append("</main>")
+
+    description = _clip(lead or f"{segment} 목록입니다.")
+    ld = _ld_block(canonical=canonical,
+                   title=f"{segment} — histgraph",
+                   description=description, crumbs=crumbs)
+    return _html(200, _shell(
+        f"{segment} — 한국사 관계망 | histgraph" if page == 1
+        else f"{segment} ({page}쪽) — 한국사 관계망 | histgraph",
+        description, canonical, "\n".join(parts),
+        ld=ld, keywords=f"{segment}, 한국사, 역사 관계망",
+        prev_url=prev_url, next_url=next_url,
+    ))
+
+
+def index_page(api) -> Page:
     """`/n/` — 글로 읽는 장들의 어귀.
 
     관계망은 자바스크립트가 그려서 로봇이 들어올 문이 없다. 이 장이 그
     문이다 — 갈래마다 가장 많이 이어진 것부터 세워, 여기서 각 항목으로,
     항목에서 또 이웃으로 이어진다.
     """
-    parts = ["<main>", "<h1>인물과 사건, 장소와 문화재</h1>",
+    canonical = f"{SITE}/n/"
+    crumbs: list[tuple[str, str | None]] = [("홈", "/"), ("글로 읽기", None)]
+    parts = ["<main>", _crumbs(crumbs), "<h1>인물과 사건, 장소와 문화재</h1>",
              '<p class="kind">한국사의 개체들이 서로 어떻게 이어져 있는지를 '
              '글과 관계망 두 가지로 봅니다.</p>']
+    counts = slugs.counts(api.store.conn)
     for kind, head in INDEX_KINDS:
-        rows = [
-            r for r in api.store.conn.execute(
-                """SELECT n.id, n.label, n.type, n.description,
-                          (SELECT COUNT(*) FROM edges e
-                            WHERE e.src = n.id OR e.dst = n.id) AS degree
-                     FROM nodes n
-                    WHERE n.type = ? AND COALESCE(n.description,'') <> ''
-                    ORDER BY degree DESC, n.label
-                    LIMIT ?""",
-                (kind, INDEX_EACH * 3),
-            )
-            if indexable(summarize(r["description"]), r["degree"])
-        ][:INDEX_EACH]
+        segment = slugs.SEGMENTS.get(kind, "")
+        rows, total = _segment_rows(api, segment, limit=INDEX_EACH) if segment else ([], 0)
         if not rows:
             continue
-        parts.append(f"<h2>{escape(head)}</h2><ul>")
+        # 머리말은 **언제나** 그 갈래의 목록 장으로 간다. 여기서 끊기면
+        # 로봇이 60개 너머로 들어갈 문이 없다.
+        parts.append(f'<h2><a href="{href(f"/{segment}/")}">{escape(head)}'
+                     f' {total:,}</a></h2><ul>')
         parts.extend(
             _link({"id": r["id"], "label": r["label"], "type": r["type"],
-                   "group": _GROUP.get(r["type"], "frame")})
+                   "group": _GROUP.get(r["type"], "frame")},
+                  {r["id"]: slugs.path(r["segment"], r["slug"])} if r["slug"] else {})
             for r in rows
         )
         parts.append("</ul>")
+        if total > len(rows):
+            parts.append(f'<p class="more"><a href="{href(f"/{segment}/")}">'
+                         f'{escape(head)} {total:,}개 모두 보기 →</a></p>')
+    # 나머지 갈래는 이름만 세운다 — 여기서 목록 장으로 들어간다.
+    rest = [s for s in slugs.SEGMENT_TYPE
+            if counts.get(s) and s not in [slugs.SEGMENTS[k] for k, _h in INDEX_KINDS]]
+    if rest:
+        parts.append("<h2>다른 갈래</h2><ul>")
+        parts.extend(
+            f'<li><span class="dot" style="background:var(--frame)"></span>'
+            f'<a href="{href(f"/{s}/")}">{escape(s)}</a>'
+            f'<span class="meta">{counts[s]:,}</span></li>' for s in rest)
+        parts.append("</ul>")
     parts.append('<a class="open" href="/">관계망에서 보기 →</a>')
     parts.append("</main>")
-    return 200, _shell(
-        "인물·사건·장소·문화재 — histgraph",
-        "한국사의 인물과 사건, 장소와 문화재가 시간 위에서 어떻게 이어지는지 "
-        "글과 관계망으로 봅니다.",
-        f"{SITE}/n/",
-        "\n".join(parts),
-    )
+    description = ("한국사의 인물과 사건, 장소와 문화재가 시간 위에서 어떻게 "
+                   "이어지는지 글과 관계망으로 봅니다.")
+    ld = _ld_block(canonical=canonical, title="인물·사건·장소·문화재 — histgraph",
+                   description=description, crumbs=crumbs)
+    return _html(200, _shell(
+        "인물·사건·장소·문화재 — 한국사 관계망 | histgraph",
+        description, canonical, "\n".join(parts), ld=ld,
+        keywords="한국사, 인물, 사건, 장소, 문화재, 지식 그래프",
+    ))
 
 
-def sitemap(api) -> tuple[int, str]:
-    """색인에 올릴 주소 목록. 노드 장이 `noindex` 를 다는 기준(`indexable`)과
-    같은 문턱을 건다 — 이름뿐인 장을 수천 개 올리면 읽을 것이 있는 장이 그
-    속에 묻힌다. 배포본 실측: 설명 유무로만 걸렀을 때 6,810장, 문턱을 걸면
-    약 2,400장."""
-    rows = [
-        r for r in api.store.conn.execute(
-            """SELECT n.id, n.description,
-                      (SELECT COUNT(*) FROM edges e
-                        WHERE e.src = n.id OR e.dst = n.id) AS degree
-                 FROM nodes n
-                WHERE COALESCE(n.description,'') <> ''
-                  AND n.id NOT LIKE '%/%'
-                ORDER BY n.id"""
-        )
-        if indexable(summarize(r["description"]), r["degree"])
-    ]
-    urls = [f"{SITE}/", f"{SITE}/n/", f"{SITE}/privacy.html", f"{SITE}/terms.html"]
-    urls += [f"{SITE}/n/{quote(r['id'], safe='')}" for r in rows]
-    body = "\n".join(f"  <url><loc>{escape(u)}</loc></url>" for u in urls)
-    return 200, (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        f"{body}\n</urlset>\n"
-    )
+# --- 사이트맵 --------------------------------------------------------------
+# 한 파일에 실을 주소 수. 규격은 50,000 이지만 갈래마다 갈라 두면 어느
+# 갈래가 얼마나 색인됐는지 서치 콘솔에서 따로 읽힌다.
+SITEMAP_CHUNK = 20000
+_SITEMAP_FILE = re.compile(r"^/sitemap-([a-z]+)-(\d+)\.xml$")
 
 
-def route(api, path: str) -> tuple[int, str, str] | None:
-    """이 경로가 문서 페이지인가. (상태, 콘텐츠 타입, 본문) 또는 None.
+def _indexable_paths(api, segment: str) -> list[str]:
+    rows, _total = _segment_rows(api, segment)
+    return [slugs.path(r["segment"], r["slug"]) for r in rows if r["slug"]]
+
+
+def _urlset(urls: list[str]) -> str:
+    body = "\n".join(
+        f"  <url><loc>{escape(SITE + quote(u, safe='/'))}</loc></url>" for u in urls)
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f"{body}\n</urlset>\n")
+
+
+def _static_urls(api) -> list[str]:
+    counts = slugs.counts(api.store.conn)
+    return (["/", "/n/", "/privacy.html", "/terms.html"]
+            + [f"/{s}/" for s in slugs.SEGMENT_TYPE if counts.get(s)])
+
+
+def sitemap_index(api) -> Page:
+    """`/sitemap.xml` — 갈래마다 하나씩, 파일 목록만 든다.
+
+    수만 장을 한 파일에 담으면 한 군데가 틀렸을 때 전부가 함께 밀린다.
+    갈래로 갈라 두면 서치 콘솔이 '인물 2,300장 중 1,900장 색인'처럼
+    갈래별로 답해 준다."""
+    files = ["/sitemap-pages-1.xml"]
+    for segment in slugs.SEGMENT_TYPE:
+        n = len(_indexable_paths(api, segment))
+        for i in range((n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK):
+            files.append(f"/sitemap-{slugs.SEGMENT_KEY[segment]}-{i + 1}.xml")
+    body = "\n".join(f"  <sitemap><loc>{escape(SITE + u)}</loc></sitemap>" for u in files)
+    return Page(200, "application/xml; charset=utf-8",
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                f"{body}\n</sitemapindex>\n")
+
+
+def sitemap_file(api, key: str, chunk: int) -> Page | None:
+    """`/sitemap-person-1.xml` — 그 갈래의 주소들."""
+    if key == "pages":
+        return Page(200, "application/xml; charset=utf-8",
+                    _urlset(_static_urls(api))) if chunk == 1 else None
+    segment = next((s for s, k in slugs.SEGMENT_KEY.items() if k == key), None)
+    if segment is None:
+        return None
+    urls = _indexable_paths(api, segment)
+    start = (chunk - 1) * SITEMAP_CHUNK
+    part = urls[start:start + SITEMAP_CHUNK]
+    if not part:
+        return None
+    return Page(200, "application/xml; charset=utf-8", _urlset(part))
+
+
+def route(api, path: str, query: dict | None = None) -> Page | None:
+    """이 경로가 문서 페이지인가. Page 또는 None.
 
     로컬(`histgraph serve`)과 배포(`api/index.py`)가 같은 표를 본다. 배포
-    쪽은 rewrite 가 `/n/…` 을 `/api/n/…` 으로 바꿔 넘긴다 (vercel.json).
+    쪽은 rewrite 가 `/인물/세종` 을 `/api/인물/세종` 으로 바꿔 넘긴다
+    (vercel.json).
     """
+    query = query or {}
     for prefix in ("/api", ""):
-        if path == f"{prefix}/sitemap.xml":
-            status, body = sitemap(api)
-            return status, "application/xml; charset=utf-8", body
-        if path.startswith(f"{prefix}/n/"):
-            from urllib.parse import unquote
-
-            node_id = unquote(path[len(f"{prefix}/n/"):]).strip("/")
-            status, body = (index_page(api) if not node_id
-                            else node_page(api, node_id))
-            return status, "text/html; charset=utf-8", body
-        if path == f"{prefix}/n":
-            status, body = index_page(api)
-            return status, "text/html; charset=utf-8", body
+        if not path.startswith(prefix or "/"):
+            continue
+        rest = path[len(prefix):] or "/"
+        page = _route(api, rest, query)
+        if page is not None:
+            return page
     return None
+
+
+def _route(api, path: str, query: dict) -> Page | None:
+    if path == "/sitemap.xml":
+        return sitemap_index(api)
+    hit = _SITEMAP_FILE.match(path)
+    if hit:
+        return sitemap_file(api, hit.group(1), int(hit.group(2)))
+
+    # 옛 주소(`/n/<id>`). 색인에 올라 있으므로 끊지 않고 새 주소로 보낸다.
+    if path == "/n" or path.startswith("/n/"):
+        node_id = unquote(path[3:]).strip("/") if path.startswith("/n/") else ""
+        if not node_id:
+            return index_page(api)
+        new = slugs.path_for(api.store.conn, node_id)
+        if new:
+            return _moved(new)
+        # 주소를 아직 못 받은 노드(`slugs.assign` 전)는 여기서 그대로 낸다 —
+        # 새 주소로 보냈다가 그 주소가 없으면 로봇이 고리를 돈다.
+        return node_page(api, node_id, f"/n/{node_id}")
+
+    segments = [s for s in path.split("/") if s]
+    if not segments or unquote(segments[0]) not in slugs.SEGMENT_TYPE:
+        return None
+    segment = unquote(segments[0])
+    if len(segments) == 1:
+        try:
+            page = int((query.get("p") or ["1"])[0])
+        except (TypeError, ValueError):
+            page = 1
+        return segment_page(api, segment, page)
+    if len(segments) > 2:
+        return _not_found(path)
+    slug = unquote(segments[1])
+    hit = slugs.lookup(api.store.conn, segment, slug)
+    if hit is None:
+        return _not_found(path)
+    node_id, current = hit
+    if not current:
+        # 이름이나 타입이 바뀌어 주소가 옮겨 갔다 — 옛 주소는 살려 두고
+        # 새 주소를 가리킨다.
+        new = slugs.path_for(api.store.conn, node_id)
+        if new and new != slugs.path(segment, slug):
+            return _moved(new)
+    return node_page(api, node_id, slugs.path(segment, slug))

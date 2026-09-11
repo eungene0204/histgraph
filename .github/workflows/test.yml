@@ -35,6 +35,11 @@ jobs:
       - name: 화면 DB 한국어 검사
         run: python tools/check_korean.py
 
+      # 주소가 없으면 화면은 멀쩡한데 사이트맵만 비어 간다. 검색에서
+      # 사라지는 것은 그 다음 주라, 사람이 알아채기 전에 여기서 센다.
+      - name: 글로 읽는 장의 주소 검사
+        run: python tools/check_slugs.py
+
   web:
     name: 화면
     runs-on: ubuntu-latest

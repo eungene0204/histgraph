@@ -177,9 +177,9 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
                 return
             # 글로 읽는 장(`/n/<id>`·`/sitemap.xml`). rewrite 가 `/api/n/…`
             # 으로 바꿔 넘기므로 같은 표(pages.route)가 양쪽을 다 받는다.
-            page = pages.route(api, path)
+            page = pages.route(api, path, parse_qs(url.query))
             if page is not None:
-                self._send(*page)
+                self._send(page)
                 return
             # 개인 역사를 내주는 둘은 로그인한 사람에게만, 그리고 **엣지에
             # 재우지 않고** 답한다 (`LIFE_GETS`).
@@ -208,12 +208,15 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         self.end_headers()
         self.wfile.write(body)
 
-    def _send(self, status: int, ctype: str, text: str) -> None:
-        """글로 읽는 장. JSON 과 같은 이유로 엣지에 재운다 —
-        그래프는 배포 사이에 바뀌지 않는다."""
-        raw = text.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
+    def _send(self, page) -> None:
+        """글로 읽는 장 (`pages.Page`). JSON 과 같은 이유로 엣지에 재운다 —
+        그래프는 배포 사이에 바뀌지 않는다. 옛 주소의 301 도 같이 재운다:
+        주소는 배포를 다시 해야 바뀐다."""
+        raw = page.body.encode("utf-8")
+        self.send_response(page.status)
+        self.send_header("Content-Type", page.ctype)
+        if page.location:
+            self.send_header("Location", page.location)
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "public, max-age=0, s-maxage=86400")
         self.end_headers()

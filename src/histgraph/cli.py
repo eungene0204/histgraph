@@ -13,6 +13,7 @@ import argparse
 import json
 import logging
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -874,6 +875,65 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_slugs(args: argparse.Namespace) -> int:
+    """주소를 짓는다 — `/인물/세종` (`slugs` 모듈 머리글).
+
+        uv run histgraph slugs
+        uv run histgraph --db data/korea.sqlite slugs
+        uv run histgraph slugs --show 40
+
+    **한 번 준 주소는 거두지 않는다.** 이름이나 타입이 바뀌면 새 주소를
+    얹고 옛 주소는 남겨 301 로 새 주소를 가리킨다. `scope` 가 파생본을
+    만들면서 스스로 한 번 돌리므로, 여기서 돌리는 것은 원본이거나 수집
+    뒤에 새 노드가 들어왔을 때다.
+    """
+    from . import slugs as slugs_mod
+
+    with GraphStore(args.db) as store:
+        if args.inherit:
+            # **원본이 지은 주소를 그대로 물려받는다.** 파생본에서 새로
+            # 지으면 이름이 겹치던 노드 하나가 여기 없는 탓에 남은 쪽이
+            # 맨 이름을 차지해, 같은 노드가 두 주소를 갖는다. `scope` 는
+            # 파생본을 만들며 이 일을 스스로 한다 — 이 옵션은 파생본을
+            # 다시 만들지 않고 주소만 맞출 때 쓴다.
+            slugs_mod.ensure_table(store.conn)
+            src = sqlite3.connect(f"file:{args.inherit}?mode=ro", uri=True)
+            src.row_factory = sqlite3.Row
+            rows = [r for r in src.execute("SELECT * FROM slugs")
+                    if store.conn.execute("SELECT 1 FROM nodes WHERE id = ?",
+                                          (r["node_id"],)).fetchone()]
+            src.close()
+            store.conn.executemany(
+                "INSERT OR REPLACE INTO slugs (segment,slug,node_id,current,made_at)"
+                " VALUES (?,?,?,?,?)",
+                [(r["segment"], r["slug"], r["node_id"], r["current"], r["made_at"])
+                 for r in rows])
+            store.conn.commit()
+            print(f"  원본에서 물려받은 주소 {len(rows):,}개")
+        if args.show:
+            rows = store.conn.execute(
+                """SELECT s.segment, s.slug, s.current, n.label, n.type
+                     FROM slugs s LEFT JOIN nodes n ON n.id = s.node_id
+                    ORDER BY s.current DESC, s.segment, s.slug LIMIT ?""",
+                (args.show,)).fetchall()
+            for r in rows:
+                mark = "  " if r["current"] else "옛"
+                print(f"  {mark} /{r['segment']}/{r['slug']:<28} {r['label'] or ''}")
+            return 0
+        result = slugs_mod.assign(store.conn)
+        counts = slugs_mod.counts(store.conn)
+        left = slugs_mod.missing(store.conn)
+
+    print(f"  새로 지은 주소 {result['added']:,}개 · 옮긴 주소 {result['moved']:,}개"
+          f" · 모두 {result['total']:,}개")
+    for segment, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        print(f"    /{segment}/{'':<{max(0, 12 - len(segment))}} {n:>6,}")
+    if left:
+        print(f"  ✗ 주소를 못 받은 노드 {left:,}개 — 이름이 한 글자도 안 남는 노드입니다")
+        return 1
+    return 0
+
+
 def cmd_central(args: argparse.Namespace) -> int:
     """무게를 다시 잰다 — 타입 가중 PageRank (`central` 모듈 머리글).
 
@@ -1013,6 +1073,10 @@ def cmd_scope(args: argparse.Namespace) -> int:
     if weight.unweighted:
         for t, n in sorted(weight.unweighted.items(), key=lambda kv: -kv[1]):
             print(f"    무게 표에 없는 관계 {t} {n:,}건 — central.EDGE_WEIGHT 에 적을 것")
+    print(f"\n  주소: 새로 지은 것 {minted['added']:,}개 · 옮긴 것 {minted['moved']:,}개"
+          f" · 파생본에 실린 것 {result['kept_slugs']:,}개")
+    if unslugged:
+        print(f"    ✗ 주소를 못 받은 노드 {unslugged:,}개 — 그 장은 옛 주소(/n/<id>)로만 열립니다")
     print(f"\n  한국어 관문: 이름 {len(relabeled.applied):,}개 · 설명"
           f" {len(redescribed.applied):,}개 옮김 · 설명 {len(redescribed.cleared):,}개 비움")
     if filled["filled"]:
@@ -3247,6 +3311,14 @@ def main(argv: list[str] | None = None) -> int:
     p_pp.add_argument("--scope", type=Path, default=None,
                       help="이 파생본에 있는 노드만 쓴다 (원본 전체는 며칠 걸린다)")
     p_pp.set_defaults(func=cmd_paraphrase)
+
+    p_sg = sub.add_parser(
+        "slugs",
+        help="주소를 짓는다 — /인물/세종 (한 번 준 주소는 거두지 않는다)")
+    p_sg.add_argument("--show", type=int, default=0, help="지어진 주소를 이만큼 보여준다")
+    p_sg.add_argument("--inherit", type=Path, default=None,
+                      help="이 DB 가 지은 주소를 먼저 물려받는다 (원본 → 파생본)")
+    p_sg.set_defaults(func=cmd_slugs)
 
     p_ct = sub.add_parser(
         "central",

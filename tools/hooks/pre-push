@@ -91,6 +91,11 @@ printf '  ✓ 배포 API — %s\n' "$out"
 #     대신 push 마다 센다. 어느 DB 인지는 저 스크립트가 진입점에서 읽는다.
 run '한국어' python3 tools/check_korean.py
 
+# 2c) 배포될 DB 의 장들이 제 주소를 갖고 있는지. 주소가 없으면 아무것도
+#     깨지지 않고 **사이트맵만 조용히 비어 간다** — 검색에서 사라지는 것은
+#     그 다음 주다. 가장 늦게 알아채는 실패라 여기서 센다.
+run '주소' python3 tools/check_slugs.py
+
 # 3) 파이썬. 의존성 없이 돈다 — 본체가 표준 라이브러리만 쓰기 때문이다.
 run '파이썬' python3 tests/test_pipeline.py
 

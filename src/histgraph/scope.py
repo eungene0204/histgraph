@@ -578,6 +578,10 @@ def extract(
         )
 
     out = Path(out_path)
+    # **이미 배포된 주소를 먼저 건진다.** 파생본은 저장소에 실려 나가므로
+    # 여기 든 주소가 곧 색인에 올라 있는 주소다 (원본 DB 는 저장소에 없다).
+    # 다시 만들면서 이걸 버리면 남의 검색 결과에 걸린 주소가 통째로 죽는다.
+    published = _published_slugs(out)
     if out.exists():
         out.unlink()
     dest = GraphStore(out)
@@ -585,6 +589,7 @@ def extract(
     ordered = sorted(keep)
     node_rows, edge_rows, alias_rows, name_rows, summary_rows = [], [], [], [], []
     override_rows: list = []
+    slug_rows: list = []
     for i in range(0, len(ordered), 500):
         batch = ordered[i : i + 500]
         marks = ",".join("?" * len(batch))
@@ -612,6 +617,13 @@ def extract(
         # 위키 원문 도입부로 물러난다.
         summary_rows += store.conn.execute(
             f"SELECT * FROM summaries WHERE node_id IN ({marks})", batch
+        ).fetchall()
+        # **주소도 따라간다** (`slugs.py`). 파생본에서 새로 지으면 같은
+        # 노드가 두 주소를 갖는다 — 이름이 겹치던 노드 하나가 파생본에
+        # 없으면 남은 쪽이 맨 이름을 차지하기 때문이다. 옛 주소(current=0)
+        # 도 함께 옮긴다: 색인에 올라 있는 주소가 301 을 잃으면 안 된다.
+        slug_rows += store.conn.execute(
+            f"SELECT * FROM slugs WHERE node_id IN ({marks})", batch
         ).fetchall()
         # 편집 계층도 따라간다 — 파생본에 `relabel` 을 또 돌리지 않아도
         # 고친 이름·정본·재위가 그대로 서고, 파생본 위의 수집도 되돌린다.
@@ -651,6 +663,10 @@ def extract(
         "INSERT OR REPLACE INTO summaries (node_id,text,model,src_hash,made_at) VALUES (?,?,?,?,?)",
         [(r["node_id"], r["text"], r["model"], r["src_hash"], r["made_at"]) for r in summary_rows],
     )
+    dest.conn.executemany(
+        "INSERT OR REPLACE INTO slugs (segment,slug,node_id,current,made_at) VALUES (?,?,?,?,?)",
+        _merge_slugs(published, slug_rows, keep),
+    )
     ocols = "target,key,field,value,origin,reason,apply_when,made_at"
     dest.conn.executemany(
         f"INSERT OR REPLACE INTO overrides ({ocols}) VALUES ({','.join('?' * 8)})",
@@ -669,12 +685,53 @@ def extract(
         "undescribed_dropped": len(undescribed),
         "isolated_dropped": len(isolated),
         "kept_aliases": len(name_rows),
+        "kept_slugs": len(slug_rows),
         "kept_nodes": stats["nodes_total"],
         "kept_edges": stats["edges_total"],
         "by_node_type": stats["by_node_type"],
         "by_edge_type": stats["by_edge_type"],
         "dangling": stats["dangling_edges"],
     }
+
+
+def _published_slugs(out) -> list[tuple]:
+    """다시 만들기 **전** 파생본이 들고 있던 주소들. 파일이 없거나 표가
+    없으면 빈 목록이다 (주소를 쓰기 전에 만든 파생본)."""
+    import sqlite3
+    from pathlib import Path as _Path
+
+    path = _Path(out)
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        return [(r["segment"], r["slug"], r["node_id"], r["current"], r["made_at"])
+                for r in conn.execute("SELECT * FROM slugs")]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def _merge_slugs(published: list[tuple], source_rows, keep: set[str]) -> list[tuple]:
+    """이미 나간 주소가 원본의 주소를 이긴다.
+
+    같은 노드에 둘이 다르면 나간 쪽이 지금 주소이고 원본 쪽은 옛 주소로
+    내려앉는다 — 어느 쪽도 버리지 않으므로 둘 다 그 장으로 이어진다."""
+    rows = [r for r in published if r[2] in keep]
+    paths = {(r[0], r[1]) for r in rows}
+    nodes = {r[2] for r in rows if r[3]}
+    for r in source_rows:
+        key = (r["segment"], r["slug"])
+        if key in paths:
+            continue
+        current = int(bool(r["current"]) and r["node_id"] not in nodes)
+        rows.append((r["segment"], r["slug"], r["node_id"], current, r["made_at"]))
+        paths.add(key)
+        if current:
+            nodes.add(r["node_id"])
+    return rows
 
 
 def sweep_undescribed(conn) -> dict[str, int]:

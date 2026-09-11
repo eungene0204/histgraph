@@ -15,9 +15,22 @@ const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 // 만 본다.
 export const LIFE_PAGE = true;
 
+// 서치 콘솔이 주인을 확인하는 표. 값이 있을 때만 장마다 한 줄이 붙는다 —
+// 빈 값을 적어 두면 구글이 그 자리를 보고 '표가 틀렸다'고 답한다. 서버가
+// 찍는 장(`histgraph.pages`)은 같은 이름의 환경변수를 제 손으로 읽는다.
+const verification = (process.env.HISTGRAPH_SITE_VERIFICATION || '').trim();
+const verifyTag = {
+  name: 'histgraph-site-verification',
+  transformIndexHtml: (html) =>
+    verification
+      ? html.replace('</head>',
+          `<meta name="google-site-verification" content="${verification}">\n</head>`)
+      : html,
+};
+
 export default {
   root: '.',
-  plugins: [react()],
+  plugins: [react(), verifyTag],
   define: { 'import.meta.env.VITE_LIFE': JSON.stringify(LIFE_PAGE ? '1' : '') },
   server: {
     // 기본값(localhost)은 이 맥에서 IPv6 [::1] 에만 붙어, 127.0.0.1:5173 이
