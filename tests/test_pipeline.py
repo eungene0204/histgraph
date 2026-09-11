@@ -6892,6 +6892,81 @@ with tempfile.TemporaryDirectory() as tmp:
     check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
 
 
+print("\n[대수가 붙은 선거의 해는 표가 정한다 (life.gate_elections)]")
+# 2026-09-11 지적: "1967년은 6대 대통령 선거인데 7대 대통령 선거로 기록 됐네,
+# 내가 입력을 잘못 했나?" — 입력은 맞았다. 이야기 한 문단에 1967년 제7대
+# **국회의원** 선거와 해를 안 적은 제7대 **대통령** 선거가 같이 있어서, 추출이
+# 이름은 뒤에서 해는 앞에서 가져와 붙였다.
+from histgraph import life as _el  # noqa: E402
+
+_tbl = _el.elections()
+check("선거 표를 읽는다 (대통령 21 · 국회의원 22)",
+      len([k for k in _tbl if k[0] == "대통령"]) == 21
+      and len([k for k in _tbl if k[0] == "국회의원"]) == 22, str(len(_tbl)))
+check("대수마다 한 줄씩 빠짐없이 있다",
+      all(("대통령", i) in _tbl for i in range(1, 22))
+      and all(("국회의원", i) in _tbl for i in range(1, 23)))
+check("해는 대수를 따라 커진다 (같은 해에 두 번 있기도 한다)",
+      all(_tbl[(k, i)] <= _tbl[(k, i + 1)]
+          for k, last in (("대통령", 21), ("국회의원", 22)) for i in range(1, last)))
+check("아는 해 몇 개 — 제7대 대선 1971 · 제6대 대선 1967 · 제7대 총선 1967",
+      _tbl[("대통령", 7)] == 1971 and _tbl[("대통령", 6)] == 1967
+      and _tbl[("국회의원", 7)] == 1967 and _tbl[("국회의원", 8)] == 1971)
+check("이름 뒤에 말이 붙어도 읽는다",
+      _el.election_year("제7대 대통령 선거 출마") == (1971, "제7대 대통령 선거"))
+check("제헌 국회의원 선거는 제1대다", _el.election_year("제헌 국회의원 선거")[0] == 1948)
+check("선거가 아닌 대수는 건드리지 않는다",
+      _el.election_year("동창회 7대 회장") is None
+      and _el.election_year("제7대 대통령 취임") is None)
+check("표에 없는 대수는 손대지 않는다", _el.election_year("제99대 대통령 선거") is None)
+
+# 지적받은 그 문서 그대로
+_nodes = [
+    {"id": "event_51", "type": "PersonalEvent", "name": "제7대 대통령 선거 출마",
+     "year": 1967, "end_year": 1967, "precision": "year"},
+    {"id": "event_52", "type": "PersonalEvent", "name": "제8대 국회의원 선거 출마 및 당선",
+     "year": 1967, "end_year": 1967, "precision": "year"},
+    {"id": "event_60", "type": "PersonalEvent", "name": "목포일보 인수", "year": 1950},
+]
+_marks = [{"event_id": "event_51", "year": 1967, "age": 43},
+          {"event_id": "event_60", "year": 1950, "age": 26}]
+_said = _el.gate_elections(_nodes, _marks)
+check("제7대 대통령 선거를 1971 로 맞춘다",
+      _nodes[0]["year"] == 1971 and _nodes[0]["end_year"] == 1971)
+check("제8대 국회의원 선거도 1971 로", _nodes[1]["year"] == 1971)
+check("선거가 아닌 사건은 그대로", _nodes[2]["year"] == 1950)
+check("연표 항목도 따라 옮기고 나이는 다시 세게 비운다",
+      _marks[0]["year"] == 1971 and _marks[0]["age"] is None
+      and _marks[1] == {"event_id": "event_60", "year": 1950, "age": 26})
+check("고친 것을 한국어로 적어 준다",
+      len(_said) == 2 and "1967 → 1971" in _said[0] and not re.search(r"[A-Za-z]", _said[0]),
+      str(_said))
+check("두 번 걸어도 더 고칠 것이 없다", _el.gate_elections(_nodes, _marks) == [])
+# 해가 아예 없던 것에도 달아 준다 — 연표에 설 수 있게 된다.
+_empty = [{"id": "e1", "type": "PersonalEvent", "name": "제15대 대통령 선거 당선"}]
+_el.gate_elections(_empty)
+check("해가 없던 선거에는 표의 해를 달아 준다", _empty[0]["year"] == 1997)
+# 날짜 글자가 남아 있으면 그것이 해를 도로 덮는다 (refine 의 month_year).
+_stale = [{"id": "e2", "type": "PersonalEvent", "name": "제7대 대통령 선거 출마",
+           "year": 1967, "start_date": "1967-05-03"}]
+_el.gate_elections(_stale)
+check("어긋난 날짜 글자는 지운다", _stale[0]["year"] == 1971 and _stale[0]["start_date"] is None)
+
+# 배포 번들에 표가 실리는가 — 코드가 읽는 파일이라 빠지면 배포에서만 조용히
+# 관문이 꺼진다 (열려 있는 것은 `life.elections()` 의 빈 사전 물러남뿐이다).
+_root_el = Path(__file__).resolve().parents[1]
+import json as _js_el  # noqa: E402
+
+_pats_el = _js_el.loads((_root_el / "vercel.json").read_text(encoding="utf-8"))["functions"]["api/index.py"]["excludeFiles"].strip("{}").split(",")
+_pats_el += [ln.strip() for ln in (_root_el / ".vercelignore").read_text(encoding="utf-8").splitlines()
+             if ln.strip() and not ln.strip().startswith(("#", "!"))]
+import fnmatch as _fn_el  # noqa: E402
+check("배포 번들이 선거 표를 걷어내지 않는다",
+      _el.ELECTIONS_PATH.is_file()
+      and not any(_fn_el.fnmatch("data/elections.tsv", q) or _fn_el.fnmatch("elections.tsv", q)
+                  for q in _pats_el))
+
+
 print("\n[내 역사 봉투 — 표에 드는 것은 읽을 수 없는 글자다 (secretbox)]")
 # 여기서 재는 것은 **틀리면 삶이 새거나 사라지는** 자리다. 네트워크도 DB 도 안 쓴다.
 import json as _js0  # noqa: E402

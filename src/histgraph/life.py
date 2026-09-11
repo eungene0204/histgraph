@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 PROMPT_PATH = Path(__file__).with_name("life_prompt.md")
 # 개인 자료가 놓이는 곳. 저장소 밖(.gitignore)이다.
 LIFE_DIR = Path(__file__).resolve().parents[2] / "data" / "life"
+# 대수가 붙은 선거의 해는 **표가 안다** (data/elections.tsv 머리글).
+ELECTIONS_PATH = Path(__file__).resolve().parents[2] / "data" / "elections.tsv"
 
 
 def system_prompt() -> str:
@@ -673,6 +675,101 @@ def trim_dates(nodes: list[dict], story: str | None, timeline: list[dict] | None
     return cut
 
 
+# '제7대 대통령 선거', '제헌 국회의원 선거'. 이름 안 어디에 있어도 잡는다 —
+# 개인 사건의 이름은 '제7대 대통령 선거 **출마**' 처럼 뒤에 말이 붙는다.
+_ELECTION = re.compile(r"제\s*(\d{1,2})\s*대\s*(대통령|국회의원)\s*선거")
+_FOUNDING_ELECTION = re.compile(r"제헌\s*(?:국회의원\s*)?(?:총)?선거|제헌\s*국회\s*선거")
+
+_elections: dict[tuple[str, int], int] | None = None
+
+
+def elections() -> dict[tuple[str, int], int]:
+    """(종류, 대수) → 해. `data/elections.tsv` 가 정본이다.
+
+    표가 없으면 빈 것을 돌려준다 — 관문이 조용히 아무것도 안 할 뿐, 터지지 않는다
+    (배포 번들에 표가 안 실린 자리에서도 화면은 살아야 한다)."""
+    global _elections
+    if _elections is not None:
+        return _elections
+    out: dict[tuple[str, int], int] = {}
+    try:
+        lines = ELECTIONS_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        log.warning("선거 표를 읽지 못했습니다: %s", ELECTIONS_PATH)
+        _elections = out
+        return out
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        bits = line.split("\t")
+        if len(bits) < 3:
+            continue
+        kind, order, date = bits[0].strip(), bits[1].strip(), bits[2].strip()[:4]
+        if not (order.isdigit() and date.isdigit()):
+            continue
+        out[(kind, int(order))] = int(date)
+    _elections = out
+    return out
+
+
+def election_year(name: str) -> tuple[int, str] | None:
+    """이 이름이 부르는 선거의 해와 그 선거 이름. 표에 없으면 None."""
+    text = name or ""
+    m = _ELECTION.search(text)
+    if m:
+        kind, order = m.group(2), int(m.group(1))
+    elif _FOUNDING_ELECTION.search(text):
+        kind, order = "국회의원", 1       # 제헌 국회가 제1대 국회다
+    else:
+        return None
+    year = elections().get((kind, order))
+    return None if year is None else (year, f"제{order}대 {kind} 선거")
+
+
+def gate_elections(nodes: list[dict], timeline: list[dict] | None = None) -> list[str]:
+    """**대수가 붙은 선거의 해는 표가 정한다.**
+
+    2026-09-11 지적: "1967년은 6대 대통령 선거인데 7대 대통령 선거로 기록 됐네,
+    내가 입력을 잘못 했나?" 입력은 맞았다 — 이야기의 한 문단에 1967년 제7대
+    **국회의원** 선거와 (해를 안 적은) 제7대 **대통령** 선거가 같이 있었고,
+    추출이 이름은 뒤에서 해는 앞에서 가져와 붙였다.
+
+    이야기가 대수를 부르는데 그 문장에 해가 없는 것은 흔하다 — 사람에게는
+    대수가 곧 해이기 때문이다. 그러니 그 자리를 모델의 어림이 아니라 **표**가
+    채운다 (`data/elections.tsv`). 이름과 해가 어긋나면 표가 이긴다: 대수는
+    이야기가 적어 준 것이고 해는 모델이 붙인 것이다.
+
+    고친 것은 연표 항목에도 옮긴다 (나이는 비워 뒤에서 다시 센다). 고친 내용을
+    한국어 한 줄씩 돌려준다 — 화면이 '고친 것'으로 보여 준다."""
+    notes: list[str] = []
+    if not elections():
+        return notes
+    marks = {t.get("event_id"): t for t in (timeline or []) if isinstance(t, dict)}
+    for n in nodes:
+        got = election_year(n.get("name") or "")
+        if got is None:
+            continue
+        year, label = got
+        was = n.get("year")
+        if was == year:
+            continue
+        n["year"], n["precision"] = year, "year"
+        if n.get("end_year") in (None, was):
+            n["end_year"] = year
+        # 날짜 글자가 남아 있으면 그것이 해를 다시 덮는다 (`month_year` 가 읽는다).
+        for key in ("start_date", "end_date"):
+            if n.get(key) and str(n[key])[:4] != str(year):
+                n[key] = None
+        mark = marks.get(n.get("id"))
+        if mark is not None:
+            mark["year"], mark["age"] = year, None
+        notes.append(
+            f"'{n.get('name')}' 의 해를 {was or '없음'} → {year} 로 맞췄습니다 ({label})."
+            if was else f"'{n.get('name')}' 에 {year} 을 달았습니다 ({label}).")
+    return notes
+
+
 def gate_dates(nodes: list[dict], me: dict | None, text: str | None,
                timeline: list[dict] | None = None) -> list[str]:
     """인물·단체 노드의 날짜를 원문에 대 보고, 근거 없는 것을 비운다.
@@ -800,6 +897,12 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
     # 0. 인물의 생몰년 — 원문을 아는 자리에서는 여기서도 잰다 (옛 그래프가 들고 있는
     #    지어낸 생년은 이 길로 빠진다. 원문을 모르면 그대로 둔다.)
     gate_dates(nodes, me, text, payload.get("timeline"))
+    # 0-1. 대수가 붙은 선거의 해는 표가 정한다 (gate_elections 머리글). **연표보다
+    #      먼저** 건다 — 연표 항목이 노드의 해를 가져가기 때문이다. 옛 그래프도
+    #      이 길로 고쳐진다 (화면이 부팅 때 `/api/life/refine` 을 지난다).
+    for note in gate_elections(nodes, payload.get("timeline")):
+        if note not in (payload.get("notes") or []):
+            payload["notes"] = list(payload.get("notes") or []) + [note]
     # 0-2. 이야기가 해만 말한 날짜는 해까지 자른다 (2026-09-10 사용자). 대는 근거는
     #      **말한 것 전부**다 — 부르는 쪽이 주는 원문(`text`)과 그래프에 실린 이야기가
     #      서로 다를 수 있어서다 (서버의 `/api/life/refine` 은 이 컴퓨터의 옛 원문
@@ -2075,6 +2178,8 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
         me["name"] = "나"
     # 인물의 생몰년은 원문이 말한 것만 남긴다 (gate_dates 머리글).
     notes += gate_dates(nodes, me, text, payload.get("timeline"))
+    # 대수가 붙은 선거의 해는 표가 정한다 (gate_elections 머리글).
+    notes += gate_elections(nodes, payload.get("timeline"))
     birth = parse_when(me.get("start_date") if me else None)[0]
     if birth is None and subject and subject.get("birth_year") is not None:
         birth = int(subject["birth_year"])
