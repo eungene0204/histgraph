@@ -1830,7 +1830,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(db: Path, host: str = "127.0.0.1", port: int = 8100, era: str = "") -> None:
+    from . import console
+
     api = GraphAPI(db, era=era)
+    # 관리실의 '그래프' 탭이 셀 파일. 여기서 적어 두지 않으면 그쪽이 기본
+    # 규칙으로 다시 찾는데, `--db` 로 딴 파일을 열었을 때 어긋난다.
+    console.ACTIVE_DB = Path(db)
     handler = type("BoundHandler", (Handler,), {"api": api})
 
     httpd = ThreadingHTTPServer((host, port), handler)

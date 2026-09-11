@@ -53,6 +53,8 @@ DB = Path(os.environ.get("HISTGRAPH_DB") or ROOT / "data" / f"{ERA}.sqlite")
 
 # 모듈 수준에 둔다. 함수가 따뜻할 때 재사용되어 요청마다 DB 를 다시 열지 않는다.
 api = GraphAPI(DB, era=ERA, readonly=True)
+# 관리실의 '그래프' 탭이 셀 파일 (`console.graph_db`).
+console.ACTIVE_DB = DB
 
 
 def _path(url) -> str:

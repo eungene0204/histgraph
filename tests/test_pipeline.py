@@ -7368,6 +7368,74 @@ try:
     check("배포 경로(/api/console)도 같은 장을 낸다",
           _auth.route(req("GET", "/api/console", cookies=jar)).body == room.body)
 
+    # 3-3) 탭 넷 — **서버가 가른다** (`?tab=`). 링크 하나에 한 탭이면 그 탭의
+    # 셈만 돈다. 자바스크립트로 감췄다 보였다 하면 네 탭 자료를 늘 다 센다.
+    _panes = {k: _auth.route(req("GET", "/console", {"tab": [k]}, cookies=jar))
+              for k, _ in _con.TABS}
+    check("탭 넷이 다 열린다",
+          all(r.status == 200 for r in _panes.values()) and len(_panes) == 4,
+          str({k: r.status for k, r in _panes.items()}))
+    check("탭마다 제 이름이 머리글로 선다",
+          all(f"<h1>{name}</h1>" in _panes[key].body.decode()
+              for key, name in _con.TABS))
+    check("열려 있는 탭은 저를 다시 가리키지 않는다",
+          all(f'href="?tab={key}"' not in _panes[key].body.decode()
+              for key, _ in _con.TABS))
+    check("모르는 탭 이름은 첫 탭으로 물러난다",
+          _auth.route(req("GET", "/console", {"tab": ["없는것"]}, cookies=jar)).body
+          == room.body)
+    for _key, _name in _con.TABS:
+        _pane = _panes[_key].body.decode()
+        _seen = re.sub(r"<[^>]+>", " ", _pane[_pane.find("<main"):_pane.find("</main>")])
+        _seen = _seen.replace("Boss@Example.com", "").replace("홍길동", "")
+        check(f"{_name} 탭 글자에 영어가 없다",
+              not re.search(r"[A-Za-z]", _seen), _seen.strip()[:120])
+
+    # **관리자라도 남이 적은 삶은 읽지 않는다** (CLAUDE.md §1-10). 쓰임새 탭은
+    # 주인 번호와 고친 시각만 묻는다 — 문서 칸을 질의에 담으면 여기서 걸린다.
+    _asked: list[str] = []
+    _keep_q = _acct.LocalStore.query
+    def _spy(self, sql, params=()):            # noqa: E306
+        _asked.append(sql)
+        return _keep_q(self, sql, params)
+    _acct.LocalStore.query = _spy
+    try:
+        _auth.route(req("GET", "/console", {"tab": ["use"]}, cookies=jar))
+    finally:
+        _acct.LocalStore.query = _keep_q
+    _life_sql = [q for q in _asked if "life_docs" in q]
+    check("쓰임새 탭은 내 역사를 세기는 한다", bool(_life_sql))
+    check("쓰임새 탭은 내 역사 문서 칸을 읽지 않는다",
+          all("doc" not in q.split("from")[0] for q in _life_sql), str(_life_sql))
+
+    # 3-4) 그래프 탭은 **화면이 읽는 그 파일**을 센다. 파일이 없으면 셈을
+    # 지어내지 않고 없다고 말한다.
+    _keep_db = _con.ACTIVE_DB
+    _con.ACTIVE_DB = Path(_tmp.name) / "없는것.sqlite"
+    check("그래프 파일이 없으면 없다고 말한다",
+          "그래프 파일이 없습니다"
+          in _auth.route(req("GET", "/console", {"tab": ["graph"]}, cookies=jar)).body.decode())
+    _gdb = Path(_tmp.name) / "g.sqlite"
+    _gst = GraphStore(_gdb)
+    _gst.conn.executescript(
+        "insert into nodes (id, type, label, source, description) values"
+        " ('a', 'person', '세종', 'wd', '조선의 임금'),"
+        " ('b', 'event', '한글 창제', 'wd', '');"
+        "insert into edges (src, dst, type, source) values ('a', 'b', 'caused', 'wd');")
+    _gst.conn.commit()
+    _gst.close()
+    _con.ACTIVE_DB = _gdb
+    _graph_pane = _auth.route(req("GET", "/console", {"tab": ["graph"]},
+                                  cookies=jar)).body.decode()
+    _con.ACTIVE_DB = _keep_db
+    check("그래프 탭이 노드와 선을 센다",
+          "노드 <b>2</b>개" in _graph_pane and "선 <b>1</b>개" in _graph_pane,
+          _graph_pane[_graph_pane.find("<p class=\"sub\""):][:160])
+    check("타입 이름은 온톨로지가 부르는 한국어다",
+          "인물" in _graph_pane and "사건" in _graph_pane)
+    check("설명이 빈 노드는 설명 있는 쪽에 안 센다",
+          "1개 · 전체의 50%" in _graph_pane, _graph_pane[:0])
+
     # 4) 즐겨찾기 — 담고, 읽고, 뺀다
     _auth.route(req("POST", "/api/my/bookmarks", cookies=jar, extra=csrf_head,
                     body=b'{"id":"wd:Q1","label":"\xec\x84\xb8\xec\xa2\x85","note":"\xeb\x82\x98\xec\xa4\x91\xec\x97\x90"}'))
