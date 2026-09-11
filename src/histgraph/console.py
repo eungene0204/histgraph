@@ -371,9 +371,11 @@ def _graph() -> str:
   <h1>그래프</h1>
   <p class="sub">화면이 읽는 그래프에 노드 <b>{nodes:,}</b>개와
      선 <b>{edges:,}</b>개가 있습니다.</p>
+  <p class="head">갈래별로</p>
   <table class="facts"><tbody>
 {body}
   </tbody></table>
+  <p class="head">그 밖에</p>
   {_facts(rows)}
 """
 
@@ -460,7 +462,8 @@ td.num, th.num { width: 44px; color: var(--text-3); text-align: right;
                  font-variant-numeric: tabular-nums; }
 td.mail { color: var(--text); }
 td.when { color: var(--text-2); font-variant-numeric: tabular-nums; }
-.facts { margin: 0 0 22px; }
+.head { margin: 0 0 8px; color: var(--text-3); font-size: 12px; }
+.facts { margin: 0 0 26px; }
 .facts th.k { width: 42%; color: var(--text-2); font-size: 13px; font-weight: 400;
               border-bottom-color: var(--line); }
 .facts td.v { color: var(--text); font-variant-numeric: tabular-nums;
