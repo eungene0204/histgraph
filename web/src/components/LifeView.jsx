@@ -8,7 +8,7 @@ import { GraphCanvas } from './GraphCanvas.jsx';
 import { SidePanel } from './SidePanel.jsx';
 import { DetailPanel } from './DetailPanel.jsx';
 import { api } from '../lib/api.js';
-import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, STORE_KEY, NEXT_KEY, FAIL_KEY } from '../lib/lifestore.js';
+import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, localAfterAccount, STORE_KEY, NEXT_KEY, FAIL_KEY } from '../lib/lifestore.js';
 import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
@@ -531,9 +531,12 @@ export default function LifeView() {
         const back = readSide(FAIL_KEY, ownerRef.current);
         if (back) setFailed(back);
         if (mine?.doc && await adopt(await refined(mine.doc), 'account')) return;
-        // 브라우저에 남은 것은 **주인이 맞을 때만** 온다. 남의 것이면
-        // readLife 가 그 자리에서 지운다 (lifestore).
-        const kept = readLife(ownerRef.current);
+        // 브라우저에 남은 것은 **주인이 맞을 때만** 온다. 남의 것이면 그 자리에서
+        // 지운다. **계정에서 지운 것도 여기서 걸린다** — 내 표가 찍힌 사본인데
+        // 계정에 없으면 지운 것이므로 되살리지 않는다 (lifestore 머리글).
+        const kept = localAfterAccount({
+          owner: ownerRef.current, accountRead: read, accountHasDoc: !!mine?.doc,
+        });
         if (kept && await adopt(await refined(kept), 'local')) {
           // 브라우저에만 있던 것을 계정으로 옮기는 길. 단추가 하던 일이다.
           if (me.user && read) await keepInAccount(rawRef.current);

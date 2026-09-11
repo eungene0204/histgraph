@@ -6,7 +6,7 @@
 // 갑이 로그아웃해도 `life-json` 이 남아, 을이 로그인하면 갑의 연표가 서고
 // 그것이 을의 계정으로 저장까지 됐다). 브라우저 없이 돈다 — localStorage 는
 // 흉내 낸 상자를 넣어 준다.
-import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, markedOwner, STORE_KEY, OWNER_KEY, NEXT_KEY, FAIL_KEY } from '../src/lib/lifestore.js';
+import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, markedOwner, localAfterAccount, STORE_KEY, OWNER_KEY, NEXT_KEY, FAIL_KEY } from '../src/lib/lifestore.js';
 
 let pass = 0;
 let fail = 0;
@@ -87,7 +87,34 @@ console.log('\n내 역사 — 브라우저에 남은 것의 주인');
   forgetLife(all);
   ok('버리면 남는 것이 없다', all.size === 0, all.keys().join(','));
 
-  // 8) 상자가 없거나 던져도 화면은 돈다.
+  // 8) **계정에서 지운 것은 사본이 되살리지 않는다** (2026-09-11 "아직 내 역사가
+  //    보이는데?"). 계정을 지웠더니 화면이 브라우저 사본을 집어 그리고 그것을
+  //    계정에 다시 올렸다.
+  const gone = fakeBox();
+  writeLife(doc('갑'), 갑, gone);
+  const after = localAfterAccount({ owner: 갑, accountRead: true, accountHasDoc: false }, gone);
+  ok('계정에서 지웠으면 브라우저 사본도 따라 지운다',
+     after === null && gone.getItem(STORE_KEY) === null, gone.keys().join(','));
+
+  const still = fakeBox();
+  writeLife(doc('갑'), 갑, still);
+  ok('계정에 있으면 그대로 (계정 것을 쓴다)',
+     localAfterAccount({ owner: 갑, accountRead: true, accountHasDoc: true }, still)?.subject.name === '갑'
+     && !!still.getItem(STORE_KEY));
+
+  const offline = fakeBox();
+  writeLife(doc('갑'), 갑, offline);
+  ok('계정을 못 읽었으면 아무 판단도 하지 않는다',
+     localAfterAccount({ owner: 갑, accountRead: false, accountHasDoc: false }, offline)?.subject.name === '갑'
+     && !!offline.getItem(STORE_KEY));
+
+  const first = fakeBox();
+  writeLife(doc('나'), '', first);
+  ok('로그인 전에 적은 글은 계정이 비어도 이어받는다',
+     localAfterAccount({ owner: 갑, accountRead: true, accountHasDoc: false }, first)?.subject.name === '나'
+     && !!first.getItem(STORE_KEY));
+
+  // 9) 상자가 없거나 던져도 화면은 돈다.
   const broken = {
     getItem() { throw new Error('막혀 있다'); },
     setItem() { throw new Error('막혀 있다'); },
