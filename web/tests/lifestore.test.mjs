@@ -110,9 +110,19 @@ console.log('\n내 역사 — 브라우저에 남은 것의 주인');
 
   const first = fakeBox();
   writeLife(doc('나'), '', first);
-  ok('로그인 전에 적은 글은 계정이 비어도 이어받는다',
+  ok('로그인 전에 적은 글(빈 표)은 계정이 비어도 이어받는다',
      localAfterAccount({ owner: 갑, accountRead: true, accountHasDoc: false }, first)?.subject.name === '나'
      && !!first.getItem(STORE_KEY));
+
+  // 표가 **없는 것**은 빈 표와 다르다 — 표가 생기기 전에 남은 사본이고, 그때는
+  // 로그인한 채로 적어 계정에 올렸다. 계정이 비었다면 지운 것이다.
+  const legacy = fakeBox({ [STORE_KEY]: JSON.stringify(doc('옛것')) });
+  ok('표가 없는 옛 사본은 계정이 비었으면 지운다',
+     localAfterAccount({ owner: 갑, accountRead: true, accountHasDoc: false }, legacy) === null
+     && legacy.getItem(STORE_KEY) === null);
+  const legacy2 = fakeBox({ [STORE_KEY]: JSON.stringify(doc('옛것')) });
+  ok('표가 없어도 로그인하지 않았으면 건드리지 않는다',
+     localAfterAccount({ owner: '', accountRead: false, accountHasDoc: false }, legacy2)?.subject.name === '옛것');
 
   // 9) 상자가 없거나 던져도 화면은 돈다.
   const broken = {
