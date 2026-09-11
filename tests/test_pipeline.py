@@ -6892,6 +6892,39 @@ with tempfile.TemporaryDirectory() as tmp:
     check("개인 자료 폴더는 저장소 밖", "data/life/" in (Path(__file__).resolve().parents[1] / ".gitignore").read_text())
 
 
+print("\n[연표 항목의 해는 노드를 따른다 (life.mark_follows_node)]")
+# 2026-09-11 지적: "서울대병원 감금 년도는 1977년인데 왜 1975년으로 표시 된거지?"
+# 그 노드는 1976 인데 연표 항목만 1975 였고, 화면이 그리는 것은 항목이라 1975 가 섰다.
+from histgraph import life as _mk  # noqa: E402
+
+_node = {"id": "e1", "type": "PersonalEvent", "name": "서울대병원 병실 감금",
+         "year": 1976, "end_year": 1978}
+_mark = {"event_id": "e1", "year": 1975, "age": 51}
+check("어긋나면 노드가 이긴다", _mk.mark_follows_node(_mark, _node, 1924) is True
+      and _mark["year"] == 1976 and _mark["age"] is None)
+check("같으면 손대지 않는다", _mk.mark_follows_node({"event_id": "e1", "year": 1976}, _node) is False)
+check("노드가 해를 모르면 항목의 해를 그대로 둔다",
+      _mk.mark_follows_node({"event_id": "e2", "year": 1975}, {"id": "e2"}) is False)
+check("항목이 스스로 말한 날짜는 남긴다",
+      _mk.mark_follows_node({"event_id": "e1", "year": 1975, "date_text": "1975년 봄"},
+                            _node, 1924) is False)
+check("노드의 날짜가 어림이면('20대 초반') 항목의 나이가 이긴다",
+      _mk.mark_follows_node({"event_id": "e3", "year": 1998, "age": 13},
+                            {"id": "e3", "year": 2005, "precision": "age"}, 1985) is False)
+check("어림이어도 항목이 해를 모르면 노드를 받는다",
+      _mk.mark_follows_node({"event_id": "e3"}, {"id": "e3", "year": 2005, "precision": "age"}) is True)
+# 고친 것이 화면까지 가는가 — 표가 노드를 고치면 연표도 따라온다.
+_doc = {"subject": {"id": "me", "name": "나", "birth_year": 1924},
+        "nodes": [{"id": "me", "type": "Person", "name": "나", "start_date": "1924"},
+                  {"id": "e1", "type": "PersonalEvent", "name": "제7대 대통령 선거 출마",
+                   "year": 1967, "end_year": 1967}],
+        "edges": [], "timeline": [{"event_id": "e1", "year": 1967, "age": 43}]}
+_out = _mk.refine(_doc)
+check("표가 노드를 고치면 연표도 따라간다 (1967 → 1971)",
+      _out["timeline"][0]["year"] == 1971 and _out["nodes"][1]["year"] == 1971,
+      str(_out["timeline"]))
+
+
 print("\n[대수가 붙은 선거의 해는 표가 정한다 (life.gate_elections)]")
 # 2026-09-11 지적: "1967년은 6대 대통령 선거인데 7대 대통령 선거로 기록 됐네,
 # 내가 입력을 잘못 했나?" — 입력은 맞았다. 이야기 한 문단에 1967년 제7대

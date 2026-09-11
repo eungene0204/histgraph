@@ -770,6 +770,41 @@ def gate_elections(nodes: list[dict], timeline: list[dict] | None = None) -> lis
     return notes
 
 
+# 해를 좁혀 말하지 못한 날짜 — '20대 초반'·'2000년대 초반'. 이런 노드 앞에서는
+# 연표 항목이 적은 나이가 더 좁은 말이라 노드가 물러난다.
+VAGUE_PRECISION = {"age", "decade"}
+
+
+def mark_follows_node(mark: dict, node: dict | None, birth: int | None = None) -> bool:
+    """**연표 항목의 해는 노드를 따른다.** 고쳤으면 참.
+
+    2026-09-11 지적: "서울대병원 감금 년도는 1977년인데 왜 1975년으로 표시
+    된거지?" 그 노드는 1976(구간 1976~1978)이었는데 연표 항목만 1975 였다.
+    화면이 그리는 것은 항목이라 1975 가 섰다.
+
+    둘은 같은 것을 두 번 적은 값이고 **노드가 그 사건이다.** 항목의 해는 모델이
+    나이나 앞뒤 항목에서 어림해 적는 일이 많고, 무엇보다 **고치는 자리가 노드다** —
+    표(`gate_elections`)도 사람의 '편집'도 노드를 고친다. 항목이 제 해를 들고
+    버티면 고친 것이 화면에 안 나온다.
+
+    **항목이 스스로 날짜를 말했으면 그것은 남긴다** (`date_text`) — 그것도 이야기가
+    준 말이라 어림이 아니다. 해를 옮기면 나이는 비운다 (생년에서 다시 센다).
+
+    **노드의 날짜가 어림이면(`'20대 초반'`·`'2000년대 초반'`) 물러난다** — 그때는
+    항목이 적은 나이가 더 좁은 말이다 (`validate` 의 연표 절 머리글, 2026-09-08).
+    """
+    year = node.get("year") if node else None
+    if year is None or mark.get("year") == year:
+        return False
+    if node.get("precision") in VAGUE_PRECISION and mark.get("year") is not None:
+        return False
+    said = parse_when(mark.get("date_text"), birth)[0] if mark.get("date_text") else None
+    if said is not None:
+        return False
+    mark["year"], mark["age"] = year, None
+    return True
+
+
 def gate_dates(nodes: list[dict], me: dict | None, text: str | None,
                timeline: list[dict] | None = None) -> list[str]:
     """인물·단체 노드의 날짜를 원문에 대 보고, 근거 없는 것을 비운다.
@@ -1008,6 +1043,8 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
             t["year"] = birth + int(t["age"])
         if t.get("year") is None and node is not None:
             t["year"] = node.get("year")
+        # 항목과 노드가 어긋나면 **노드가 이긴다** (mark_follows_node 머리글).
+        mark_follows_node(t, node, birth)
         # 달까지 아는 날짜는 항목이 적어 온 해를 이긴다 — 모델은 항목의 year 를
         # 나이나 앞뒤 항목에서 어림해 적는다 (2026-09-08 지적: 1998년 4월 24일
         # 메탈리카 공연이 1997 로 적혀 와 연표의 1997 칸에 '4월'로 섰다).
@@ -2262,6 +2299,7 @@ def validate(payload: dict, subject: dict | None = None, text: str | None = None
             item["year"] = birth + int(item["age"])
         if item.get("year") is None:
             item["year"] = node.get("year")
+        mark_follows_node(item, node, birth)
         if item.get("age") is None and item.get("year") is not None and birth is not None:
             item["age"] = int(item["year"]) - birth
         timeline.append(item)

@@ -73,6 +73,8 @@ export const ONE_WAY_STAGES = new Set(LIFE_STAGES.slice(0, LIFE_STAGES.indexOf('
 export const STAGE_END = { 군복무: /전역|소집해제|(?<![가-힣])제대(?!로)|만기/,
   연애: /결혼|약혼|이별|헤어|파혼/ };
 // 연표에 점으로 찍는 타입. 사람·장소·책은 이어지는 것이라 점이 아니다.
+// 해를 좁혀 말하지 못한 날짜 (life.py VAGUE_PRECISION 과 같다).
+const VAGUE_PRECISION = new Set(['age', 'decade']);
 export const EVENT_TYPES = new Set(['PersonalEvent', 'HistoricalEvent', 'TurningPoint', 'Crisis',
   'Achievement', 'Failure', 'Decision', 'Memory']);
 // 사람 갈래 (life.py PERSON_TYPES 와 같다).
@@ -944,6 +946,16 @@ export function normalize(raw) {
     // 1998년 이었어"). 어림한 나이도 함께 버리고 생년에서 다시 센다.
     const fine = monthYear(node.start_date);
     if (fine != null && fine !== item.year) { item.year = fine; item.age = null; }
+    // **항목과 노드가 어긋나면 노드가 이긴다** (life.py `mark_follows_node` 와 같다).
+    // 둘은 같은 것을 두 번 적은 값이고 노드가 그 사건이다 — 고치는 자리도 노드다
+    // (사람의 '편집'·표). 항목이 제 해를 들고 버티면 고친 것이 화면에 안 나온다
+    // (2026-09-11 지적: 노드는 1976 인데 연표만 1975 로 서 있었다).
+    // 항목이 스스로 날짜를 말했으면 그것은 남긴다 — 어림이 아니라 이야기가 준 말이다.
+    // 노드의 날짜가 어림이면('20대 초반') 물러난다 — 그때는 항목이 적은 나이가
+    // 더 좁은 말이다 (life.py VAGUE_PRECISION 과 같다).
+    if (node.year != null && item.year !== node.year
+        && !(VAGUE_PRECISION.has(node.precision) && item.year != null)
+        && parseWhen(item.date_text, birth).year == null) { item.year = node.year; item.age = null; }
     if (item.age == null && item.year != null && birth != null) item.age = item.year - birth;
     timeline.push(item);
   }
