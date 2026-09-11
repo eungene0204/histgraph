@@ -210,7 +210,6 @@ export default function App() {
       if (!alive) return;
       if (!m) { setOffline(true); return; }
       setMeta(m);
-      document.title = `histgraph — ${m.era_label || '전체'}`;
       const s = await api.seeds(12).catch(() => []);
       if (!alive) return;
       setSeeds(s);
