@@ -59,7 +59,25 @@ DESC_SOURCES: tuple[tuple[str, str, str], ...] = (
     ("ko.wikipedia.org", "kowiki", "kowiki_url"),
 )
 
-_DATE = re.compile(r"^\d{3,4}(-\d{2}(-\d{2})?)?$")
+_DATE = re.compile(r"^-?\d{3,4}(-\d{2}(-\d{2})?)?$")
+# **기원전은 사람이 적는 대로 받는다** (2026-09-12). 날짜 칸은 XSD 셈법이라
+# 기원전 108년이 `-0107` 인데(0년이 있다 — `timeline.bce_text` 머리글), 표는
+# 사람이 적는 자리다. 여기서 한 번 옮겨 적고 표에는 '기원전 108' 로 둔다.
+_BCE = re.compile(r"^(?:기원전|서기전)\s*(\d{1,4})$")
+
+
+def _iso(date: str) -> str:
+    """표의 날짜 한쪽을 그래프의 날짜로.
+
+    **해는 네 자리로 채운다.** 그래프의 다른 날짜가 전부 `0660` 꼴이라,
+    `494` 를 그대로 두면 같은 칸에서 문자열로 견주는 자리마다 494년이
+    660년보다 뒤가 된다 (기원전이 뒤집히는 것과 같은 함정)."""
+    if m := _BCE.match(date):
+        return f"{1 - int(m.group(1)):05d}"
+    head, sep, rest = date.partition("-")
+    if head.isdigit():
+        return f"{int(head):04d}{sep}{rest}"
+    return date
 _URL = re.compile(r"https?://[^\s]+")
 
 
@@ -128,6 +146,7 @@ def load_table(path: Path) -> list[Row]:
             raise EventsTableError(
                 f"{path}:{lineno} 이름과 설명은 한국어로 적습니다 (§1): {raw!r}")
         start, _, end = date.partition("~")
+        start, end = _iso(start.strip()), _iso(end.strip())
         for d in (start, end):
             if d and not _DATE.match(d):
                 raise EventsTableError(f"{path}:{lineno} 날짜가 아닙니다: {d!r}")
