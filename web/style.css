@@ -1116,6 +1116,23 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
 .life-log-when { flex: none; width: 96px; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .life-log-text { flex: 1; min-width: 0; white-space: pre-wrap; }
 .life-log-list .life-btn { flex: none; margin-top: 4px; }
+/* 이야기가 말했는데 연표에 없는 해 (LifeView missingYears). 목록 위에 조용히
+   선다 — 고쳐야 할 것이 아니라 **아직 안 읽힌 것**이라, 경고 색을 쓰지 않는다. */
+.life-log-miss { flex: none; margin: 0 0 12px; padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m);
+  background: var(--background-primary-alt); }
+.life-log-miss .tl-hint { margin: 0 0 8px; }
+.life-miss-list { margin: 0; padding: 0; list-style: none; max-height: 132px; overflow-y: auto; }
+.life-miss-list li { margin-bottom: 4px; }
+.life-miss-item {
+  width: 100%; display: flex; gap: 10px; text-align: left; padding: 6px 8px;
+  border: 0; border-radius: var(--radius-s); background: transparent;
+  color: var(--text-muted); font: inherit; font-size: var(--font-ui-smaller);
+  line-height: 1.7; cursor: pointer;
+}
+.life-miss-item:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.life-miss-year { flex: none; width: 44px; color: var(--text-normal); font-variant-numeric: tabular-nums; }
+.life-miss-item .life-log-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .life-log-foot { display: flex; align-items: center; gap: 8px; }
 .life-log-foot .tl-hint { margin: 0 auto 0 0; }
 /* 지운 것이 없으면 '고쳐서 다시 읽기' 는 눌리지 않는다 — 그렇게 보여야 한다. */

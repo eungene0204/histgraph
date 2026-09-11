@@ -1171,6 +1171,63 @@ export function editNode(raw, id, patch) {
 // 가른다. 이어 붙일 때 빈 줄을 넣었으므로 (server.LifeAnalysis._run) 그것이
 // 덩어리의 경계다. 한 번에 여러 문단을 적었으면 더 잘게 갈리지만, 고치고
 // 다시 읽을 때 같은 빈 줄로 이어 붙이므로 결과는 같다.
+// --- 이야기가 말했는데 연표에 없는 해 ---------------------------------------
+// 2026-09-11 물음: "년도를 정확하게 말했는데 왜 그래프에서 빠진거지?" 실측한
+// 그 문서에는 이야기가 또렷이 적은 1952·1963·1964·1970·1980년이 노드로 서
+// 있지 않았다. **아무도 버리지 않았다** — 모델이 그 문장을 안 냈고, 그것을 세는
+// 자리가 없어서 조용히 없는 채로 남았다 (버렸다면 `notes` 에 사유가 남는다).
+//
+// 그래서 **센다.** 지어내지 않는다 — 이야기가 해를 적은 문장을 찾아, 그 해에
+// 아무 사건도 서 있지 않으면 그 문장을 도로 보여 준다. 사람이 눌러 다시 넣으면
+// 모델이 그때 읽는다 ('내가 적은 이야기' 상자가 그 자리다).
+//
+// 재는 것은 **사건이 선 해**다. 사람·장소는 이어지는 것이라 해를 덮지 않고,
+// 주인공 노드는 생몰년이라 삶 전체를 덮어 버린다. 사건의 구간은 스무 해까지만
+// 덮는 것으로 본다 — 망명 같은 긴 구간 하나가 그 사이의 빈 해를 다 가린다.
+const SPAN_MAX = 20;
+const YEAR_IN_TEXT = /((?:1[89]|20)\d\d)\s*년/g;
+
+export function coveredYears(nodes = [], timeline = []) {
+  const out = new Set();
+  for (const t of timeline || []) if (t && t.year) out.add(+t.year);
+  for (const n of nodes || []) {
+    if (!n || !EVENT_TYPES.has(n.type) || !n.year) continue;
+    const from = +n.year;
+    const to = n.end_year && +n.end_year >= from ? Math.min(+n.end_year, from + SPAN_MAX) : from;
+    for (let y = from; y <= to; y++) out.add(y);
+  }
+  return out;
+}
+
+/**
+ * 이야기가 해를 적었는데 그 해에 아무것도 서 있지 않은 문장들.
+ * `[{ year, text }]` — 해가 이른 것부터, 한 해에 한 문장.
+ */
+export function missingYears(doc, stories = [], limit = 8) {
+  const said = Array.isArray(stories) && stories.length
+    ? stories : (doc && Array.isArray(doc.stories) ? doc.stories : []);
+  if (!said.length) return [];
+  const have = coveredYears(doc?.nodes, doc?.timeline);
+  const out = [];
+  const seen = new Set();
+  for (const r of said) {
+    const text = typeof r === 'string' ? r : (r?.text || '');
+    for (const line of text.split(/(?<=[.!?])\s+|\n+/)) {
+      const sentence = line.trim();
+      if (!sentence) continue;
+      YEAR_IN_TEXT.lastIndex = 0;
+      for (const m of sentence.matchAll(YEAR_IN_TEXT)) {
+        const year = +m[1];
+        if (have.has(year) || seen.has(year)) continue;
+        seen.add(year);
+        out.push({ year, text: sentence });
+      }
+    }
+  }
+  out.sort((a, b) => a.year - b.year);
+  return out.slice(0, limit);
+}
+
 export function splitStories(text) {
   return String(text || '')
     .split(/\n\s*\n/)

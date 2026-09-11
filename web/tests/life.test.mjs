@@ -10,6 +10,7 @@ import {
   ladder,
   graphPayload, graphMeta, nodeWeight, EDGE_WEIGHT, GRAPH_TYPE, GRAPH_TYPE_LABEL, edgeLabel, tidyEdges, deedOf, LIFE_EDGES, RELAX,
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
+  missingYears, coveredYears,
   addedFocus, addedNames, yearAt,
   linkPeople, kinIn, markYs,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY, romance, STAGE_END,
@@ -958,6 +959,39 @@ console.log('\n개인 역사 — 배포에도 싣는다');
   delete process.env.VERCEL;
   ok('로컬 빌드에 life.html 이 있다', !!local.build.rollupOptions.input.life && local.define['import.meta.env.VITE_LIFE'] === '"1"');
   ok('배포 빌드에도 life.html 이 있다', !!vercel.build.rollupOptions.input.life && vercel.define['import.meta.env.VITE_LIFE'] === '"1"');
+}
+
+
+console.log('\n이야기가 말했는데 연표에 없는 해');
+{
+  // 2026-09-11 물음: "년도를 정확하게 말했는데 왜 그래프에서 빠진거지?" — 아무도
+  // 버리지 않았고 모델이 그 문장을 안 냈다. 지어내지 않고 **세어서 보여 준다.**
+  const doc = {
+    nodes: [
+      { id: 'me', type: 'Person', name: '나', year: 1924, end_year: 2009 },
+      { id: 'e1', type: 'PersonalEvent', name: '목포일보 인수', year: 1950 },
+      { id: 'e2', type: 'PersonalEvent', name: '해외 망명', year: 1972, end_year: 1985 },
+    ],
+    timeline: [{ event_id: 'e1', year: 1950 }],
+  };
+  const stories = [{ at: '', text: '1950년 목포일보를 인수했다. 1963년 전진적 보수주의를 내세웠다.\n1967년 제7대 국회의원 선거에서 목포시에 출마해 당선되었다.' }];
+  const miss = missingYears(doc, stories);
+  ok('이야기가 말한 해 가운데 빈 해만 센다', miss.map((m) => m.year).join(',') === '1963,1967', JSON.stringify(miss));
+  ok('그 해를 말한 문장을 그대로 들고 온다', miss[1].text.includes('제7대 국회의원 선거'));
+  ok('사건이 선 해는 세지 않는다 (1950)', !miss.some((m) => m.year === 1950));
+
+  // 주인공의 생몰년은 삶 전체를 덮는다 — 그것으로 덮으면 아무것도 안 보인다.
+  ok('사람 노드는 해를 덮지 않는다', !coveredYears(doc.nodes, []).has(1930));
+  // 구간은 스무 해까지만 덮는다 (긴 망명 하나가 그 사이를 다 가리지 않게).
+  const cover = coveredYears(doc.nodes, doc.timeline);
+  ok('사건의 구간은 덮는다 (1972~1985)', cover.has(1980) && cover.has(1985));
+  ok('구간 밖은 안 덮는다', !cover.has(1986));
+
+  ok('이야기가 없으면 셀 것도 없다', missingYears(doc, []).length === 0);
+  ok('한 해는 한 문장만', missingYears({ nodes: [], timeline: [] },
+     [{ text: '1999년 하나. 1999년 둘.' }]).length === 1);
+  ok('보여 주는 수를 자른다', missingYears({ nodes: [], timeline: [] },
+     [{ text: [...Array(12)].map((_, i) => `${1990 + i}년 일이 있었다.`).join(' ') }], 5).length === 5);
 }
 
 console.log(`\n${'='.repeat(46)}\n통과 ${pass} / 실패 ${fail}`);

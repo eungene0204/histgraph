@@ -9,7 +9,7 @@ import { SidePanel } from './SidePanel.jsx';
 import { DetailPanel } from './DetailPanel.jsx';
 import { api } from '../lib/api.js';
 import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, localAfterAccount, STORE_KEY, NEXT_KEY, FAIL_KEY } from '../lib/lifestore.js';
-import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, missingYears, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -766,6 +766,11 @@ export default function LifeView() {
     await keepInAccount(next);
   }, [adopt, toast, keepInAccount]);
 
+  // 이야기가 해를 적었는데 그 해에 아무것도 서 있지 않은 문장들. 지어내지 않고
+  // **세어서 보여만 준다** — 사람이 눌러 다시 넣으면 모델이 그때 읽는다
+  // (2026-09-11 물음: "년도를 정확하게 말했는데 왜 그래프에서 빠진거지?").
+  const missing = useMemo(() => missingYears(life, stories), [life, stories]);
+
   const name = life?.subject?.name || '나';
 
   // **주소로 곧장 들어와도 같은 문을 지난다.** 머리 줄의 '내 역사'만 막으면
@@ -840,6 +845,7 @@ export default function LifeView() {
                             draft={draftRef.current} onDraft={(v) => { draftRef.current = v; }}
                             onClose={closeWriting} />}
       {logOpen && <StoryLog stories={stories} running={job?.state === 'running'}
+                            missing={missing}
                             onPick={pickStory} onDrop={dropStory}
                             onClose={() => setLogOpen(false)} />}
 
@@ -1117,7 +1123,7 @@ function StoryBox({ job, local, blocking, sent, failed, draft, onDraft, onRestor
 // 문단이 앞의 것을 고치는 말이라 이어 붙일 때 뒤집으면 뜻이 달라진다.
 // 설명 문단은 두지 않는다 (2026-09-08 사용자: "이 문장을 삭제해줘") — 무엇을 하는
 // 자리인지는 눌러 보면 알고, 단추의 title 로만 남긴다.
-export function StoryLog({ stories, running, onPick, onDrop, onClose }) {
+export function StoryLog({ stories, running, missing = [], onPick, onDrop, onClose }) {
   useEffect(() => {
     const esc = (e) => { if (e.key === 'Escape') onClose?.(); };
     document.addEventListener('keydown', esc);
@@ -1131,6 +1137,25 @@ export function StoryLog({ stories, running, onPick, onDrop, onClose }) {
          onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
       <div className="life-log-box" role="dialog" aria-modal="true" aria-label="내가 적은 이야기">
         <h2>내가 적은 이야기</h2>
+        {/* 이야기가 말했는데 연표에 없는 해. **지운 것이 아니라 안 읽힌 것이다**
+            (life.js missingYears 머리글) — 누르면 그 문장이 입력창으로 가고,
+            다시 넣으면 모델이 그때 읽는다. */}
+        {missing.length > 0 && (
+          <div className="life-log-miss">
+            <p className="tl-hint">이야기가 말했는데 연표에 없는 해입니다. 누르면 그 문장이 입력창으로 갑니다.</p>
+            <ul className="life-miss-list">
+              {missing.map((m) => (
+                <li key={m.year}>
+                  <button type="button" className="life-miss-item" onClick={() => onPick?.(m.text)}
+                          title="이 문장을 입력창으로 옮깁니다">
+                    <span className="life-miss-year">{m.year}</span>
+                    <span className="life-log-text">{m.text}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {stories.length === 0 && (
           <p className="tl-hint">아직 적은 이야기가 없습니다. ‘내 역사 입력하기’ 로 적으면 여기에 남습니다.</p>
         )}
