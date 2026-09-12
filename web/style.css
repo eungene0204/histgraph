@@ -259,6 +259,47 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   50%      { opacity: 1; }
 }
 
+/* 그 빛 아래 서는 말풍선 — '내 역사를 입력해 보세요' (2026-09-13 사용자:
+   "내 역사가 비어있는 사람들에게 … 버블 상자를 만들어서 … 입력을 유도해줘").
+   빛은 눈길을 끌 뿐이고 무엇을 하라는 말은 `title` 에만 있었는데, 그것은
+   마우스를 올려야 뜬다 — 손가락으로 보는 사람에게는 없는 말이다.
+
+   **자리는 여기서도 그대로다** — 절대 자리라 단추도 옆의 시대 단추도 안 밀린다
+   (빛과 같은 규칙). 나올 때 한 번 밝아지고 그 뒤로는 가만히 있는다: 머리 줄에서
+   계속 움직이는 것이 둘이면(숨 쉬는 빛 + 흔들리는 말풍선) 읽으려는 글자를
+   방해한다.
+
+   바탕은 **화면을 뒤집은 무채색**이다. 어두운 화면에서는 흰 종이, 밝은 화면에서는
+   검은 종이 — 빛과 같이 흰빛 계열이라 강조색 보라(누를 수 있는 것)의 뜻을 빌리지
+   않고, 뒤집혀 있어 머리 줄의 회색 층 위에 확실히 떠 보인다. */
+.era .life-nudge {
+  --nudge-bg: #f2f2f2;
+  --nudge-fg: #1e1e1e;
+  position: absolute; z-index: 20;
+  top: calc(100% + 9px); left: 0;
+  padding: 5px 10px;
+  border-radius: var(--radius-m);
+  background: var(--nudge-bg); color: var(--nudge-fg);
+  font-size: var(--font-ui-small); font-weight: 500; line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: var(--shadow-s);
+  animation: nudge-in .5s ease both .3s;
+}
+/* 말풍선의 꼬리 — 단추를 가리킨다. 바탕과 같은 종이를 45도 돌려 세운다. */
+.era .life-nudge::before {
+  content: '';
+  position: absolute; top: -3px; left: 14px;
+  width: 8px; height: 8px;
+  background: var(--nudge-bg);
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+:root[data-theme="light"] .era .life-nudge { --nudge-bg: #2a2a2a; --nudge-fg: #fff; }
+@keyframes nudge-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
 .search { position: relative; grid-column: 2; width: 100%; }
 /* 머리 줄 오른쪽 끝 — 화면 밝기와 계정이 나란히 선다. */
 .top-right { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 6px; }
@@ -1302,6 +1343,8 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   .life-detail { transition: none; }
   /* 깜박이지 않는다. 그래도 '여기를 보라'는 것은 남아야 하므로 테두리로 세운다. */
   .era.beckon::after { animation: none; opacity: .8; }
+  /* 말풍선은 미끄러져 들어오지 않고 그냥 서 있는다 (말은 그대로 남는다). */
+  .era .life-nudge { animation: none; }
   /* 돌리지 않는다. 그래도 '돌고 있다'는 것은 보여야 하므로 밝기만 오간다. */
   .life-spinner { animation: life-breathe 1.6s ease-in-out infinite; }
 }

@@ -442,6 +442,25 @@ let detailHtml = '';
      /255,\s*255,\s*255/.test(glow) && !/accent/.test(glow));
   ok('움직임을 줄여 달라고 한 사람에게는 깜박이지 않는다',
      /prefers-reduced-motion[^]*?\.era\.beckon::after\s*\{[^}]*animation:\s*none/.test(eraCss));
+
+  // 2026-09-13 사용자: "내 역사가 비어있는 사람들에게 … 버블 상자를 만들어서
+  // '내 역사를 입력해 보세요' … 입력을 유도 해줘." 빛은 '여기를 보라'까지고,
+  // 무엇을 하라는 말은 마우스를 올려야 뜨는 `title` 에만 있었다.
+  ok("빈 사람에게만 말풍선이 선다",
+     /\{lifeEmpty && <span className="life-nudge"/.test(appSrc)
+     && /\.era \.life-nudge\s*\{/.test(eraCss));
+  ok('말풍선의 말은 한국어 한 줄이다',
+     appSrc.includes('내 역사를 입력해 보세요'));
+  // 빛과 같은 규칙 — 머리 줄의 배치를 건드리지 않는다. 흐름에 서면 '내 역사'가
+  // 옆 단추를 밀어 그래프를 여는 동안 머리 줄이 한 번 흔들린다.
+  const nudge = eraCss.match(/\.era \.life-nudge\s*\{[^}]*\}/)?.[0] || '';
+  ok('말풍선은 자리를 흔들지 않는다', /position:\s*absolute/.test(nudge));
+  // 머리 줄에서 계속 움직이는 것이 둘이면 읽으려는 글자를 방해한다 — 한 번
+  // 나타나고(both) 멈춘다.
+  ok('말풍선은 한 번 나타나고 멈춘다',
+     /animation:\s*nudge-in[^;]*;/.test(nudge) && !/infinite/.test(nudge));
+  ok('움직임을 줄여 달라고 한 사람에게는 미끄러지지 않는다',
+     /prefers-reduced-motion[^]*?\.era \.life-nudge\s*\{[^}]*animation:\s*none/.test(eraCss));
 }
 
 // --- 내가 적은 이야기 -----------------------------------------------------
