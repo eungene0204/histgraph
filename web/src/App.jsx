@@ -329,7 +329,8 @@ export default function App() {
               내 역사
               {/* 빛 옆에 **말 한 줄**을 세운다 (2026-09-13 사용자: "내 역사가
                   비어있는 사람들에게 … 버블 상자를 만들어서 '내 역사를 입력해
-                  보세요' … 입력을 유도"). 빛(beckon)은 '여기를 보라'까지고
+                  보세요' … 입력을 유도"; 같은 날 "'당신의 역자를 만들어 보세요' 이걸로
+                  수정하자" — '역자'는 '역사'의 오타로 읽었다). 빛(beckon)은 '여기를 보라'까지고
                   무엇을 하라는 말이 없었다 — 마우스를 올려야 뜨는 `title` 은
                   손가락으로 보는 사람에게는 없는 것이다.
 
@@ -337,7 +338,7 @@ export default function App() {
                   아무 말도 안 세운다. 링크 **안에** 두어 말풍선을 눌러도 같은
                   데로 간다 (로그인 전이면 같은 상자가 뜬다). 읽어 주는 기계에는
                   `title` 이 이미 같은 말을 하므로 두 번 읽히지 않게 감춘다. */}
-              {lifeEmpty && <span className="life-nudge" aria-hidden="true">내 역사를 입력해 보세요</span>}
+              {lifeEmpty && <span className="life-nudge" aria-hidden="true">당신의 역사를 만들어 보세요</span>}
             </a>
           )}
         </div>

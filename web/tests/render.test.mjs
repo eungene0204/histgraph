@@ -450,7 +450,7 @@ let detailHtml = '';
      /\{lifeEmpty && <span className="life-nudge"/.test(appSrc)
      && /\.era \.life-nudge\s*\{/.test(eraCss));
   ok('말풍선의 말은 한국어 한 줄이다',
-     appSrc.includes('내 역사를 입력해 보세요'));
+     appSrc.includes('당신의 역사를 만들어 보세요'));
   // 빛과 같은 규칙 — 머리 줄의 배치를 건드리지 않는다. 흐름에 서면 '내 역사'가
   // 옆 단추를 밀어 그래프를 여는 동안 머리 줄이 한 번 흔들린다.
   const nudge = eraCss.match(/\.era \.life-nudge\s*\{[^}]*\}/)?.[0] || '';
