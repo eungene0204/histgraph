@@ -57,7 +57,12 @@ ADS_CLIENT = "ca-pub-8335444243080631"
 
 # 서치 콘솔이 주인을 확인하는 표. 없으면 아무것도 안 적는다 — 빈 값을
 # 적으면 구글이 그 자리를 보고 '표가 틀렸다'고 답한다.
+#
+# **둘을 따로 둔다.** 구글과 네이버는 태그 이름도 값도 다르고, 한쪽만 받아
+# 두고 다른 쪽을 나중에 받는 일이 흔하다. 값이 있는 쪽만 한 줄이 붙는다.
+# 로봇만 읽는 자리라 영어 이름이 화면에 뜨지 않는다 (CLAUDE.md §1).
 VERIFICATION = os.environ.get("HISTGRAPH_SITE_VERIFICATION", "").strip()
+NAVER_VERIFICATION = os.environ.get("HISTGRAPH_NAVER_VERIFICATION", "").strip()
 
 # 카카오톡·슬랙·트위터가 링크를 펼칠 때 세우는 그림. 노드마다 제 그림이
 # 있으면 그것을 쓰고(유산은 국가유산청이 준다), 없으면 이 한 장이다.
@@ -698,6 +703,8 @@ def _shell(title: str, description: str, canonical: str, body: str,
         head.append(f'<meta name="keywords" content="{escape(keywords)}">\n')
     if VERIFICATION:
         head.append(f'<meta name="google-site-verification" content="{escape(VERIFICATION)}">\n')
+    if NAVER_VERIFICATION:
+        head.append(f'<meta name="naver-site-verification" content="{escape(NAVER_VERIFICATION)}">\n')
     if prev_url:
         head.append(f'<link rel="prev" href="{prev_url}">\n')
     if next_url:

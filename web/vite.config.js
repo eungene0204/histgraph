@@ -18,14 +18,24 @@ export const LIFE_PAGE = true;
 // 서치 콘솔이 주인을 확인하는 표. 값이 있을 때만 장마다 한 줄이 붙는다 —
 // 빈 값을 적어 두면 구글이 그 자리를 보고 '표가 틀렸다'고 답한다. 서버가
 // 찍는 장(`histgraph.pages`)은 같은 이름의 환경변수를 제 손으로 읽는다.
-const verification = (process.env.HISTGRAPH_SITE_VERIFICATION || '').trim();
+//
+// **주인 확인은 여는 화면(`/`)에서 본다.** 구글도 네이버도 주소를 등록한 그
+// 자리를 받아 가는데, 그 자리는 정적 장이 아니라 이 리액트 껍데기다 — 그래서
+// 두 태그가 여기에도 있어야 한다. 한쪽만 받아 둔 동안에는 그쪽만 붙는다.
+const VERIFY_TAGS = [
+  ['google-site-verification', process.env.HISTGRAPH_SITE_VERIFICATION],
+  ['naver-site-verification', process.env.HISTGRAPH_NAVER_VERIFICATION],
+];
 const verifyTag = {
   name: 'histgraph-site-verification',
-  transformIndexHtml: (html) =>
-    verification
-      ? html.replace('</head>',
-          `<meta name="google-site-verification" content="${verification}">\n</head>`)
-      : html,
+  transformIndexHtml: (html) => {
+    const tags = VERIFY_TAGS
+      .map(([name, value]) => [name, (value || '').trim()])
+      .filter(([, value]) => value)
+      .map(([name, value]) => `<meta name="${name}" content="${value}">\n`)
+      .join('');
+    return tags ? html.replace('</head>', `${tags}</head>`) : html;
+  },
 };
 
 export default {
