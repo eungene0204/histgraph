@@ -5897,7 +5897,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("이야기가 말하지 않은 남의 생년은 비운다", got["kim"] == (None, 1997), str(got))
     check("뺀 것을 적어 준다", any("김일권" in n for n in gnotes), str(gnotes))
     check("생년이 없어진 사람은 연표에서도 내린다 (그 자리가 곧 '0세 · 출생'이다)",
-          [t["event_id"] for t in gated["timeline"]] == ["dad"], str(gated["timeline"]))
+          "kim" not in [t["event_id"] for t in gated["timeline"]], str(gated["timeline"]))
     check("주인공의 생년은 남는다 — 연표가 여기서 선다", gated["subject"]["birth_year"] == 1982, str(gated["subject"]))
     check("원문을 모르면 재지 않는다",
           {n["id"]: n.get("start_date") for n in life_mod.validate(people)[0]["nodes"]}["kim"] == "1982-01-01")
@@ -6110,6 +6110,51 @@ with tempfile.TemporaryDirectory() as tmp:
                         {"id": "club2", "type": "Organization", "name": "산악회", "year": 2010}],
               "edges": [{"source": "me", "target": "club2", "type": "member_of", "confidence": 1.0}],
               "timeline": []}, "2010년에 산악회에 들어갔어.")["nodes"]})
+
+    # **태어난 일도 사건이다** (2026-09-13 지적: '1954년 4월 1일 이창동이 태어났어.'
+    # 한 줄을 넣었는데 연표에 못 들어갔다). 실측한 그 답은 사람 노드 하나에 생일이
+    # 제대로 적힌 것이었고 버린 것도 없었다 — 연표가 사건만 그려서 빈 것이다.
+    born_text = "1954년 4월 1일 이창동이 태어났어."
+    born = life_mod.refine({
+        "subject": {"id": "p1", "name": "이창동", "birth_year": 1954},
+        "nodes": [{"id": "p1", "type": "Person", "name": "이창동", "start_date": "1954-04-01",
+                   "year": 1954, "precision": "exact", "confidence": 1.0}],
+        "edges": [], "timeline": []}, born_text)
+    born_ev = next((n for n in born["nodes"] if n["id"] == "born_p1"), None)
+    check("한 줄짜리 이야기의 출생도 사건으로 선다",
+          born_ev is not None and born_ev["name"] == "출생"
+          and (born_ev["year"], born_ev["start_date"]) == (1954, "1954-04-01"), str(born_ev))
+    check("그 사건이 연표에 선다 — 0세·출생",
+          [(t["event_id"], t["life_stage"], t["age"]) for t in born["timeline"]]
+          == [("born_p1", "출생", 0)], str(born["timeline"]))
+    check("참여의 역할은 '출생' 이다 (화면·birth_date_from_nodes 가 이 이름으로 생일을 읽는다)",
+          [(e["source"], e["target"], e["type"], e.get("role")) for e in born["edges"]]
+          == [("p1", "born_p1", "experienced", "출생")], str(born["edges"]))
+    check("두 번 돌려도 출생은 하나다",
+          len([n for n in life_mod.refine(born, born_text)["nodes"] if n["id"] == "born_p1"]) == 1)
+    check("모델이 이미 '출생' 을 세웠으면 또 세우지 않는다",
+          "born_p2" not in {n["id"] for n in life_mod.refine({
+              "subject": {"id": "p2", "name": "나", "birth_year": 1954},
+              "nodes": [{"id": "p2", "type": "Person", "name": "나", "start_date": "1954", "year": 1954},
+                        {"id": "e0", "type": "PersonalEvent", "name": "출생", "start_date": "1954",
+                         "year": 1954, "confidence": 1.0}],
+              "edges": [{"source": "p2", "target": "e0", "type": "experienced", "confidence": 1.0}],
+              "timeline": [{"event_id": "e0", "life_stage": "출생", "year": 1954}]},
+              "1954년에 태어났어.")["nodes"]})
+    check("이야기가 태어났다고 말하지 않으면 세우지 않는다",
+          "born_p3" not in {n["id"] for n in life_mod.refine({
+              "subject": {"id": "p3", "name": "나", "birth_year": 1954},
+              "nodes": [{"id": "p3", "type": "Person", "name": "나", "start_date": "1954", "year": 1954}],
+              "edges": [], "timeline": []}, "1954년에 부산에서 살았어.")["nodes"]})
+    # 남의 출생은 내 연표에 세우지 않는다 — 그 줄의 나이·단계가 내 것으로 읽힌다.
+    check("태어났다고 말한 문장이 남을 부르면 그 사람의 출생이다",
+          "born_p4" not in {n["id"] for n in life_mod.refine({
+              "subject": {"id": "p4", "name": "나", "birth_year": 1955},
+              "nodes": [{"id": "p4", "type": "Person", "name": "나", "start_date": "1955", "year": 1955},
+                        {"id": "dad4", "type": "FamilyMember", "name": "아버지", "start_date": "1955-03-02",
+                         "year": 1955, "confidence": 1.0}],
+              "edges": [{"source": "dad4", "target": "p4", "type": "parent_of", "confidence": 1.0}],
+              "timeline": []}, "아버지는 1955년 3월 2일에 태어나셨다.")["nodes"]})
 
     # **모델이 달라져도 같은 화면이 나와야 한다** (2026-09-09 사용자: "llm 모델이
     # 달라져도 똑같이 적용할 수 있는 하네스지?"). 모델마다 답하는 버릇이 다르다 —

@@ -1019,9 +1019,10 @@ def refine(payload: dict, text: str | None = None, *, added: str | None = None) 
     participants_from_story(nodes, story)
     link_participants(nodes, edges, me)
 
-    # 3-3. **만난 일도 만든 일도 사건이다.** 사람·단체만 세우고 끝내면 연표에
-    #      아무것도 서지 않는다.
-    if meet_events(payload, nodes, edges, me, story, entries) \
+    # 3-3. **태어난 일도 만난 일도 만든 일도 사건이다.** 사람·단체만 세우고 끝내면
+    #      연표에 아무것도 서지 않는다.
+    if birth_events(payload, nodes, edges, me, story) \
+            + meet_events(payload, nodes, edges, me, story, entries) \
             + founding_events(payload, nodes, edges, me, story):
         by_id = {n["id"]: n for n in nodes}
 
@@ -1217,6 +1218,88 @@ def time_anchors(nodes: list[dict], me: dict | None) -> dict[str, int]:
             continue
         out.setdefault(name, int(n["year"]))
     return out
+
+
+# --- 태어난 일도 사건이다 -----------------------------------------------------------
+# 이야기가 출생을 말하는 말. 이 말이 있어야 '출생'을 사건으로 세운다 — 근거는
+# 이야기 안에 있어야 한다 (`meet_events` 와 같은 규칙).
+_BORN_STORY = re.compile(r"태어|출생|탄생")
+
+
+def _birth_event(me: dict, nodes: list[dict], edges: list[dict]) -> dict | None:
+    """이미 선 '출생' 사건. `birth_date_from_nodes` 와 같은 자리를 보되 설명은 안 본다 —
+    설명에 '1954년 … 태어났다' 가 적혀 있어도 연표에 설 사건은 아니다."""
+    by_id = {n["id"]: n for n in nodes}
+    hosts = set(_WHEN_TYPES) | EVENT_TYPES
+    for e in edges:
+        if e.get("source") != me.get("id"):
+            continue
+        t = by_id.get(e.get("target"))
+        if t is None or t.get("type") not in hosts:
+            continue
+        if e.get("type") == "born_in" or _BIRTH_NODE.match(str(e.get("role") or "").strip()) \
+                or _BIRTH_NODE.match(str(t.get("name") or "").strip()):
+            return t
+    for n in nodes:
+        if n.get("type") in hosts and _BIRTH_NODE.match(str(n.get("name") or "").strip()):
+            return n
+    return None
+
+
+def birth_events(payload: dict, nodes: list[dict], edges: list[dict], me: dict | None,
+                 story: str | None) -> int:
+    """'…태어났어' 를 **출생 사건**으로 세운다. 돌아오는 것은 새로 세운 수 (0 또는 1).
+
+    2026-09-13 지적: '1954년 4월 1일 이창동이 태어났어.' 한 줄을 넣었는데 연표에
+    아무것도 안 들어갔다. 모델은 제 할 일을 했고 코드가 버린 것도 없다 (`notes` 가
+    비어 있었다) — 사람 노드 하나에 생일이 제대로 적혀 있었다. 그런데 **연표는
+    사건만 그린다** (`personalMarks`): 사람을 점으로 찍으면 그 이름 아래 선 나이·
+    단계가 곧 그 사람의 생년으로 읽혀서다 (2026-09-08 사용자). 긴 이야기를 읽은
+    모델은 '출생' 사건을 스스로 세우지만 한 줄짜리에는 빠뜨린다 — 빠뜨린 것을
+    코드가 채운다 (`meet_events` 머리글과 같은 자리).
+
+    **주인공의 출생만 세운다.** 연표는 그 사람의 삶이고, 남의 생일은 그 사람 노드가
+    들고 있다 (어머니의 출생을 내 연표에 세우면 그 줄의 나이·단계가 내 것으로 읽힌다).
+
+    근거는 둘이 다 있어야 한다: 이야기가 **태어났다고 말한** 문장과, 그 문장이 주인공의
+    생년을 말할 것. 그 문장이 남의 이름을 부르면 그 사람의 출생이라 세우지 않는다.
+    """
+    if me is None or not story:
+        return 0
+    date = str(me.get("start_date") or "").strip()
+    year = me.get("year")
+    if not date or year is None:
+        return 0
+    ev_id = f"born_{me['id']}"
+    if any(n.get("id") == ev_id for n in nodes) or _birth_event(me, nodes, edges) is not None:
+        return 0
+    others = [str(n.get("name") or "").strip() for n in nodes
+              if n.get("type") in PERSON_TYPES and n is not me and len(str(n.get("name") or "").strip()) >= 2]
+    said = None
+    for line in re.split(r"[.!?。\n]", story):
+        if not _BORN_STORY.search(line) or not re.search(rf"(?<!\d){int(year)}(?!\d)", line):
+            continue
+        if any(name in line for name in others):
+            continue
+        said = line.strip()
+        break
+    if said is None:
+        return 0
+    event = {
+        # 설명은 이야기가 그렇게 말한 문장 그대로다 — 지어낸 말을 세우지 않는다.
+        "id": ev_id, "type": "PersonalEvent", "name": "출생", "description": said or None,
+        "start_date": date, "end_date": None, "location": None,
+        "participants": [me["id"]], "importance_score": None, "emotional_impact": None,
+        "confidence": float(me.get("confidence") or 1.0),
+        "year": int(year), "end_year": None, "precision": me.get("precision") or "year",
+    }
+    nodes.append(event)
+    # 역할이 '출생'인 참여 — 화면과 `birth_date_from_nodes` 가 이 이름으로 생일을 읽는다.
+    edges.append({"source": me["id"], "target": ev_id, "type": "experienced",
+                  "description": None, "confidence": event["confidence"], "role": "출생"})
+    payload.setdefault("timeline", []).append(
+        {"event_id": ev_id, "life_stage": "출생", "year": int(year), "age": 0, "date_text": None})
+    return 1
 
 
 def _mend_meet(event: dict, edges: list[dict], me: dict, pid: str, lines: list[str]) -> None:
