@@ -8385,6 +8385,16 @@ with GraphStore(Path(_tmp_hm.name) / "g.sqlite") as _st:
     _origin = _hm_origin("hand", _hm_json.loads(_n["props"]), None)
     check("근거의 주소로 출처 한 줄을 세운다",
           _origin and _origin["name"] == "한국민족문화대백과사전", str(_origin))
+    # 대통령기록관도 그 자리에 선다 (2026-09-13: 취임식 스물한 대의 날짜·장소가
+    # 거기서 왔다). 공공기관 기록이라 출처 표시가 이용 조건이고, 정본이라
+    # `paraphrase` 가 다시 쓰지 않는다.
+    _pa = _hm_origin("hand", hm_mod._desc_props(
+        "대통령기록관 「대통령이야기 — 제1대 취임식」 "
+        "https://www.pa.go.kr/online_contents/inauguration/president01.jsp"), None)
+    check("대통령기록관 주소도 출처 한 줄이 된다",
+          _pa and _pa["name"] == "대통령기록관" and _pa["url"].endswith("president01.jsp"), str(_pa))
+    check("그 글은 정본이라 새로 쓰지 않는다",
+          "대통령기록관" in __import__("histgraph.summaries", fromlist=["CANON"]).CANON)
     _es = {(r["src"], r["dst"], r["type"]): _hm_json.loads(r["props"])
            for r in _st.conn.execute("SELECT src, dst, type, props FROM edges")}
     check("참여는 사람에서 사건으로 들어온다",

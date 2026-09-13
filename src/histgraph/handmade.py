@@ -57,6 +57,7 @@ DESC_SOURCES: tuple[tuple[str, str, str], ...] = (
     ("encykorea.aks.ac.kr", "aks", "desc_url"),
     ("contents.history.go.kr", "nikh", "nikh_url"),
     ("ko.wikipedia.org", "kowiki", "kowiki_url"),
+    ("pa.go.kr", "pa", "pa_url"),
 )
 
 _DATE = re.compile(r"^-?\d{3,4}(-\d{2}(-\d{2})?)?$")

@@ -48,6 +48,11 @@ def desc_origin(source: str | None, props: dict, url: str | None = None) -> dict
                 "license": CC_BY_NC_SA[0], "license_url": CC_BY_NC_SA[1]}
     if "kowiki" in ds:
         return _kowiki(props)
+    if ds == "pa":
+        # 대통령기록관. 공공기관 기록이라 출처 표시가 이용 조건이다
+        # (2026-09-13: 취임식 스물한 대의 날짜·장소가 여기서 왔다).
+        return {"name": "대통령기록관", "url": props.get("pa_url") or "",
+                "license": "", "license_url": ""}
     if ds == "aks":
         return {"name": "한국민족문화대백과사전", "url": props.get("desc_url") or "",
                 "license": "", "license_url": ""}
