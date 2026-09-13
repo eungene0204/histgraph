@@ -171,6 +171,10 @@ NEAR_WINDOW = 150
 # (실측: 몰년을 모르는 인물의 end_date 가 2000-01-01 로 적혀 있다 —
 #  이재현 1870~2000. 사건 쪽은 정축하성이 1637~1895 로 258년짜리다.)
 MAX_SPAN = {"person": 110, "event": 60}
+# 한 사람이 자리에 앉아 있을 수 있는 햇수의 상한 (가장 긴 재위가 영조 52년,
+# 세계에서도 72년이다). 이보다 오래된 시작인데 끝이 비어 있으면 **아직 안
+# 끝난 것이 아니라 끝을 모르는 것**이다 — `_reigns` 가 한 점으로 둔다.
+MAX_IN_OFFICE = 100
 
 # 관계를 볼 때 사람이 먼저 궁금해하는 순서. 상세 패널의 정렬 기준이다.
 # 역할이 적힌 참여·관련은 역할이 곧 이름이다 (`roles.ROLES`·인포박스 칸 이름).
@@ -949,7 +953,14 @@ class GraphAPI:
 
         **재임 중인 사람은 끝이 없다.** 끝을 모르는 것과 아직 안 끝난 것은
         다르다 — 살아 있고 끝 날짜가 없으면 오늘까지 긋고 `ongoing` 으로
-        밝힌다. 죽은 사람의 빈 끝은 전처럼 몰년으로 닫는다."""
+        밝힌다. 죽은 사람의 빈 끝은 전처럼 몰년으로 닫는다.
+
+        **그러나 사람은 백 년 넘게 자리에 앉아 있지 않는다** (2026-09-13
+        지적: "여기에 대원의는 왜 나온거야? 연표의 년도가 전혀 맞지
+        않자나"). 발해 대원의(793)와 신라 신무왕(839)은 몇 달 만에 자리를
+        잃었는데 Wikidata 에 재위 끝도 몰년도 없어 **재임 중**으로 읽혔고,
+        그 띠가 1952년 부산정치파동 옆에 서 있었다. 오래된 시작은 끝을
+        모르는 것이지 안 끝난 것이 아니다 — 한 점으로 둔다 (`MAX_IN_OFFICE`)."""
         cached = getattr(self._local, "reigns", None)
         if cached is not None:
             return cached
@@ -997,7 +1008,7 @@ class GraphAPI:
                 if death is not None:
                     end = death if death >= start else start
                     at_end = at_death if end == death else at_start
-                elif r["end_date"]:
+                elif r["end_date"] or start < this_year - MAX_IN_OFFICE:
                     end = start
                     at_end = at_start
                 else:

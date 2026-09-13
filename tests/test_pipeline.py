@@ -3386,6 +3386,40 @@ with tempfile.TemporaryDirectory() as tmp:
           api.timeline("wd:E1")["axis"]["to"] >= _dt.date.today().year)
     store.close()
 
+# 사람은 백 년 넘게 자리에 앉아 있지 않는다 (2026-09-13 지적: "여기에 대원의는 왜
+# 나온거야? 연표의 년도가 전혀 맞지 않자나"). 발해 대원의는 793년에 몇 달 앉았다
+# 자리를 잃었는데 Wikidata 에 재위 끝도 몰년도 없어 **재임 중**으로 읽혔고, 그 띠가
+# 1952년 부산정치파동 옆에 서 있었다. 오래된 시작의 빈 끝은 안 끝난 것이 아니라
+# **모르는** 것이다 — 한 점으로 둔다.
+with tempfile.TemporaryDirectory() as tmp:
+    import datetime as _dt
+
+    store = GraphStore(Path(tmp) / "old.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:K9", type="person", label="대원의", source="wd"),
+        Node(id="wd:P9", type="person", label="이재명", source="wd", start_date="1963-12-08"),
+        Node(id="ex:role:발해 왕", type="role", label="발해 왕", source="ex"),
+        Node(id="wd:Q6296418", type="role", label="대한민국 대통령", source="wd"),
+    ])
+    store.upsert_edges([
+        # 재위 끝도 몰년도 없다 (Wikidata 실측)
+        Edge(src="wd:K9", dst="ex:role:발해 왕", type="held_position", source="wd",
+             start_date="0793", props={"reign": "monarch"}),
+        Edge(src="wd:P9", dst="wd:Q6296418", type="held_position", source="wd",
+             start_date="2025-06-04", props={"reign": "president"}),
+    ])
+    api = GraphAPI(store, era="korea")
+    band = {r["id"]: r for r in api._reigns()}
+    check("끝도 몰년도 없는 옛 재위는 한 점이다 — 오늘까지 늘리지 않는다",
+          (band["wd:K9"]["start"], band["wd:K9"]["end"], band["wd:K9"]["ongoing"]) == (793, 793, False),
+          str(band["wd:K9"]))
+    check("오늘 자리에 앉은 사람은 그대로 재임 중이다",
+          band["wd:P9"]["ongoing"] and band["wd:P9"]["end"] == _dt.date.today().year, str(band["wd:P9"]))
+    check("그래서 1950년대 구간에 793년의 임금이 서지 않는다",
+          [r["label"] for r in api.context(1952, 1956)["reigns"]] == [],
+          str(api.context(1952, 1956)["reigns"]))
+    store.close()
+
 # --- 대한민국 시대의 씨앗 ---------------------------------------------------
 # 인물 18,471명이 대한민국 국적이다 — 국적으로 고르면 명단이 된다. 씨앗은
 # 사건과 대통령 자리에서 오고, 사람은 그 이웃으로만 들어온다.
