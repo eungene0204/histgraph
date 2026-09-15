@@ -85,6 +85,40 @@ let appHtml = '';
      appHtml.slice(appHtml.indexOf('<footer')).slice(0, 300));
 }
 
+// --- 광고는 읽을 것이 있는 화면에만 --------------------------------------
+// 광고 정책이 재는 것은 색인이 아니라 **광고가 실리는 화면**이다: "We do not
+// allow Google-served ads on screens: without publisher-content or with
+// low-value content ... or used for alerts, navigation or other behavioral
+// purposes." 이 장(`index.html`)은 관계망을 자바스크립트가 그리는 화면이라
+// 스크립트 없이 열면 안내 한 줄뿐이다 — 광고를 부르면 그 조항에 걸린다.
+// 글로 읽는 장 가운데 내용 문턱을 넘은 것에만 광고가 실린다 (pages.py).
+{
+  for (const f of ['index.html', 'life.html']) {
+    const html = readFileSync(join(WEB, f), 'utf-8');
+    ok(`${f} 은 광고를 부르지 않는다 (자바스크립트가 그리는 화면)`,
+       !html.includes('adsbygoogle'), f);
+  }
+  // 광고를 안 싣는 대신 **주인은 밝힌다.** 애드센스가 첫 화면에 광고를 안 싣는
+  // 사이트를 위해 두는 확인 방법이라, 광고 요청 없이 확인만 통과한다.
+  ok('첫 화면이 메타 태그로 사이트를 확인시킨다',
+     readFileSync(join(WEB, 'index.html'), 'utf-8')
+       .includes('<meta name="google-adsense-account" content="ca-pub-'));
+}
+
+// --- 광고 번호는 어디서나 같아야 한다 ------------------------------------
+// 번호가 여러 장에 따로 박혀 있어 하나만 고치면 조용히 어긋난다.
+{
+  const files = ['index.html', 'privacy.html', 'terms.html',
+                 join('..', 'src', 'histgraph', 'pages.py')];
+  const ids = new Set();
+  for (const f of files) {
+    for (const m of readFileSync(join(WEB, f), 'utf-8').matchAll(/ca-pub-\d{10,}/g)) {
+      ids.add(m[0]);
+    }
+  }
+  ok('광고 번호가 한 가지뿐이다', ids.size === 1, [...ids].join(' '));
+}
+
 // --- 방침·약관 (리액트 바깥의 정적 문서) ---------------------------------
 {
   const docs = [['개인정보처리방침', 'privacy.html'], ['이용약관', 'terms.html']];

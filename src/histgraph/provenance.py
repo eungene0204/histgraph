@@ -21,10 +21,23 @@ from __future__ import annotations
 
 CC_BY_SA = ("크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0",
             "https://creativecommons.org/licenses/by-sa/4.0/deed.ko")
-# 나무위키는 비영리 조건이 붙어 있다. 광고가 걸린 화면에 세우는 것 자체가
-# 조건과 어긋난다 — 출처는 적되, 그 글은 빼는 쪽이 맞다 (HANDOFF 2026-09-05).
+# 나무위키는 **비영리** 조건이 붙어 있다. 광고가 걸린 사이트에 그 글을 세우는
+# 것 자체가 조건과 어긋난다 — 출처를 적는 것으로 풀리는 문제가 아니다.
+# 2026-09-05 에 '뺄지 결정 필요'로 남겨 두었던 것을 09-16 에 뺐다 (실측 18건).
+# 우리 말로 새로 쓴 것(`summaries`)도 2차 저작물이라 같은 조건에 묶인다.
 CC_BY_NC_SA = ("크리에이티브 커먼즈 저작자표시-비영리-동일조건변경허락 2.0 대한민국",
                "https://creativecommons.org/licenses/by-nc-sa/2.0/kr/deed.ko")
+
+# 비영리 조건이 붙은 라이선스 이름. 여기 들면 그 글은 화면에 안 세운다.
+NONCOMMERCIAL = frozenset({CC_BY_NC_SA[0]})
+
+
+def noncommercial(origin: dict | None) -> bool:
+    """이 글을 광고가 걸린 화면에 세워도 되는가 — 안 되면 참.
+
+    재는 자리를 **하나**로 둔다. 커넥터마다 따로 적으면 새 출처가 들어올 때
+    한 군데만 고쳐진다 (§1 의 그 규칙과 같은 자리)."""
+    return bool(origin) and origin.get("license", "") in NONCOMMERCIAL
 
 
 def desc_origin(source: str | None, props: dict, url: str | None = None) -> dict | None:

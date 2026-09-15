@@ -449,6 +449,10 @@ def _year_num(value: str | None) -> int | None:
 def _why_empty(node: dict) -> str:
     """빈 설명의 이유. 뭉뚱그려 '자료 없음'이라 적으면, 더 받아오면 채워지는
     노드와 애초에 채울 것이 없는 노드가 같은 말을 하게 된다."""
+    if node.get("desc_noncommercial"):
+        # 자료가 없는 것이 아니라 **못 싣는 것**이다. 비영리 조건이 붙은 글은
+        # 광고가 걸린 이 사이트에 세울 수 없다 (provenance.NONCOMMERCIAL).
+        return "이용 조건이 비영리라 다른 곳의 글을 옮겨 싣지 못합니다."
     if node.get("source") == "timeline":
         return "연표의 해를 세우는 노드라 설명이 없습니다."
     if node.get("source") == "extract":
@@ -783,10 +787,29 @@ def _entity_ld(node: dict, canonical: str, summary: str,
 
 
 def _shell(title: str, description: str, canonical: str, body: str,
-           noindex: bool = False, *, ld: str = "", image: str | None = None,
-           keywords: str = "", prev_url: str = "", next_url: str = "") -> str:
+           noindex: bool = False, *, ads: bool = False, ld: str = "",
+           image: str | None = None, keywords: str = "",
+           prev_url: str = "", next_url: str = "") -> str:
+    """장 하나를 감싸는 껍데기. `ads` 는 **이 장에 광고를 실을 것인가**다.
+
+    **기본은 안 싣는 것이다.** 광고 정책이 재는 것은 색인이 아니라 *광고가
+    실리는 화면*이다 — "We do not allow Google-served ads on screens: without
+    publisher-content or with low-value content, that are under construction,
+    or used for alerts, navigation or other behavioral purposes."
+    `noindex` 는 검색 지시어라 광고를 막지 않는다. 2026-09-16 실측: 문턱을
+    올려 색인은 3,118 → 571장이 됐는데 **광고는 14,345장에 그대로 나가고
+    있었다** — 목록 장·어귀·404 에도. 그래서 광고를 부르는 자리에도 같은
+    문턱을 건다 (`indexable`). 새 장을 만들면 기본값이 '안 싣는다'이므로
+    잊어서 정책을 어기는 쪽으로는 안 기운다."""
     robots = ('<meta name="robots" content="noindex,follow">\n' if noindex else
               '<meta name="robots" content="index,follow,max-image-preview:large">\n')
+    # 사이트 확인은 광고와 따로다. 광고를 안 싣는 장에도 주인은 밝혀 둔다 —
+    # 메타 태그는 광고 요청을 내지 않으므로 정책에 걸리지 않는다.
+    ads_tag = (f'<meta name="google-adsense-account" content="{ADS_CLIENT}">\n'
+               if not ads else "") + (
+        '<script async src="https://pagead2.googlesyndication.com/pagead/js/'
+        f'adsbygoogle.js?client={ADS_CLIENT}"\n        crossorigin="anonymous">'
+        "</script>\n" if ads else "")
     picture = image or OG_IMAGE
     head = [robots]
     if keywords:
@@ -820,9 +843,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 <meta name="twitter:description" content="{escape(description)}">
 <meta name="twitter:image" content="{escape(picture)}">
 {ld}
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={ADS_CLIENT}"
-        crossorigin="anonymous"></script>
-<script async src="/analytics.js"></script>
+{ads_tag}<script async src="/analytics.js"></script>
 <style>{STYLE}</style>
 </head>
 <body>
@@ -869,6 +890,8 @@ def _not_found(path: str) -> Page:
         '다른 항목으로 합쳐졌을 수 있습니다.</p>'
         '<a class="open" href="/n/">글로 읽는 장에서 찾아보기</a></main>',
         noindex=True,
+        # 광고 없음 (`_shell` 기본값). 없는 주소에 대고 미안하다는 한 줄뿐인
+        # 화면이라 정책이 말하는 `without publisher-content` 바로 그것이다.
     ))
 
 
@@ -1085,6 +1108,9 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
         canonical,
         "\n".join(parts),
         noindex=not indexable(summary, total),
+        # 문턱을 넘은 장에만 광고를 싣는다. 색인과 **같은 판정**이다 —
+        # 읽을 것이 있다고 말한 장에만 광고가 간다.
+        ads=indexable(summary, total),
         ld=ld, image=image, keywords=keywords,
     ))
 
@@ -1273,6 +1299,9 @@ def segment_page(api, segment: str, page: int = 1) -> Page:
         description, canonical, "\n".join(parts),
         # 세울 것이 몇 줄뿐인 목록 장은 색인에 올리지 않는다 (`MIN_SEGMENT`).
         noindex=total < MIN_SEGMENT,
+        # 광고 없음 (`_shell` 기본값). 이름을 늘어놓아 다음 장으로 보내는
+        # 화면이라 정책이 이름으로 금지하는 `navigation` 이다. 길잡이 노릇은
+        # 그대로 한다 — 광고만 안 싣는다.
         ld=ld, keywords=f"{segment}, 한국사, 역사 관계망",
         prev_url=prev_url, next_url=next_url,
     ))
@@ -1332,6 +1361,8 @@ def index_page(api) -> Page:
                    description=description, crumbs=crumbs)
     return _html(200, _shell(
         "인물·사건·장소·문화재 — 한국사 관계망 | histgraph",
+        # 광고 없음 (`_shell` 기본값). 갈래마다 이름을 세워 각 장으로 보내는
+        # 어귀라, 글이 길어도 하는 일은 `navigation` 이다.
         description, canonical, "\n".join(parts), ld=ld,
         keywords="한국사, 인물, 사건, 장소, 문화재, 지식 그래프",
     ))

@@ -4824,7 +4824,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("관계망으로 돌아가는 길이 있다", 'href="/#wd%3AS"' in body)
     check("정본 주소를 스스로 말한다",
           '<link rel="canonical" href="https://www.histgraph.space/%EC%9D%B8%EB%AC%BC/%EC%84%B8%EC%A2%85">' in body)
-    check("광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
+    # 광고 정책이 재는 것은 색인이 아니라 **광고가 실리는 화면**이다: "We do
+    # not allow Google-served ads on screens: without publisher-content or with
+    # low-value content ... or used for alerts, navigation or other behavioral
+    # purposes." `noindex` 는 검색 지시어라 광고를 막지 않는다 — 2026-09-16
+    # 실측으로 색인은 571장인데 광고는 14,345장에 나가고 있었다. 그래서 광고를
+    # 부르는 자리에 색인과 같은 문턱을 건다.
+    check("읽을 것이 있는 장은 광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
     # 방문 통계는 화면 네 장과 이 장이 **같은 파일 하나**를 부른다. 측정 ID 를
     # 여기 박으면 화면과 어긋나므로, 부르는 것은 주소뿐이다
     # (web/public/analytics.js · web/tests/render.test.mjs 가 나머지를 잰다).
@@ -4949,6 +4955,28 @@ with tempfile.TemporaryDirectory() as tmp:
           _origin("wd", {"kowiki_url": "https://ko.wikipedia.org/wiki/x"})["name"] == "한국어 위키백과")
     check("표식이 없으면 모른다고 한다 — 틀린 출처보다 낫다", _origin("wd", {}) is None)
 
+    # 비영리 조건이 붙은 글은 **세우지 않는다** (2026-09-16). 이 사이트에는
+    # 광고가 걸려 있어 그 글을 싣는 것 자체가 이용 조건과 어긋난다 — 출처를
+    # 적는 것으로 풀리지 않는다. 재는 자리는 `provenance.noncommercial` 하나다.
+    from histgraph.provenance import noncommercial as _nc  # noqa: E402
+    check("나무위키 글은 비영리 조건이다", _nc(_origin("wd", {"desc_source": "namu"})))
+    check("위키백과 글은 그렇지 않다", not _nc(_origin("wd", {"desc_source": "kowiki"})))
+    check("출처를 모르면 막지 않는다 — 비영리라는 근거가 없다", not _nc(None))
+
+    _nc_store = api.store
+    _nc_store.upsert_nodes([Node(
+        id="wd:NC", type="person", label="어떤 사람", source="wd",
+        description="나무위키에서 옮겨 온 문단이다. " * 8,
+        props={"desc_source": "namu", "namu_url": "https://namu.wiki/w/x"})])
+    _nc_node = api.node("wd:NC")
+    check("비영리 글은 설명 칸으로 나가지 않는다", _nc_node["description"] == "",
+          repr(_nc_node["description"]))
+    check("출처 줄도 세우지 않는다 — 글이 없으면 적을 것도 없다",
+          _nc_node["desc_origin"] is None)
+    check("화면이 빈 칸의 이유를 정확히 말한다 — '자료가 없다'가 아니다",
+          "비영리" in pages._why_empty(_nc_node), pages._why_empty(_nc_node))
+    _nc_store.conn.execute("DELETE FROM nodes WHERE id = 'wd:NC'")
+
     page = pages.route(api, "/인물/없는사람")
     check("없는 주소는 404 이고 색인에 안 올린다",
           page.status == 404 and "noindex" in page.body)
@@ -5028,6 +5056,23 @@ with tempfile.TemporaryDirectory() as tmp:
     _noindexed = {n for n in _listed
                   if 'content="noindex' in pages.node_page(api, n).body}
     check("목록에 오른 장은 하나도 noindex 가 아니다", not _noindexed, str(_noindexed))
+
+    # --- 광고는 읽을 것이 있는 화면에만 --------------------------------
+    def _ads(page) -> bool:
+        return "adsbygoogle" in page.body
+
+    check("없는 주소(404)에는 광고를 싣지 않는다 — publisher-content 가 없다",
+          not _ads(pages.route(api, "/인물/없는사람")))
+    check("갈래 목록 장에는 광고를 싣지 않는다 — navigation 이다",
+          not _ads(pages.route(api, "/인물/")))
+    check("어귀(/n/)에도 광고를 싣지 않는다 — navigation 이다",
+          not _ads(pages.route(api, "/n/")))
+    # 문턱을 도로 내려 얇은 장에 광고가 실리는 일이 없게 잰다.
+    pages.MIN_SUMMARY, pages.MIN_RELATIONS = 10_000, 10_000
+    check("문턱을 못 넘은 장에는 광고를 싣지 않는다 — low-value content 다",
+          not _ads(pages.route(api, "/인물/세종")))
+    check("그래도 사람에게는 그대로 열린다", pages.route(api, "/인물/세종").status == 200)
+    pages.MIN_SUMMARY, pages.MIN_RELATIONS = 120, 3
     check("목록 장도 세울 것이 열 줄은 돼야 한다", pages.MIN_SEGMENT == 10)
     # 큰 묶음을 문장으로 풀면 같은 꼴이 열여섯 줄 선다 — 그것이 곧 찍어 낸
     # 글이다. 작은 묶음만 문장이고 나머지는 이름 목록이다.
