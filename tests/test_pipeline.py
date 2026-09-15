@@ -4743,6 +4743,12 @@ with tempfile.TemporaryDirectory() as tmp:
     _slugs.assign(store.conn)
     api = _GraphAPI(store, era="korea")
 
+    # 이 그래프는 노드 예닐곱짜리라 배포의 색인 문턱(요약 240자·관계 8건)을
+    # 넘을 수 없다. 재려는 것은 **장이 어떻게 그려지는가**이므로 문턱만 잠시
+    # 낮춘다 — 문턱 값 자체는 아래 '색인 문턱' 절이 따로 잰다.
+    _gate = (pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT)
+    pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT = 120, 3, 1
+
     def _visible(html: str) -> str:
         html = _re.sub(r"<(script|style)\b[\s\S]*?</\1>", " ", html)
         html = _re.sub(r"<!--[\s\S]*?-->", " ", html)
@@ -4790,9 +4796,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("설명의 도입부가 본문에 들어 있다", "훈민정음을 창제하고" in text)
     # 원문 전체를 옮기면 스크랩이다. 절 본문은 내지 않고 위키 문법도 세우지 않는다.
     check("절 본문은 내지 않는다", "막동" not in text and "== " not in text, text[:400])
-    check("이 사이트의 말이 먼저 온다 — 무엇이고 몇 건과 이어졌는지",
-          "세종은 조선의 인물입니다. " in text and "모두 6건과 이어져 있습니다" in text
-          and text.index("인물입니다") < text.index("훈민정음을"), text[:400])
+    # 첫 문단은 **관계를 읽은 문장**이다. 2026-09-16 이전에는 세는 말이었는데
+    # ('…모두 6건과 이어져 있습니다') 3,118장에 같은 틀이라 자동 생성 문구로
+    # 읽혔다 — 애드센스가 `Low value content` 로 돌려보낸 자리다.
+    check("이 사이트의 말이 먼저 온다 — 관계를 읽은 문장으로",
+          "세종은 조선 사람이다." in text
+          and text.index("조선 사람이다") < text.index("훈민정음을"), text[:400])
+    check("세는 말은 첫 문단에 없다",
+          "건과 이어져 있습니다" not in text, text[:400])
     check("다른 이름이 적힌다", "이도" in text)
     # 출처는 설명 아래 한 줄. §1 의 유일한 예외 — 라이선스 의무다.
     check("출처와 라이선스가 설명 아래 한 줄로 선다",
@@ -4802,8 +4813,11 @@ with tempfile.TemporaryDirectory() as tmp:
           'href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"' in body
           and 'href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"' in body)
     # 방향이 뒤집히면 아버지가 자식이 된다 — child_of 는 나가는 쪽이 부모다.
+    # child_of 는 나가는 쪽이 부모다. 문장으로 읽으면 방향이 그대로 드러난다 —
+    # 뒤집히면 '세종의 부모는 문종이다' 가 된다.
+    _tight = text.replace(" ", "")
     check("부모와 자녀가 갈려 있다",
-          text.index("부모") < text.index("태종") and "자녀" in text, text)
+          "세종의부모는태종이다." in _tight and "문종의부모는세종이다." in _tight, text)
     check("이웃으로 가는 링크가 이름 주소로 간다",
           'href="/%EC%9D%B8%EB%AC%BC/%ED%83%9C%EC%A2%85"' in body
           and 'href="/%EC%9D%B8%EB%AC%BC/%EB%AC%B8%EC%A2%85"' in body, body[:200])
@@ -4827,9 +4841,12 @@ with tempfile.TemporaryDirectory() as tmp:
           and ".copy { text-align: center" in body, text[-120:])
 
     # --- 장의 짜임 ----------------------------------------------------
-    check("속성처럼 읽히는 관계는 앞의 표로 올라간다",
-          "주요 사실" in text and text.index("주요 사실") < text.index("이어진 것"), text[:900])
-    check("시대가 그 표의 첫 줄이다", "시대 조선" in text, text[text.index("주요 사실"):][:120])
+    # 속성처럼 읽히는 관계(시대·출생지·직위)는 표가 아니라 **첫 문단의 문장**이
+    # 된다. 표로 세우면 그 관계가 무슨 말인지는 어디에도 안 적힌다.
+    check("속성처럼 읽히는 관계가 첫 문단을 이룬다",
+          "세종은 조선 사람이다." in text
+          and text.index("조선 사람이다") < text.index("이어진 것"), text[:900])
+    check("표로 두 번 세우지 않는다", "주요 사실" not in text, text[:900])
     check("연표가 해 순으로 선다",
           "연표" in text and text.index("1433년") < text.index("1446년"), text)
     check("이어진 것은 상대의 갈래로 갈라 세운다",
@@ -4839,7 +4856,7 @@ with tempfile.TemporaryDirectory() as tmp:
           "<title>세종 — 조선의 인물 (1397년 ~ 1450년) | histgraph</title>" in body,
           body[body.index("<title>"):][:120])
     check("설명 칸은 이 사이트의 말로 시작한다 — 빈 장이 없다",
-          '<meta name="description" content="세종은 조선의 인물입니다.' in body)
+          '<meta name="description" content="세종은 조선 사람이다.' in body)
 
     # --- 빵부스러기 ---------------------------------------------------
     _crumb = _visible(body[body.index('<p class="crumb">'):body.index("<h1>")])
@@ -4988,6 +5005,33 @@ with tempfile.TemporaryDirectory() as tmp:
           and pages.route(api, "/privacy.html") is None
           and pages.route(api, "/assets/index.js") is None
           and pages.route(api, "/") is None)
+
+    # --- 색인 문턱 ----------------------------------------------------
+    # 2026-09-16 애드센스 `Low value content`. 낮은 문턱(120·3)을 겨우 넘은
+    # 장이 천 장 넘게 깔려 있었다 — 머리·바닥까지 400자에 링크 열한 개짜리
+    # 장이다. 값을 낮추면 그 장들이 도로 색인에 오르므로 여기서 잡는다.
+    pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT = _gate
+    check("색인 문턱은 요약 200자 · 관계 9건이다",
+          (pages.MIN_SUMMARY, pages.MIN_RELATIONS) == (200, 9),
+          str((pages.MIN_SUMMARY, pages.MIN_RELATIONS)))
+    check("두 조건을 모두 넘어야 올린다",
+          pages.indexable("가" * 200, 9)
+          and not pages.indexable("가" * 199, 9)
+          and not pages.indexable("가" * 200, 8))
+    # 목록·사이트맵과 장이 **같은 것**을 재야 한다. 목록은 SQL 차수로, 장은
+    # 제가 그린 수로 재던 때 후보 951 중 713 에서 수가 달랐고 53장이
+    # 사이트맵에는 있는데 정작 `noindex` 였다 (거제시: 차수 10 · 그린 것 9).
+    _seen = _visible(pages.route(api, "/인물/세종").body)
+    check("장이 적는 '이어진 것' 수가 `_page_parts` 가 센 수다",
+          f"이어진 것 {pages._page_parts(api.node('wd:S'))[2]}" in _seen, _seen[:300])
+    _listed = {r["id"] for r in pages._segment_rows(api, "인물")[0]}
+    _noindexed = {n for n in _listed
+                  if 'content="noindex' in pages.node_page(api, n).body}
+    check("목록에 오른 장은 하나도 noindex 가 아니다", not _noindexed, str(_noindexed))
+    check("목록 장도 세울 것이 열 줄은 돼야 한다", pages.MIN_SEGMENT == 10)
+    # 큰 묶음을 문장으로 풀면 같은 꼴이 열여섯 줄 선다 — 그것이 곧 찍어 낸
+    # 글이다. 작은 묶음만 문장이고 나머지는 이름 목록이다.
+    check("문장으로 읽는 묶음은 넷까지다", pages.SENTENCE_MAX == 4)
     store.close()
 
 
@@ -8717,6 +8761,59 @@ _cr_body = _cr_body[:_cr_body.index("};")]
 check("만든 방식마다 문장 규칙이 있다",
       all(f"'{r}':" in _cr_body for r in cr_mod.ROLES),
       str([r for r in cr_mod.ROLES if f"'{r}':" not in _cr_body]))
+
+# ── 문장 규칙은 두 벌이다 (`histgraph/sentences.py` 와 `web/src/lib/relations.js`).
+# 글로 읽는 장이 관계를 문장으로 읽어 주려면 파이썬에도 표가 있어야 하는데,
+# 같은 표를 두 벌 두면 한쪽만 고쳐진다. 그래서 **두 쪽이 같은 고정판을 잰다** —
+# 여기서 파이썬이, `web/tests/relations.test.mjs` 에서 자바스크립트가.
+# 저작권 한 줄을 상수 둘에 두고 글자까지 재는 것과 같은 방법이다 (CLAUDE.md §1).
+print("\n문장 규칙 — 두 벌이 같은 말을 하는가")
+from histgraph import sentences as _sen  # noqa: E402
+import json as _sen_json  # noqa: E402
+
+_sen_cases = _sen_json.loads(Path("tests/data/sentences.json").read_text(encoding="utf-8"))
+_sen_bad = []
+for _c in _sen_cases:
+    _rel = {"type": _c["type"], "dir": _c["dir"], "label": _c["type"],
+            "other": dict(_c["other"]), **_c["extra"]}
+    _got = _sen.sentence(_rel, _c["self"])
+    if _got != _c["expected"]:
+        _sen_bad.append(f'{_c["type"]}: {_got} ≠ {_c["expected"]}')
+check(f"고정판 {len(_sen_cases)}줄이 그대로 나온다", not _sen_bad, "; ".join(_sen_bad[:3]))
+
+# 고정판이 규칙을 빠짐없이 덮는가. 새 타입을 더하고 고정판에 안 적으면 두
+# 쪽이 갈라져도 아무도 모른다.
+_sen_types = {c["type"] for c in _sen_cases}
+check("모든 엣지 타입이 고정판에 있다",
+      set(_sen.SENTENCE) <= _sen_types, str(set(_sen.SENTENCE) - _sen_types))
+_sen_labels = {c["extra"].get("edge_label") for c in _sen_cases} - {None}
+for _name, _table in (("역할이", _sen.ROLE_SENTENCE), ("인과 종류가", _sen.KIND_SENTENCE),
+                      ("만든 방식이", _sen.CREATED_SENTENCE)):
+    check(f"모든 {_name} 고정판에 있다",
+          set(_table) <= _sen_labels, str(set(_table) - _sen_labels))
+
+# 두 파일의 표가 같은 열쇠를 들고 있는가. 한쪽에만 규칙을 더하면 여기서 걸린다.
+_sen_js = Path("web/src/lib/relations.js").read_text(encoding="utf-8")
+
+
+def _js_keys(name: str) -> set[str]:
+    head = f"export const {name} = {{"
+    body = _sen_js[_sen_js.index(head) + len(head):]
+    depth = 1
+    for i, ch in enumerate(body):
+        depth += (ch == "{") - (ch == "}")
+        if depth == 0:
+            body = body[:i]
+            break
+    return {a or c for a, c in
+            re.findall(r"^  (?:'([^']+)'|([a-z_]+)):", body, re.M)}
+
+
+for _name, _table in (("SENTENCE", _sen.SENTENCE), ("ROLE_SENTENCE", _sen.ROLE_SENTENCE),
+                      ("KIND_SENTENCE", _sen.KIND_SENTENCE),
+                      ("CREATED_SENTENCE", _sen.CREATED_SENTENCE)):
+    check(f"{_name} 의 열쇠가 두 쪽에 같다",
+          _js_keys(_name) == set(_table), str(_js_keys(_name) ^ set(_table)))
 
 print(f"\n{'='*46}\n통과 {passed} / 실패 {failed}")
 sys.exit(1 if failed else 0)

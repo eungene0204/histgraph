@@ -4,9 +4,11 @@
 //
 // 여기 걸린 것들은 대부분 화면에서 실제로 났던 오류다. 옮기면서 방어가
 // 같이 따라왔는지를 잰다.
+import { readFileSync } from 'node:fs';
 import {
   pt, sentence, groupRelations, relHead, byYear, cardsFor,
   whyEmpty, fmtDate, chainRows, chainGuides, pathSteps, pathSentence,
+  SENTENCE, ROLE_SENTENCE, KIND_SENTENCE, CREATED_SENTENCE,
 } from '../src/lib/relations.js';
 import { imeKey, moveCursor } from '../src/lib/keys.js';
 
@@ -396,9 +398,6 @@ console.log('\n인과');
   eq('걸음에 연도가 붙는다', steps[0].year, '1592년');
 }
 
-console.log('\n==============================================');
-console.log(`통과 ${pass} / 실패 ${fail}`);
-process.exit(fail ? 1 : 0);
 
 console.log('\n검색 목록 키보드');
 eq('아무것도 안 고른 채 ↓ 는 맨 위', moveCursor(-1, 'ArrowDown', 4), 0);
@@ -409,3 +408,37 @@ eq('맨 위서 ↑ 는 맨 아래로 돈다', moveCursor(0, 'ArrowUp', 4), 3);
 eq('목록이 비면 -1', moveCursor(2, 'ArrowDown', 0), -1);
 ok('한글 조립 중의 키는 입력기 것', imeKey({ key: 'ArrowDown', isComposing: true }) && imeKey({ key: 'Process', keyCode: 229 }));
 ok('조립이 끝난 키는 우리 것', !imeKey({ key: 'ArrowDown', isComposing: false, keyCode: 40 }));
+
+// ── 문장 규칙은 두 벌이다 (JS 와 `histgraph/sentences.py`). 어긋나면 여기서
+// 걸린다 — 두 쪽이 **같은 고정판**(tests/data/sentences.json)을 잰다. 한쪽에
+// 규칙을 더하거나 문구를 고치면 다른 쪽 시험이 빨개진다.
+console.log('\n문장 규칙 고정판 (파이썬 쪽과 같은 표)');
+{
+  const cases = JSON.parse(readFileSync(new URL('../../tests/data/sentences.json', import.meta.url), 'utf-8'));
+  let bad = 0;
+  for (const c of cases) {
+    const r = { type: c.type, dir: c.dir, label: c.type, other: { ...c.other }, ...c.extra };
+    const got = sentence(r, c.self);
+    if (got !== c.expected) {
+      bad += 1;
+      console.log(`      ${c.type}/${c.extra.edge_label || '-'}  나온 것: ${got}  바란 것: ${c.expected}`);
+    }
+  }
+  ok(`고정판 ${cases.length}줄이 그대로 나온다`, bad === 0, `${bad}줄 어긋남`);
+  // 고정판이 규칙을 빠짐없이 덮는가. 새 타입을 더하고 고정판에 안 적으면
+  // 두 쪽이 갈라져도 아무도 모른다.
+  const covered = new Set(cases.map((c) => c.type));
+  const missing = Object.keys(SENTENCE).filter((t) => !covered.has(t));
+  ok('모든 엣지 타입이 고정판에 있다', missing.length === 0, missing.join(', '));
+  const roles = new Set(cases.map((c) => c.extra.edge_label).filter(Boolean));
+  const noRole = Object.keys(ROLE_SENTENCE).filter((r) => !roles.has(r));
+  ok('모든 역할이 고정판에 있다', noRole.length === 0, noRole.join(', '));
+  const noKind = Object.keys(KIND_SENTENCE).filter((k) => !roles.has(k));
+  ok('모든 인과 종류가 고정판에 있다', noKind.length === 0, noKind.join(', '));
+  const noMade = Object.keys(CREATED_SENTENCE).filter((k) => !roles.has(k));
+  ok('모든 만든 방식이 고정판에 있다', noMade.length === 0, noMade.join(', '));
+}
+
+console.log('\n==============================================');
+console.log(`통과 ${pass} / 실패 ${fail}`);
+process.exit(fail ? 1 : 0);

@@ -1,0 +1,1038 @@
+[
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "이순신",
+   "type": "person"
+  },
+  "other": {
+   "label": "명량 해전",
+   "type": "event"
+  },
+  "extra": {},
+  "expected": "이순신은 명량 해전에 참여했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "정도전",
+   "type": "person"
+  },
+  "other": {
+   "label": "제1차 왕자의 난",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "피해"
+  },
+  "expected": "정도전은 제1차 왕자의 난의 피해자다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "정도전",
+   "type": "person"
+  },
+  "other": {
+   "label": "제1차 왕자의 난",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "피해",
+   "fate": "사망"
+  },
+  "expected": "정도전은 제1차 왕자의 난에서 살해되었다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "이방원",
+   "type": "person"
+  },
+  "other": {
+   "label": "제1차 왕자의 난",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "주도"
+  },
+  "expected": "이방원은 제1차 왕자의 난을 주도했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "김종서",
+   "type": "person"
+  },
+  "other": {
+   "label": "계유정난",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "주도",
+   "fate": "처형"
+  },
+  "expected": "김종서는 계유정난을 주도했고 처형되었다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "홍길동",
+   "type": "person"
+  },
+  "other": {
+   "label": "무오사화",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "가담",
+   "fate": "귀양"
+  },
+  "expected": "홍길동은 무오사화에 가담했고 귀양 갔다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "곽재우",
+   "type": "person"
+  },
+  "other": {
+   "label": "임진왜란",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "대항",
+   "fate": "부상"
+  },
+  "expected": "곽재우는 임진왜란에 맞섰고 다쳤다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "이순신",
+   "type": "person"
+  },
+  "other": {
+   "label": "옥포 해전",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "지휘관",
+   "side_name": "조선"
+  },
+  "expected": "이순신은 옥포 해전에서 조선 측을 지휘했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "이순신",
+   "type": "person"
+  },
+  "other": {
+   "label": "노량 해전",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "지휘관",
+   "side_name": "조선",
+   "fate": "사망"
+  },
+  "expected": "이순신은 노량 해전에서 조선 측을 지휘하다 전사했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "원균",
+   "type": "person"
+  },
+  "other": {
+   "label": "칠천량 해전",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "지휘관"
+  },
+  "expected": "원균은 칠천량 해전을 지휘했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "황진이",
+   "type": "person"
+  },
+  "other": {
+   "label": "기묘사화",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "표적"
+  },
+  "expected": "황진이는 기묘사화에서 표적이 되었다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "김구",
+   "type": "person"
+  },
+  "other": {
+   "label": "신임사화",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "수습"
+  },
+  "expected": "김구는 신임사화를 수사·재판했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "송준길",
+   "type": "person"
+  },
+  "other": {
+   "label": "사육신",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "언급"
+  },
+  "expected": "송준길은 사육신 기록에 이름이 나온다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "전상우",
+   "type": "person"
+  },
+  "other": {
+   "label": "무오사화",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "근거 없음"
+  },
+  "expected": "전상우와 무오사화는 관련이 있다고 하나 근거를 찾지 못했다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "권율",
+   "type": "person"
+  },
+  "other": {
+   "label": "행주 대첩",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "주요 인물"
+  },
+  "expected": "권율은 행주 대첩의 주요 인물이다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "양만춘",
+   "type": "person"
+  },
+  "other": {
+   "label": "안시성 전투",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "교전"
+  },
+  "expected": "양만춘은 안시성 전투에서 싸웠다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "out",
+  "self": {
+   "label": "전두환",
+   "type": "person"
+  },
+  "other": {
+   "label": "12.3 내란",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "가해"
+  },
+  "expected": "전두환은 12.3 내란의 가해자다"
+ },
+ {
+  "type": "participated_in",
+  "dir": "in",
+  "self": {
+   "label": "명량 해전",
+   "type": "event"
+  },
+  "other": {
+   "label": "이순신",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "지휘관",
+   "side_name": "조선"
+  },
+  "expected": "이순신은 명량 해전에서 조선 측을 지휘했다"
+ },
+ {
+  "type": "occurred_at",
+  "dir": "out",
+  "self": {
+   "label": "옥포 해전",
+   "type": "event"
+  },
+  "other": {
+   "label": "거제시",
+   "type": "place"
+  },
+  "extra": {},
+  "expected": "옥포 해전은 거제시에서 일어났다"
+ },
+ {
+  "type": "occurred_during",
+  "dir": "out",
+  "self": {
+   "label": "임진왜란",
+   "type": "event"
+  },
+  "other": {
+   "label": "조선",
+   "type": "period"
+  },
+  "extra": {},
+  "expected": "임진왜란은 조선에 일어났다"
+ },
+ {
+  "type": "born_in",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "한성부",
+   "type": "place"
+  },
+  "extra": {},
+  "expected": "세종은 한성부에서 태어났다"
+ },
+ {
+  "type": "died_in",
+  "dir": "out",
+  "self": {
+   "label": "황진이",
+   "type": "person"
+  },
+  "other": {
+   "label": "개성",
+   "type": "place"
+  },
+  "extra": {},
+  "expected": "황진이는 개성에서 죽었다"
+ },
+ {
+  "type": "located_in",
+  "dir": "out",
+  "self": {
+   "label": "불국사",
+   "type": "heritage"
+  },
+  "other": {
+   "label": "경주시",
+   "type": "place"
+  },
+  "extra": {},
+  "expected": "불국사는 경주시에 있다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "세한도",
+   "type": "artwork"
+  },
+  "other": {
+   "label": "김정희",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "그림"
+  },
+  "expected": "김정희가 세한도를 그렸다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "세한도",
+   "type": "artwork"
+  },
+  "other": {
+   "label": "김정희",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "글씨"
+  },
+  "expected": "김정희가 세한도의 글씨를 썼다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "목민심서",
+   "type": "artwork"
+  },
+  "other": {
+   "label": "정약용",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "저술"
+  },
+  "expected": "정약용이 목민심서를 지었다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "고려사",
+   "type": "artwork"
+  },
+  "other": {
+   "label": "정인지",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "편찬"
+  },
+  "expected": "정인지가 고려사를 엮었다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "거북선",
+   "type": "heritage"
+  },
+  "other": {
+   "label": "이순신",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "제작"
+  },
+  "expected": "이순신이 거북선을 만들었다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "불화",
+   "type": "heritage"
+  },
+  "other": {
+   "label": "문정왕후",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "발원"
+  },
+  "expected": "문정왕후가 불화를 만들게 했다"
+ },
+ {
+  "type": "created",
+  "dir": "in",
+  "self": {
+   "label": "월인천강지곡",
+   "type": "artwork"
+  },
+  "other": {
+   "label": "세종",
+   "type": "person"
+  },
+  "extra": {},
+  "expected": "세종이 월인천강지곡을 만들었다"
+ },
+ {
+  "type": "depicts",
+  "dir": "out",
+  "self": {
+   "label": "송시열 초상",
+   "type": "artwork"
+  },
+  "other": {
+   "label": "송시열",
+   "type": "person"
+  },
+  "extra": {},
+  "expected": "송시열 초상은 송시열을 다룬다"
+ },
+ {
+  "type": "about",
+  "dir": "out",
+  "self": {
+   "label": "성균관 스캔들",
+   "type": "media"
+  },
+  "other": {
+   "label": "성균관",
+   "type": "org"
+  },
+  "extra": {},
+  "expected": "성균관 스캔들은 성균관을 주제로 한다"
+ },
+ {
+  "type": "set_in",
+  "dir": "out",
+  "self": {
+   "label": "뿌리깊은 나무",
+   "type": "media"
+  },
+  "other": {
+   "label": "조선",
+   "type": "period"
+  },
+  "extra": {},
+  "expected": "뿌리깊은 나무의 배경은 조선이다"
+ },
+ {
+  "type": "adapted_from",
+  "dir": "out",
+  "self": {
+   "label": "노다지",
+   "type": "media"
+  },
+  "other": {
+   "label": "뽕",
+   "type": "artwork"
+  },
+  "extra": {},
+  "expected": "노다지는 뽕을 원작으로 한다"
+ },
+ {
+  "type": "spouse_of",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "소헌왕후",
+   "type": "person"
+  },
+  "extra": {},
+  "expected": "세종과 소헌왕후는 부부다"
+ },
+ {
+  "type": "taught",
+  "dir": "out",
+  "self": {
+   "label": "이황",
+   "type": "person"
+  },
+  "other": {
+   "label": "유성룡",
+   "type": "person"
+  },
+  "extra": {},
+  "expected": "이황이 유성룡을 가르쳤다"
+ },
+ {
+  "type": "member_of",
+  "dir": "out",
+  "self": {
+   "label": "성삼문",
+   "type": "person"
+  },
+  "other": {
+   "label": "집현전",
+   "type": "org"
+  },
+  "extra": {},
+  "expected": "성삼문은 집현전 소속이다"
+ },
+ {
+  "type": "member_of",
+  "dir": "out",
+  "self": {
+   "label": "덕천군",
+   "type": "person"
+  },
+  "other": {
+   "label": "덕천군파",
+   "type": "org"
+  },
+  "extra": {
+   "edge_label": "파조"
+  },
+  "expected": "덕천군은 덕천군파의 파조다"
+ },
+ {
+  "type": "held_position",
+  "dir": "out",
+  "self": {
+   "label": "황희",
+   "type": "person"
+  },
+  "other": {
+   "label": "영의정",
+   "type": "role"
+  },
+  "extra": {},
+  "expected": "황희는 영의정을 지냈다"
+ },
+ {
+  "type": "part_of",
+  "dir": "out",
+  "self": {
+   "label": "덕천군파",
+   "type": "org"
+  },
+  "other": {
+   "label": "전주 이씨",
+   "type": "org"
+  },
+  "extra": {
+   "edge_label": "분파"
+  },
+  "expected": "덕천군파는 전주 이씨에서 갈라져 나온 파다"
+ },
+ {
+  "type": "part_of",
+  "dir": "out",
+  "self": {
+   "label": "집현전",
+   "type": "org"
+  },
+  "other": {
+   "label": "조선",
+   "type": "org"
+  },
+  "extra": {},
+  "expected": "집현전은 조선의 일부다"
+ },
+ {
+  "type": "child_of",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "태종",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "아버지"
+  },
+  "expected": "세종의 아버지는 태종이다"
+ },
+ {
+  "type": "child_of",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "원경왕후",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "어머니"
+  },
+  "expected": "세종의 어머니는 원경왕후다"
+ },
+ {
+  "type": "child_of",
+  "dir": "out",
+  "self": {
+   "label": "세조",
+   "type": "person"
+  },
+  "other": {
+   "label": "세종",
+   "type": "person"
+  },
+  "extra": {},
+  "expected": "세조의 부모는 세종이다"
+ },
+ {
+  "type": "caused",
+  "dir": "out",
+  "self": {
+   "label": "임진왜란",
+   "type": "event"
+  },
+  "other": {
+   "label": "명나라의 쇠퇴",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "원인"
+  },
+  "expected": "임진왜란은 명나라의 쇠퇴의 원인이 되었다"
+ },
+ {
+  "type": "caused",
+  "dir": "out",
+  "self": {
+   "label": "세도정치",
+   "type": "concept"
+  },
+  "other": {
+   "label": "동학 농민 혁명",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "배경"
+  },
+  "expected": "세도정치는 동학 농민 혁명의 배경이 되었다"
+ },
+ {
+  "type": "caused",
+  "dir": "out",
+  "self": {
+   "label": "단발령",
+   "type": "event"
+  },
+  "other": {
+   "label": "을미의병",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "계기"
+  },
+  "expected": "단발령은 을미의병의 계기가 되었다"
+ },
+ {
+  "type": "caused",
+  "dir": "out",
+  "self": {
+   "label": "갑오개혁",
+   "type": "event"
+  },
+  "other": {
+   "label": "대한제국",
+   "type": "org"
+  },
+  "extra": {
+   "edge_label": "영향"
+  },
+  "expected": "갑오개혁은 대한제국에 영향을 주었다"
+ },
+ {
+  "type": "caused",
+  "dir": "out",
+  "self": {
+   "label": "임진왜란",
+   "type": "event"
+  },
+  "other": {
+   "label": "병자호란",
+   "type": "event"
+  },
+  "extra": {},
+  "expected": "임진왜란은 병자호란의 원인이 되었다"
+ },
+ {
+  "type": "caused",
+  "dir": "in",
+  "self": {
+   "label": "제1차 왕자의 난",
+   "type": "event"
+  },
+  "other": {
+   "label": "정도전",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "원인",
+   "as": "정도전의 병권 집중"
+  },
+  "expected": "정도전의 병권 집중은 제1차 왕자의 난의 원인이 되었다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "무신정변",
+   "type": "event"
+  },
+  "other": {
+   "label": "김보당의 난",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "다음"
+  },
+  "expected": "무신정변 다음에 김보당의 난이 일어났다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "훈민정음을 창제하다",
+   "type": "event"
+  },
+  "other": {
+   "label": "한글",
+   "type": "concept"
+  },
+  "extra": {
+   "edge_label": "이 기사의 대상"
+  },
+  "expected": "훈민정음을 창제하다는 한글을 다룬 기록이다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "성삼문",
+   "type": "person"
+  },
+  "other": {
+   "label": "집현전",
+   "type": "org"
+  },
+  "extra": {
+   "edge_label": "소속"
+  },
+  "expected": "성삼문은 집현전 소속이다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "황희",
+   "type": "person"
+  },
+  "other": {
+   "label": "영의정",
+   "type": "role"
+  },
+  "extra": {
+   "edge_label": "직위"
+  },
+  "expected": "황희는 영의정을 지냈다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "전주 이씨",
+   "type": "org"
+  },
+  "other": {
+   "label": "전주시",
+   "type": "place"
+  },
+  "extra": {
+   "edge_label": "본관"
+  },
+  "expected": "전주 이씨의 본관은 전주시다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "김정희",
+   "type": "person"
+  },
+  "other": {
+   "label": "세한도",
+   "type": "artwork"
+  },
+  "extra": {
+   "edge_label": "그림"
+  },
+  "expected": "김정희가 세한도를 그렸다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "정도전",
+   "type": "person"
+  },
+  "other": {
+   "label": "제1차 왕자의 난",
+   "type": "event"
+  },
+  "extra": {
+   "edge_label": "피해",
+   "fate": "피살"
+  },
+  "expected": "정도전은 제1차 왕자의 난에서 살해되었다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "훈민정음",
+   "type": "heritage"
+  },
+  "extra": {
+   "edge_label": "원인"
+  },
+  "expected": "세종은 훈민정음의 원인이 되었다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "신사임당",
+   "type": "person"
+  },
+  "other": {
+   "label": "이이",
+   "type": "person"
+  },
+  "extra": {},
+  "expected": "신사임당과 이이는 관련이 있다"
+ },
+ {
+  "type": "from_period",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "조선",
+   "type": "period"
+  },
+  "extra": {},
+  "expected": "세종은 조선 사람이다"
+ },
+ {
+  "type": "from_period",
+  "dir": "out",
+  "self": {
+   "label": "임진왜란",
+   "type": "event"
+  },
+  "other": {
+   "label": "조선",
+   "type": "period"
+  },
+  "extra": {},
+  "expected": "임진왜란은 조선에 일어난 일이다"
+ },
+ {
+  "type": "from_period",
+  "dir": "out",
+  "self": {
+   "label": "훈민정음",
+   "type": "heritage"
+  },
+  "other": {
+   "label": "조선",
+   "type": "period"
+  },
+  "extra": {},
+  "expected": "훈민정음은 조선의 것이다"
+ },
+ {
+  "type": "from_period",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "1397년",
+   "type": "period"
+  },
+  "extra": {
+   "edge_label": "출생"
+  },
+  "expected": "세종은 1397년에 태어났다"
+ },
+ {
+  "type": "from_period",
+  "dir": "out",
+  "self": {
+   "label": "세종",
+   "type": "person"
+  },
+  "other": {
+   "label": "1450년",
+   "type": "period"
+  },
+  "extra": {
+   "edge_label": "사망"
+  },
+  "expected": "세종은 1450년에 죽었다"
+ },
+ {
+  "type": "dated_to",
+  "dir": "out",
+  "self": {
+   "label": "황진이",
+   "type": "person"
+  },
+  "other": {
+   "label": "1506년",
+   "type": "period"
+  },
+  "extra": {
+   "edge_label": "출생"
+  },
+  "expected": "황진이는 1506년에 태어났다"
+ },
+ {
+  "type": "dated_to",
+  "dir": "out",
+  "self": {
+   "label": "황진이",
+   "type": "person"
+  },
+  "other": {
+   "label": "1567년",
+   "type": "period"
+  },
+  "extra": {
+   "edge_label": "사망"
+  },
+  "expected": "황진이는 1567년에 죽었다"
+ },
+ {
+  "type": "dated_to",
+  "dir": "out",
+  "self": {
+   "label": "임진왜란",
+   "type": "event"
+  },
+  "other": {
+   "label": "1592년",
+   "type": "period"
+  },
+  "extra": {},
+  "expected": "임진왜란의 연표에 1592년이 있다"
+ }
+]

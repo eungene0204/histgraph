@@ -7,9 +7,14 @@
 
 상세 패널(`web/src/components/DetailPanel.jsx`)과 같은 것을 그리지만 같은
 일을 하지 않는다. 저쪽은 **파고드는** 자리라 근거 구절·인과 사슬·자취까지
-붙고, 이쪽은 **읽는** 자리라 이름·설명·이어진 것에서 멈춘다. 관계를 문장으로
-바꾸는 규칙(`relations.js` 의 SENTENCE)은 옮겨 오지 않았다 — 같은 규칙을 두
-벌 두면 한쪽만 고쳐진다.
+붙고, 이쪽은 **읽는** 자리라 이름·설명·이어진 것에서 멈춘다.
+
+관계를 문장으로 바꾸는 규칙은 **`sentences.py` 에 한 벌 더 있다** (2026-09-16).
+같은 표를 두 벌 두면 한쪽만 고쳐지므로 오래 미뤄 둔 것인데, 그 사이 이 장들은
+이름과 링크뿐인 종이였고 애드센스가 그것을 `Low value content` 로 돌려보냈다.
+관계를 읽어 주는 말 — "정도전은 제1차 왕자의 난에서 살해되었다" — 은 남의
+백과사전에 없는, 이 사이트가 판정해서 적은 것이다. 그래서 옮겨 오되 **어긋나면
+걸리게** 했다: 두 쪽이 같은 고정판(`tests/data/sentences.json`)을 잰다.
 
 여기도 §1 이 그대로 걸린다: 사람이 읽는 자리에 영어를 쓰지 않는다. **주소도
 사람이 읽는 자리다** — 그래서 주소의 칸도 한글이다 (`slugs.py`). 자료
@@ -20,15 +25,23 @@
 돌려보냈다. 그때 이 장은 설명 칸을 통째로 뿌리고 있었다 — 세조 25,093자,
 태조 18,787자, `== 생애 ==` 위키 문법까지 그대로. 로봇에게 그것은 남의
 백과사전을 긁어 온 페이지였다. 그래서 지금은 (1) 설명은 첫 몇 문장까지만,
-(2) 이 사이트만 아는 것 — 언제의 무엇이고 무엇과 몇 건이나 이어졌는지 — 를
-이 사이트의 말로 먼저 적고, (3) 그 둘이 다 얇은 장은 색인에 올리지 않는다.
+(2) 이 사이트의 말을 먼저 적고, (3) 그 둘이 다 얇은 장은 색인에 올리지 않는다.
 
-장의 짜임은 넷이다 (2026-09-11):
+**세는 말은 이 사이트의 말이 아니다** (2026-09-16). 그 첫머리는 오래
+`'여성제는 인물입니다. 시기 2 · 자녀 1 모두 3건과 이어져 있습니다.'` 였다 —
+3,118장에 글자까지 같은 틀이라, 읽는 사람에게도 로봇에게도 자동으로 찍어 낸
+문구다. 애드센스가 두 번째로 돌려보내며 이번에는 이유를 댔다
+(`Low value content`). 지금은 **관계를 문장으로 읽는다**: 속성처럼 읽히는
+관계(시대·출생지·직위)가 첫 문단이 되고, 이어진 것도 묶음이 작으면 문장으로
+선다. 세는 말은 묶음이 커서 목록으로 물러날 때만 남는다.
+
+장의 짜임은 넷이다 (2026-09-16):
 
     이름 · 갈래 · 시기      제목과 그 아래 한 줄
-    이 사이트의 말 · 요약    무엇이고 몇 건과 이어졌는지, 그다음 원문 요약
-    주요 사실 · 연표        속성처럼 읽히는 관계(시대·소재지·직위)와 연도가 있는 이웃
+    첫 문단 · 요약          속성 관계를 읽은 문장 몇, 그다음 원문 요약
+    연표                   연도가 있는 이웃
     이어진 것              관련 인물 · 사건 · 장소 · 유산과 작품 · 시대와 자리
+                           (작은 묶음은 문장, 큰 묶음은 이름 목록)
 
 로봇이 읽는 것은 그 위에 얹는다 — `JSON-LD`(Schema.org)·정본 주소·여는 그림·
 빵부스러기. **화면에는 한 자도 더 세우지 않는다**: 그것들은 `<script>`·
@@ -44,7 +57,7 @@ from html import escape
 from typing import NamedTuple
 from urllib.parse import quote, unquote
 
-from . import slugs
+from . import sentences, slugs
 from .ontology import NODE_TYPES
 
 # 링크를 절대 주소로 적어야 하는 자리(정본 주소·사이트맵). 배포 도메인이
@@ -106,6 +119,16 @@ LABEL_HEADS = ROLE_HEADS | set(LABEL_DIR_HEAD) | {"소속", "직위", "파조"}
 # 있는데, 문서로 읽는 화면에서 목록이 화면을 넘기면 아무도 안 읽는다.
 GROUP_MAX = 30
 
+# 묶음이 이만큼까지면 **문장**으로 읽고, 넘으면 이름 목록으로 물러난다.
+# 세종의 '자녀'는 열여섯인데 "세종의 부모는 …이다"를 열여섯 줄 세우면 그것이
+# 곧 자동 생성 문구다. 반대로 한둘짜리 묶음을 이름만 던져 두면 그 관계가
+# 무엇인지 아무 데도 안 적힌다 — '피해 · 1' 로는 정도전이 그 난에 죽었다는
+# 말이 되지 않는다 (§1-6).
+SENTENCE_MAX = 4
+
+# 첫 문단에 세울 문장 수. 속성처럼 읽히는 관계를 차례대로 읽는다.
+LEAD_SENTENCES = 3
+
 # 설명을 이만큼까지만 낸다 (문장 단위로 끊으므로 조금 넘을 수 있다). 인물
 # 항목의 도입부 한 문단이 대개 300~400자다 — 그 너머는 원문을 옮기는 일이지
 # 이 장이 할 말이 아니다.
@@ -116,8 +139,22 @@ SUMMARY_MAX = 360
 # 6,810개 색인 속에 깔려 읽을 것이 있는 장을 묻었다. 두 조건은 **모두**
 # 넘어야 한다: 설명이 길어도 아무것과 안 이어졌으면 이 사이트에 있을 까닭이
 # 없고, 관계가 많아도 설명이 한 줄이면 목록일 뿐이다.
-MIN_SUMMARY = 120
-MIN_RELATIONS = 3
+#
+# 2026-09-16 에 문턱을 올렸다 (120·3 → 200·9, 색인 3,118 → 571장).
+# 낮은 문턱을 겨우 넘은 장이 천 장 넘게 있었는데, 그런 장 하나는 머리·바닥을
+# 다 합쳐 400자에 링크 열한 개였다 — `/인물/여성제` 가 그랬다. 애드센스가
+# 사이트를 통째로 `Low value content` 로 돌려보낸 자리가 거기다. **장을
+# 늘리는 것이 아니라 줄이는 쪽**이 맞다: 얇은 장은 사람에게는 그대로 열리고
+# (주소도 링크도 그대로다) 사이트맵과 목록에서만 빠진다.
+#
+# **둘 중에서는 관계 쪽을 무겁게 잰다.** 요약은 남의 글을 줄인 것이고 우리가
+# 보탠 것은 관계다 — 관계가 많을수록 이 장이 제 말로 읽어 줄 문장도 많다.
+# 실측으로 같은 장 수(약 570)를 내는 조합 중 요약을 낮추고 관계를 올린 쪽을
+# 골랐다 — 장이 더 길다 (글자수 중앙값 930 대 900). 거제시가 그 차이다:
+# 요약은 220자뿐이지만 그 고장에서 태어나고 죽은 사람과 거기서 벌어진 전투를
+# 아홉 문장으로 읽어 준다. `240·8` 은 그 장을 스무 자 차이로 떨어뜨렸다.
+MIN_SUMMARY = 200
+MIN_RELATIONS = 9
 
 # 위키 문법의 절 제목 (`== 생애 ==`). 본문 전체를 받은 설명에 남아 있다.
 _HEADING = re.compile(r"^=+[ \t]*.+?[ \t]*=+[ \t]*$", re.M)
@@ -259,7 +296,9 @@ h1 { color: var(--text-normal); font-size: 1.8em; font-weight: 700; line-height:
 h1 .also { color: var(--text-muted); font-weight: 400; font-size: .65em; margin-left: 8px; }
 .kind { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.lead { color: var(--text-normal); font-size: 17px; margin: 0 0 14px; }
+.lead { color: var(--text-normal); font-size: 17px; line-height: 1.6; margin: 0 0 14px; }
+.lead a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--background-modifier-border); text-underline-offset: 3px; }
+.lead a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
 .desc { color: var(--text-normal); font-size: 16px; margin: 0 0 8px; }
 .src { color: var(--text-faint); font-size: 12px; margin: 0 0 18px; }
 .src a { color: var(--text-faint); text-decoration: underline; text-underline-offset: 2px; }
@@ -281,15 +320,11 @@ li a { color: var(--text-normal); text-decoration: none; }
 li a:hover { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
 li .meta { color: var(--text-faint); font-size: 12px; }
 .more { color: var(--text-faint); font-size: 12.5px; padding: 4px 0; }
-/* 주요 사실 — 속성처럼 읽히는 관계(시대·소재지·직위)를 표로 세운다. */
-.facts { margin: 0 0 4px; }
-.facts div { display: flex; gap: 12px; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius-s); font-size: 15px; }
-.facts div:hover { background: var(--background-modifier-hover); }
-.facts dt { flex: none; width: 84px; color: var(--text-faint); font-size: 12.5px; padding-top: 2px; }
-.facts dd { margin: 0; color: var(--text-normal); }
-.facts dd a { color: var(--text-normal); text-decoration: none; }
-.facts dd a:hover { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
-.facts dd span { color: var(--text-faint); }
+/* 작은 묶음은 문장으로 읽는다. 목록의 `li` 는 flex 라 이름과 조사가 따로
+   떨어지므로 (한 칸씩 벌어진다) 여기서만 글줄로 되돌린다. */
+.says li { display: block; padding: 4px 6px; font-size: 15px; line-height: 1.65; color: var(--text-normal); }
+.says li a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--background-modifier-border); text-underline-offset: 3px; }
+.says li a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
 /* 연표 — 해와 이름 두 칸. */
 .marks li { align-items: baseline; }
 .marks .when { flex: none; width: 84px; color: var(--text-faint); font-size: 12.5px; }
@@ -491,24 +526,79 @@ def _sections(relations: list[dict]) -> list[tuple[str, list[tuple[str, list[dic
     return out
 
 
-def _lead(title: str, kind: str, era: str,
-          sections: list[tuple[str, list[tuple[str, list[dict]]]]],
-          facts: list[tuple[str, list[dict]]], total: int) -> str:
-    """이 사이트의 말로 적는 첫 문단. 원문을 옮기지 않고 관계망이 아는
-    것만 말한다 — 언제의 무엇이고, 무엇과 몇 건이나 이어졌는지.
+def _sentence(rel: dict, node: dict) -> str:
+    """관계 하나를 문장으로. 규칙은 `sentences.py` 에 있다 (`relations.js` 의 짝)."""
+    return sentences.sentence(rel, node)
 
-    '조선 세종은 조선의 인물입니다. 자녀 18 · 사건 9 · 시기 3 등 모두 87건과
-    이어져 있습니다.' 생몰은 바로 위 갈래 줄에 있으니 되풀이하지 않는다.
-    """
-    first = f"{title}{_josa(title, '은', '는')} {era}{kind}입니다."
-    if not total:
-        return first
-    heads = [(head, len(rels)) for _title, ranked in sections for head, rels in ranked]
-    heads += [(name, len(rels)) for name, rels in facts]
-    heads.sort(key=lambda x: -x[1])
-    shown = " · ".join(f"{head} {n}" for head, n in heads[:4])
-    rest = " 등" if len(heads) > 4 else ""
-    return f"{first} {shown}{rest} 모두 {total}건과 이어져 있습니다."
+
+def _sentence_html(rel: dict, node: dict, paths: dict[str, str]) -> str:
+    """그 문장에서 **상대의 이름만** 링크로 만든다.
+
+    이름은 문장 안에 있지 따로 붙는 딱지가 아니다 — "정도전은 제1차 왕자의
+    난에서 살해되었다" 에서 눌러 갈 곳은 '제1차 왕자의 난'이다. 엣지는
+    출발 → 도착 순으로 읽으므로 **나가는 관계면 상대가 뒤**에 있고 들어오는
+    관계면 앞에 있다. 동명이인이라 주어와 상대의 이름이 같을 때 엉뚱한 쪽을
+    링크로 만들지 않으려고 찾는 방향을 가른다."""
+    text = _sentence(rel, node)
+    # 인과의 상대가 서술구로 적혀 있으면 문장에 선 것은 그 구다.
+    name = rel["as"] if (rel["type"] == "caused" and rel.get("as")) else rel["other"]["label"]
+    at = text.rfind(name) if rel.get("dir") == "out" else text.find(name)
+    url = href(_url_of(rel["other"]["id"], paths))
+    if at < 0:   # 문장이 이름을 안 쓰는 규칙이면 (지금은 없다) 뒤에 붙인다
+        return f'{escape(text)} <a href="{url}">{escape(name)}</a>'
+    return (escape(text[:at]) + f'<a href="{url}">{escape(name)}</a>'
+            + escape(text[at + len(name):]))
+
+
+# 주어를 지울 수 있는 조사. '은·는·이·가'는 그 자리에 주어가 섰다는 표식이고
+# '의'는 '세종의 어머니는' 처럼 주어를 앞에 세운 꼴이라 지워도 말이 남는다.
+# **'과·와'는 지우지 않는다** — '정도전과 정몽주는 …' 에서 앞을 지우면 남는
+# 것이 딴말이 된다.
+_SUBJECT_JOSA = ("은 ", "는 ", "이 ", "가 ", "의 ")
+
+
+def _drop_subject(text: str, title: str) -> str:
+    """이어지는 문장에서 되풀이되는 주어를 지운다.
+
+    '세종은 조선 사람이다. 세종은 통인동에서 태어났다. 세종은 안동별궁에서
+    죽었다.' → 뒤의 둘에서 '세종은'을 지운다. 한국어는 주어를 이어서 생략하는
+    말이라 그것이 오히려 제 꼴이고, 3,000장에 같은 이름이 세 줄씩 박히는 것은
+    사람이 쓴 글로 읽히지 않는다."""
+    for josa in _SUBJECT_JOSA:
+        if text.startswith(title + josa):
+            return text[len(title) + len(josa):]
+    return text
+
+
+def _lead(node: dict, facts: list[dict], paths: dict[str, str],
+          title: str, kind: str, era: str) -> tuple[str, str]:
+    """첫 문단. **이 사이트의 말**이 원문 요약보다 먼저 온다. (HTML, 맨글)
+
+    2026-09-16 이전에는 세는 말이었다 — '세종은 조선의 인물입니다. 자녀 16 ·
+    배우자 11 … 모두 68건과 이어져 있습니다.' 뜻은 맞지만 3,118장에 같은 틀이라
+    사람에게는 읽을 것이 없고 로봇에게는 찍어 낸 문구다. 지금은 **속성처럼
+    읽히는 관계를 문장으로** 읽는다 — 어느 시대 사람이고, 어디서 태어났고,
+    무슨 자리를 지냈는지. 장마다 다른 말이 되고, 그 말은 관계망이 아는 것이다.
+
+    붙일 관계가 하나도 없으면 갈래만 말한다. 그 장은 어차피 문턱에 걸린다."""
+    if not facts:
+        return (escape(f"{title}{_josa(title, '은', '는')} {era}{kind}이다."),
+                f"{title}{_josa(title, '은', '는')} {era}{kind}이다.")
+    htmls, plains = [], []
+    for i, r in enumerate(facts):
+        one = _sentence(r, node)
+        short = one if i == 0 else _drop_subject(one, title)
+        marked = _sentence_html(r, node, paths)
+        cut = len(escape(one)) - len(escape(short))
+        # 지운 만큼 링크가 붙은 쪽에서도 지운다. 앞머리에 태그가 있으면
+        # (상대가 문장 앞에 선 관계) 자르지 않는다 — 태그를 반 토막 낸다.
+        if short != one and "<" not in marked[:cut]:
+            marked = marked[cut:]
+        else:
+            short = one
+        htmls.append(marked + ".")
+        plains.append(short + ".")
+    return " ".join(htmls), " ".join(plains)
 
 
 def _origin_line(origin: dict | None) -> str:
@@ -884,10 +974,8 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
     other_ids = [r["other"]["id"] for r in relations]
     paths = slugs.paths_for(conn, other_ids)
     dates = _dates(conn, other_ids)
-    facts, rest = _facts(relations)
-    sections = _sections(rest)
-    total = sum(len(rels) for _t, ranked in sections for _h, rels in ranked)
-    total += sum(len(rels) for _n, rels in facts)
+    facts, _rest = _facts(relations)
+    lead_rels, sections, total = _page_parts(node)
     summary = summarize(desc)
     era_node = _era_of(facts)
     era = f"{era_node['label']}의 " if era_node else ""
@@ -913,10 +1001,10 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
         f'{escape(kind)}' + (f' · {escape(span)}' if span else "") + "</p>"
     )
 
-    # 이 사이트의 말이 먼저다 — 언제의 무엇이고 무엇과 이어졌는지는 원문이
-    # 아니라 관계망이 아는 것이다. 그다음에 원문 요약이 온다.
-    lead = _lead(title, kind, era, sections, facts, total)
-    parts.append(f'<p class="lead">{escape(lead)}</p>')
+    # 이 사이트의 말이 먼저다 — 어느 시대의 무엇이고 어디서 났고 무슨 자리를
+    # 지냈는지는 원문이 아니라 관계망이 아는 것이다. 그다음에 원문 요약이 온다.
+    lead_html, lead = _lead(node, lead_rels, paths, title, kind, era)
+    parts.append(f'<p class="lead">{lead_html}</p>')
     if summary:
         parts.append(f'<p class="desc">{escape(summary)}</p>')
         origin = _origin_line(node.get("desc_origin"))
@@ -928,17 +1016,6 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
     aliases = node.get("aliases") or []
     if aliases:
         parts.append(f'<p class="aka">다른 이름 · {escape(" · ".join(aliases))}</p>')
-
-    if facts:
-        parts.append("<h2>주요 사실</h2><dl class=\"facts\">")
-        for name, rels in facts:
-            links = " · ".join(
-                f'<a href="{href(_url_of(r["other"]["id"], paths))}">'
-                f'{escape(r["other"]["label"])}</a>' for r in rels[:FACT_MAX])
-            if len(rels) > FACT_MAX:
-                links += f' <span>외 {len(rels) - FACT_MAX}</span>'
-            parts.append(f"<div><dt>{escape(name)}</dt><dd>{links}</dd></div>")
-        parts.append("</dl>")
 
     marks = _marks(relations, dates)
     if len(marks) >= 2:
@@ -956,7 +1033,18 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
         for section, ranked in sections:
             parts.append(f"<h3>{escape(section)}</h3>")
             for head, rels in ranked:
-                parts.append(f'<p class="head">{escape(head)}</p><ul>')
+                # 작은 묶음은 **문장**이다. 그 관계가 무엇인지 말해 주는 것이
+                # 이름 하나를 던져 두는 것보다 읽을 것이 있고, 그 말은 남의
+                # 백과사전이 아니라 이 관계망이 판정해 적은 것이다 (§1-6).
+                if len(rels) <= SENTENCE_MAX:
+                    parts.append('<ul class="says">')
+                    parts.extend(f"<li>{_sentence_html(r, node, paths)}.</li>"
+                                 for r in rels)
+                    parts.append("</ul>")
+                    continue
+                # 큰 묶음은 이름 목록이다 — 같은 꼴의 문장 열여섯 줄은
+                # 읽을 것이 아니라 찍어 낸 것이다. 묶음 이름이 그 관계를 말한다.
+                parts.append(f'<p class="head">{escape(head)} {len(rels)}</p><ul>')
                 parts.extend(_link(r["other"], paths) for r in rels[:GROUP_MAX])
                 parts.append("</ul>")
                 if len(rels) > GROUP_MAX:
@@ -1006,6 +1094,10 @@ INDEX_EACH = 60
 # 갈래별 목록 장은 한 쪽에 이만큼. 로봇이 여기서 각 장으로 들어간다.
 PAGE_SIZE = 100
 
+# 목록 장도 이만큼은 세워야 색인에 오른다. 한두 줄짜리 목록은 그 자체가
+# 얇은 장이다 — 문턱을 올린 뒤 유산 1 · 직위 1 · 시대 2 가 그랬다.
+MIN_SEGMENT = 10
+
 # 목록 장에 세울 갈래와 그 머리말. 시대·직위(frame)는 두지 않는다 —
 # '조선'·'영의정' 은 읽을거리가 아니라 다른 항목을 묶는 틀이다.
 INDEX_KINDS = [
@@ -1038,13 +1130,58 @@ SEGMENT_LEAD = {
 }
 
 
+def _page_parts(node: dict) -> tuple[list[dict], list[tuple], int]:
+    """장이 실제로 세우는 것. (첫 문단이 읽을 관계, 아래 칸, 이어진 것 수)
+
+    **세는 자리가 하나여야 한다.** 목록·사이트맵은 SQL 의 차수(`degree`)로,
+    장은 제가 그린 수로 재던 때 둘이 후보 951 중 713 에서 달랐고 53장에서
+    판정이 갈렸다 — 거제시는 차수 10 · 그린 것 9 라 사이트맵에는 있는데 장은
+    `noindex` 였다. 차수는 같은 상대에게 두 번 걸린 엣지도 따로 세고 화면이
+    접는 것을 모른다. 읽는 사람이 보는 것은 그린 쪽이다."""
+    facts, rest = _facts(node.get("relations") or [])
+    # 첫 문단이 읽을 관계와 아래 목록이 맡을 나머지를 가른다. 첫 문단에 올린
+    # 것을 아래에 또 세우면 같은 말이 한 장에 두 번 선다. 갈래마다 **하나씩**
+    # 이다 — 정도전의 시대 엣지는 셋이라 그대로 읽으면 '…사람이다'가 세 줄 선다.
+    lead_rels: list[dict] = []
+    for _name, rels in facts:
+        head = rels[:1] if len(lead_rels) < LEAD_SENTENCES else []
+        lead_rels.extend(head)
+        rest.extend(rels[len(head):])
+    sections = _sections(rest)
+    total = sum(len(rels) for _t, ranked in sections for _h, rels in ranked)
+    return lead_rels, sections, total + len(lead_rels)
+
+
+def _row_indexable(api, node_id: str, description: str | None) -> bool:
+    """목록·사이트맵이 거는 문턱. **장이 거는 것과 같은 것**을 잰다 —
+    같은 설명(`_shown_desc`)과 같은 관계 수(`_page_parts`)."""
+    node = api.node(node_id)
+    if node is None:
+        return False
+    return indexable(summarize(_shown_desc(api, node_id, description)),
+                     _page_parts(node)[2])
+
+
+def _shown_desc(api, node_id: str, description: str | None) -> str:
+    """그 장이 실제로 세우는 설명. 정본이 아닌 글은 우리 말로 새로 쓴 것이
+    선다 (`summaries`). 늦게 들이는 것은 `summaries` 가 이 파일의 `summarize`
+    를 쓰기 때문이다 — 위에서 들이면 서로 물린다."""
+    from . import summaries
+    return summaries.lookup(api.store.conn, node_id, description) or (description or "")
+
+
 def _segment_rows(api, segment: str, *, limit: int | None = None,
                   offset: int = 0) -> tuple[list, int]:
     """그 갈래에서 **색인에 올릴 만한** 장들. (줄, 전부 몇 개인가)
 
     문턱(`indexable`)은 요약을 봐야 알 수 있는데 노드가 만 개다. 그래서
     SQL 로 먼저 걷어낸다 — 요약은 설명보다 길어질 수 없으므로 설명 길이가
-    문턱보다 짧으면 요약도 짧다. 남은 것만 파이썬이 정확히 잰다."""
+    문턱보다 짧으면 요약도 짧다. 남은 것만 파이썬이 정확히 잰다.
+
+    **장이 읽는 글과 같은 글을 재야 한다.** 정본이 아닌 설명은 우리 말로
+    새로 쓴 것(`summaries`)이 화면에 서고 그쪽이 더 짧다 — 원문으로 재면
+    목록·사이트맵은 '올린다'는데 정작 그 장은 `noindex` 를 달고 있다
+    (2026-09-16 실측 246건. 로봇에게는 사이트맵이 없는 장을 가리키는 꼴이다)."""
     node_type, form = slugs.SEGMENT_TYPE[segment]
     where = ["n.type = ?", "COALESCE(n.description,'') <> ''",
              "LENGTH(n.description) >= ?", "s.slug IS NOT NULL"]
@@ -1068,7 +1205,9 @@ def _segment_rows(api, segment: str, *, limit: int | None = None,
                  ORDER BY degree DESC, label""",
             (*args, MIN_RELATIONS),
         )
-        if indexable(summarize(r["description"]), r["degree"])
+        # 차수는 **앞걸름**에만 쓴다 — 장이 그리는 수는 그보다 적을 수는
+        # 있어도 많을 수는 없다. 문턱은 장이 거는 것과 같은 것으로 잰다.
+        if _row_indexable(api, r["id"], r["description"])
     ]
     total = len(rows)
     if limit is not None:
@@ -1132,6 +1271,8 @@ def segment_page(api, segment: str, page: int = 1) -> Page:
         f"{segment} — 한국사 관계망 | histgraph" if page == 1
         else f"{segment} ({page}쪽) — 한국사 관계망 | histgraph",
         description, canonical, "\n".join(parts),
+        # 세울 것이 몇 줄뿐인 목록 장은 색인에 올리지 않는다 (`MIN_SEGMENT`).
+        noindex=total < MIN_SEGMENT,
         ld=ld, keywords=f"{segment}, 한국사, 역사 관계망",
         prev_url=prev_url, next_url=next_url,
     ))
@@ -1169,15 +1310,19 @@ def index_page(api) -> Page:
         if total > len(rows):
             parts.append(f'<p class="more"><a href="{href(f"/{segment}/")}">'
                          f'{escape(head)} {total:,}개 모두 보기 →</a></p>')
-    # 나머지 갈래는 이름만 세운다 — 여기서 목록 장으로 들어간다.
-    rest = [s for s in slugs.SEGMENT_TYPE
-            if counts.get(s) and s not in [slugs.SEGMENTS[k] for k, _h in INDEX_KINDS]]
+    # 나머지 갈래는 이름만 세운다 — 여기서 목록 장으로 들어간다. 세는 수는
+    # **색인에 오를 것**이다. 슬러그 수(`counts`)로 세면 '유산 4,000' 이라
+    # 적어 놓고 눌러 가면 한 줄뿐인 장이 나온다 (2026-09-16 문턱을 올린 뒤).
+    seen = {slugs.SEGMENTS[k] for k, _h in INDEX_KINDS}
+    rest = [(s, _segment_rows(api, s)[1]) for s in slugs.SEGMENT_TYPE
+            if counts.get(s) and s not in seen]
+    rest = [(s, n) for s, n in rest if n >= MIN_SEGMENT]
     if rest:
         parts.append("<h2>다른 갈래</h2><ul>")
         parts.extend(
             f'<li><span class="dot" style="background:var(--frame)"></span>'
             f'<a href="{href(f"/{s}/")}">{escape(s)}</a>'
-            f'<span class="meta">{counts[s]:,}</span></li>' for s in rest)
+            f'<span class="meta">{n:,}</span></li>' for s, n in rest)
         parts.append("</ul>")
     parts.append('<a class="open" href="/">관계망에서 보기 →</a>')
     parts.append("</main>")
@@ -1213,9 +1358,13 @@ def _urlset(urls: list[str]) -> str:
 
 
 def _static_urls(api) -> list[str]:
+    """사이트맵에 드는 붙박이 장. **빈 목록 장은 넣지 않는다** — 문턱을
+    올린 뒤 작품·영화·책 갈래에 색인에 오를 장이 하나도 안 남았는데,
+    그 목록 장을 사이트맵에 적으면 로봇에게 빈 종이를 가리키는 꼴이다."""
     counts = slugs.counts(api.store.conn)
     return (["/", "/n/", "/privacy.html", "/terms.html"]
-            + [f"/{s}/" for s in slugs.SEGMENT_TYPE if counts.get(s)])
+            + [f"/{s}/" for s in slugs.SEGMENT_TYPE
+               if counts.get(s) and _segment_rows(api, s)[1] >= MIN_SEGMENT])
 
 
 def sitemap_index(api) -> Page:
