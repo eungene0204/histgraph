@@ -39,6 +39,7 @@ DEFAULT_TERMS = ROOT / "data" / "terms.tsv"
 DEFAULT_RECENT = ROOT / "data" / "recent.tsv"
 DEFAULT_CLANS = ROOT / "data" / "clans.tsv"
 DEFAULT_CREATORS = ROOT / "data" / "creators.tsv"
+DEFAULT_SPOUSES = ROOT / "data" / "spouses.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -2240,6 +2241,46 @@ def cmd_creators(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_spouses(args: argparse.Namespace) -> int:
+    """산문이 혼인이라 읽은 것을 표로 가른다 (`spouses` 모듈 머리글).
+
+        uv run histgraph spouses                 # 판정이 없는 후보를 센다
+        uv run histgraph spouses --show 40       # 근거와 함께 찍는다
+        uv run histgraph spouses --apply
+        uv run histgraph --db data/korea.sqlite spouses --apply
+    """
+    from . import spouses as sp
+
+    table = sp.load_table(args.table) if args.table.exists() else []
+    with GraphStore(args.db) as store:
+        if args.apply:
+            rep = sp.apply_table(store, table)
+            print(f"  표 {len(table)}줄 · 부부로 둔 것 {rep.kept} ·"
+                  f" 관련으로 낮춘 것 {rep.demoted} · 지운 것 {rep.deleted}")
+            if rep.missing:
+                print(f"    이 그래프에 없는 줄 {rep.missing} (딴 DB 의 것이거나 이미 씌웠다)")
+        left = sp.unjudged(store.conn, table)
+        total = store.conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE type = 'spouse_of'").fetchone()[0]
+
+    print(f"  서 있는 `spouse_of` 엣지 {total:,}건 ·"
+          f" 산문이 낸 것 중 판정이 없는 것 {len(left):,}건")
+    for c in left[:args.show or 0]:
+        note = json.loads(c["props"] or "{}").get("evidence") or ""
+        if isinstance(note, list):
+            note = " / ".join(note)
+        print(f'\n  {c["src"]}\t{c["dst"]}\t{c["a_label"]} — {c["b_label"]}')
+        print(f'    {note[:200]}')
+    if left:
+        # 관문. 추출을 다시 돌리면 새 `spouse_of` 가 들어온다 — 조용히 넘기면
+        # 화면이 "A 와 B 는 부부다"로 읽어 버린다 (CLAUDE.md §1-6·§1-15).
+        print(f"\n  ✗ 산문이 혼인이라 읽었는데 판정이 없는 쌍 {len(left):,} —"
+              f" {args.table} 에 적을 것 (`--show` 로 근거를 본다)", file=sys.stderr)
+        return 1
+    print("\n  ✓ 산문이 낸 혼인이 모두 판정돼 있다")
+    return 0
+
+
 def cmd_positions(args: argparse.Namespace) -> int:
     """왕조가 나눠 쓰는 임금 자리를 가른다 (`positions` 모듈 머리글).
 
@@ -3255,6 +3296,18 @@ def main(argv: list[str] | None = None) -> int:
                       help="판정이 없는 후보를 근거와 함께 찍는다")
     p_cr.add_argument("--show", type=int, default=0, help="찍을 후보 수")
     p_cr.set_defaults(func=cmd_creators)
+
+    p_sp = sub.add_parser(
+        "spouses", help="산문이 혼인이라 읽은 것을 표로 가른다 (`spouse_of` · 판정 표)"
+    )
+    p_sp.add_argument("--table", type=Path, default=DEFAULT_SPOUSES,
+                      help="판정 표 `인물 id<TAB>인물 id<TAB>판정<TAB>근거`"
+                           " (기본: data/spouses.tsv)")
+    p_sp.add_argument("--apply", action="store_true",
+                      help="표를 편집 계층에 적고 그래프에 씌운다 (기본은 세기만)")
+    p_sp.add_argument("--show", type=int, default=0,
+                      help="판정이 없는 후보를 근거와 함께 이만큼 찍는다")
+    p_sp.set_defaults(func=cmd_spouses)
 
     p_ps = sub.add_parser(
         "positions", help="왕조가 나눠 쓰는 임금 자리를 왕조별로 가른다"

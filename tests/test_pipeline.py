@@ -8767,6 +8767,89 @@ check("만든 방식마다 문장 규칙이 있다",
 # 같은 표를 두 벌 두면 한쪽만 고쳐진다. 그래서 **두 쪽이 같은 고정판을 잰다** —
 # 여기서 파이썬이, `web/tests/relations.test.mjs` 에서 자바스크립트가.
 # 저작권 한 줄을 상수 둘에 두고 글자까지 재는 것과 같은 방법이다 (CLAUDE.md §1).
+print("\n[혼인 — 산문이 인척을 아내라 읽은 것]")
+from histgraph import spouses as sp_mod  # noqa: E402
+
+_tmp_sp = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_sp.name) / "sp.sqlite") as _sp:
+    _sp.upsert_nodes([
+        Node(id="p:정도전", type="person", label="정도전", source="t"),
+        Node(id="p:정몽주", type="person", label="정몽주", source="t"),
+        Node(id="p:세종", type="person", label="세종", source="t"),
+        Node(id="p:소헌", type="person", label="소헌왕후", source="t"),
+        Node(id="p:송병준", type="person", label="송병준", source="t"),
+        Node(id="p:홍씨", type="person", label="홍씨", source="t"),
+    ])
+    _sp.upsert_edges([
+        # 산문이 낸 것 — 물어야 한다
+        Edge(src="p:정도전", dst="p:정몽주", type="spouse_of", source="extract"),
+        Edge(src="p:송병준", dst="p:홍씨", type="spouse_of", source="extract"),
+        # 혼인 칸에 적힌 것 — 묻지 않는다
+        Edge(src="p:세종", dst="p:소헌", type="spouse_of", source="wd"),
+    ])
+    check("묻는 것은 산문이 낸 것뿐이다 — 위키데이터의 배우자 칸은 묻지 않는다",
+          {(c["src"], c["dst"]) for c in sp_mod.candidates(_sp.conn)}
+          == {("p:정도전", "p:정몽주"), ("p:송병준", "p:홍씨")})
+    check("판정이 없으면 관문이 묻는다", len(sp_mod.unjudged(_sp.conn, [])) == 2)
+
+    _sp_rows = [sp_mod.TableRow("p:정도전", "p:정몽주", "관련", "벗이었으나 뜻이 갈렸다"),
+                sp_mod.TableRow("p:송병준", "p:홍씨", "삭제", "성씨 한 자를 사람으로 세운 줄이다")]
+    _rep = sp_mod.apply_table(_sp, _sp_rows)
+    check("'관련' 은 낮추는 것이지 지우는 것이 아니다 (§1-6)",
+          _rep.demoted == 1 and _rep.deleted == 1)
+    check("혼인이 아니라고 판정한 엣지는 없어진다",
+          not _sp.conn.execute(
+              "SELECT 1 FROM edges WHERE src='p:정도전' AND type='spouse_of'").fetchone())
+    _dem = _sp.conn.execute(
+        "SELECT props FROM edges WHERE src='p:정도전' AND type='related_to'").fetchone()
+    check("낮춘 자리에 근거가 남는다 — 화면이 그 관계의 근거로 읽는다",
+          _dem is not None and "벗이었으나" in _dem["props"], str(_dem and _dem["props"]))
+    check("'삭제' 는 아무 엣지도 남기지 않는다",
+          not _sp.conn.execute("SELECT 1 FROM edges WHERE src='p:송병준'").fetchone())
+    check("표를 씌운 뒤에는 관문이 묻지 않는다", not sp_mod.unjudged(_sp.conn, _sp_rows))
+    check("두 번 씌워도 결과가 같다",
+          sp_mod.apply_table(_sp, _sp_rows).demoted == 1
+          and _sp.conn.execute(
+              "SELECT COUNT(*) FROM edges WHERE src='p:정도전'").fetchone()[0] == 1)
+
+    # 수집이 되살려도 편집 계층이 다시 낮춘다.
+    _sp.upsert_edges([Edge(src="p:정도전", dst="p:정몽주", type="spouse_of", source="extract")])
+    check("재수집이 되살린 혼인을 편집 계층이 다시 지운다",
+          not _sp.conn.execute(
+              "SELECT 1 FROM edges WHERE src='p:정도전' AND type='spouse_of'").fetchone())
+
+    # 믿을 만한 자리가 혼인이라 적은 것을 표가 낮추려 하면 막는다 — 편집 계층의
+    # `deleted` 는 출처를 가리지 않아 그 줄까지 같이 지운다.
+    try:
+        sp_mod.apply_table(_sp, [sp_mod.TableRow("p:세종", "p:소헌", "관련", "아님")])
+        _blocked = False
+    except sp_mod.SpousesTableError:
+        _blocked = True
+    check("위키데이터가 혼인이라 적은 것은 표가 함부로 낮추지 못한다", _blocked)
+    check("막힌 뒤에도 그 엣지는 그대로다",
+          _sp.conn.execute(
+              "SELECT 1 FROM edges WHERE src='p:세종' AND type='spouse_of'").fetchone())
+_tmp_sp.cleanup()
+
+# 저장소의 표가 실제 그래프를 덮는가. 추출을 다시 돌려 새 혼인이 들어오면
+# 여기서 걸린다 — 조용히 넘기면 화면이 "A 와 B 는 부부다"로 읽는다.
+_sp_table = sp_mod.load_table(Path("data/spouses.tsv"))
+check("저장소의 판정 표가 백 줄 넘는다", len(_sp_table) > 100, str(len(_sp_table)))
+check("모든 판정이 부부·관련·삭제 중 하나다",
+      {r.verdict for r in _sp_table} <= set(sp_mod.VERDICTS),
+      str({r.verdict for r in _sp_table} - set(sp_mod.VERDICTS)))
+check("근거 칸이 다 차 있다 — 화면에 그 관계의 근거로 뜬다",
+      all(len(r.note) >= 6 for r in _sp_table),
+      str([r.note for r in _sp_table if len(r.note) < 6][:3]))
+for _db in (Path("data/korea.sqlite"), Path("data/histgraph.sqlite")):
+    if not _db.exists():
+        continue
+    with GraphStore(_db, readonly=True) as _g:
+        check(f"{_db.name} 에 판정 없는 혼인 후보가 없다",
+              not sp_mod.unjudged(_g.conn, _sp_table),
+              str([(c["a_label"], c["b_label"])
+                   for c in sp_mod.unjudged(_g.conn, _sp_table)][:5]))
+
 print("\n문장 규칙 — 두 벌이 같은 말을 하는가")
 from histgraph import sentences as _sen  # noqa: E402
 import json as _sen_json  # noqa: E402

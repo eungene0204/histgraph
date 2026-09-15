@@ -308,6 +308,35 @@ uv run histgraph --db data/korea.sqlite roles --table
 군사 반란의 판정 16건을 '지휘관'으로 되돌려 놓았다. 표(origin `roles`)가
 모델(origin `roles-model`)을 이긴다.
 
+**산문은 혼인도 잘못 읽는다** (2026-09-16). 같은 함정이 `spouse_of` 에 있었다 —
+산문이 혼인을 적는 자리에는 사위·장인·처남·형수·며느리가 같이 서는데, 추출은
+두 이름이 한 문장에 혼인의 낱말과 같이 서면 혼인으로 읽었다. 실측: 추출이 낸
+107쌍 중 **49쌍이 혼인이 아니었다** (영조와 며느리 헌경왕후, 세조와 형수
+현덕왕후, 논개와 그가 끌어안고 남강에 뛰어든 게야무라 로쿠스케). 글로 읽는
+장이 관계를 문장으로 읽기 시작하자 그것이 "A 와 B 는 부부다"로 섰다 (§1-15).
+
+재는 것은 `uv run histgraph spouses` 이고 판정은 `data/spouses.tsv` 가 한다 —
+`인물 id<TAB>인물 id<TAB>판정<TAB>근거`. 판정은 부부·관련·삭제 셋이다.
+**묻는 것은 산문이 낸 것뿐이다** — 위키데이터 P26 과 인포박스의 배우자 칸은
+혼인이라고 적힌 자리다 (`spouses.UNTRUSTED`). 표에 없는 후보가 남으면 종료
+코드 1. 원본과 파생본에 한 번씩:
+
+```
+uv run histgraph spouses --apply
+uv run histgraph --db data/korea.sqlite spouses --apply
+```
+
+- **혼인이 아닌 것을 지우지 않는다.** 사위도 형수도 참인 관계다 — `관련`으로
+  낮추면 근거 칸의 문장이 화면에 그 관계의 근거로 뜬다. 위의 §1-6 에서 배운 것을
+  그대로 지킨다 (삭제 114 중 43 이 참인 관계였다).
+- **더 정확한 타입은 여기서 정하지 않는다.** '이수형은 이세좌의 아들'은
+  `child_of` 가 맞지만 이 표가 답하는 물음은 '혼인인가' 하나다. `related_to` 로
+  낮춰 두면 근거가 남아 `untangle` 이 갈라 갈 수 있다.
+- **믿을 만한 자리가 혼인이라 적은 쌍은 낮추지 못한다** (종료 코드 1이 아니라
+  오류다). 편집 계층의 `deleted` 는 출처를 가리지 않아 그 줄까지 같이 지운다.
+- **첩·후처·계배도 혼인이다.** 한 사람만 배우자라고 정하는 것은 우리가 할 일이
+  아니다.
+
 ## 1-7. 한 자리를 여러 왕조가 나눠 쓰면 왕조별로 가른다
 
 2026-09-09 지적: "왕 노드에 왜 고려왕만 연결되어 있지? 조선 왕도 있는데".
@@ -617,7 +646,7 @@ uv run histgraph central         # 무게 다시 재기 (§2)
 수집(`ingest`·`enrich`)은 라벨·설명·엣지 props 를 통째로 덮어쓴다. 고친 값은
 **편집 계층(`overrides` 표)**에 남아 저장소가 쓸 때마다 다시 씌운다 (2026-09-05,
 README "편집 계층" 절) — `relabel`·`redescribe`·`describe`·`nikh`·`precision`·
-`reigns`·`dedupe`·`chronology`·`founding`·`roles --table`·`positions`·`terms`·`creators`·`events --table` 가 거기 적는다. 그래서 수집 뒤에 그 열을 **잊어도 고친
+`reigns`·`dedupe`·`chronology`·`founding`·`roles --table`·`positions`·`terms`·`creators`·`spouses`·`events --table` 가 거기 적는다. 그래서 수집 뒤에 그 열을 **잊어도 고친
 값은 돌아온다.** 다시 돌리는 것은 새로 고칠 것이 생겼을 때다. 그 다음
 `scope korea` 로 파생본을 만든다. `dedupe`·`untangle`(`related_to` 갈라 내기)은
 수집이 새 노드·새 `related_to` 를 내므로 수집 뒤마다 돌린다. **SQL 로
