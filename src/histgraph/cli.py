@@ -39,6 +39,7 @@ DEFAULT_TERMS = ROOT / "data" / "terms.tsv"
 DEFAULT_RECENT = ROOT / "data" / "recent.tsv"
 DEFAULT_CLANS = ROOT / "data" / "clans.tsv"
 DEFAULT_CREATORS = ROOT / "data" / "creators.tsv"
+DEFAULT_MAKERS = ROOT / "data" / "makers.tsv"
 DEFAULT_SPOUSES = ROOT / "data" / "spouses.tsv"
 
 
@@ -2216,6 +2217,15 @@ def cmd_creators(args: argparse.Namespace) -> int:
     try:
         with GraphStore(args.db) as store:
             if args.apply:
+                # 그래프에 없는 만든 사람을 먼저 세운다 — 그래야 표의 줄이
+                # 이을 끝을 찾는다 (`creators` 머리글 '그래프에 없는 만든 사람').
+                if args.makers.exists():
+                    mrep = cr.apply_makers(store, cr.load_makers(args.makers), table)
+                    print(f"  만든 사람 표 · 세운 인물 {mrep.made} ·"
+                          f" 이 DB 에 작품이 없어 건너뛴 것 {mrep.skipped}")
+                    for label, other in mrep.collided:
+                        print(f"    ✗ 같은 이름이 이미 있다: {label} ({other}) — 괄호로 가를 것",
+                              file=sys.stderr)
                 rep = cr.apply_table(store, table)
                 print(f"  표 {len(table)}줄 · 새로 세운 엣지 {rep.made} ·"
                       f" 역할을 고친 것 {rep.relabelled} · 지운 것 {rep.deleted}")
@@ -3288,6 +3298,8 @@ def main(argv: list[str] | None = None) -> int:
     p_cr.add_argument("--table", type=Path, default=DEFAULT_CREATORS,
                       help="판정 표 `작품 id<TAB>인물 id<TAB>역할<TAB>근거`"
                            " (기본: data/creators.tsv)")
+    p_cr.add_argument("--makers", type=Path, default=DEFAULT_MAKERS,
+                      help="그래프에 없는 만든 사람 표 (기본: data/makers.tsv)")
     p_cr.add_argument("--corpus", type=Path, default=None,
                       help="말뭉치 파일 (기본 data/corpus.sqlite)")
     p_cr.add_argument("--apply", action="store_true",

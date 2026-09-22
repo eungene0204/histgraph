@@ -8780,6 +8780,48 @@ with GraphStore(Path(_tmp_cr.name) / "g.sqlite") as _st:
     check("판정이 없으면 관문이 묻는다",
           {c.name for c in cr_mod.unjudged(_st, [])} == {"김정희", "세종"},
           str([c.name for c in cr_mod.unjudged(_st, [])]))
+
+# **그래프에 없는 만든 사람** (2026-09-23): 화승 임한은 위키데이터에 없어서
+# 통도사 아미타여래설법도의 설명에 이름이 있는데도 이을 끝이 없었다.
+_mk = Path(_tmp_cr.name) / "makers.tsv"
+_mk.write_text(
+    "kr:person:임한\t임한\t任閑\t18세기 전반\t화승\t18세기 전반 경상도에서 활동한 화승.\t통도사 화기\n"
+    "kr:person:딴사람\t딴사람\t-\t-\t-\t이 DB 에 작품이 없는 사람.\t시험\n"
+    "kr:person:세종\t세종\t-\t-\t화승\t이름이 겹치는 사람.\t시험\n",
+    encoding="utf-8")
+_mk_rows = [cr_mod.TableRow("khs:3", "kr:person:임한", "그림", "화기에 임한이 그렸다고 적혀 있다"),
+            cr_mod.TableRow("khs:9", "kr:person:딴사람", "그림", "시험"),
+            cr_mod.TableRow("khs:3", "kr:person:세종", "그림", "시험")]
+with GraphStore(Path(_tmp_cr.name) / "m.sqlite") as _st:
+    _st.upsert_nodes([
+        Node(id="khs:3", type="heritage", label="통도사 아미타여래설법도", source="khs",
+             description="화기에 의하면 임한이란 화사가 그린 것이다."),
+        Node(id="wd:Q37682", type="person", label="세종", source="wd"),
+    ])
+    _mrep = cr_mod.apply_makers(_st, cr_mod.load_makers(_mk), _mk_rows)
+    check("표의 만든 사람을 인물 노드로 세운다", _mrep.made == 1, str(_mrep))
+    check("이 DB 에 그의 작품이 없으면 세우지 않는다", _mrep.skipped == 1, str(_mrep))
+    check("이름이 겹치면 세우지 않고 보고한다",
+          _mrep.collided == [("세종", "wd:Q37682")], str(_mrep.collided))
+    check("한자는 별칭으로 남는다",
+          _st.conn.execute("SELECT 1 FROM aliases WHERE node_id='kr:person:임한'"
+                           " AND alias='任閑'").fetchone() is not None)
+    cr_mod.apply_table(_st, _mk_rows[:1])
+    check("세운 사람에게 작품이 이어진다",
+          _st.conn.execute("SELECT label FROM edges WHERE src='kr:person:임한'"
+                           " AND dst='khs:3' AND type='created'").fetchone()[0] == "그림")
+for _bad, _why in (
+    ("wd:Q1\t임한\t-\t-\t-\t설명.\t근거\n", "만든 사람 표의 id 는 kr:person: 이다"),
+    ("kr:person:X\tImhan\t-\t-\t-\t설명.\t근거\n", "만든 사람의 이름은 한국어다"),
+    ("kr:person:임한\t임한\t-\t-\t-\t\t근거\n", "만든 사람의 설명이 비면 막는다"),
+):
+    _p = Path(_tmp_cr.name) / "badm.tsv"
+    _p.write_text(_bad, encoding="utf-8")
+    try:
+        cr_mod.load_makers(_p)
+        check(_why, False, "막지 않았다")
+    except cr_mod.CreatorsTableError:
+        check(_why, True)
 _tmp_cr.cleanup()
 
 # 저장소에 실린 표가 실제 그래프와 맞는가.

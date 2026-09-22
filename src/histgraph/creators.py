@@ -54,6 +54,32 @@
     uv run histgraph creators --scan --show 200   # 판정이 없는 후보를 읽는다
     uv run histgraph creators --apply
     uv run histgraph --db data/korea.sqlite creators --apply
+
+## 그래프에 없는 만든 사람 (`data/makers.tsv`)
+
+2026-09-23 지적: "'통도사 아미타여래설법도' 같은 문화재에 누가 만들었는데
+없는 경우가 많아." 설명에는 "화기(畵記)에 의하면 임한(任閑)이란 화사가 그린
+것"이라고 적혀 있었는데, 위의 훑기는 **그래프에 있는 인물 이름만** 놓고
+찾으므로 임한이 후보로 오르지도 않았다. 불화의 화승, 불상의 조각승, 범종의
+주종장, 판목의 각수는 거의 다 위키데이터에 항목이 없다 — 그래프에 없는 것이
+정상이고, 그래서 유물 쪽에서 만든 사람이 통째로 비어 있었다.
+
+그 사람들을 사람이 표에 적어 세운다 (`handmade` 의 사건 표와 같은 자리):
+
+    인물 id<TAB>이름<TAB>한자<TAB>활동 연대<TAB>신분<TAB>설명<TAB>근거[<TAB>별칭]
+
+한자·별칭 칸은 가운뎃점(·)으로 여럿을 적는다 — 한 화승이 작품마다 다른
+글자로 적힌 것(의겸 義謙·儀謙·義兼)은 한 사람이다.
+
+- id 는 `kr:person:` 으로 시작한다. 이름이 이미 다른 인물의 라벨이면 괄호로
+  가른다 — `수연 (조각승)` (CLAUDE.md §1-2).
+- 같은 이름이 여러 작품에 나오면 **연대가 이어질 때만** 한 사람이다. 화승
+  의겸이 1720~1750년대에 그린 불화 열한 점은 한 사람이지만, 이름만 같고 백 년
+  떨어진 것은 둘이다.
+- 설명은 표가 적는다. 비면 `scope` 가 그 사람을 뺀다 (§1-3).
+- 작품과 잇는 것은 여전히 `creators.tsv` 다. 이 표는 노드만 세운다. 이 DB 에
+  그 사람이 만든 작품이 하나도 없으면 세우지 않는다 — 파생본에 고아가 서지
+  않게.
 """
 
 from __future__ import annotations
@@ -339,6 +365,103 @@ def apply_table(store: GraphStore, table: list[TableRow]) -> TableReport:
             c.execute("UPDATE edges SET label = ?, props = ? WHERE rowid = ?",
                       (row.role, json.dumps(props, ensure_ascii=False), e["rowid"]))
         rep.relabelled += 1
+    c.commit()
+    return rep
+
+
+# --- 그래프에 없는 만든 사람 --------------------------------------------------
+
+MAKER_PREFIX = "kr:person:"
+MAKER_ORIGIN = "makers-table"
+
+
+@dataclass(frozen=True)
+class Maker:
+    id: str
+    label: str
+    hanja: str
+    active: str
+    status: str
+    desc: str
+    note: str
+    aliases: tuple[str, ...] = ()
+
+
+def load_makers(path: Path) -> list[Maker]:
+    from .koreanize import has_hangul
+
+    rows: list[Maker] = []
+    seen: set[str] = set()
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        parts = [p.strip() for p in raw.rstrip("\n").split("\t")]
+        if len(parts) < 7 or not all(parts[:7]):
+            raise CreatorsTableError(
+                f"{path}:{lineno} 인물 id·이름·한자·활동 연대·신분·설명·근거 일곱 칸입니다"
+                f" (모르는 칸은 -): {raw!r}")
+        extra = tuple(a for a in (parts[7].split("·") if len(parts) > 7 else ()) if a)
+        m = Maker(*parts[:7], aliases=extra)
+        if not m.id.startswith(MAKER_PREFIX):
+            raise CreatorsTableError(f"{path}:{lineno} id 는 {MAKER_PREFIX} 로 시작합니다: {m.id!r}")
+        if not has_hangul(m.label) or not has_hangul(m.desc):
+            raise CreatorsTableError(f"{path}:{lineno} 이름과 설명은 한국어로 적습니다 (§1): {raw!r}")
+        if m.id in seen:
+            raise CreatorsTableError(f"{path}:{lineno} 같은 id 가 두 번 적혔습니다: {m.id!r}")
+        seen.add(m.id)
+        rows.append(m)
+    return rows
+
+
+@dataclass
+class MakersReport:
+    made: int = 0
+    skipped: int = 0                                   # 이 DB 에 그의 작품이 없다
+    collided: list[tuple[str, str]] = field(default_factory=list)   # (이름, 이미 있는 id)
+
+
+def apply_makers(store: GraphStore, makers: list[Maker], table: list[TableRow]) -> MakersReport:
+    """표의 사람을 인물 노드로 세운다. 여러 번 돌려도 결과가 같다."""
+    from .ontology import Node
+
+    c = store.conn
+    rep = MakersReport()
+    works: dict[str, list[str]] = collections.defaultdict(list)
+    for r in table:
+        if r.role in ROLES:
+            works[r.person].append(r.work)
+    nodes: list[Node] = []
+    for m in makers:
+        present = [w for w in works.get(m.id, ())
+                   if c.execute("SELECT 1 FROM nodes WHERE id = ?", (w,)).fetchone()]
+        if not present:
+            rep.skipped += 1
+            continue
+        other = c.execute(
+            "SELECT id FROM nodes WHERE label = ? AND id != ?", (m.label, m.id)).fetchone()
+        if other is not None:
+            # 이름이 겹치면 세우지 않는다 — 같은 사람이면 그 id 로 이어야 하고,
+            # 다른 사람이면 괄호로 갈라 적어야 한다 (§1-2).
+            rep.collided.append((m.label, other["id"]))
+            continue
+        aliases = [a for a in m.hanja.split("·") if a and a != "-"] + list(m.aliases)
+        base = m.label.split(" (")[0]
+        if base != m.label:
+            aliases.append(base)
+        nodes.append(Node(
+            id=m.id, type="person", label=m.label, source="hand",
+            description=m.desc, aliases=aliases,
+            props={"handmade": True, "maker": m.status if m.status != "-" else "",
+                   "active": m.active if m.active != "-" else "",
+                   "hanja": m.hanja if m.hanja != "-" else "", "note": m.note},
+        ))
+        rep.made += 1
+    if nodes:
+        store.upsert_nodes(nodes)
+        for n in nodes:
+            m = next(x for x in makers if x.id == n.id)
+            ov.record(c, "node", m.id, "label", m.label, MAKER_ORIGIN, m.note)
+            ov.record(c, "node", m.id, "description", m.desc, MAKER_ORIGIN, m.note)
     c.commit()
     return rep
 
