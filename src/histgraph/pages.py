@@ -327,7 +327,9 @@ li .meta { color: var(--text-faint); font-size: 12px; }
 .says li a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
 /* 연표 — 해와 이름 두 칸. */
 .marks li { align-items: baseline; }
-.marks .when { flex: none; width: 84px; color: var(--text-faint); font-size: 12.5px; }
+/* 구간('1392년 ~ 1897년')은 84px 을 넘는다 — 줄을 꺾으면 '년' 한 글자가
+   다음 줄에 떨어지므로 칸이 늘어난다. */
+.marks .when { flex: none; min-width: 84px; white-space: nowrap; color: var(--text-faint); font-size: 12.5px; }
 .open {
   display: inline-block; margin-top: 26px; padding: 7px 14px;
   border: 1px solid var(--background-modifier-border); border-radius: 5px;

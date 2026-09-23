@@ -165,6 +165,8 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 /* Obsidian 의 스크롤바 — 가늘고, 트랙은 없고, 잡이만 반투명. */
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
+/* 가로·세로 스크롤바가 만나는 귀퉁이 — 기본이 흰 네모라 어두운 화면에 뜬다. */
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb); border-radius: var(--radius-l);
   border: 3px solid transparent; background-clip: padding-box;
@@ -1349,3 +1351,152 @@ a.era { text-decoration: none; }   /* 링크(내 역사·한국사)도 탭처럼
   .life-spinner { animation: life-breathe 1.6s ease-in-out infinite; }
 }
 @keyframes life-breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+
+/* --- 휴대폰 (2026-09-23 사용자: "핸드폰으로 접속해서 봤을때도 일그러지거나
+   깨지지 않게") ---
+   넓은 화면의 세 칸(연표 | 그래프 | 상세)은 390px 에 못 들어간다 — 연표 252 +
+   상세 348 만으로 화면이 넘쳐서 그래프가 오른쪽 한 줄로 밀려났다. 좁은 화면에서는
+   **그래프가 화면을 다 쓰고** 나머지 둘은 그 위로 불러낸다:
+
+   - 머리 줄은 두 줄이다. 위에 상표·시대·아이콘, 아래에 검색을 폭 가득.
+   - 연표는 왼쪽에서 밀려 나오는 서랍이다 (캔버스 오른쪽 위 '연표' 단추).
+     display 로 감추지 않고 밀어 둔다 — TimelineRail 이 제 폭(clientWidth)을 재서
+     그리므로 감춰 두면 폭 0 으로 그린다.
+   - 상세는 아래 시트다. 덮어 띄우지 않고 **세로로 자리를 나눈다** — 덮으면
+     focusOn 이 캔버스 한가운데 세운 노드가 시트 밑에 깔린다. 나누면 캔버스가
+     줄어든 만큼 엔진이 다시 재고(ResizeObserver) 남은 칸 한가운데에 세운다.
+
+   넓은 화면에서만 쓰는 손잡이들은 여기 밖에서 감춘다. */
+.rail-toggle, .rail-scrim, .d-grip, .life-pane-toggle { display: none; }
+
+@media (max-width: 720px) {
+  /* 주소창이 오르내리는 휴대폰 브라우저에서 100% 는 가장 큰 화면을 잡아 바닥
+     줄이 주소창 밑에 깔린다. dvh 는 지금 보이는 높이다. */
+  body { height: 100dvh; }
+
+  /* 머리 줄 — 두 줄 격자. 세 칸(1fr·640·1fr)을 그대로 두면 각 칸이 130px 로
+     눌려 '고조선~대한민국'이 한 글자씩 세로로 선다. */
+  .top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand right" "search search";
+    height: auto; row-gap: 8px; column-gap: 8px;
+    padding: 8px 12px 10px;
+  }
+  .brand { grid-area: brand; min-width: 0; gap: 6px; }
+  .brand h1 { display: none; }            /* 점 세 개가 상표를 대신한다 */
+  .brand .mark { margin-right: 14px; }    /* 그림자로 붙은 두 점의 자리 */
+  .era { white-space: nowrap; flex: none; padding: 5px 8px; }
+  .brand > button.era { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .top > .search { grid-area: search; grid-column: 1 / -1; }
+  .top-right { grid-area: right; grid-column: auto; }
+  /* 16px 아래면 iOS 사파리가 입력칸을 누를 때 화면을 확대하고 안 돌아온다. */
+  .search input { height: 40px; font-size: 16px; }
+  .results { max-height: 60dvh; }
+  /* 말풍선이 화면 오른쪽 밖으로 나가지 않게 줄을 허락한다. */
+  .era .life-nudge { white-space: normal; width: max-content; max-width: 62vw; }
+  /* 말풍선이 검색칸 위에 걸린다 — 검색을 누르면 비켜 준다. */
+  .top:focus-within .life-nudge { display: none; }
+
+  /* 배치 — 그래프 위, 상세 아래. 연표는 이 틀 위에 뜬다. */
+  .layout { flex-direction: column; position: relative; }
+  .stage-wrap { min-height: 0; }
+
+  .timeline {
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 25;
+    width: min(86vw, 320px);
+    transform: translateX(-102%);
+    transition: transform .2s ease;
+    box-shadow: var(--shadow-l);
+  }
+  .layout.rail-open .timeline { transform: none; }
+  .rail-scrim {
+    display: block; position: absolute; inset: 0; z-index: 24;
+    background: rgba(0, 0, 0, .45);
+  }
+  .rail-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    position: absolute; top: 12px; right: 12px; z-index: 6;
+    height: 34px; padding: 0 12px;
+    border: 1px solid var(--background-modifier-border); border-radius: var(--pill-radius);
+    background: var(--background-secondary); color: var(--text-normal);
+    font: inherit; font-size: var(--font-ui-small); cursor: pointer;
+    box-shadow: var(--shadow-s);
+  }
+  .rail-toggle svg { width: 16px; height: 16px; }
+
+  /* 설정 상자가 화면을 다 덮지 않게 — 캔버스 폭에서 여백만 뺀다. */
+  .graph-controls { width: min(var(--graph-controls-width), calc(100% - 24px)); }
+  .stage-note { right: 12px; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 상세 — 아래 시트 */
+  .detail {
+    width: auto; height: 52%; flex: none;
+    border-left: none; border-top: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    padding-top: 22px;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, .25);
+  }
+  .detail.is-tall { height: 88%; }
+  .d-grip {
+    display: block; position: sticky; top: -22px; z-index: 4;
+    width: 100%; height: 22px; margin: -22px 0 0;
+    border: none; background: var(--background-secondary); cursor: pointer;
+  }
+  .d-grip::before {
+    content: ''; display: block; margin: 8px auto 0;
+    width: 36px; height: 4px; border-radius: 2px;
+    background: var(--background-modifier-border-hover);
+  }
+  .detail .close, .detail .d-star { top: 16px; }
+  .d-back { top: 0; }
+
+  /* 손가락으로 누르는 자리는 44px 가까이 — 아이콘 단추가 28px 이면 옆을 누른다. */
+  .clickable-icon { width: 36px; height: 36px; }
+
+  /* 바닥 줄 — 한 줄에 안 들어가면 두 줄로 선다. 저작권 문장은 **말줄임으로 자르지
+     않는다** (CLAUDE.md §1: 어느 화면에나 같은 한 문장이다 — 앞머리만 보인다고
+     지적받았다). 방침·약관이 오른쪽 끝에 남도록 글줄째 넘긴다. */
+  .foot { height: auto; min-height: 24px; flex-wrap: wrap; row-gap: 2px;
+    padding: 3px 8px calc(3px + env(safe-area-inset-bottom)); }
+  .foot a { flex: none; }
+}
+
+/* 내 역사 — 휴대폰. 머리 줄 둘째 줄에 입력·이야기·판 바꾸기가 서고, 판(연표)과
+   관계망은 한 번에 하나만 폭 가득 선다. 판은 세 열(644px)이 그대로라 판 안에서
+   가로로 훑는다 — 열을 줄이면 이름이 다 잘린다. 상세는 한국사 장과 같은 아래
+   시트이고, 접으면 오른쪽 아래 '상세' 알약이 남는다. */
+@media (max-width: 720px) {
+  .life-top { grid-template-areas: "brand right" "tools tools"; }
+  .life-tools { grid-area: tools; grid-column: 1 / -1; flex-wrap: wrap; }
+  .life-tools .life-btn { font-size: var(--font-ui-small); padding: 6px 12px; }
+  .life-pane-toggle { display: inline-flex; margin-left: auto; }
+  .life-search { width: min(40vw, 180px); }
+  .life-search input { font-size: 16px; height: 34px; }
+  .life-search .results { width: min(320px, calc(100vw - 24px)); }
+  .life-toast { top: 100px; max-width: calc(100vw - 32px); }
+
+  .life-layout .life-board { flex: 1; width: auto !important; border-right: none; }
+  /* 관계망은 display 로 감추지 않는다 — 크기 0 인 상자에서 만들어진 3D 엔진은
+     드러난 뒤에도 화면 맞춤이 어긋난다 (실측: 구름이 오른쪽 아래로 치우쳤다).
+     제 크기로 판 뒤에 깔아 두고 안 보이게만 한다. */
+  .life-layout .stage-wrap { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+  .life-layout.pane-graph .life-board { visibility: hidden; }
+  .life-layout.pane-graph .stage-wrap { visibility: visible; pointer-events: auto; z-index: 1; }
+
+  .life-detail { padding-top: 0; transition: none; }
+  .life-detail .life-tabs { border-radius: var(--radius-l) var(--radius-l) 0 0; }
+  .life-detail.is-folded { display: none; }
+  .life-detail-peek {
+    top: auto; bottom: 56px; right: 12px; transform: none;
+    flex-direction: row; padding: 8px 14px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--pill-radius); box-shadow: var(--shadow-s);
+  }
+  .life-detail-peek span { writing-mode: horizontal-tb; letter-spacing: 0; }
+  .life-detail-peek svg { transform: rotate(90deg); }
+  .life-detail-fold svg { transform: rotate(90deg); }   /* 시트는 아래로 접힌다 */
+  /* 이야기 상자 — 16px 아래면 iOS 가 확대한다. 단추 줄은 넘치면 접는다. */
+  .life-story textarea { font-size: 16px; height: 34dvh; }
+  .life-paste-row { flex-wrap: wrap; }
+  .life-log-box { padding: 18px 16px 14px; max-height: 86dvh; }
+}

@@ -45,6 +45,10 @@ export default function App() {
   const [timeline, setTimeline] = useState(null);   // 연표 자료
   const [note, setNote] = useState(null);
   const [sideOpen, setSideOpen] = useState(false);
+  // 좁은 화면(휴대폰)에서 연표는 옆에 서지 않고 왼쪽에서 밀려 나오는 서랍이다
+  // (style.css 의 '휴대폰' 절). 넓은 화면에서는 이 값이 아무것도 바꾸지 않는다 —
+  // 그래서 화면 폭을 JS 로 재지 않고 늘 들고만 있는다.
+  const [railOpen, setRailOpen] = useState(false);
   const [ready, setReady] = useState(false);        // 그래프를 한 번이라도 그렸나
   // 자료 서버에 못 닿은 상태. 화면에는 '아직 아무것도 안 골랐다'와
   // 똑같이 비어 보이므로, 둘을 갈라 적으려고 따로 든다.
@@ -236,7 +240,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (ev) => {
       // Esc 는 패널을 닫는다 — 깊이 들어갔다고 한 칸씩만 나가야 하면 답답하다
-      if (ev.key === 'Escape') closeDetail();
+      if (ev.key === 'Escape') { closeDetail(); setRailOpen(false); }
       // 브라우저의 뒤로가기 몸짓은 상세 안에서 상위로 올라가는 뜻으로 받는다
       if (ev.key === 'ArrowLeft' && (ev.altKey || ev.metaKey) && trail.length) {
         ev.preventDefault();
@@ -365,8 +369,12 @@ export default function App() {
         />
       )}
 
-      <div className="layout">
-        <TimelinePanel railRef={railRef} data={timeline} onPick={visit} />
+      <div className={`layout${railOpen ? ' rail-open' : ''}`}>
+        {/* 서랍으로 연 연표에서 고르면 서랍을 닫는다 — 고른 것은 그래프와 아래
+            상세에 서고, 서랍이 그것을 덮고 있으면 누른 보람이 안 보인다. */}
+        <TimelinePanel railRef={railRef} data={timeline}
+                       onPick={(id) => { setRailOpen(false); visit(id); }} />
+        {railOpen && <div className="rail-scrim" onClick={() => setRailOpen(false)} />}
 
         {/* 그래프 설정은 캔버스 위 오른쪽 위에 뜬다 (Obsidian 의 graph-controls).
             사이드바가 아니라 캔버스의 일부라서 같은 틀에 담는다. */}
@@ -396,6 +404,17 @@ export default function App() {
           onSettings={changeSettings}
           onPick={(id) => load(id)}
         />
+        {/* 휴대폰에서만 보이는 연표 손잡이 (넓은 화면에서는 연표가 늘 옆에 있다). */}
+        {timeline && settings.showRail && (
+          <button type="button" className="rail-toggle" aria-expanded={railOpen}
+                  onClick={() => setRailOpen((v) => !v)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                 strokeLinecap="round" aria-hidden="true">
+              <path d="M6 3v18M6 7h9M6 12h12M6 17h7" />
+            </svg>
+            연표
+          </button>
+        )}
         </div>
 
         <DetailPanel

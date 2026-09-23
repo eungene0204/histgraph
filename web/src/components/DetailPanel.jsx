@@ -123,6 +123,8 @@ function Evidence({ text, shared = false }) {
 
 export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
   const boxRef = useRef(null);
+  // 휴대폰에서 상세는 아래 시트다 — 손잡이를 누르면 화면 대부분으로 올라온다.
+  const [tall, setTall] = useState(false);
 
   // 옮겨간 곳은 머리부터 읽는다
   useEffect(() => { if (boxRef.current) boxRef.current.scrollTop = 0; }, [node?.id]);
@@ -139,7 +141,11 @@ export function DetailPanel({ node, prev, onClose, onBack, onVisit }) {
   const via = prev ? cardsFor(groups, prev.id) : [];
 
   return (
-    <aside className="detail" ref={boxRef}>
+    <aside className={`detail${tall ? ' is-tall' : ''}`} ref={boxRef}>
+      {/* 시트 손잡이 — 넓은 화면에서는 CSS 가 감춘다. */}
+      <button type="button" className="d-grip" aria-expanded={tall}
+              aria-label={tall ? '상세 내리기' : '상세 올리기'}
+              onClick={() => setTall((v) => !v)} />
       <BookmarkStar node={d} />
       <button className="clickable-icon close" aria-label="닫기" onClick={onClose}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"

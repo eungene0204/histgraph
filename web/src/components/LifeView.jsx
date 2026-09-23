@@ -162,7 +162,10 @@ export default function LifeView() {
   // **브라우저에 남기지 않는다** — 노드를 고르면 저절로 펴지므로(아래 pick)
   // 접힌 채로 저장해 두면 다음에 열 때만 한 번 어긋나 보인다. 접은 것은
   // '지금 넓게 보고 싶다'는 그때의 뜻이지 이 사람의 설정이 아니다.
-  const [detailOpen, setDetailOpen] = useState(true);
+  // 휴대폰에서는 접은 채로 연다 — 아래 시트가 아무것도 안 고른 안내 한 줄로
+  // 화면 절반을 먹는다. 사건을 고르면 펴진다 (pick).
+  const [detailOpen, setDetailOpen] = useState(
+    () => !(typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches));
   // --- 한국사를 이 화면에서 본다 ------------------------------------------
   // 2026-09-10 사용자: "내 역사에서 한국사 사건을 연표에서 클릭하면 한국사
   // 페이지로 이동하는데 그러지 말고 한국사 그래프와 노드 정보를 그 페이지에서
@@ -218,6 +221,10 @@ export default function LifeView() {
   // 동시에 보여줘"). 역사 화면과 같은 배치 — 왼쪽 연표, 가운데 그래프, 오른쪽
   // 상세. 연표는 접지 않는다 (2026-09-08 — 세 열을 좁게 잡아 접을 이유가 없어졌다).
   const [sideOpen, setSideOpen] = useState(false);
+  // 휴대폰에서는 연표 판과 관계망이 한 화면을 나눠 쓰지 못한다 (판만 644px 이다).
+  // 둘 중 하나를 폭 가득 세우고 머리 줄의 단추로 갈아 본다 — style.css '휴대폰' 절.
+  // 넓은 화면에서는 이 값이 아무것도 바꾸지 않는다.
+  const [pane, setPane] = useState('board');
   const [settings, setSettings] = useState({
     depth: 2, limit: 120, includePeriod: false, hiddenEdges: [],
     showLabels: true, showRail: true, arrows: true,
@@ -828,6 +835,13 @@ export default function LifeView() {
               <StoryLogIcon />
             </button>
           )}
+          {/* 휴대폰에서만 보이는 판 바꾸기 — 지금 안 보이는 쪽의 이름을 적는다. */}
+          {life && (
+            <button type="button" className="life-btn life-pane-toggle"
+                    onClick={() => setPane(pane === 'graph' ? 'board' : 'graph')}>
+              {pane === 'graph' ? '연표 보기' : '관계망 보기'}
+            </button>
+          )}
           {/* 계정에 두는 단추는 없다 — 저절로 올라간다 (위 keepInAccount 머리글). */}
         </div>
         {/* 머리 줄 오른쪽 끝 — 검색이 안쪽, 화면 밝기가 바깥쪽이다. 한국사
@@ -849,7 +863,7 @@ export default function LifeView() {
                             onPick={pickStory} onDrop={dropStory}
                             onClose={() => setLogOpen(false)} />}
 
-      <div className="layout life-layout">
+      <div className={`layout life-layout${pane === 'graph' ? ' pane-graph' : ''}`}>
         {/* 연표 판은 늘 붙어 있다(LifeBoard 가 DOM 을 쥔다). 자료가 없으면 빈
             안내가 이 자리를 다 쓰고, 있으면 세 열 너비로 왼쪽에 선다 — 단 화면의
             45% 까지다. 1440px 에서 864px 를 다 주면 그래프 폭이 0 이 된다 (실측).

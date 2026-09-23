@@ -1643,6 +1643,9 @@ export class LifeBoard {
       ev.preventDefault();
       this.onHistory(hist.dataset.id);
     });
+    // 열 머리는 판과 같이 가로로 움직인다 — 좁은 화면에서 판을 가로로 훑으면
+    // 머리만 제자리에 남아 '한국사' 머리 밑에 내 사건이 선다.
+    this.body.addEventListener('scroll', () => { this.head.scrollLeft = this.body.scrollLeft; }, { passive: true });
     this._ro = new ResizeObserver(() => this.layout());
     this._ro.observe(this.body);
   }
@@ -1729,6 +1732,13 @@ export class LifeBoard {
       // 첫 그림은 미끄러지지 않는다('auto') — 열자마자 움직이면 읽는 사람이
       // 무엇이 지나갔는지 모른다.
       if (!(selected && this.reveal(selected, 'auto'))) this.body.scrollTop = 0;
+      // 판이 화면보다 넓으면(휴대폰) 이 사람의 열이 보이는 데서 연다 — 왼쪽
+      // 끝에서 열면 첫 화면에 '나의 역사'가 한 줄도 안 든다. 한국사 열은 왼쪽으로
+      // 훑으면 나온다.
+      const { lane, history, gutter, personal, stage } = COLS;
+      const xP = lane + history + gutter;
+      const over = xP + personal + stage - this.body.clientWidth;
+      this.body.scrollLeft = over > 0 ? Math.min(xP - 8, over) : 0;
     } else if (keep != null) {
       this.toYear(keep);   // 판이 달라져도 보던 해는 그 자리에
     } else {
