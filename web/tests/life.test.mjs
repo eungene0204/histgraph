@@ -12,7 +12,7 @@ import {
   splitStories, joinStories, appendDraft, nodeLabel, participantsFromStory, linkParticipants, saysDate,
   missingYears, coveredYears,
   addedFocus, addedNames, yearAt,
-  linkPeople, kinIn, markYs,
+  linkPeople, kinIn, kinOf, markYs,
   NODE_TYPE_KO, EDGE_TYPE_KO, IMPACT_KO, LIFE_STAGES, COLS, MILITARY, romance, STAGE_END,
 } from '../src/lib/life.js';
 import { searchNodes } from '../src/lib/life.js';
@@ -298,6 +298,17 @@ console.log('\n개인 역사 — 세 열이 한 자');
   ok('화면 글자 덩어리마다 한글이 있다', chunks.length === 0, chunks.join(' | '));
   ok('원인이 결과보다 위에 선다 (이사 → 전학, 같은 해)', lay.personal.findIndex((p) => p.m.id === 'ev_move') < lay.personal.findIndex((p) => p.m.id === 'ev_transfer'));
   ok('열 너비의 합이 캔버스 너비', html.includes(`width:${COLS.lane + COLS.history + COLS.gutter + COLS.stage + COLS.personal}px`));
+  {
+    // 2026-09-23: 같은 해에 시작한 두 시절('출생'·'어린 시절')의 이름이 한 자리에 포개졌다.
+    const same = renderLife({ ...lay, stages: [
+      { stage: '출생', start: 1985, end: 1985, y1: 100, y2: 100 },
+      { stage: '어린 시절', start: 1985, end: 1997, y1: 100, y2: 400 },
+      { stage: '학창 시절', start: 1997, end: 2004, y1: 400, y2: 600 },
+    ] }, { subjectName: '나' });
+    const tops = [...same.matchAll(/life-stage" style="[^"]*top:([\d.]+)px/g)].map((m) => +m[1]);
+    ok('같은 해에 시작한 시절의 이름이 겹치지 않는다', tops.length === 3 && tops[1] - tops[0] >= 32, tops.join(', '));
+    ok('겹치지 않는 시절의 이름은 제 해에 선다', tops[0] === 100 && tops[2] === 400, tops.join(', '));
+  }
 }
 
 console.log('\n개인 역사 — 관계의 이름 (2026-09-08 "친구들은 만남이 아니라 친구 · 뒤·동안은 도대체 뭐야")');
@@ -716,6 +727,45 @@ console.log('\n개인 역사 — 가족은 호칭으로 잇는다 (2026-09-08 "�
   // 호칭은 낱말이다 — 이름 안의 글자('나형철'의 '형')로는 잇지 않는다
   ok("'나형철'의 '형'은 호칭이 아니다", kinIn('이름은 나형철이고 지금까지 만나고 있어', ['나형철']) === null);
   ok("'우리형은' 은 형이다", kinIn('우리형은 1980년생이야')?.term === '형' && kinIn('동생 박준영과 갔어')?.kind === 'relative_of');
+  {
+    // 2026-09-23: "아버지 김운식과 어머니 장수금" — 장수금이 문장의 첫 호칭 '아버지'를 받았다.
+    const s1 = '아버지 김운식과 어머니 장수금 사이에서 태어났다';
+    const nm = ['김운식', '장수금'];
+    ok('남의 이름 앞에 붙은 호칭은 그 사람의 것이다', kinIn('그런데 아버지 김운식은 장수금 말고 본처가 있었다', nm, '장수금') === null);
+    ok('호칭은 그 이름에 가장 가까운 것이다 (어머니 장수금)', kinIn(s1, nm, '장수금')?.term === '어머니' && kinIn(s1, nm, '김운식')?.term === '아버지');
+    const dj = { id: 'p0', type: 'Person', name: '김대중' };
+    const ppl = [dj, { id: 'p1', type: 'Person', name: '김운식' }, { id: 'p2', type: 'Person', name: '장수금' }];
+    const wrong = [
+      { source: 'p1', target: 'p0', type: 'parent_of', role: '아버지' },
+      { source: 'p2', target: 'p0', type: 'parent_of', role: '아버지' },
+      { source: 'p0', target: 'p2', type: 'child_of', role: '아버지' },
+    ];
+    linkPeople(ppl, wrong, dj, s1 + '.');
+    ok('옛 규칙이 잘못 단 호칭을 다시 읽어 고친다 (두 선 다)', wrong[0].role === '아버지' && wrong[1].role === '어머니' && wrong[2].role === '어머니', JSON.stringify(wrong));
+    // 2026-09-23 실측: 옛 규칙이 "아내 차용애 여사가 … 장면 전 국무총리가" 에서 장면을 아내로 이었다.
+    const cy = [dj, { id: 'c', type: 'Person', name: '차용애' }, { id: 'j', type: 'Person', name: '장면' }];
+    const stale = [
+      { source: 'p0', target: 'c', type: 'relative_of', role: '아내', description: null, confidence: 1 },
+      { source: 'p0', target: 'j', type: 'relative_of', role: '아내', description: null, confidence: 1 },
+      { source: 'p0', target: 'j', type: 'met', description: null, confidence: 1 },
+    ];
+    linkPeople(cy, stale, dj, '이 와중에 아내 차용애 여사가 세상을 떠났지만 장면 전 국무총리가 대변인으로 발탁했다.');
+    ok('근거 없이 코드가 단 가족 선은 걷는다 (장면은 아내가 아니다)',
+      !stale.some((e) => e.target === 'j' && e.type === 'relative_of') && stale.some((e) => e.target === 'c' && e.role === '아내')
+      && stale.some((e) => e.target === 'j' && e.type === 'met'), JSON.stringify(stale));
+    const told = [{ source: 'p0', target: 'j', type: 'relative_of', role: '아내', description: '모델이 적은 설명', confidence: 1 }];
+    linkPeople(cy, told, dj, '장면이 발탁했다.');
+    ok('모델이 설명을 달아 세운 가족 선은 건드리지 않는다', told.length === 1 && told[0].role === '아내');
+    // 사건 상세의 '함께' 자리 — 나에게 누구인지
+    const life = { subject: { id: 'p0' }, edges: [...wrong,
+      { source: 'p0', target: 'f', type: 'friend_of' }, { source: 'p0', target: 'm', type: 'met' },
+      { source: 'kid', target: 'p0', type: 'child_of' }, { source: 'p0', target: 't', type: 'mentored_by' }] };
+    ok("'함께' 대신 호칭 (아버지·어머니)", kinOf(life, 'p1') === '아버지' && kinOf(life, 'p2') === '어머니');
+    ok('호칭이 없으면 관계의 이름 (친구·자녀·스승)', kinOf(life, 'f') === '친구' && kinOf(life, 'kid') === '자녀' && kinOf(life, 't') === '스승');
+    ok("'만남' 은 관계의 이름이 아니다 — '함께' 가 남는다", kinOf(life, 'm') === null && kinOf(life, 'nobody') === null);
+    ok("미룬 선(확신 0.8)은 확실한 관계가 아니다 — '함께' 가 남는다",
+      kinOf({ subject: { id: 'p0' }, edges: [{ source: 'p0', target: 'w', type: 'worked_with', confidence: 0.8 }] }, 'w') === null);
+  }
   const me = { id: 'me', type: 'Person', name: '나' };
   const two = () => [me, { id: 'k', type: 'Person', name: '김일권' }];
   let edges = [];

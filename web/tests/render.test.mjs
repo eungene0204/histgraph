@@ -89,13 +89,12 @@ let appHtml = '';
 // 광고 정책이 재는 것은 색인이 아니라 **광고가 실리는 화면**이다: "We do not
 // allow Google-served ads on screens: without publisher-content or with
 // low-value content ... or used for alerts, navigation or other behavioral
-// purposes." 이 장(`index.html`)은 관계망을 자바스크립트가 그리는 화면이라
-// 스크립트 없이 열면 안내 한 줄뿐이다 — 광고를 부르면 그 조항에 걸린다.
-// 글로 읽는 장 가운데 내용 문턱을 넘은 것에만 광고가 실린다 (pages.py).
+// purposes." 첫 화면은 소개·길잡이이고 개인 역사 화면은 앱이다. 두 화면은
+// 광고를 부르지 않는다. 내용 문턱을 넘은 역사 문서만 광고를 부른다 (pages.py).
 {
   for (const f of ['index.html', 'life.html']) {
     const html = readFileSync(join(WEB, f), 'utf-8');
-    ok(`${f} 은 광고를 부르지 않는다 (자바스크립트가 그리는 화면)`,
+    ok(`${f} 은 광고를 부르지 않는다`,
        !html.includes('adsbygoogle'), f);
   }
   // 광고를 안 싣는 대신 **주인은 밝힌다.** 애드센스가 첫 화면에 광고를 안 싣는
@@ -108,7 +107,7 @@ let appHtml = '';
 // --- 광고 번호는 어디서나 같아야 한다 ------------------------------------
 // 번호가 여러 장에 따로 박혀 있어 하나만 고치면 조용히 어긋난다.
 {
-  const files = ['index.html', 'privacy.html', 'terms.html',
+  const files = ['index.html', 'about.html', 'privacy.html', 'terms.html',
                  join('..', 'src', 'histgraph', 'pages.py')];
   const ids = new Set();
   for (const f of files) {
@@ -121,7 +120,7 @@ let appHtml = '';
 
 // --- 방침·약관 (리액트 바깥의 정적 문서) ---------------------------------
 {
-  const docs = [['개인정보처리방침', 'privacy.html'], ['이용약관', 'terms.html']];
+  const docs = [['제작 방식', 'about.html'], ['개인정보처리방침', 'privacy.html'], ['이용약관', 'terms.html']];
   for (const [name, file] of docs) {
     const html = readFileSync(join(WEB, file), 'utf-8');
     ok(`${name} 페이지가 있다`, html.includes('<h1>') && html.length > 1000);
@@ -134,7 +133,8 @@ let appHtml = '';
        scripts.every((tag) => tag.includes('adsbygoogle.js') || tag.includes('/theme-boot.js')
                      || tag.includes('/analytics.js')), scripts.join(' '));
     ok(`${name} 이 테마 설정을 따른다`, html.includes('src="/theme-boot.js"'));
-    ok(`${name} 이 광고를 부른다`, html.includes('adsbygoogle.js?client=ca-pub-'));
+    ok(`${name} 은 광고 요청 없이 소유권 메타 태그만 둔다`,
+       !html.includes('adsbygoogle.js') && html.includes('name="google-adsense-account"'));
     ok(`${name} 에 그래프로 돌아가는 길이 있다`, html.includes('href="/"'));
   }
 }
@@ -144,7 +144,7 @@ let appHtml = '';
 // 방문 통계는 같은 실수를 못 하도록 파일 하나만 부르게 했고, 그 약속을 여기서
 // 지킨다 — 어느 장이든 <script> 를 새로 박으면 걸린다.
 {
-  const files = ['index.html', 'life.html', 'privacy.html', 'terms.html'];
+  const files = ['index.html', 'life.html', 'about.html', 'privacy.html', 'terms.html'];
   for (const f of files) {
     ok(`${f} 이 방문 통계를 부른다`,
        readFileSync(join(WEB, f), 'utf-8').includes('src="/analytics.js"'));

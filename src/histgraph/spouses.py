@@ -191,13 +191,26 @@ def apply_table(store: GraphStore, table: list[TableRow]) -> TableReport:
         if not _both_here(c, row.a, row.b):
             rep.missing += 1
             continue
-        ov.forget(c, "edge", ov.edge_key(row.a, row.b, "related_to"), "deleted")
+        # 낮춘 '관련'을 `kin` 표가 이름 있는 관계로 갈라 갔으면(자녀·사제 선으로
+        # 옮겨 '관련'을 지웠거나 '사위' 라벨을 달았으면) 되돌리지 않는다 —
+        # 여기서 다시 세우면 같은 두 사람 사이에 '자녀'와 '관련'이 겹쳐 선다.
+        rkey = ov.edge_key(row.a, row.b, "related_to")
+        moved = c.execute(
+            "SELECT 1 FROM overrides WHERE target = 'edge' AND key = ? AND field = 'deleted' AND origin = 'kin'",
+            (rkey,)).fetchone()
+        if moved:
+            rep.demoted += 1
+            continue
+        ov.forget(c, "edge", rkey, "deleted")
+        named = c.execute(
+            "SELECT value FROM overrides WHERE target = 'edge' AND key = ? AND field = 'label' AND origin = 'kin'",
+            (rkey,)).fetchone()
         c.execute(
             """INSERT INTO edges (src, dst, type, source, label, confidence, props)
                VALUES (?,?,?,?,?,?,?)
                ON CONFLICT(src, dst, type, source) DO UPDATE SET
                  label = excluded.label, props = excluded.props""",
-            (row.a, row.b, "related_to", SOURCE_MARK, None, 0.8,
+            (row.a, row.b, "related_to", SOURCE_MARK, json.loads(named[0]) if named else None, 0.8,
              json.dumps({"evidence": row.note, "was": "spouse_of"}, ensure_ascii=False)),
         )
         rep.demoted += 1

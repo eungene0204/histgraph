@@ -4824,13 +4824,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("관계망으로 돌아가는 길이 있다", 'href="/#wd%3AS"' in body)
     check("정본 주소를 스스로 말한다",
           '<link rel="canonical" href="https://www.histgraph.space/%EC%9D%B8%EB%AC%BC/%EC%84%B8%EC%A2%85">' in body)
-    # 광고 정책이 재는 것은 색인이 아니라 **광고가 실리는 화면**이다: "We do
-    # not allow Google-served ads on screens: without publisher-content or with
-    # low-value content ... or used for alerts, navigation or other behavioral
-    # purposes." `noindex` 는 검색 지시어라 광고를 막지 않는다 — 2026-09-16
-    # 실측으로 색인은 571장인데 광고는 14,345장에 나가고 있었다. 그래서 광고를
-    # 부르는 자리에 색인과 같은 문턱을 건다.
-    check("읽을 것이 있는 장은 광고를 부른다", "adsbygoogle.js?client=ca-pub-" in body)
+    # 자동 조립된 문서에는 길이에 관계없이 광고를 요청하지 않는다.
+    # 소유권 확인은 별도의 메타 태그로 유지한다.
+    check("문서에 광고 요청 없이 소유권 표만 남는다",
+          "adsbygoogle.js" not in body
+          and '<meta name="google-adsense-account" content="ca-pub-' in body)
     # 방문 통계는 화면 네 장과 이 장이 **같은 파일 하나**를 부른다. 측정 ID 를
     # 여기 박으면 화면과 어긋나므로, 부르는 것은 주소뿐이다
     # (web/public/analytics.js · web/tests/render.test.mjs 가 나머지를 잰다).
@@ -5057,7 +5055,7 @@ with tempfile.TemporaryDirectory() as tmp:
                   if 'content="noindex' in pages.node_page(api, n).body}
     check("목록에 오른 장은 하나도 noindex 가 아니다", not _noindexed, str(_noindexed))
 
-    # --- 광고는 읽을 것이 있는 화면에만 --------------------------------
+    # --- 자동 조립 문서에는 광고가 없다 --------------------------------
     def _ads(page) -> bool:
         return "adsbygoogle" in page.body
 
@@ -5067,6 +5065,8 @@ with tempfile.TemporaryDirectory() as tmp:
           not _ads(pages.route(api, "/인물/")))
     check("어귀(/n/)에도 광고를 싣지 않는다 — navigation 이다",
           not _ads(pages.route(api, "/n/")))
+    check("색인 문서도 수동 검토 전에는 광고를 싣지 않는다",
+          not _ads(pages.route(api, "/인물/세종")))
     # 문턱을 도로 내려 얇은 장에 광고가 실리는 일이 없게 잰다.
     pages.MIN_SUMMARY, pages.MIN_RELATIONS = 10_000, 10_000
     check("문턱을 못 넘은 장에는 광고를 싣지 않는다 — low-value content 다",
@@ -6562,6 +6562,32 @@ with tempfile.TemporaryDirectory() as tmp:
     check("'우리형은' 은 형, '동생 박준영' 은 친척(대칭)에 호칭",
           life_mod.kin_in("우리형은 1980년생이야")[:3] == ("형", "relative_of", "sym")
           and life_mod.kin_in("동생 박준영과 갔어")[1] == "relative_of")
+    s1 = "아버지 김운식과 어머니 장수금 사이에서 태어났다"
+    check("호칭은 그 이름에 가장 가까운 것이다 (2026-09-23 어머니 장수금이 '아버지'를 받았다)",
+          life_mod.kin_in(s1, ["김운식", "장수금"], "장수금")[0] == "어머니"
+          and life_mod.kin_in(s1, ["김운식", "장수금"], "김운식")[0] == "아버지")
+    check("남의 이름 앞에 붙은 호칭은 그 사람의 것이다",
+          life_mod.kin_in("그런데 아버지 김운식은 장수금 말고 본처가 있었다", ["김운식", "장수금"], "장수금") is None)
+    dj = {"id": "p0", "type": "Person", "name": "김대중"}
+    ppl = [dj, {"id": "p1", "type": "Person", "name": "김운식"}, {"id": "p2", "type": "Person", "name": "장수금"}]
+    wrong = [{"source": "p1", "target": "p0", "type": "parent_of", "role": "아버지"},
+             {"source": "p2", "target": "p0", "type": "parent_of", "role": "아버지"},
+             {"source": "p0", "target": "p2", "type": "child_of", "role": "아버지"}]
+    life_mod.link_people(ppl, wrong, dj, s1 + ".")
+    check("옛 규칙이 잘못 단 호칭을 다시 읽어 고친다 (두 선 다)",
+          [e["role"] for e in wrong] == ["아버지", "어머니", "어머니"], str(wrong))
+    cy = [dj, {"id": "c", "type": "Person", "name": "차용애"}, {"id": "j", "type": "Person", "name": "장면"}]
+    stale = [{"source": "p0", "target": "c", "type": "relative_of", "role": "아내", "description": None, "confidence": 1.0},
+             {"source": "p0", "target": "j", "type": "relative_of", "role": "아내", "description": None, "confidence": 1.0},
+             {"source": "p0", "target": "j", "type": "met", "description": None, "confidence": 1.0}]
+    life_mod.link_people(cy, stale, dj, "이 와중에 아내 차용애 여사가 세상을 떠났지만 장면 전 국무총리가 대변인으로 발탁했다.")
+    check("근거 없이 코드가 단 가족 선은 걷는다 (2026-09-23 장면은 아내가 아니다)",
+          not any(e["target"] == "j" and e["type"] == "relative_of" for e in stale)
+          and any(e["target"] == "c" and e["role"] == "아내" for e in stale)
+          and any(e["target"] == "j" and e["type"] == "met" for e in stale), str(stale))
+    told = [{"source": "p0", "target": "j", "type": "relative_of", "role": "아내", "description": "모델이 적은 설명", "confidence": 1.0}]
+    life_mod.link_people(cy, told, dj, "장면이 발탁했다.")
+    check("모델이 설명을 달아 세운 가족 선은 건드리지 않는다", len(told) == 1 and told[0]["role"] == "아내")
     me_n = {"id": "me", "type": "Person", "name": "나"}
     two = lambda: [me_n, {"id": "k", "type": "Person", "name": "김일권"}]  # noqa: E731
     e1: list = []
@@ -8936,6 +8962,72 @@ for _db in (Path("data/korea.sqlite"), Path("data/histgraph.sqlite")):
               not sp_mod.unjudged(_g.conn, _sp_table),
               str([(c["a_label"], c["b_label"])
                    for c in sp_mod.unjudged(_g.conn, _sp_table)][:5]))
+
+print("\n[사람 사이의 '관련' — 이름 있는 관계로 가른다 (2026-09-23)]")
+from histgraph import kin as kin_mod  # noqa: E402
+
+_tmp_kin = tempfile.TemporaryDirectory()
+with GraphStore(Path(_tmp_kin.name) / "kin.sqlite") as _k:
+    _k.upsert_nodes([Node(id=f"p:{n}", type="person", label=n, source="t")
+                     for n in ("이산해", "이덕형", "정약용", "정약전", "세종", "태종", "김정희", "조희룡", "갑", "을", "병", "정")])
+    _k.upsert_edges([
+        Edge(src="p:이산해", dst="p:이덕형", type="related_to", source="extract",
+             props={"evidence": "그의 사위 이덕형을 시켜"}),
+        Edge(src="p:정약용", dst="p:정약전", type="related_to", source="extract"),
+        Edge(src="p:세종", dst="p:태종", type="related_to", source="extract",
+             props={"evidence": "태종의 셋째 아들"}),
+        Edge(src="p:김정희", dst="p:조희룡", type="related_to", source="extract"),
+        Edge(src="p:갑", dst="p:을", type="related_to", source="extract"),
+        Edge(src="p:병", dst="p:정", type="related_to", source="extract"),
+    ])
+    check("묻는 것은 사람끼리의 이름 없는 '관련' 전부다", len(kin_mod.candidates(_k.conn)) == 6)
+    _kin_rows = [
+        kin_mod.TableRow("p:이산해", "p:이덕형", "사위", "이덕형은 이산해의 사위다"),
+        kin_mod.TableRow("p:정약용", "p:정약전", "형제", "정약전은 정약용의 형이다"),
+        kin_mod.TableRow("p:세종", "p:태종", "아버지", "태종은 세종의 아버지다"),
+        kin_mod.TableRow("p:김정희", "p:조희룡", "제자", "조희룡은 김정희의 제자다"),
+        kin_mod.TableRow("p:갑", "p:을", "관련", "같은 상소에 이름이 오른 사이"),
+        kin_mod.TableRow("p:병", "p:정", "삭제", "동명이인이 붙었다"),
+    ]
+    _kr = kin_mod.apply_table(_k, _kin_rows)
+    check("이름이 둘 · 타입이 둘 · 관련 하나 · 삭제 하나",
+          (_kr.labeled, _kr.typed, _kr.kept, _kr.deleted) == (2, 2, 1, 1), str(_kr))
+    check("사위는 '관련' 선에 이름으로 달린다",
+          _k.conn.execute("SELECT label FROM edges WHERE src='p:이산해' AND type='related_to'").fetchone()[0] == "사위")
+    _pa = _k.conn.execute("SELECT label, props FROM edges WHERE src='p:세종' AND dst='p:태종' AND type='child_of'").fetchone()
+    check("아버지는 child_of 로 옮기고 원문 근거를 들고 간다",
+          _pa is not None and _pa["label"] == "아버지" and "셋째 아들" in _pa["props"], str(_pa and dict(_pa)))
+    check("제자는 스승 → 제자 방향의 taught 다",
+          _k.conn.execute("SELECT 1 FROM edges WHERE src='p:김정희' AND dst='p:조희룡' AND type='taught'").fetchone())
+    check("타입으로 옮긴 쌍에는 '관련'이 남지 않는다",
+          not _k.conn.execute("SELECT 1 FROM edges WHERE src='p:세종' AND type='related_to'").fetchone())
+    check("표를 씌운 뒤에는 관문이 묻지 않는다", not kin_mod.unjudged(_k.conn, _kin_rows))
+    # 재수집이 옛 '관련'을 되살려도 편집 계층이 다시 가른다
+    _k.upsert_edges([Edge(src="p:세종", dst="p:태종", type="related_to", source="extract"),
+                     Edge(src="p:이산해", dst="p:이덕형", type="related_to", source="extract")])
+    check("재수집이 되살린 '관련'을 편집 계층이 다시 지운다 (자녀로 옮긴 쌍)",
+          not _k.conn.execute("SELECT 1 FROM edges WHERE src='p:세종' AND type='related_to'").fetchone())
+    check("재수집이 되살린 '관련'에 편집 계층이 이름을 다시 단다",
+          _k.conn.execute("SELECT label FROM edges WHERE src='p:이산해' AND type='related_to'").fetchone()[0] == "사위")
+    check("두 번 씌워도 같다", kin_mod.apply_table(_k, _kin_rows).typed == 0
+          and _k.conn.execute("SELECT COUNT(*) FROM edges WHERE src='p:세종'").fetchone()[0] == 1)
+_tmp_kin.cleanup()
+
+from histgraph import server as _kin_server  # noqa: E402
+check("사람 사이 이름표는 서버의 목록 머리에 든다 (사위 쪽에서는 장인·장모)",
+      _kin_server.LABEL_DIR_HEAD["사위"] == {"out": "사위", "in": "장인·장모"} and "형제" in _kin_server.LABEL_HEADS)
+_js_rel = Path("web/src/lib/relations.js").read_text(encoding="utf-8")
+_js_inv = dict(re.findall(r"'([^']+)': '([^']+)'", _js_rel[_js_rel.index("export const KIN_INVERSE"):_js_rel.index("const KIN_DIR_HEAD")]))
+check("사람 사이 이름표가 파이썬·화면에서 같다 (kin.LABELS = relations.js KIN_INVERSE)",
+      _js_inv == kin_mod.LABELS, str(set(_js_inv.items()) ^ set(kin_mod.LABELS.items())))
+_kin_table = kin_mod.load_table(Path("data/kin.tsv"))
+for _db in (Path("data/korea.sqlite"), Path("data/histgraph.sqlite")):
+    if not _db.exists():
+        continue
+    with GraphStore(_db, readonly=True) as _g:
+        check(f"{_db.name} 에 판정 없는 사람 사이의 '관련'이 없다",
+              not kin_mod.unjudged(_g.conn, _kin_table),
+              str([(c["a_label"], c["b_label"]) for c in kin_mod.unjudged(_g.conn, _kin_table)][:5]))
 
 print("\n문장 규칙 — 두 벌이 같은 말을 하는가")
 from histgraph import sentences as _sen  # noqa: E402

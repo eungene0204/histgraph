@@ -28,6 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import accounts, auth, pages, summaries
+from .kin import KIN_DIR_HEAD
 from .labels import screen_alias
 from .ontology import EDGE_TYPES, NODE_TYPES, type_label
 from .provenance import desc_origin, noncommercial
@@ -205,6 +206,10 @@ LABEL_DIR_HEAD = {
     # 이곳을 본관으로 삼은 씨족들의 목록이다.
     "본관": {"out": "본관 지명", "in": "이곳을 본관으로 하는 씨족"},
     **CREATOR_DIR_HEAD,
+    # 사람 사이의 이름 있는 관계 (`kin.py` — 2026-09-23 전수 조사). '관련'으로
+    # 서 있던 형제·장인·사위·벗·연인이다. 사위 쪽에서는 '장인', 장인 쪽에서는
+    # '사위'로 부른다.
+    **KIN_DIR_HEAD,
 }
 # 라벨이 타입 이름보다 정확한 관계 전부 (`relations.js` LABEL_HEADS 와 같은 표).
 # 그래프의 선과 연표의 딱지가 '관련' 대신 이 이름으로 말한다.

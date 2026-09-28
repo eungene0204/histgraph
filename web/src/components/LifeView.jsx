@@ -9,7 +9,7 @@ import { SidePanel } from './SidePanel.jsx';
 import { DetailPanel } from './DetailPanel.jsx';
 import { api } from '../lib/api.js';
 import { readLife, writeLife, forgetLife, readSide, writeSide, ownerOf, localAfterAccount, STORE_KEY, NEXT_KEY, FAIL_KEY } from '../lib/lifestore.js';
-import { LifeBoard, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, missingYears, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
+import { LifeBoard, kinOf, normalize, removeNode, editNode, nodeYears, dateSaid, graphPayload, graphMeta, boardWidth, edgeLabel, splitStories, appendDraft, nodeLabel, missingYears, addedFocus, addedNames, NODE_TYPE_KO, IMPACT_KO, LIFE_STAGES, CAUSAL_EDGES, EVENT_TYPES } from '../lib/life.js';
 
 // 개인 역사 화면 (/life.html). 왼쪽 왕·대통령 띠 · 가운데 한국사 · 오른쪽
 // 내 역사 — 세 열이 한 자 위에 선다 (lib/life.js). 오른쪽 끝 패널이 고른
@@ -1243,6 +1243,10 @@ function EventDetail({ life, id, onPick, onHistory, onDrop, onEdit }) {
   const causes = ins.filter((e) => CAUSAL_EDGES.has(e.type));
   const effects = outs.filter((e) => CAUSAL_EDGES.has(e.type));
   const others = [...ins.filter((e) => !CAUSAL_EDGES.has(e.type)), ...outs.filter((e) => !CAUSAL_EDGES.has(e.type))];
+  const relLabel = (e, other) => {
+    const label = edgeLabel(e.type, byId.get(e.source)?.type, byId.get(e.target)?.type, e.role);
+    return label === '함께' ? (kinOf(life, other) || label) : label;
+  };
   const links = life.historical_connections.filter((c) => c.personal_event === id);
   const turning = life.turning_points.find((p) => p.event === id);
   const cf = life.counterfactual_analysis.filter((c) => c.event === id);
@@ -1338,10 +1342,12 @@ function EventDetail({ life, id, onPick, onHistory, onDrop, onEdit }) {
           {/* 상대는 눌러서 옮겨가는 자리다 — 원인·결과(Rel)와 같은 단추다
               (2026-09-08 지적: "함께에 있는 사람이 node에 있으면 링크를 걸어 줘야지").
               그래프에 없는 것은 이름만 적는다. */}
+          {/* '함께' 는 '이 일에 같이 있었다'까지만 말한다 — 그 사람이 나에게 누구인지
+              확실하면(아버지·어머니·친구·연인) 그 이름을 대신 세운다 (kinOf). */}
           <ul>{others.map((e, i) => {
             const other = e.source === id ? e.target : e.source;
             return (
-              <li key={i}><span className="tl-rel">{edgeLabel(e.type, byId.get(e.source)?.type, byId.get(e.target)?.type, e.role)}</span>{' '}
+              <li key={i}><span className="tl-rel">{relLabel(e, other)}</span>{' '}
                 {byId.has(other)
                   ? <button type="button" className="life-link" onClick={() => onPick(other)}>{nameOf(other)}</button>
                   : nameOf(other)}

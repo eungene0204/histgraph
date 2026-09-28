@@ -58,14 +58,14 @@ from typing import NamedTuple
 from urllib.parse import quote, unquote
 
 from . import sentences, slugs
+from .kin import KIN_DIR_HEAD
 from .ontology import NODE_TYPES
 
 # 링크를 절대 주소로 적어야 하는 자리(정본 주소·사이트맵). 배포 도메인이
 # 바뀌면 여기 하나만 고친다.
 SITE = os.environ.get("HISTGRAPH_SITE", "https://www.histgraph.space").rstrip("/")
 
-# 광고. 화면 세 장(`web/index.html`·`privacy.html`·`terms.html`)에 걸어 둔
-# 것과 같은 번호다.
+# 사이트 소유권 메타 태그와 내용이 충분한 문서의 광고 호출에 쓰는 번호다.
 ADS_CLIENT = "ca-pub-8335444243080631"
 
 # 서치 콘솔이 주인을 확인하는 표. 없으면 아무것도 안 적는다 — 빈 값을
@@ -112,7 +112,9 @@ LABEL_DIR_HEAD = {"다음": {"out": "다음 일", "in": "앞선 일"},
                   "저술": {"out": "지은 것", "in": "지은 사람"},
                   "편찬": {"out": "엮은 것", "in": "엮은 사람"},
                   "제작": {"out": "만든 것", "in": "만든 사람"},
-                  "발원": {"out": "만들게 한 것", "in": "만들게 한 사람"}}
+                  "발원": {"out": "만들게 한 것", "in": "만들게 한 사람"},
+                  # 사람 사이의 이름 있는 관계 (`kin.py` — 2026-09-23 전수 조사)
+                  **KIN_DIR_HEAD}
 LABEL_HEADS = ROLE_HEADS | set(LABEL_DIR_HEAD) | {"소속", "직위", "파조"}
 
 # 한 묶음에 이만큼까지만 적는다. 세종의 '자녀'처럼 수십이 붙는 자리가
@@ -798,11 +800,10 @@ def _shell(title: str, description: str, canonical: str, body: str,
     실리는 화면*이다 — "We do not allow Google-served ads on screens: without
     publisher-content or with low-value content, that are under construction,
     or used for alerts, navigation or other behavioral purposes."
-    `noindex` 는 검색 지시어라 광고를 막지 않는다. 2026-09-16 실측: 문턱을
-    올려 색인은 3,118 → 571장이 됐는데 **광고는 14,345장에 그대로 나가고
-    있었다** — 목록 장·어귀·404 에도. 그래서 광고를 부르는 자리에도 같은
-    문턱을 건다 (`indexable`). 새 장을 만들면 기본값이 '안 싣는다'이므로
-    잊어서 정책을 어기는 쪽으로는 안 기운다."""
+    `noindex` 는 검색 지시어라 광고를 막지 않는다. 2026-09-16 실측에서는
+    문턱을 올려 색인은 3,118 → 571장이 됐어도 광고는 14,345장에 나갔다.
+    자동 조립 문서에도 색인 문턱만으로 광고를 켜지 않는다. 새 장의 기본값은
+    광고 없음이며, 사람이 내용을 검토한 장에서만 명시적으로 켤 수 있다."""
     robots = ('<meta name="robots" content="noindex,follow">\n' if noindex else
               '<meta name="robots" content="index,follow,max-image-preview:large">\n')
     # 사이트 확인은 광고와 따로다. 광고를 안 싣는 장에도 주인은 밝혀 둔다 —
@@ -857,7 +858,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 {body}
 
 <footer class="foot">
-  <a href="/">histgraph</a><span>·</span><a href="/n/">글로 읽기</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
+  <a href="/">histgraph</a><span>·</span><a href="/n/">글로 읽기</a><span>·</span><a href="/about.html">제작 방식</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
   <div class="copy">{COPYRIGHT}</div>
 </footer>
 
@@ -1110,9 +1111,9 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
         canonical,
         "\n".join(parts),
         noindex=not indexable(summary, total),
-        # 문턱을 넘은 장에만 광고를 싣는다. 색인과 **같은 판정**이다 —
-        # 읽을 것이 있다고 말한 장에만 광고가 간다.
-        ads=indexable(summary, total),
+        # 문서는 자료에서 자동 조립된다. 길이 문턱을 넘었다고 수동 검토가
+        # 끝난 것은 아니다. 광고는 검토·선별한 별도 장에만 켤 수 있다.
+        ads=False,
         ld=ld, image=image, keywords=keywords,
     ))
 
@@ -1395,7 +1396,7 @@ def _static_urls(api) -> list[str]:
     올린 뒤 작품·영화·책 갈래에 색인에 오를 장이 하나도 안 남았는데,
     그 목록 장을 사이트맵에 적으면 로봇에게 빈 종이를 가리키는 꼴이다."""
     counts = slugs.counts(api.store.conn)
-    return (["/", "/n/", "/privacy.html", "/terms.html"]
+    return (["/", "/n/", "/about.html", "/privacy.html", "/terms.html"]
             + [f"/{s}/" for s in slugs.SEGMENT_TYPE
                if counts.get(s) and _segment_rows(api, s)[1] >= MIN_SEGMENT])
 

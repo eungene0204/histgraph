@@ -345,13 +345,35 @@ const FAMILY_EDGES = new Set(['parent_of', 'child_of', 'grandparent_of', 'ancest
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // 문장 속 가족 호칭 하나 — {term, kind, dir}. names 는 그 문장의 사람 이름이라 먼저 가린다.
-export function kinIn(sentence, names = []) {
-  let masked = String(sentence || '');
+//
+// `near` 를 주면 **그 이름에 가장 가까운 호칭**이다 (2026-09-23: "아버지 김운식과
+// 어머니 장수금" 에서 장수금이 문장의 첫 호칭 '아버지'를 받았다). 거리가 같으면 이름
+// **앞의** 호칭이 이긴다 — '어머니 장수금' 처럼 호칭을 앞에 세우는 것이 우리말의 꼴이다.
+// 남의 이름 앞에 붙은 호칭만 있으면 null — 그 문장은 이 사람의 호칭을 말하지 않는다.
+const KIN_ALL = new RegExp(KIN.source, 'g');
+export function kinIn(sentence, names = [], near = null) {
+  const text = String(sentence || '');
+  let masked = text;
   for (const nm of names) masked = masked.split(nm).join('○'.repeat(nm.length));
-  const m = KIN.exec(masked);
-  if (!m) return null;
-  const [kind, dir] = KIN_TERMS[m[1]];
-  return { term: m[1], kind, dir };
+  let hits = [...masked.matchAll(KIN_ALL)].map((m) => ({ term: m[1], at: m.index + m[0].indexOf(m[1]) }));
+  const pos = near ? text.indexOf(near) : -1;
+  // **남의 이름 바로 앞에 붙은 호칭은 그 사람의 것이다** — "아버지 김운식은 장수금
+  // 말고 본처가 있었다" 의 '아버지'는 김운식의 호칭이지 장수금의 것이 아니다.
+  if (pos >= 0) {
+    const others = names.filter((nm) => nm && nm !== near);
+    hits = hits.filter((h) => {
+      const rest = text.slice(h.at + h.term.length).trimStart();
+      return !others.some((nm) => rest.startsWith(nm));
+    });
+  }
+  if (!hits.length) return null;
+  let best = hits[0];
+  if (pos >= 0) {
+    const gap = (h) => (h.at + h.term.length <= pos ? pos - (h.at + h.term.length) : h.at - (pos + near.length) + 0.5);
+    best = hits.reduce((a, b) => (gap(b) < gap(a) ? b : a));
+  }
+  const [kind, dir] = KIN_TERMS[best.term];
+  return { term: best.term, kind, dir };
 }
 // '김일권의 엄마'·'김일권 엄마' — 남의 가족이지 내 가족이 아니다.
 const kinOfOther = (sentence, name) => new RegExp(`${escapeRe(name)}\\s*(?:의|네)?\\s*(?:${KIN_ALT})${KIN_TAIL}`).test(sentence);
@@ -369,11 +391,15 @@ export function linkPeople(nodes, edges, me, text) {
   if (!people.length) return 0;
   const tied = edges.map((e) => [e.source, e.target]);
   const direct = new Set(tied.filter(([a, b]) => a === me.id || b === me.id).map(([a, b]) => (a === me.id ? b : a)));
+  // 호칭을 다시 잴 가족 선 — 역할이 비었거나 **호칭이 적힌** 것. 호칭은 이야기에서
+  // 읽은 것이라 다시 읽어도 되고, 그래야 옛 규칙이 잘못 단 호칭(어머니에게 '아버지')이
+  // 새로고침으로 바로잡힌다. 한 사람에게 선이 둘(parent_of·child_of)이면 둘 다 단다.
   const unnamed = new Map();
   for (const e of edges) {
-    if (FAMILY_EDGES.has(e.type) && !e.role && (e.source === me.id || e.target === me.id)) {
+    if (FAMILY_EDGES.has(e.type) && (!e.role || KIN_TERMS[e.role]) && (e.source === me.id || e.target === me.id)) {
       const other = e.source === me.id ? e.target : e.source;
-      if (!unnamed.has(other)) unnamed.set(other, e);
+      if (!unnamed.has(other)) unnamed.set(other, []);
+      unnamed.get(other).push(e);
     }
   }
   let made = 0;
@@ -387,12 +413,29 @@ export function linkPeople(nodes, edges, me, text) {
         const s = sents[i];
         if (!s.includes(name) || kinOfOther(s, name)) continue;
         const names = people.map((p) => String(p.name).trim()).filter((nm) => s.includes(nm));
-        hit = kinIn(s, names) || (i > 0 ? kinIn(sents[i - 1], names) : null);
+        hit = kinIn(s, names, name) || (i > 0 ? kinIn(sents[i - 1], names) : null);
       }
       if (hit) break;
     }
-    if (!hit) continue;
-    if (unnamed.has(n.id)) { unnamed.get(n.id).role = hit.term; continue; }
+    if (!hit) {
+      // 다시 읽어 호칭의 근거가 없으면 **코드가 단 가족 선은 거짓이다** (2026-09-23 실측:
+      // "아내 차용애 여사가 … 장면 전 국무총리가" 한 문장에서 옛 규칙이 장면을 아내로
+      // 이었다). 코드가 만든 선(설명 없음 · 확신 1 · 호칭)만 걷는다 — 모델이 설명을
+      // 달아 세운 가족 선은 이야기 밖의 근거가 있을 수 있어 건드리지 않는다. 그 사람이
+      // 섬이 되면 아래 2 가 이름으로 다시 잇는다(met).
+      const stale = new Set((unnamed.get(n.id) || [])
+        .filter((e) => KIN_TERMS[e.role] && !e.description && e.confidence === 1));
+      if (stale.size) {
+        for (let j = edges.length - 1; j >= 0; j -= 1) if (stale.has(edges[j])) edges.splice(j, 1);
+        for (let j = tied.length - 1; j >= 0; j -= 1) {
+          const [a, b] = tied[j];
+          if ((a === n.id && b === me.id) || (a === me.id && b === n.id)) tied.splice(j, 1);
+        }
+        if (!edges.some((e) => (e.source === n.id && e.target === me.id) || (e.source === me.id && e.target === n.id))) direct.delete(n.id);
+      }
+      continue;
+    }
+    if (unnamed.has(n.id)) { for (const e of unnamed.get(n.id)) e.role = hit.term; continue; }
     const [src, dst] = hit.dir === 'in' ? [n.id, me.id] : [me.id, n.id];
     edges.push({ source: src, target: dst, type: hit.kind, role: hit.term, description: null, confidence: 1 });
     tied.push([src, dst]);
@@ -602,6 +645,35 @@ const AT_LABEL = { School: '학교', University: '학교', Company: '회사', Bu
   Project: '프로젝트', Investment: '투자', Occupation: '직업', Skill: '기술', Hobby: '취미',
   Location: '장소', BirthPlace: '장소', Residence: '장소', TravelLocation: '장소' };
 const EVENT_TO = { moved_to: '이주지', visited: '방문지', lived_in: '거주지', born_in: '출생지' };
+
+// 이 사람이 **나에게** 누구인가 — 사건 상세의 '함께' 자리에 대신 선다 (2026-09-23
+// 사용자: "관계가 확실한 사람은 함께라는 말 대신 확실한 관계를 바로 알려줘").
+// 확실한 것만 답한다: 가족 선의 호칭(아버지·어머니), 없으면 가족 선의 이름, 그리고
+// 연인·친구·동료·동창·스승. '만남'·'도움' 은 관계의 이름이 아니라 null — '함께'가 남는다.
+const KIN_BY_EDGE = {
+  parent_of: ['부모', '자녀'], child_of: ['자녀', '부모'],
+  grandparent_of: ['조부모', '손주'], ancestor_of: ['조상', '후손'],
+  relative_of: ['친척', '친척'], partner_of: ['연인', '연인'], friend_of: ['친구', '친구'],
+  worked_with: ['동료', '동료'], schoolmate: ['동창', '동창'], mentored_by: ['제자', '스승'],
+};
+const KIN_ORDER = ['parent_of', 'child_of', 'grandparent_of', 'ancestor_of', 'relative_of',
+  'partner_of', 'friend_of', 'mentored_by', 'worked_with', 'schoolmate'];
+export function kinOf(life, id) {
+  const me = life?.subject?.id;
+  if (!me || id === me) return null;
+  // 미룬 선(확신 < 1 — 이야기가 말하지 않고 짐작한 것)은 '확실한 관계'가 아니다.
+  const ties = (life.edges || []).filter((e) => KIN_BY_EDGE[e.type] && !(e.confidence < 1)
+    && ((e.source === me && e.target === id) || (e.source === id && e.target === me)));
+  if (!ties.length) return null;
+  const named = ties.find((e) => FAMILY_EDGES.has(e.type) && e.role && KIN_TERMS[e.role]);
+  if (named) return named.role;
+  ties.sort((a, b) => KIN_ORDER.indexOf(a.type) - KIN_ORDER.indexOf(b.type));
+  const e = ties[0];
+  // [그 사람이 source 일 때 그 사람의 이름, 내가 source 일 때 그 사람의 이름]
+  // parent_of: 그 사람 → 나 = 부모 · 나 → 그 사람 = 자녀. mentored_by: 나 → 그 사람 = 스승.
+  const [asSource, asTarget] = KIN_BY_EDGE[e.type];
+  return e.source === id ? asSource : asTarget;
+}
 export function edgeLabel(kind, srcType, dstType, role = null) {
   if (role) return role;
   if (kind === 'at') return AT_LABEL[dstType] || '곳';
@@ -817,6 +889,9 @@ const PAD_TOP = 18;
 const PAD_BOTTOM = 64;
 const ZOOM = 5;      // 일생 40년이면 시대 연표의 16배는 너무 길다
 export const STAGE_COLOR = 'var(--interactive-accent)';
+// 단계 이름표 한 칸의 높이 — 이름과 해 두 줄에 숨 쉴 틈. 재위 띠의 26 은
+// 붙어 서면 앞 이름표의 해가 뒤 이름표의 이름에 닿는다 (실측).
+const STAGE_LABEL_GAP = 32;
 
 // --- 날짜 ----------------------------------------------------------------
 // 파이썬 life.parse_when 과 같은 규칙. 화면에 붙여 넣은 날것의 JSON 도
@@ -1464,9 +1539,19 @@ export function renderLife(layout, { selected = null, subjectName = '나' } = {}
   const stageSvg = layout.stages.map((s, i) => `
     <rect x="${xS + 6}" y="${s.y1.toFixed(1)}" width="6" height="${Math.max(s.y2 - s.y1, 2).toFixed(1)}" rx="3"
           fill="${STAGE_COLOR}" opacity="${i % 2 ? 0.45 : 0.75}"><title>${esc(s.stage)} ${s.start}~${s.end}</title></rect>`).join('');
-  const stageItems = layout.stages.map((s) => `
-    <div class="tl-reign life-stage" style="left:${xS + 18}px; top:${s.y1.toFixed(1)}px" title="${esc(s.stage)} · ${s.start}~${s.end}">
-      <b>${esc(s.stage)}</b><i>${s.start}~${s.end === s.start ? '' : s.end}</i></div>`).join('');
+  // 이름은 겹치면 **아래로 민다** (2026-09-23 사용자: 같은 해에 '출생'과 '어린
+  // 시절'이 시작해 두 이름이 한 자리에 포개졌다). 재위 띠는 겹치면 뒤의 라벨을
+  // 빼지만(reignBand) 단계는 이어 붙은 띠라 빼면 그 시절의 이름이 사라진다 —
+  // 막대는 제 해에 그대로 서고 이름만 한 줄(이름+해 두 줄 높이) 내려선다.
+  let floor = -Infinity;
+  const labelY = layout.stages.map((s) => {
+    const y = Math.max(s.y1, floor);
+    floor = y + STAGE_LABEL_GAP;
+    return y;
+  });
+  const stageItems = layout.stages.map((s, i) => `
+    <div class="tl-reign life-stage" style="left:${xS + 18}px; top:${labelY[i].toFixed(1)}px" title="${esc(s.stage)} · ${s.start}~${s.end}">
+      <b>${esc(s.stage)}</b><i>${s.end === s.start ? s.start : `${s.start}~${s.end}`}</i></div>`).join('');
 
   // 점과 구간
   const dots = [];

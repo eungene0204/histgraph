@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+from .kin import LABELS as KIN_LABELS
+
 # 인과의 종류(`causes.KINDS`)별 문장. 엣지 라벨이 종류다.
 KIND_SENTENCE = {
     "원인": lambda a, b: f"{a}{pt(a, '은', '는')} {b}의 원인이 되었다",
@@ -167,6 +169,9 @@ def _related_to(a, b, o):
         return CREATED_SENTENCE[lab](a, b)
     if lab in ROLE_SENTENCE:
         return role_sentence(lab, a, b, fate=o.get("fate"), side_name=o.get("side_name"))
+    # 사람 사이의 이름 있는 관계 — "B 는 A 의 ○○" (`kin.py`)
+    if lab in KIN_LABELS:
+        return f"{a}의 {lab}{pt(lab, '은', '는')} {b}{pt(b, '이다', '다')}"
     return f"{a}{pt(a, '과', '와')} {b}{pt(b, '은', '는')} 관련이 있다"
 
 

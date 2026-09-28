@@ -170,6 +170,9 @@ export const SENTENCE = {
     : CREATED_SENTENCE[o.label] ? CREATED_SENTENCE[o.label](a, b)
     : ROLE_SENTENCE[o.label]
     ? roleSentence(o.label, a, b, o)
+    // 사람 사이의 이름 있는 관계 — "B 는 A 의 ○○" (`kin.py`)
+    : KIN_INVERSE[o.label]
+    ? `${a}의 ${o.label}${pt(o.label, '은', '는')} ${b}${pt(b, '이다', '다')}`
     : `${a}${pt(a, '과', '와')} ${b}${pt(b, '은', '는')} 관련이 있다`),
   // 엣지에 '아버지'·'어머니'가 적혀 있으면 그대로 부른다 (실측 479건)
   child_of: (a, b, o) => {
@@ -223,6 +226,19 @@ export const ROLE_HEADS = new Set(Object.keys(ROLE_SENTENCE).filter((k) => k !==
 // 본관 → 지명의 '본관'. 나가는 쪽은 이 파가 갈라져 나온 문중이고, 들어오는
 // 쪽은 여기서 갈라진 파들이다. '상위 · 1 / 하위 · 111' 로는 무엇의 목록인지
 // 알 수 없다.
+// "B 는 A 의 ○○" → B 쪽에서 본 A 의 이름. 성별을 모르면 둘을 함께 적는다.
+export const KIN_INVERSE = {
+  '형제': '형제', '사촌': '사촌', '동서': '동서', '사돈': '사돈',
+  '인척': '인척', '친척': '친척', '벗': '벗', '연인': '연인',
+  '조부모': '손주', '손주': '조부모', '외조부모': '외손', '외손': '외조부모',
+  '숙부': '조카', '숙모': '조카', '조카': '숙부·숙모',
+  '장인': '사위', '장모': '사위', '사위': '장인·장모',
+  '시아버지': '며느리', '시어머니': '며느리', '며느리': '시부모',
+  '처남': '매부', '매부': '처남·처제', '형수': '시동생', '시동생': '형수',
+  '양부모': '양자', '양자': '양부모',
+};
+const KIN_DIR_HEAD = Object.fromEntries(Object.entries(KIN_INVERSE).map(([k, v]) => [k, { out: k, in: v }]));
+
 export const LABEL_DIR_HEAD = {
   '다음': { out: '다음 일', in: '앞선 일' },
   '이 기사의 대상': { out: '이 기록이 다루는 것', in: '이것을 다룬 기록' },
@@ -239,6 +255,10 @@ export const LABEL_DIR_HEAD = {
   '편찬': { out: '엮은 것', in: '엮은 사람' },
   '제작': { out: '만든 것', in: '만든 사람' },
   '발원': { out: '만들게 한 것', in: '만들게 한 사람' },
+  // 사람 사이의 이름 있는 관계 (`kin.py` KIN_DIR_HEAD 와 같은 표 — 2026-09-23 전수
+  // 조사). '관련'으로 서 있던 형제·장인·사위·벗·연인이다. 라벨은 "B 는 A 의 ○○"라
+  // A 쪽(out)에서는 그 이름, B 쪽(in)에서는 거꾸로 부른 이름이다.
+  ...KIN_DIR_HEAD,
 };
 export const LABEL_HEADS = new Set([...ROLE_HEADS, ...Object.keys(LABEL_DIR_HEAD), '소속', '직위', '파조']);
 

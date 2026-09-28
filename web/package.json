@@ -6,7 +6,7 @@
     "dev": "node dev.mjs",
     "dev:web": "vite",
     "dev:api": "cd .. && uv run histgraph serve",
-    "build": "vite build",
+    "build": "vite build && node prerender-landing.mjs",
     "preview": "vite preview",
     "test": "node tests/layout.test.mjs && node tests/relations.test.mjs && node tests/life.test.mjs && node tests/lifestore.test.mjs && node tests/render.test.mjs"
   },

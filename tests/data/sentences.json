@@ -1034,5 +1034,53 @@
   },
   "extra": {},
   "expected": "임진왜란의 연표에 1592년이 있다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "이산해",
+   "type": "person"
+  },
+  "other": {
+   "label": "이덕형",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "사위"
+  },
+  "expected": "이산해의 사위는 이덕형이다"
+ },
+ {
+  "type": "related_to",
+  "dir": "out",
+  "self": {
+   "label": "정약용",
+   "type": "person"
+  },
+  "other": {
+   "label": "정약전",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "형제"
+  },
+  "expected": "정약용의 형제는 정약전이다"
+ },
+ {
+  "type": "related_to",
+  "dir": "in",
+  "self": {
+   "label": "이덕형",
+   "type": "person"
+  },
+  "other": {
+   "label": "이산해",
+   "type": "person"
+  },
+  "extra": {
+   "edge_label": "사위"
+  },
+  "expected": "이산해의 사위는 이덕형이다"
  }
 ]

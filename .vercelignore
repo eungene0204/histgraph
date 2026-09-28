@@ -20,6 +20,9 @@ __pycache__
 data/cache
 data/raw
 data/histgraph.sqlite
+data/corpus.sqlite
+data/accounts.sqlite
+data/life
 *.duckdb
 tools
 tests

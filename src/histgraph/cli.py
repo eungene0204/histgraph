@@ -41,6 +41,7 @@ DEFAULT_CLANS = ROOT / "data" / "clans.tsv"
 DEFAULT_CREATORS = ROOT / "data" / "creators.tsv"
 DEFAULT_MAKERS = ROOT / "data" / "makers.tsv"
 DEFAULT_SPOUSES = ROOT / "data" / "spouses.tsv"
+DEFAULT_KIN = ROOT / "data" / "kin.tsv"
 
 
 def load_dotenv(path: Path) -> None:
@@ -2291,6 +2292,45 @@ def cmd_spouses(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_kin(args: argparse.Namespace) -> int:
+    """사람 사이의 '관련'을 이름 있는 관계로 가른다 (`kin` 모듈 머리글).
+
+        uv run histgraph kin                     # 판정이 없는 후보를 센다
+        uv run histgraph kin --show 40           # 근거와 함께 찍는다
+        uv run histgraph kin --apply
+        uv run histgraph --db data/korea.sqlite kin --apply
+    """
+    from . import kin
+
+    table = kin.load_table(args.table) if args.table.exists() else []
+    with GraphStore(args.db) as store:
+        if args.apply:
+            rep = kin.apply_table(store, table)
+            print(f"  표 {len(table)}줄 · 이름을 단 것 {rep.labeled} · 타입으로 옮긴 것 {rep.typed}"
+                  f" · 이미 있던 것 {rep.already} · 관련으로 둔 것 {rep.kept} · 지운 것 {rep.deleted}")
+            if rep.missing:
+                print(f"    이 그래프에 없는 줄 {rep.missing} (파생본이 뺀 노드)")
+            for src, dst, etype in rep.over:
+                print(f"    ✗ {src} → {dst} {etype}: 이미 부모가 둘이다 — 사람이 다시 본다", file=sys.stderr)
+        left = kin.unjudged(store.conn, table)
+
+    print(f"  사람 사이의 '관련' 가운데 판정이 없는 것 {len(left):,}건")
+    for c in left[:args.show or 0]:
+        note = json.loads(c["props"] or "{}").get("evidence") or ""
+        if isinstance(note, list):
+            note = " / ".join(note)
+        print(f'\n  {c["src"]}\t{c["dst"]}\t{c["a_label"]} — {c["b_label"]}')
+        print(f'    {note[:200]}')
+    if left:
+        # 관문. 추출을 다시 돌리면 사람끼리의 '관련'이 새로 들어온다 — 조용히
+        # 넘기면 아버지와 아들이 "관련이 있다"로 읽힌다 (2026-09-23).
+        print(f"\n  ✗ 판정이 없는 사람 사이의 '관련' {len(left):,} —"
+              f" {args.table} 에 적을 것 (`--show` 로 근거를 본다)", file=sys.stderr)
+        return 1
+    print("\n  ✓ 사람 사이의 '관련'이 모두 판정돼 있다")
+    return 0
+
+
 def cmd_positions(args: argparse.Namespace) -> int:
     """왕조가 나눠 쓰는 임금 자리를 가른다 (`positions` 모듈 머리글).
 
@@ -3320,6 +3360,17 @@ def main(argv: list[str] | None = None) -> int:
     p_sp.add_argument("--show", type=int, default=0,
                       help="판정이 없는 후보를 근거와 함께 이만큼 찍는다")
     p_sp.set_defaults(func=cmd_spouses)
+
+    p_kin = sub.add_parser(
+        "kin", help="사람 사이의 '관련'을 이름 있는 관계로 가른다 (친족·벗·사제 · 판정 표)"
+    )
+    p_kin.add_argument("--table", type=Path, default=DEFAULT_KIN,
+                       help="판정 표 `인물 id<TAB>인물 id<TAB>판정<TAB>근거` (기본: data/kin.tsv)")
+    p_kin.add_argument("--apply", action="store_true",
+                       help="표를 편집 계층에 적고 그래프에 씌운다 (기본은 세기만)")
+    p_kin.add_argument("--show", type=int, default=0,
+                       help="판정이 없는 후보를 근거와 함께 이만큼 찍는다")
+    p_kin.set_defaults(func=cmd_kin)
 
     p_ps = sub.add_parser(
         "positions", help="왕조가 나눠 쓰는 임금 자리를 왕조별로 가른다"

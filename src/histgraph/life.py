@@ -1650,18 +1650,37 @@ _KIN = re.compile(r"(?:(?<![가-힣])|(?<=우리)|(?<=내)|(?<=저희)|(?<=울))
 _FAMILY_EDGES = frozenset({"parent_of", "child_of", "grandparent_of", "ancestor_of", "relative_of"})
 
 
-def kin_in(sentence: str, names: list[str] | None = None) -> tuple[str, str, str, int] | None:
+def kin_in(sentence: str, names: list[str] | None = None,
+           near: str | None = None) -> tuple[str, str, str, int] | None:
     """문장 속 가족 호칭 하나 — (호칭, 관계, 방향, 자리). `names` 는 그 문장의 사람 이름이라
-    호칭 찾기 전에 가린다 (이름 안의 글자가 호칭으로 읽히면 안 된다)."""
+    호칭 찾기 전에 가린다 (이름 안의 글자가 호칭으로 읽히면 안 된다).
+
+    `near` 를 주면 **그 이름에 가장 가까운 호칭**이다 (2026-09-23: "아버지 김운식과
+    어머니 장수금" 에서 장수금이 문장의 첫 호칭 '아버지'를 받았다). 거리가 같으면 이름
+    **앞의** 호칭이 이긴다 — '어머니 장수금' 처럼 호칭을 앞에 세우는 것이 우리말의 꼴이다.
+    남의 이름 앞에 붙은 호칭만 있으면 None — 그 문장은 이 사람의 호칭을 말하지 않는다.
+    web/src/lib/life.js `kinIn` 과 같은 규칙."""
     masked = sentence
     for nm in names or []:
         masked = masked.replace(nm, "○" * len(nm))
-    m = _KIN.search(masked)
-    if not m:
+    hits = [(m.group(1), m.start(1)) for m in _KIN.finditer(masked)]
+    pos = sentence.find(near) if near else -1
+    if pos >= 0:
+        # **남의 이름 바로 앞에 붙은 호칭은 그 사람의 것이다** — "아버지 김운식은
+        # 장수금 말고 본처가 있었다" 의 '아버지'는 김운식의 호칭이지 장수금의 것이 아니다.
+        others = [nm for nm in names or [] if nm and nm != near]
+        hits = [(t, a) for t, a in hits
+                if not any(sentence[a + len(t):].lstrip().startswith(nm) for nm in others)]
+    if not hits:
         return None
-    term = m.group(1)
+    term, at = hits[0]
+    if pos >= 0:
+        def gap(h: tuple[str, int]) -> float:
+            t, a = h
+            return pos - (a + len(t)) if a + len(t) <= pos else a - (pos + len(near)) + 0.5
+        term, at = min(hits, key=gap)
     kind, direction = _KIN_TERMS[term]
-    return term, kind, direction, m.start(1)
+    return term, kind, direction, at
 
 
 def _kin_of_other(sentence: str, name: str) -> bool:
@@ -1720,11 +1739,16 @@ def link_people(nodes: list[dict], edges: list[dict], me: dict | None, text: str
     tied = {(e.get("source"), e.get("target")) for e in edges}
     direct = {b if a == me["id"] else a for a, b in tied if me["id"] in (a, b)}
     # 모델이 이미 가족 관계로 이었는데 역할이 비어 있으면 호칭만 단다 (선의 이름).
-    unnamed: dict[str, dict] = {}
+    # **호칭이 적힌 선도 다시 잰다** — 호칭은 이야기에서 읽은 것이라 다시 읽어도 되고,
+    # 그래야 옛 규칙이 잘못 단 호칭(어머니에게 '아버지')이 바로잡힌다. 한 사람에게
+    # 선이 둘(parent_of·child_of)이면 둘 다 단다.
+    unnamed: dict[str, list[dict]] = {}
     for e in edges:
-        if e.get("type") in _FAMILY_EDGES and not e.get("role") and me["id"] in (e.get("source"), e.get("target")):
+        role = e.get("role")
+        if (e.get("type") in _FAMILY_EDGES and (not role or role in _KIN_TERMS)
+                and me["id"] in (e.get("source"), e.get("target"))):
             other = e["target"] if e.get("source") == me["id"] else e["source"]
-            unnamed.setdefault(str(other), e)
+            unnamed.setdefault(str(other), []).append(e)
     made = 0
     # 1. 호칭
     for n in people:
@@ -1738,16 +1762,28 @@ def link_people(nodes: list[dict], edges: list[dict], me: dict | None, text: str
                 if name not in s or _kin_of_other(s, name):
                     continue
                 names = [str(p["name"]).strip() for p in people if str(p["name"]).strip() in s]
-                hit = kin_in(s, names) or (kin_in(sents[i - 1], names) if i > 0 else None)
+                hit = kin_in(s, names, name) or (kin_in(sents[i - 1], names) if i > 0 else None)
                 if hit:
                     break
             if hit:
                 break
         if not hit:
+            # 다시 읽어 호칭의 근거가 없으면 **코드가 단 가족 선은 거짓이다** (2026-09-23
+            # 실측: "아내 차용애 여사가 … 장면 전 국무총리가" 한 문장에서 옛 규칙이 장면을
+            # 아내로 이었다). 코드가 만든 선(설명 없음 · 확신 1 · 호칭)만 걷는다 — 모델이
+            # 설명을 달아 세운 가족 선은 건드리지 않는다. 섬이 되면 아래 2 가 met 으로 잇는다.
+            stale = [e for e in unnamed.get(n["id"], [])
+                     if e.get("role") in _KIN_TERMS and not e.get("description") and e.get("confidence") == 1]
+            if stale:
+                edges[:] = [e for e in edges if not any(e is x for x in stale)]
+                tied = {(e.get("source"), e.get("target")) for e in edges}
+                if not any(me["id"] in (a, b) and n["id"] in (a, b) for a, b in tied):
+                    direct.discard(n["id"])
             continue
         term, kind, direction, _ = hit
         if n["id"] in unnamed:
-            unnamed[n["id"]]["role"] = term
+            for e in unnamed[n["id"]]:
+                e["role"] = term
             continue
         src, dst = (n["id"], me["id"]) if direction == "in" else (me["id"], n["id"])
         edges.append({"source": src, "target": dst, "type": kind, "role": term,

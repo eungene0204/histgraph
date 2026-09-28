@@ -4,32 +4,30 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="/theme-boot.js"></script>
-<title>histgraph</title>
+<title>histgraph — 내 삶과 세상의 역사를 함께</title>
 <link rel="canonical" href="https://www.histgraph.space/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://www.histgraph.space/">
 <meta property="og:title" content="histgraph — 세상의 역사와 나의 역사를 한눈에">
-<meta name="description" content="세상의 역사와 나의 역사를 나란히 살펴보세요.">
-<meta property="og:description" content="세상의 역사와 나의 역사를 나란히 살펴보세요.">
+<meta name="description" content="내가 태어난 날, 세상은 어떤 모습이었을까요? 생일과 결혼, 내 삶의 순간을 세상의 역사와 나란히 살펴보세요.">
+<meta property="og:description" content="내가 태어난 날, 세상은 어떤 모습이었을까요? 내 삶의 순간을 세상의 역사와 나란히 살펴보세요.">
 <meta property="og:locale" content="ko_KR">
 <meta property="og:image" content="https://www.histgraph.space/og.png">
 <meta property="og:image:alt" content="histgraph — 한국사 관계망">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://www.histgraph.space/og.png">
 <meta name="twitter:title" content="histgraph — 세상의 역사와 나의 역사를 한눈에">
-<meta name="twitter:description" content="세상의 역사와 나의 역사를 나란히 살펴보세요.">
+<meta name="twitter:description" content="내가 태어난 날, 세상은 어떤 모습이었을까요? 내 삶의 순간을 세상의 역사와 나란히 살펴보세요.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"WebSite","@id":"https://www.histgraph.space/#site",
  "name":"histgraph","url":"https://www.histgraph.space/","inLanguage":"ko",
- "description":"한국사의 인물·사건·장소·문화재가 서로 어떻게 이어지는지 보는 지식 그래프입니다."}
+ "description":"내 삶의 순간과 세상의 역사를 한 시간 위에서 나란히 살펴보세요."}
 </script>
-<!-- 광고를 부르지 않는다 (2026-09-16). 이 장은 관계망을 그리는 화면이라
-     자바스크립트 없이 열면 안내 한 줄뿐이고(실측 105자), 광고 정책은 그런
-     화면을 `without publisher-content` 로 막는다. 글로 읽는 장 가운데 내용
-     문턱을 넘은 것에만 광고가 실린다 (`pages._shell` 의 `ads`).
+<!-- 랜딩 페이지에는 광고를 싣지 않는다. 자동 조립된 역사 문서에도 수동
+     검토가 끝나기 전에는 광고 요청을 넣지 않는다 (`pages.node_page`).
 
-     대신 **사이트 확인은 메타 태그로** 한다. 애드센스가 첫 화면에 광고를 안
-     싣는 사이트를 위해 두는 방법이라, 광고 요청 없이 주인만 밝힌다. -->
+     **사이트 확인은 메타 태그로** 한다. 첫 화면에 광고를 싣지 않아도
+     광고 요청 없이 사이트 주인을 밝힐 수 있다. -->
 <meta name="google-adsense-account" content="ca-pub-8335444243080631">
 <!-- 방문 통계. 측정 ID 는 web/public/analytics.js 한 줄에만 있고, 비어 있으면
      아무 요청도 나가지 않는다. async 라 화면 그리기를 막지 않는다. -->
@@ -39,18 +37,8 @@
 
 <div id="root"></div>
 
-<!-- 관계망은 자바스크립트가 그린다. 그것이 없는 눈(검색 로봇·광고 심사)에게
-     이 화면은 빈 <div> 하나다 — 글로 읽는 장으로 가는 문을 여기 둔다. -->
-<noscript>
-  <p style="max-width:640px;margin:60px auto;padding:0 22px;line-height:1.8;
-            font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;
-            color:#b3b3b3">
-    관계망은 브라우저에서 그려집니다. 자바스크립트 없이 읽으시려면
-    <a href="/n/" style="color:#8a6cef">인물·사건·장소·문화재 목록</a>으로
-    가시면 됩니다.
-  </p>
-</noscript>
-
-<script type="module" src="/src/main.jsx"></script>
+<!-- 빌드 뒤 prerender-landing.mjs 가 #root 에 본문을 넣는다. 브라우저는 같은
+     컴포넌트를 hydrate 해서 메뉴를 작동시킨다. -->
+<script type="module" src="/src/landing-main.jsx"></script>
 </body>
 </html>
