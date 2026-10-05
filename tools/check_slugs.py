@@ -72,8 +72,11 @@ def main(argv: list[str]) -> int:
                   AND LENGTH(n.description) >= ?""",
             (pages.MIN_SUMMARY,),
         ).fetchall()
+        # 앞걸름이다 — 판정한 설명 수(세 번째 조건)는 장을 그려야 알 수 있어
+        # 넘긴 것으로 친다. 범위가 넓어질 뿐이라 주소 누락을 놓치지 않는다.
         indexable = [r for r in rows
-                     if pages.indexable(pages.summarize(r["description"]), r["degree"])]
+                     if pages.indexable(pages.summarize(r["description"]), r["degree"],
+                                        pages.MIN_EXPLAINED)]
         missing = [r for r in indexable if not r["slug"]]
         # 주소의 로마자는 **이름에 있던 것만** 봐준다. 'YH 사건'·'IMF 구제금융'
         # 처럼 라벨 자체가 로마자 약칭을 품는 것은 §1 이 이미 통과시킨
