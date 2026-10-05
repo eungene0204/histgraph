@@ -158,6 +158,20 @@ SUMMARY_MAX = 360
 MIN_SUMMARY = 200
 MIN_RELATIONS = 9
 
+# **이 사이트만의 설명**이 이만큼은 있어야 색인에 오른다 (2026-10-05).
+# 길이 문턱만으로는 모자랐다 — 색인 420장 중 337장의 중심 문단이 남의
+# 사이트에 이미 있는 글의 앞부분이었고, 애드센스는 세 번째로 `Low value
+# content` 를 돌려보냈다. 이 관계망이 남에게 없는 것은 **판정한 관계**다:
+# 무엇이 이 일을 불렀고 이 일이 무엇을 불렀는지(인과), 누가 그 안에서 무엇을
+# 했는지(역할) — 각각 우리 말로 적은 설명(`how`)이 붙어 있다. 그것이 세 줄은
+# 돼야 남의 글 요약 말고 읽을 것이 있다. 실측 420 → 226장.
+MIN_EXPLAINED = 3
+# 장 머리에 세우는 인과·역할 문장 수 (갈래마다). 넘는 것은 아래 목록에 남는다.
+STORY_MAX = 8
+# 설명을 달고 장 머리에 서는 역할. '지휘관'·'교전'은 인포박스가 준 편이라
+# 판정이 아니다 (§1-6) — 아래 목록에 그대로 둔다.
+STORY_ROLES = ("주도", "가담", "대항", "피해", "표적", "수습")
+
 # 위키 문법의 절 제목 (`== 생애 ==`). 본문 전체를 받은 설명에 남아 있다.
 _HEADING = re.compile(r"^=+[ \t]*.+?[ \t]*=+[ \t]*$", re.M)
 # 문장 끝. '다.' '이다.' 뒤에 공백이나 줄바꿈이 오는 자리에서 끊는다.
@@ -229,9 +243,46 @@ def plain_description(text: str | None) -> str:
     return _HEADING.sub(lambda m: m.group(0).strip("= \t"), text)
 
 
-def indexable(summary: str, relations: int) -> bool:
-    """이 장을 색인에 올릴 만한가. 문턱은 위의 두 상수다."""
-    return len(summary) >= MIN_SUMMARY and relations >= MIN_RELATIONS
+def indexable(summary: str, relations: int, explained: int) -> bool:
+    """이 장을 색인에 올릴 만한가. 문턱은 위의 세 상수다 — 요약, 이어진 것,
+    그리고 이 사이트만의 설명(`_story` 가 세우는 인과·역할 문장)."""
+    return (len(summary) >= MIN_SUMMARY and relations >= MIN_RELATIONS
+            and explained >= MIN_EXPLAINED)
+
+
+def _story(node: dict) -> tuple[list[dict], list[dict], list[dict]]:
+    """장 머리에 세울 이 사이트만의 설명. (원인, 결과, 역할)
+
+    **사람이 판정한 것만** 고른다. 머리에 서는 문장은 그 장의 얼굴이라 틀린
+    인과가 서면 장 전체가 거짓으로 읽힌다 — 판정 전 실측으로 '이순신의 명량
+    해전 승리는 임진왜란의 원인', '변협은 임진왜란의 배경(죽은 지 2년 뒤에
+    일어났다)' 이 임진왜란 장 맨 위에 섰다.
+
+    - 인과: `causal.tsv` 가 참이라 판정한 것(`checked`) 중 설명(`how`)이 있는 것.
+    - 역할: `roles.tsv` 가 정하고 근거 문장을 적은 것(`role_note`).
+
+    설명은 `_why` 에 담아 돌려준다. 같은 상대는 한 번, 확신이 높은 것부터,
+    갈래마다 `STORY_MAX` 까지. 나머지는 아래 목록에 그대로 남는다."""
+    causes: list[dict] = []
+    effects: list[dict] = []
+    roles: list[dict] = []
+    seen: set[tuple] = set()
+    rels = sorted(node.get("relations") or [],
+                  key=lambda r: -(r.get("confidence") or 0))
+    for r in rels:
+        key = (r["other"]["id"], r["type"], r["dir"])
+        if key in seen:
+            continue
+        if r["type"] == "caused" and r.get("checked") and (r.get("how") or "").strip():
+            bucket, why = (causes if r["dir"] == "in" else effects), r["how"]
+        elif r.get("edge_label") in STORY_ROLES and (r.get("role_note") or "").strip():
+            bucket, why = roles, r["role_note"]
+        else:
+            continue
+        if len(bucket) < STORY_MAX:
+            seen.add(key)
+            bucket.append({**r, "_why": why.strip()})
+    return causes, effects, roles
 
 
 def _josa(word: str, with_batchim: str, without: str) -> str:
@@ -327,6 +378,11 @@ li .meta { color: var(--text-faint); font-size: 12px; }
 .says li { display: block; padding: 4px 6px; font-size: 15px; line-height: 1.65; color: var(--text-normal); }
 .says li a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--background-modifier-border); text-underline-offset: 3px; }
 .says li a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
+/* 인과·역할 — 관계 문장 뒤에 우리 말로 적은 설명이 붙는다. 문장과 같은 글줄. */
+.story li { display: block; padding: 5px 6px; font-size: 15px; line-height: 1.7; color: var(--text-normal); }
+.story li a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--background-modifier-border); text-underline-offset: 3px; }
+.story li a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
+.story .how { color: var(--text-muted); }
 /* 연표 — 해와 이름 두 칸. */
 .marks li { align-items: baseline; }
 /* 구간('1392년 ~ 1897년')은 84px 을 넘는다 — 줄을 꺾으면 '년' 한 글자가
@@ -613,6 +669,46 @@ def _lead(node: dict, facts: list[dict], paths: dict[str, str],
         htmls.append(marked + ".")
         plains.append(short + ".")
     return " ".join(htmls), " ".join(plains)
+
+
+def _ro(word: str) -> str:
+    """'로'/'으로'. 받침이 없거나 ㄹ 받침이면 '로' ('균역법으로' · '군포로' · '세실로')."""
+    tail = word.strip()[-1:] if word.strip() else ""
+    code = ord(tail) - 0xAC00 if tail else -1
+    if code < 0 or code > 11171:
+        return "로"
+    jong = code % 28
+    return "로" if jong in (0, 8) else "으로"
+
+
+def _gist(causes: list[dict], effects: list[dict],
+          paths: dict[str, str]) -> tuple[str, str]:
+    """첫 문단 끝에 붙는 한 문장 — 무엇에서 비롯되어 무엇으로 이어졌는지.
+
+    첫 문단의 사실 문장('…은 조선에 일어난 일이다')은 갈래가 같으면 틀이
+    같다 — 수십 장에 같은 꼴이 선다. 이 문장은 **그 장의 인과**로 지어서
+    장마다 다르다. 인과가 없으면 붙이지 않는다. (HTML, 맨글)"""
+    def names(rels: list[dict], n: int) -> list[tuple[str, str]]:
+        out = []
+        for r in rels[:n]:
+            name = r["as"] if r.get("as") else r["other"]["label"]
+            out.append((name, f'<a href="{href(_url_of(r["other"]["id"], paths))}">'
+                              f'{escape(name)}</a>'))
+        return out
+    came, went = names(causes, 2), names(effects, 3)
+    if not came and not went:
+        return "", ""
+    plain, html = [], []
+    if came:
+        plain.append("·".join(n for n, _ in came) + "에서 비롯되었")
+        html.append("·".join(h for _, h in came) + "에서 비롯되었")
+    if went:
+        last = went[-1][0]
+        plain.append("·".join(n for n, _ in went) + f"{_ro(last)} 이어졌")
+        html.append("·".join(h for _, h in went) + f"{_ro(last)} 이어졌")
+    if len(plain) == 2:
+        return f"{html[0]}고, {html[1]}다.", f"{plain[0]}고, {plain[1]}다."
+    return f"{html[0]}다.", f"{plain[0]}다."
 
 
 def _origin_line(origin: dict | None) -> str:
@@ -1035,9 +1131,34 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
 
     # 이 사이트의 말이 먼저다 — 어느 시대의 무엇이고 어디서 났고 무슨 자리를
     # 지냈는지는 원문이 아니라 관계망이 아는 것이다. 그다음에 원문 요약이 온다.
+    causes, effects, roles = _story(node)
+    explained = len(causes) + len(effects) + len(roles)
     lead_html, lead = _lead(node, lead_rels, paths, title, kind, era)
+    gist_html, gist = _gist(causes, effects, paths)
+    if gist:
+        lead_html, lead = f"{lead_html} {gist_html}", f"{lead} {gist}"
     parts.append(f'<p class="lead">{lead_html}</p>')
+
+    # **이 관계망만 아는 것**을 남의 글 요약보다 위에 세운다 (2026-10-05).
+    # 이름만 늘어놓던 인과·역할을 우리 말로 적은 설명과 함께 읽는다.
+    event_like = node["type"] == "event"
+    shown_keys: set[tuple] = set()
+    for heading, rels in (
+            ("왜 일어났나" if event_like else "무엇에서 비롯되었나", causes),
+            ("무엇을 남겼나" if event_like else "무엇으로 이어졌나", effects),
+            ("누가 무엇을 했나" if event_like else "어떤 일에서 무엇을 했나", roles)):
+        if not rels:
+            continue
+        parts.append(f'<h2>{heading}</h2><ul class="story">')
+        for r in rels:
+            shown_keys.add((r["other"]["id"], r["type"], r["dir"]))
+            how = r["_why"].rstrip(".")
+            parts.append(f"<li>{_sentence_html(r, node, paths)}"
+                         f'<span class="how"> — {escape(how)}.</span></li>')
+        parts.append("</ul>")
+
     if summary:
+        parts.append('<h2>자료의 설명</h2>' if explained else "")
         parts.append(f'<p class="desc">{escape(summary)}</p>')
         origin = _origin_line(node.get("desc_origin"))
         if origin:
@@ -1060,8 +1181,19 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
                 f'<a href="{href(_url_of(other["id"], paths))}">{escape(other["label"])}</a></li>')
         parts.append("</ul>")
 
-    if total:
-        parts.append(f"<h2>이어진 것 {total}</h2>")
+    # 위에서 설명과 함께 세운 관계는 다시 세우지 않는다 — 같은 말이 한 장에
+    # 두 번 서면 그것이 찍어 낸 장이다.
+    def _not_told(rels: list[dict]) -> list[dict]:
+        return [r for r in rels
+                if (r["other"]["id"], r["type"], r["dir"]) not in shown_keys]
+    sections = [(t, [(h, _not_told(rs)) for h, rs in ranked if _not_told(rs)])
+                for t, ranked in sections]
+    sections = [(t, ranked) for t, ranked in sections if ranked]
+    # 머리의 수는 `_page_parts` 가 센 것(첫 문단의 관계까지)에서 위에 설명과
+    # 함께 세운 것만 뺀다 — 목록·사이트맵이 재는 수와 같은 뿌리다.
+    rest_n = total - len(shown_keys)
+    if sections:
+        parts.append(f"<h2>{'그 밖에 ' if shown_keys else ''}이어진 것 {rest_n}</h2>")
         for section, ranked in sections:
             parts.append(f"<h3>{escape(section)}</h3>")
             for head, rels in ranked:
@@ -1081,7 +1213,7 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
                 parts.append("</ul>")
                 if len(rels) > GROUP_MAX:
                     parts.append(f'<p class="more">외 {len(rels) - GROUP_MAX}개</p>')
-    else:
+    elif not total:
         parts.append('<h2>이어진 것</h2><p class="empty">연결된 관계가 없습니다.</p>')
 
     parts.append(
@@ -1116,7 +1248,7 @@ def node_page(api, node_id: str, canonical_path: str | None = None) -> Page:
         meta,
         canonical,
         "\n".join(parts),
-        noindex=not indexable(summary, total),
+        noindex=not indexable(summary, total, explained),
         # 문서는 자료에서 자동 조립된다. 길이 문턱을 넘었다고 수동 검토가
         # 끝난 것은 아니다. 광고는 검토·선별한 별도 장에만 켤 수 있다.
         ads=False,
@@ -1194,7 +1326,9 @@ def _row_indexable(api, node_id: str, description: str | None) -> bool:
     node = api.node(node_id)
     if node is None:
         return False
-    return indexable(summarize(node["description"]), _page_parts(node)[2])
+    causes, effects, roles = _story(node)
+    return indexable(summarize(node["description"]), _page_parts(node)[2],
+                     len(causes) + len(effects) + len(roles))
 
 
 def _segment_rows(api, segment: str, *, limit: int | None = None,

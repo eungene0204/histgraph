@@ -4707,6 +4707,91 @@ with tempfile.TemporaryDirectory() as tmp:
     store.close(); target.close()
 
 
+# --- 인과 판정 표 (`causal`) · 장 머리의 이 사이트만의 설명 (`pages._story`) ----
+#
+# 2026-10-05 `Low value content` 세 번째. 장의 중심이 남의 글 요약이어서 판정한
+# 인과·역할을 장 머리로 올렸고, 올리자 틀린 인과('변협은 임진왜란의 배경 — 변협이
+# 죽은 지 2년 뒤에 일어났다')가 맨 위에 섰다. 그래서 머리에 서는 것은 **사람이
+# 판정한 것뿐**이다.
+print("\n[인과 판정 · 장 머리]")
+with tempfile.TemporaryDirectory() as tmp:
+    from histgraph import causal as _causal
+    from histgraph import pages as _pg
+    from histgraph.server import GraphAPI as _GA
+    store = GraphStore(Path(tmp) / "g.sqlite")
+    store.upsert_nodes([
+        Node(id="wd:IMJ", type="event", label="임진왜란", source="wd", start_date="1592",
+             description="일본이 조선을 침략한 전쟁이다.", props={"canon": "nikh"}),
+        Node(id="wd:HID", type="person", label="도요토미 히데요시", source="wd"),
+        Node(id="wd:BH", type="person", label="변협", source="wd"),
+        Node(id="wd:GP", type="concept", label="군포", source="wd"),
+        Node(id="wd:DD", type="concept", label="대동법", source="wd"),
+        Node(id="wd:XX", type="person", label="동명이인", source="wd"),
+        Node(id="wd:SJ", type="person", label="선조", source="wd"),
+    ])
+    store.upsert_edges([
+        Edge(src="wd:HID", dst="wd:IMJ", type="caused", source="causes", label="배경",
+             confidence=0.9, props={"how": "히데요시의 공명심이 전쟁의 배경이 되었다"}),
+        Edge(src="wd:BH", dst="wd:IMJ", type="caused", source="causes", label="배경",
+             confidence=0.9, props={"how": "변협이 죽은 지 2년 뒤에 임진왜란이 일어났다"}),
+        Edge(src="wd:IMJ", dst="wd:GP", type="caused", source="causes", label="계기",
+             confidence=0.9, props={"how": "엉뚱한 설명"}),
+        Edge(src="wd:IMJ", dst="wd:DD", type="caused", source="causes", label="원인",
+             confidence=0.9, props={"how": "판정이 아직 없다"}),
+        Edge(src="wd:XX", dst="wd:IMJ", type="caused", source="causes", label="원인",
+             confidence=0.9, props={"how": "동명이인을 이은 줄"}),
+        Edge(src="wd:SJ", dst="wd:IMJ", type="participated_in", source="roles", label="표적",
+             props={"role_origin": "roles", "role_evidence": "선조는 한양을 버리고 의주로 피란했다"}),
+    ])
+    table = [
+        _causal.TableRow("wd:HID", "wd:IMJ", "인과", "히데요시의 공명심이 배경이었다."),
+        _causal.TableRow("wd:BH", "wd:IMJ", "관련", "변협이 죽은 지 2년 뒤에 임진왜란이 일어났다."),
+        _causal.TableRow("wd:IMJ", "wd:GP", "고침", "오군영의 군비를 대려고 군포 징수가 본격화되었다"),
+        _causal.TableRow("wd:XX", "wd:IMJ", "삭제", "동명이인이다."),
+    ]
+    rep = _causal.apply_table(store, table)
+    check("판정 넷이 각각 씌워진다", (rep.checked, rep.demoted, rep.deleted) == (2, 1, 1), str(rep))
+    _rel = store.conn.execute("SELECT props FROM edges WHERE src='wd:BH' AND dst='wd:IMJ' AND type='related_to'").fetchone()
+    check("인과가 아닌 것은 지우지 않고 '관련'으로 낮추며 근거가 남는다",
+          _rel is not None and "2년 뒤" in _rel[0]
+          and store.conn.execute("SELECT 1 FROM edges WHERE src='wd:BH' AND type='caused'").fetchone() is None)
+    check("동명이인 인과는 지운다",
+          store.conn.execute("SELECT 1 FROM edges WHERE src='wd:XX'").fetchone() is None)
+    # 재수집이 같은 엣지를 다시 세워도 편집 계층이 판정을 다시 씌운다.
+    store.upsert_edges([Edge(src="wd:BH", dst="wd:IMJ", type="caused", source="causes",
+                             label="배경", confidence=0.9, props={"how": "다시 들어온 줄"})])
+    check("재수집이 되살린 거짓 인과는 편집 계층이 다시 지운다",
+          store.conn.execute("SELECT 1 FROM edges WHERE src='wd:BH' AND type='caused'").fetchone() is None)
+
+    api = _GA(store, era="korea")
+    d = api.node("wd:IMJ")
+    causes, effects, roles = _pg._story(d)
+    check("장 머리에는 판정한 인과만 선다 — 판정 없는 대동법은 서지 않는다",
+          [r["other"]["id"] for r in causes] == ["wd:HID"]
+          and [r["other"]["id"] for r in effects] == ["wd:GP"], str([c["other"]["id"] for c in causes + effects]))
+    check("고침 판정은 설명을 판정한 문장으로 바꾼다",
+          effects[0]["_why"].startswith("오군영의 군비"), effects[0]["_why"])
+    check("역할은 표가 적은 근거 문장과 함께 선다",
+          [r["other"]["id"] for r in roles] == ["wd:SJ"] and "의주로 피란" in roles[0]["_why"])
+    _gate3 = _pg.MIN_SUMMARY, _pg.MIN_RELATIONS
+    _pg.MIN_SUMMARY, _pg.MIN_RELATIONS = 1, 1
+    body = _pg.node_page(api, "wd:IMJ").body
+    check("사건 장 머리에 '왜 일어났나'·'무엇을 남겼나'·'누가 무엇을 했나'가 선다",
+          all(h in body for h in ("<h2>왜 일어났나</h2>", "<h2>무엇을 남겼나</h2>", "<h2>누가 무엇을 했나</h2>")))
+    check("남의 글 요약은 그 아래 '자료의 설명'으로 내려간다",
+          body.index("왜 일어났나") < body.index("자료의 설명") < body.index('class="desc"'))
+    check("첫 문단 끝에 그 장의 인과로 지은 문장이 붙는다",
+          "에서 비롯되었고," in body and "군포</a>로 이어졌다." in body, body[body.find('class="lead"'):][:300])
+    check("머리에 세운 관계는 아래 목록에 다시 서지 않는다",
+          body.count(">군포</a>") == 2)   # 첫 문단 한 번 · 머리 문장 한 번
+    check("판정한 설명이 셋이면 색인 문턱의 세 번째 조건을 넘는다",
+          'content="index,follow' in body)
+    _pg.MIN_SUMMARY, _pg.MIN_RELATIONS = _gate3
+    check("'로/으로'는 받침으로 가른다 (ㄹ 받침은 '로')",
+          (_pg._ro("군포"), _pg._ro("균역법"), _pg._ro("대동법"), _pg._ro("세실")) == ("로", "으로", "으로", "로"))
+    store.close()
+
+
 print("\n[글로 읽는 장]")
 with tempfile.TemporaryDirectory() as tmp:
     import json as _json
@@ -4780,8 +4865,8 @@ with tempfile.TemporaryDirectory() as tmp:
     # 이 그래프는 노드 예닐곱짜리라 배포의 색인 문턱(요약 240자·관계 8건)을
     # 넘을 수 없다. 재려는 것은 **장이 어떻게 그려지는가**이므로 문턱만 잠시
     # 낮춘다 — 문턱 값 자체는 아래 '색인 문턱' 절이 따로 잰다.
-    _gate = (pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT)
-    pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT = 120, 3, 1
+    _gate = (pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT, pages.MIN_EXPLAINED)
+    pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT, pages.MIN_EXPLAINED = 120, 3, 1, 0
 
     def _visible(html: str) -> str:
         html = _re.sub(r"<(script|style)\b[\s\S]*?</\1>", " ", html)
@@ -5076,14 +5161,17 @@ with tempfile.TemporaryDirectory() as tmp:
     # 2026-09-16 애드센스 `Low value content`. 낮은 문턱(120·3)을 겨우 넘은
     # 장이 천 장 넘게 깔려 있었다 — 머리·바닥까지 400자에 링크 열한 개짜리
     # 장이다. 값을 낮추면 그 장들이 도로 색인에 오르므로 여기서 잡는다.
-    pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT = _gate
-    check("색인 문턱은 요약 200자 · 관계 9건이다",
-          (pages.MIN_SUMMARY, pages.MIN_RELATIONS) == (200, 9),
-          str((pages.MIN_SUMMARY, pages.MIN_RELATIONS)))
-    check("두 조건을 모두 넘어야 올린다",
-          pages.indexable("가" * 200, 9)
-          and not pages.indexable("가" * 199, 9)
-          and not pages.indexable("가" * 200, 8))
+    pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_SEGMENT, pages.MIN_EXPLAINED = _gate
+    check("색인 문턱은 요약 200자 · 관계 9건 · 판정한 설명 3건이다",
+          (pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_EXPLAINED) == (200, 9, 3),
+          str((pages.MIN_SUMMARY, pages.MIN_RELATIONS, pages.MIN_EXPLAINED)))
+    # 2026-10-05 `Low value content` 세 번째. 길이 문턱만 넘은 장의 열에 아홉이
+    # 남의 글 요약이었다 — 이 사이트만의 설명(판정한 인과·역할)이 있어야 오른다.
+    check("세 조건을 모두 넘어야 올린다",
+          pages.indexable("가" * 200, 9, 3)
+          and not pages.indexable("가" * 199, 9, 3)
+          and not pages.indexable("가" * 200, 8, 3)
+          and not pages.indexable("가" * 200, 9, 2))
     # 목록·사이트맵과 장이 **같은 것**을 재야 한다. 목록은 SQL 차수로, 장은
     # 제가 그린 수로 재던 때 후보 951 중 713 에서 수가 달랐고 53장이
     # 사이트맵에는 있는데 정작 `noindex` 였다 (거제시: 차수 10 · 그린 것 9).

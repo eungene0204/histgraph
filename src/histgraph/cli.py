@@ -317,6 +317,22 @@ def ex_scope_ids(path: str | None) -> set[str] | None:
     return load_scope_ids(path)
 
 
+def cmd_causal(args: argparse.Namespace) -> int:
+    """인과 판정 표(`data/causal.tsv`)를 씌운다 — 글로 읽는 장의 머리에 서는 인과."""
+    from . import causal
+
+    table = causal.load_table(Path(args.table))
+    print(f"→ 인과 판정 {len(table):,}줄")
+    if not args.apply:
+        return 0
+    with GraphStore(args.db) as store:
+        rep = causal.apply_table(store, table)
+    print(f"  ✓ 인과 {rep.checked:,} · 관련으로 낮춤 {rep.demoted:,}"
+          f" · 뒤집음 {rep.flipped:,} · 지움 {rep.deleted:,}"
+          + (f" · 이 그래프에 없음 {len(rep.absent):,}" if rep.absent else ""))
+    return 0
+
+
 def cmd_provenance(args: argparse.Namespace) -> int:
     """설명이 어디서 왔는지 — 화면에 서는 글과 비운 글을 까닭별로 센다.
 
@@ -3268,6 +3284,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="출처 표식이 없는 글을 위키데이터·위키백과에 맞춰 보고 표식을 적는다")
     p_pv.add_argument("--interval", type=float, default=1.0)
     p_pv.set_defaults(func=cmd_provenance)
+
+    p_cs = sub.add_parser("causal", help="인과 판정 표를 씌운다 — 글로 읽는 장의 머리에 서는 인과")
+    p_cs.add_argument("--apply", action="store_true", help="표를 편집 계층에 적고 그래프에 씌운다")
+    p_cs.add_argument("--table", default="data/causal.tsv")
+    p_cs.set_defaults(func=cmd_causal)
 
     p_prune = sub.add_parser("prune", help="스포츠 이벤트 노드 제거")
     p_prune.add_argument("--labels-only", action="store_true", help="Wikidata 클래스 조회 생략 (빠름)")

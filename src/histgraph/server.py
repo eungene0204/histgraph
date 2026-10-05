@@ -691,7 +691,16 @@ class GraphAPI:
                     # 지휘하다 전사했다"·"살해되었다"가 되는 재료다.
                     "fate": edge_props.get("fate") or None,
                     "side_name": edge_props.get("side_name") or None,
+                    # 사람이 판정한 표식. 글로 읽는 장은 **판정을 거친 것만** 머리에
+                    # 세운다 (`pages._story`) — 인과는 `causal.tsv` 가 참이라 한
+                    # 것, 역할은 `roles.tsv` 가 정하고 근거 문장을 적은 것.
+                    "checked": False,
+                    "role_note": None,
                 }
+            if edge_props.get("checked"):
+                fact["checked"] = True
+            if edge_props.get("role_origin") == "roles" and edge_props.get("role_evidence"):
+                fact["role_note"] = fact["role_note"] or edge_props["role_evidence"]
             fact["confidence"] = max(fact["confidence"], r["confidence"])
             if not fact["how"] and edge_props.get("how"):
                 fact["how"] = edge_props["how"]
