@@ -457,6 +457,12 @@ def _why_empty(node: dict) -> str:
         # 자료가 없는 것이 아니라 **못 싣는 것**이다. 비영리 조건이 붙은 글은
         # 광고가 걸린 이 사이트에 세울 수 없다 (provenance.NONCOMMERCIAL).
         return "이용 조건이 비영리라 다른 곳의 글을 옮겨 싣지 못합니다."
+    # 글은 있는데 싣지 않은 것 (`summaries.shown`). 남의 글을 그대로 옮기지
+    # 않고, 어디서 왔는지 모르는 글은 출처를 못 밝히니 세우지 않는다.
+    if node.get("desc_withheld") == "unrewritten":
+        return "다른 곳의 글을 그대로 옮기지 않고 새로 쓰는 중이라 아직 싣지 않았습니다."
+    if node.get("desc_withheld") == "unknown_origin":
+        return "어디서 온 글인지 확인하지 못해 싣지 않았습니다."
     if node.get("source") == "timeline":
         return "연표의 해를 세우는 노드라 설명이 없습니다."
     if node.get("source") == "extract":
@@ -1183,20 +1189,12 @@ def _page_parts(node: dict) -> tuple[list[dict], list[tuple], int]:
 
 def _row_indexable(api, node_id: str, description: str | None) -> bool:
     """목록·사이트맵이 거는 문턱. **장이 거는 것과 같은 것**을 잰다 —
-    같은 설명(`_shown_desc`)과 같은 관계 수(`_page_parts`)."""
+    장이 받는 그 설명(`api.node` → `summaries.shown`)과 같은 관계 수
+    (`_page_parts`). 따로 고르면 사이트맵과 장이 어긋난다 (§1-15)."""
     node = api.node(node_id)
     if node is None:
         return False
-    return indexable(summarize(_shown_desc(api, node_id, description)),
-                     _page_parts(node)[2])
-
-
-def _shown_desc(api, node_id: str, description: str | None) -> str:
-    """그 장이 실제로 세우는 설명. 정본이 아닌 글은 우리 말로 새로 쓴 것이
-    선다 (`summaries`). 늦게 들이는 것은 `summaries` 가 이 파일의 `summarize`
-    를 쓰기 때문이다 — 위에서 들이면 서로 물린다."""
-    from . import summaries
-    return summaries.lookup(api.store.conn, node_id, description) or (description or "")
+    return indexable(summarize(node["description"]), _page_parts(node)[2])
 
 
 def _segment_rows(api, segment: str, *, limit: int | None = None,

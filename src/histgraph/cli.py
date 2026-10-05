@@ -317,6 +317,43 @@ def ex_scope_ids(path: str | None) -> set[str] | None:
     return load_scope_ids(path)
 
 
+def cmd_provenance(args: argparse.Namespace) -> int:
+    """설명이 어디서 왔는지 — 화면에 서는 글과 비운 글을 까닭별로 센다.
+
+    남의 글은 출처 줄과 함께, 정본이 아니면 새로 쓴 것만 선다
+    (`summaries.shown`). `--repair` 는 출처 표식이 없는 글의 출처를
+    위키데이터·위키백과에 맞춰 보고 되찾는다 (`wikipedia.mark_origins`)."""
+    from . import summaries
+    from .sources import wikipedia
+
+    with GraphStore(args.db) as store:
+        if args.repair:
+            fetcher = Fetcher(DEFAULT_CACHE, min_interval=max(args.interval, 1.0))
+            print("→ 출처 표식이 없는 글의 출처를 맞춰 보는 중...")
+            r = wikipedia.mark_origins(fetcher, store)
+            print(f"  ✓ 후보 {r['candidates']:,} · 위키데이터 {r['wikidata']:,}"
+                  f" · 위키백과 {r['kowiki']:,} · 맞지 않음 {r['unmatched']:,}")
+            if r["unresolved"]:
+                print(f"  ⚠ 조회가 죽어 못 물어본 노드 {r['unresolved']:,}개"
+                      " — 다시 실행하면 재시도합니다", file=sys.stderr)
+
+        counts: dict[str, int] = {}
+        for row in store.conn.execute(
+                "SELECT id, source, url, props, description FROM nodes"
+                " WHERE COALESCE(description, '') <> ''"):
+            _text, _origin, why = summaries.shown(
+                store.conn, row["id"], row["source"], json.loads(row["props"] or "{}"),
+                row["url"], row["description"])
+            counts[why or "shown"] = counts.get(why or "shown", 0) + 1
+    names = {"shown": "화면에 섬", "unrewritten": "새로 쓴 글이 없어 비움",
+             "unknown_origin": "출처를 몰라 비움", "noncommercial": "비영리 조건이라 비움"}
+    for key in ("shown", "unrewritten", "unknown_origin", "noncommercial"):
+        print(f"  {names[key]:<16} {counts.get(key, 0):>7,}")
+    if counts.get("unrewritten"):
+        print("  · 새로 쓴 글은 `histgraph paraphrase` (MLX) 로 채운다")
+    return 0
+
+
 def cmd_enrich(args: argparse.Namespace) -> int:
     """한국어 위키백과 서사를 기존 노드에 채운다."""
     from .sources import wikipedia
@@ -3225,6 +3262,12 @@ def main(argv: list[str] | None = None) -> int:
     p_en.add_argument("--refresh", action="store_true", help="이미 산문이 있는 노드도 다시 받기")
     p_en.add_argument("--scope", default=None, help="시대 서브그래프 DB 로 대상 한정")
     p_en.set_defaults(func=cmd_enrich)
+
+    p_pv = sub.add_parser("provenance", help="설명의 출처 — 화면에 서는 글·비운 글을 세고 출처를 되찾는다")
+    p_pv.add_argument("--repair", action="store_true",
+                      help="출처 표식이 없는 글을 위키데이터·위키백과에 맞춰 보고 표식을 적는다")
+    p_pv.add_argument("--interval", type=float, default=1.0)
+    p_pv.set_defaults(func=cmd_provenance)
 
     p_prune = sub.add_parser("prune", help="스포츠 이벤트 노드 제거")
     p_prune.add_argument("--labels-only", action="store_true", help="Wikidata 클래스 조회 생략 (빠름)")

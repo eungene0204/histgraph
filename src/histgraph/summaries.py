@@ -18,7 +18,7 @@
 **받아들이는 기준은 기계가 잰다** (`accept`): 한국어일 것, 영어가 없을 것,
 60~420자, 원문과 30자 넘게 겹치는 구절이 없을 것(그대로 베낀 것은 요약이
 아니다), '위키'·'이 글'·'문서' 같은 말을 하지 않을 것. 떨어지면 저장하지
-않는다 — 화면은 그때 도입부를 낸다. 없는 사실을 지어냈는지는 기계가 못 잰다.
+않는다 — 화면은 그때 **설명을 비운다** (`shown`). 없는 사실을 지어냈는지는 기계가 못 잰다.
 그래서 프롬프트가 원문에 없는 것을 보태지 말라 하고, 표본을 사람이 읽는다.
 
 모델은 `causes`·`roles` 와 같은 MLX 다 (35GB, 함께 띄우지 말 것). 한 건에
@@ -34,7 +34,7 @@ import re
 from typing import Any
 
 from .pages import summarize
-from .provenance import desc_origin
+from .provenance import desc_origin, noncommercial
 from .store import GraphStore
 
 log = logging.getLogger(__name__)
@@ -236,6 +236,46 @@ def lookup(conn, node_id: str, description: str | None) -> str | None:
     if row and row["src_hash"] == src_hash(description):
         return row["text"]
     return None
+
+
+# 우리가 직접 쓴 설명의 소스 — 화승·장인(`makers.tsv`, 'hand')과 씨족의
+# 파(`clans`). 남의 글이 아니라 출처 줄 없이 선다.
+OWN_SOURCES = frozenset({"hand", "clans"})
+
+
+def shown(conn, node_id: str, source: str | None, props: dict | None,
+          url: str | None, description: str | None) -> tuple[str, dict | None, str]:
+    """화면에 세울 설명 — (글, 출처, 비운 까닭).
+
+    **장·상세 패널·목록·사이트맵이 모두 이것 하나를 부른다.** 따로 재면
+    사이트맵은 올린다는데 그 장은 `noindex` 인 일이 다시 생긴다 (§1-15).
+
+    - 정본은 원문 그대로 준다 (도입부로 줄이는 것은 부르는 쪽 몫).
+    - 우리가 쓴 글(`OWN_SOURCES`)도 그대로 준다.
+    - 정본이 아닌 남의 글은 **새로 쓴 글만** 준다. 2026-10-05 실측: 새로 쓴
+      글이 없을 때 위키 도입부로 물러나던 길로 2,044장이 원문을 싣고 있었다 —
+      애드센스 `Low value content` 의 '남의 글을 자른 장'이 이것이다.
+    - **출처를 모르는 글은 싣지 않는다.** 남의 글을 출처 줄 없이 세우면 라이선스를
+      어긴다 (1,442장이 원문을 출처 줄 없이 싣고 있었다). 출처를 되찾는 것은
+      `histgraph provenance` 다.
+    - 비영리 조건이 붙은 글은 새로 쓴 것까지 싣지 않는다 (`noncommercial`).
+
+    비운 까닭: 'noncommercial' · 'unrewritten' · 'unknown_origin', 실었으면 ''."""
+    if not description:
+        return "", None, ""
+    origin = desc_origin(source, props or {}, url)
+    if noncommercial(origin):
+        return "", None, "noncommercial"
+    if origin and origin["name"] in CANON:
+        return description, origin, ""
+    if origin is None:
+        if source in OWN_SOURCES:
+            return description, None, ""
+        return "", None, "unknown_origin"
+    rewritten = lookup(conn, node_id, description)
+    if not rewritten:
+        return "", None, "unrewritten"
+    return rewritten, {**origin, "rewritten": True}, ""
 
 
 def sync(store: GraphStore, target: GraphStore) -> int:

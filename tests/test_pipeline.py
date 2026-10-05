@@ -4659,8 +4659,14 @@ with tempfile.TemporaryDirectory() as tmp:
     check("출처 줄은 '바탕으로 새로 쓴 글'이라 말한다",
           d["desc_origin"]["rewritten"] is True
           and "문서를 바탕으로 새로 쓴 글입니다" in _pages.node_page(api, "wd:LSS").body)
-    check("떨어진 노드는 도입부로 물러난다",
-          api.node("wd:UNK")["description"].startswith("강항(姜沆)은") and api.node("wd:UNK")["desc_origin"] is None)
+    # 2026-10-05: 새로 쓴 글이 없을 때 원문 도입부로 물러나던 길이 애드센스
+    # `Low value content` 의 '남의 글을 자른 장' 이었다. 이제 비운다.
+    _unk = api.node("wd:UNK")
+    check("출처를 모르는 글은 새로 쓴 것이 떨어지면 싣지 않는다",
+          _unk["description"] == "" and _unk["desc_origin"] is None
+          and _unk["desc_withheld"] == "unknown_origin", str(_unk["description"])[:60])
+    check("빈 칸의 까닭을 한국어로 적는다",
+          "어디서 온 글인지 확인하지 못해" in _pages.node_page(api, "wd:UNK").body)
     check("정본은 줄인 글 그대로",
           api.node("wd:KIM")["description"].startswith("김종서(金宗瑞)는")
           and "rewritten" not in api.node("wd:KIM")["desc_origin"])
@@ -4669,9 +4675,24 @@ with tempfile.TemporaryDirectory() as tmp:
     # 수집이 설명을 바꾸면 옛 요약은 옛 글의 요약이다 — 화면은 도입부로 돌아간다.
     store.conn.execute("UPDATE nodes SET description = ? WHERE id = 'wd:LSS'", (WIKI + " 노량 해전에서 전사했다.",))
     store.conn.commit()
-    check("원문이 바뀌면 옛 글은 무효다",
-          api.node("wd:LSS")["description"].startswith("이순신(李舜臣")
+    check("원문이 바뀌면 옛 글은 무효다 — 원문으로 물러나지 않고 비운다",
+          api.node("wd:LSS")["description"] == ""
+          and api.node("wd:LSS")["desc_withheld"] == "unrewritten"
           and "wd:LSS" in [c["id"] for c in sm.candidates(store)])
+    # 우리가 쓴 글은 출처 줄 없이 그대로 선다 — 화승·장인(`makers.tsv`)의 설명.
+    store.upsert_nodes([Node(id="kr:person:임한", type="person", label="임한", source="hand",
+                             description="18세기 중엽에 활동한 화승이다. 통도사의 불화를 그렸다.")])
+    _own = api.node("kr:person:임한")
+    check("우리가 쓴 글은 출처 줄 없이 선다",
+          _own["description"].startswith("18세기 중엽") and _own["desc_withheld"] == "")
+    check("두 쪽(장·목록)이 같은 규칙을 부른다 — 따로 고르는 함수가 없다",
+          not hasattr(_pages, "_shown_desc"))
+    from histgraph.sources.wikipedia import _starts_with_title as _swt
+    check("출처를 되찾을 때 글이 그 문서 이름으로 시작하는지 잰다",
+          _swt("제2차 진주성 전투(第二次晋州城戰鬪)는 1593년", "제2차 진주성 전투")
+          and _swt("김영재(1995년 ~ )는 배우이다.", "김영재 (배우)")
+          and not _swt("폐세자 이지(廢世子 李祬)는", "이지 (1598년)")
+          and not _swt("원의 역관", "서찬"))
 
     target = GraphStore(Path(tmp) / "t.sqlite")
     target.upsert_nodes([Node(id="wd:LSS", type="person", label="이순신", source="wd", description=WIKI)])
@@ -4712,8 +4733,9 @@ with tempfile.TemporaryDirectory() as tmp:
              aliases=["이도"],
              props={"desc_source": "kowiki",
                     "kowiki_url": "https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"}),
+        # 출처가 분명한 글이라야 선다 (`summaries.shown`) — 정본 표식을 단다.
         Node(id="wd:T", type="person", label="태종", source="wd",
-             description="조선의 제3대 국왕이다."),
+             description="조선의 제3대 국왕이다.", props={"canon": "nikh"}),
         Node(id="wd:M", type="person", label="문종", source="wd",
              description="조선의 제5대 국왕이다."),
         Node(id="wd:H", type="person", label="황희", source="wd",
@@ -4739,6 +4761,18 @@ with tempfile.TemporaryDirectory() as tmp:
         Edge(src="wd:S", dst="wd:HUN", type="participated_in", source="wd"),
         Edge(src="wd:S", dst="wd:SIX", type="participated_in", source="wd"),
     ])
+    # 세종의 글은 위키백과 글이라 **새로 쓴 것만** 선다 (`summaries.shown`).
+    # 새로 쓴 글을 하나 넣어 둔다 — 없으면 장은 설명을 비운다 (아래 따로 잰다).
+    SEJONG_REWRITE = (
+        "세종은 1397년에 태어나 1450년에 세상을 떠난 조선의 네 번째 임금으로 "
+        "1418년부터 1450년까지 나라를 다스렸다. 훈민정음을 창제하고 측우기와 "
+        "자격루를 만들게 했으며, 북쪽으로 4군과 6진을 열어 국경을 넓혔다. "
+        "황희와 맹사성을 곁에 두고 의정부서사제를 시행했다.")
+    store.conn.execute(
+        "INSERT INTO summaries (node_id, text, model, src_hash, made_at)"
+        " VALUES ('wd:S', ?, 'fake', ?, datetime('now'))",
+        (SEJONG_REWRITE, __import__("histgraph.summaries", fromlist=["x"]).src_hash(f"{SEJONG_INTRO}\n\n\n== 생애 ==\n{SEJONG_BODY}")))
+    store.conn.commit()
     from histgraph import slugs as _slugs
     _slugs.assign(store.conn)
     api = _GraphAPI(store, era="korea")
@@ -4793,7 +4827,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("노드 장이 열린다", page.status == 200 and page.ctype.startswith("text/html"))
     check("이름·갈래·생몰이 글로 적힌다",
           "세종" in text and "인물" in text and "1397년 ~ 1450년" in text, text[:200])
-    check("설명의 도입부가 본문에 들어 있다", "훈민정음을 창제하고" in text)
+    # 위키백과 글은 원문이 아니라 새로 쓴 글이 선다 (2026-10-05).
+    check("새로 쓴 설명이 본문에 들어 있고 원문 도입부는 없다",
+          "훈민정음을 창제하고" in text and "재위 기간은" not in text, text[:400])
     # 원문 전체를 옮기면 스크랩이다. 절 본문은 내지 않고 위키 문법도 세우지 않는다.
     check("절 본문은 내지 않는다", "막동" not in text and "== " not in text, text[:400])
     # 첫 문단은 **관계를 읽은 문장**이다. 2026-09-16 이전에는 세는 말이었는데
@@ -4807,8 +4843,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("다른 이름이 적힌다", "이도" in text)
     # 출처는 설명 아래 한 줄. §1 의 유일한 예외 — 라이선스 의무다.
     check("출처와 라이선스가 설명 아래 한 줄로 선다",
-          "한국어 위키백과 문서를 줄인 글입니다 · 크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0" in text
-          and text.index("훈민정음을") < text.index("문서를 줄인 글입니다"), text[:600])
+          "한국어 위키백과 문서를 바탕으로 새로 쓴 글입니다 · 크리에이티브 커먼즈 저작자표시-동일조건변경허락 4.0" in text
+          and text.index("훈민정음을") < text.index("새로 쓴 글입니다"), text[:600])
     check("출처 이름과 라이선스가 링크다",
           'href="https://ko.wikipedia.org/wiki/%EC%84%B8%EC%A2%85"' in body
           and 'href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko"' in body)
@@ -4938,7 +4974,11 @@ with tempfile.TemporaryDirectory() as tmp:
           and "막동" not in api.node("wd:S")["description"])
     check("상세 패널이 출처를 받는다",
           api.node("wd:S")["desc_origin"]["name"] == "한국어 위키백과"
-          and api.node("wd:T")["desc_origin"] is None)
+          and api.node("wd:T")["desc_origin"]["name"] == "국사편찬위원회 우리역사넷")
+    # 표식이 없어 출처를 모르는 글(황희)은 출처 줄 없이 싣지 않는다 — 글도 비운다.
+    check("출처를 모르는 글은 상세 패널에도 서지 않는다",
+          api.node("wd:H")["desc_origin"] is None and api.node("wd:H")["description"] == ""
+          and api.node("wd:H")["desc_withheld"] == "unknown_origin")
 
     # 출처 판정 자체 (provenance.desc_origin). 표식이 확실할 때만 적는다.
     from histgraph.provenance import desc_origin as _origin

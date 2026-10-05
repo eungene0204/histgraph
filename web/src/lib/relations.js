@@ -348,6 +348,11 @@ export function cardsFor(groups, otherId) {
 // '자료 없음'이라고 적으면, 더 받아오면 채워지는 노드와 애초에 채울
 // 것이 없는 노드가 같은 말을 하게 된다.
 export function whyEmpty(d) {
+  // 글은 있는데 싣지 않은 것 — 서버가 까닭을 준다 (`summaries.shown`).
+  // 글로 읽는 장(`pages._why_empty`)과 같은 말을 한다.
+  if (d.desc_withheld === 'noncommercial') return '이용 조건이 비영리라 다른 곳의 글을 옮겨 싣지 못합니다.';
+  if (d.desc_withheld === 'unrewritten') return '다른 곳의 글을 그대로 옮기지 않고 새로 쓰는 중이라 아직 싣지 않았습니다.';
+  if (d.desc_withheld === 'unknown_origin') return '어디서 온 글인지 확인하지 못해 싣지 않았습니다.';
   if (d.source === 'timeline') return '연표의 해를 세우는 노드입니다.';
   if (d.source === 'extract') return '산문에서 이름만 추출된 노드라 원문이 없습니다.';
   if (d.source === 'khs') return '국가유산청 자료에 해설문이 없습니다.';

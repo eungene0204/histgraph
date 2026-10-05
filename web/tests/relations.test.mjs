@@ -169,6 +169,14 @@ eq('추출 고아', whyEmpty({ source: 'extract' }), '산문에서 이름만 추
 eq('영어라 비운 것', whyEmpty({ desc_dropped: true }), '한국어로 옮길 수 있는 설명이 아직 없습니다.');
 eq('한국어 문서가 없는 것', whyEmpty({ no_kowiki: true }), '한국어 위키백과에 문서가 없습니다.');
 eq('아직 안 받아온 것', whyEmpty({}), '아직 서사를 받아오지 않았습니다.');
+// 글은 있는데 싣지 않은 것 — 서버(`summaries.shown`)가 까닭을 준다. 글로 읽는
+// 장(`pages._why_empty`)과 같은 말이다.
+eq('새로 쓴 글이 없어 비운 것', whyEmpty({ desc_withheld: 'unrewritten', no_kowiki: true }),
+   '다른 곳의 글을 그대로 옮기지 않고 새로 쓰는 중이라 아직 싣지 않았습니다.');
+eq('출처를 몰라 비운 것', whyEmpty({ desc_withheld: 'unknown_origin' }),
+   '어디서 온 글인지 확인하지 못해 싣지 않았습니다.');
+eq('비영리 조건이라 비운 것', whyEmpty({ desc_withheld: 'noncommercial' }),
+   '이용 조건이 비영리라 다른 곳의 글을 옮겨 싣지 못합니다.');
 ok('이유는 늘 한국어다', !/[A-Za-z]/.test(
   [whyEmpty({ source: 'timeline' }), whyEmpty({ source: 'khs' }), whyEmpty({})].join('')));
 

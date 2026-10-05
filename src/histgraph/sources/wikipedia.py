@@ -1170,6 +1170,89 @@ def enrich(
     }
 
 
+def _starts_with_title(text: str, title: str) -> bool:
+    """글이 그 문서의 도입부인가 — 위키백과 도입부는 문서 이름으로 시작한다
+    ('제2차 진주성 전투(第二次晋州城戰鬪)는 …'). 동명이인 괄호는 떼고 잰다."""
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()
+    head = text.lstrip(" \n《「『\"'")
+    if not base:
+        return False
+    return head.startswith(base) or head.replace(" ", "").startswith(base.replace(" ", ""))
+
+
+def mark_origins(fetcher: Fetcher, store: GraphStore,
+                 node_ids: set[str] | None = None) -> dict[str, int]:
+    """출처 표식이 없는 `wd:` 노드의 설명이 어디서 왔는지 되찾는다.
+
+    2026-10-05: `desc_source` 를 적기 전에 들어온 글이 화면 DB 에만 4,500건
+    있었다 — 위키백과 도입부를 출처 줄 없이 싣고 있었다(`summaries.shown` 이
+    이제 그런 글을 싣지 않는다). **짐작으로 적지 않는다.** 표본 150건 중
+    위키데이터 설명과 같은 것은 16건뿐이었고 나머지는 짧은 위키백과 토막글이었다 —
+    '짧으면 위키데이터'라고 적었으면 출처를 틀리게 적었다. 그래서 맞춰 본다:
+
+    - 지금의 위키데이터 한국어 설명과 글자까지 같으면 → `wd:ko`
+    - 위키백과 문서가 있고 글이 그 문서 이름으로 시작하면 → `kowiki` (+ 주소)
+    - 둘 다 아니면 그대로 둔다. 화면은 그 글을 싣지 않는다.
+    """
+    from .wikidata import _qid, _safe_query, _val
+    from ..provenance import desc_origin
+
+    rows = [
+        r for r in store.conn.execute(
+            "SELECT id, source, url, props, description FROM nodes"
+            " WHERE id LIKE 'wd:%' AND COALESCE(description, '') <> ''")
+        if (node_ids is None or r["id"] in node_ids)
+        and desc_origin(r["source"], json.loads(r["props"] or "{}"), r["url"]) is None
+    ]
+    if not rows:
+        return {"candidates": 0, "wikidata": 0, "kowiki": 0, "unmatched": 0, "unresolved": 0}
+
+    by_qid = {r["id"].split(":", 1)[1]: r for r in rows}
+    qids = sorted(by_qid)
+
+    wd_desc: dict[str, str] = {}
+    failures: list[str] = []
+    unresolved: set[str] = set()
+    for i in range(0, len(qids), 200):
+        batch = qids[i:i + 200]
+        before = len(failures)
+        values = " ".join(f"wd:{q}" for q in batch)
+        for b in _safe_query(
+            fetcher,
+            f"""SELECT ?item ?d WHERE {{ VALUES ?item {{ {values} }}
+                  ?item schema:description ?d FILTER(lang(?d) = 'ko') }}""",
+            f"desc/{i}", failures,
+        ):
+            wd_desc[_qid(_val(b, "item"))] = _val(b, "d") or ""
+        if len(failures) > before:
+            unresolved.update(batch)
+    titles = fetch_titles(fetcher, qids, unresolved=unresolved)
+
+    as_wd, as_wiki, unmatched = [], [], 0
+    for q, r in by_qid.items():
+        text = r["description"].strip()
+        if wd_desc.get(q, "").strip() == text:
+            as_wd.append((r["id"],))
+        elif q in titles and _starts_with_title(text, titles[q]):
+            as_wiki.append((
+                f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(titles[q])}", r["id"]))
+        elif q not in unresolved:
+            unmatched += 1
+
+    store.conn.executemany(
+        """UPDATE nodes SET props = json_set(COALESCE(NULLIF(props,''), '{}'),
+                                             '$.desc_source', 'wd:ko')
+            WHERE id = ?""", as_wd)
+    store.conn.executemany(
+        """UPDATE nodes SET props = json_set(json_set(COALESCE(NULLIF(props,''), '{}'),
+                                                      '$.kowiki_url', ?),
+                                             '$.desc_source', 'kowiki')
+            WHERE id = ?""", as_wiki)
+    store.conn.commit()
+    return {"candidates": len(rows), "wikidata": len(as_wd), "kowiki": len(as_wiki),
+            "unmatched": unmatched, "unresolved": len(unresolved)}
+
+
 def _fill_from_wikidata(
     fetcher: Fetcher, store: GraphStore, qid_to_node: dict[str, str]
 ) -> int:
