@@ -57,7 +57,7 @@ from html import escape
 from typing import NamedTuple
 from urllib.parse import quote, unquote
 
-from . import sentences, slugs
+from . import essays, sentences, slugs
 from .kin import KIN_DIR_HEAD
 from .ontology import NODE_TYPES
 
@@ -383,6 +383,10 @@ li .meta { color: var(--text-faint); font-size: 12px; }
 .story li a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--background-modifier-border); text-underline-offset: 3px; }
 .story li a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
 .story .how { color: var(--text-muted); }
+/* 해설 글의 문단 — 읽는 글이라 줄 간격을 넉넉히. */
+.essay { font-size: 16px; line-height: 1.85; color: var(--text-normal); margin: 0 0 16px; }
+.essay a { color: var(--text-normal); text-decoration: underline; text-decoration-color: var(--background-modifier-border); text-underline-offset: 3px; }
+.essay a:hover { color: var(--color-accent); text-decoration-color: currentColor; }
 /* 연표 — 해와 이름 두 칸. */
 .marks li { align-items: baseline; }
 /* 구간('1392년 ~ 1897년')은 84px 을 넘는다 — 줄을 꺾으면 '년' 한 글자가
@@ -1526,11 +1530,73 @@ def _urlset(urls: list[str]) -> str:
 def _static_urls(api) -> list[str]:
     """사이트맵에 드는 붙박이 장. **빈 목록 장은 넣지 않는다** — 문턱을
     올린 뒤 작품·영화·책 갈래에 색인에 오를 장이 하나도 안 남았는데,
-    그 목록 장을 사이트맵에 적으면 로봇에게 빈 종이를 가리키는 꼴이다."""
+    그 목록 장을 사이트맵에 적으면 로봇에게 빈 종이를 가리키는 꼴이다.
+    해설 글은 **공개한 것만** 든다 — 초안은 사람이 사실을 확인하기 전이다."""
     counts = slugs.counts(api.store.conn)
+    published = [e for e in essays.load() if e.published]
     return (["/", "/n/", "/about.html", "/privacy.html", "/terms.html"]
+            + ([f"/{essays.SEGMENT}/"] + [f"/{essays.SEGMENT}/{e.slug}" for e in published]
+               if published else [])
             + [f"/{s}/" for s in slugs.SEGMENT_TYPE
                if counts.get(s) and _segment_rows(api, s)[1] >= MIN_SEGMENT])
+
+
+def essay_page(api, slug: str) -> Page:
+    """`/글/<제목>` — 해설 글 한 편. 초안은 열리되 색인에 안 오르고 그렇다고 적는다."""
+    essay = essays.find(slug)
+    if essay is None:
+        return _not_found(f"/{essays.SEGMENT}/{slug}")
+    conn = api.store.conn
+    targets = essays.link_targets(conn, essays.labels_in(essay.body))
+    paths = slugs.paths_for(conn, list(targets.values()))
+
+    def href_of(label: str) -> str | None:
+        node_id = targets.get(label)
+        return href(_url_of(node_id, paths)) if node_id else None
+
+    path = f"/{essays.SEGMENT}/{essay.slug}"
+    canonical = f"{SITE}{quote(path, safe='/')}"
+    crumbs: list[tuple[str, str | None]] = [("홈", "/"), ("해설", f"/{essays.SEGMENT}/"),
+                                            (essay.title, None)]
+    parts = ["<main>", _crumbs(crumbs), f"<h1>{escape(essay.title)}</h1>",
+             f'<p class="kind">해설 · {escape(essay.date)}</p>']
+    if not essay.published:
+        parts.append('<p class="empty">검토 전 초안입니다. 사실 확인을 마치기 전이라 '
+                     '검색에 올리지 않습니다.</p>')
+    parts.append(f'<p class="lead">{escape(essay.summary)}</p>')
+    parts.append(essays.render_body(essay.body, href_of))
+    parts.append("</main>")
+    ld = _ld_block(canonical=canonical, title=f"{essay.title} | histgraph",
+                   description=_clip(essay.summary), crumbs=crumbs,
+                   entity={"@type": "Article", "@id": f"{canonical}#article",
+                           "headline": essay.title,
+                           "datePublished": essay.date, "inLanguage": "ko"},
+                   related=[])
+    return _html(200, _shell(f"{essay.title} | histgraph", _clip(essay.summary), canonical,
+                             "\n".join(parts), noindex=not essay.published, ld=ld))
+
+
+def essays_index(api) -> Page:
+    """`/글/` — 공개한 해설 글의 목록. 공개한 글이 없으면 없는 장이다."""
+    published = [e for e in essays.load() if e.published]
+    if not published:
+        return _not_found(f"/{essays.SEGMENT}/")
+    path = f"/{essays.SEGMENT}/"
+    canonical = f"{SITE}{quote(path, safe='/')}"
+    crumbs: list[tuple[str, str | None]] = [("홈", "/"), ("해설", None)]
+    parts = ["<main>", _crumbs(crumbs), "<h1>해설</h1>",
+             '<p class="lead">한 사건이 어떻게 다음 사건을 불렀는지, 이 관계망이 판정한 '
+             '인과를 따라 이어서 읽는 글입니다.</p>', '<ul class="says">']
+    for e in published:
+        url = href(f"/{essays.SEGMENT}/{e.slug}")
+        parts.append(f'<li><a href="{url}">{escape(e.title)}</a> — {escape(e.summary)}</li>')
+    parts += ["</ul>", "</main>"]
+    ld = _ld_block(canonical=canonical, title="해설 | histgraph",
+                   description="인과를 따라 이어서 읽는 한국사 해설", crumbs=crumbs,
+                   entity=None, related=[])
+    # 목록은 길잡이 화면이다 — 광고 정책이 `navigation` 으로 막는 자리라 광고 없음.
+    return _html(200, _shell("해설 | histgraph", "인과를 따라 이어서 읽는 한국사 해설",
+                             canonical, "\n".join(parts), noindex=False, ld=ld))
 
 
 def sitemap_index(api) -> Page:
@@ -1605,6 +1671,13 @@ def _route(api, path: str, query: dict) -> Page | None:
         return node_page(api, node_id, f"/n/{node_id}")
 
     segments = [s for s in path.split("/") if s]
+    # 해설 글 (`essays`). 노드 갈래가 아니라 따로 가른다.
+    if segments and unquote(segments[0]) == essays.SEGMENT:
+        if len(segments) == 1:
+            return essays_index(api)
+        if len(segments) == 2:
+            return essay_page(api, unquote(segments[1]))
+        return _not_found(path)
     if not segments or unquote(segments[0]) not in slugs.SEGMENT_TYPE:
         return None
     segment = unquote(segments[0])

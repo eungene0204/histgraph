@@ -4789,6 +4789,49 @@ with tempfile.TemporaryDirectory() as tmp:
     _pg.MIN_SUMMARY, _pg.MIN_RELATIONS = _gate3
     check("'로/으로'는 받침으로 가른다 (ㄹ 받침은 '로')",
           (_pg._ro("군포"), _pg._ro("균역법"), _pg._ro("대동법"), _pg._ro("세실")) == ("로", "으로", "으로", "로"))
+
+    # --- 해설 글 (`essays`) ---------------------------------------------------
+    # 초안은 사람이 사실을 확인하기 전이다 — 열리되 색인·목록·사이트맵에 없다.
+    import re as _re2
+    from histgraph import essays as _es
+    _old_dir = _es.ESSAY_DIR
+    _es.ESSAY_DIR = Path(tmp) / "essays"
+    _es.ESSAY_DIR.mkdir()
+    (_es.ESSAY_DIR / "초안-글.md").write_text(
+        "제목: 초안 글\n요약: 아직 검토 전이다.\n상태: 초안\n날짜: 2026-10-05\n---\n"
+        "[[임진왜란]]은 [[도요토미 히데요시|히데요시]]가 일으켰다. [[없는 이름]]은 글자로 남는다.\n",
+        encoding="utf-8")
+    _draft = _pg.route(api, "/글/초안-글")
+    check("초안은 열리되 색인에 안 오르고 그렇다고 적는다",
+          _draft.status == 200 and 'content="noindex' in _draft.body and "검토 전 초안" in _draft.body)
+    check("본문의 이름은 그 장으로 이어지고, 없는 이름은 글자로 남는다",
+          ">임진왜란</a>" in _draft.body and ">히데요시</a>" in _draft.body
+          and "없는 이름은" in _draft.body and ">없는 이름</a>" not in _draft.body)
+    check("공개한 글이 없으면 해설 목록 장은 없다", _pg.route(api, "/글/").status == 404)
+    check("초안은 사이트맵에 없다", "/%EA%B8%80/" not in _pg.route(api, "/sitemap-pages-1.xml").body)
+    (_es.ESSAY_DIR / "공개-글.md").write_text(
+        "제목: 공개 글\n요약: 검토를 마쳤다.\n상태: 공개\n날짜: 2026-10-06\n---\n본문이다.\n",
+        encoding="utf-8")
+    _sm = _pg.route(api, "/sitemap-pages-1.xml").body
+    check("공개한 글만 사이트맵과 목록에 오른다",
+          "%EA%B3%B5%EA%B0%9C-%EA%B8%80" in _sm and "%EC%B4%88%EC%95%88" not in _sm
+          and "공개 글" in _pg.route(api, "/글/").body and "초안 글" not in _pg.route(api, "/글/").body)
+    try:
+        _es.parse("모자란-글", "제목: 머리만\n---\n본문\n")
+        _bad = False
+    except _es.EssayError:
+        _bad = True
+    check("머리 칸이 빠진 글은 EssayError", _bad)
+    _es.ESSAY_DIR = _old_dir
+    # 실제 글들 — 화면에 서는 글자에 영어가 없어야 한다 (§1).
+    # 링크한 장의 이름에 든 로마자('YH 사건')는 §1 이 이미 통과시킨 이름이다.
+    _named = {w for e in _es.load() for lab in _es.labels_in(e.body)
+              for w in _re2.findall(r"[A-Za-z]{2,}", lab)}
+    _latin = {e.slug: [w for w in _re2.findall(r"[A-Za-z]{2,}", _es.plain(e.body) + e.title + e.summary)
+                       if w not in _named]
+              for e in _es.load()}
+    check("해설 글의 글자에 영어가 없다", not any(_latin.values()),
+          str({k: v for k, v in _latin.items() if v}))
     store.close()
 
 
@@ -8036,8 +8079,11 @@ try:
             if any(_fn.fnmatch(str(q.relative_to(_root)), pat) or _fn.fnmatch(q.name, pat)
                    for pat in _pats)]
     _inc = _ex["functions"]["api/index.py"].get("includeFiles", "")
+    # Vercel 의 `**/` 는 '0개 이상의 폴더'다 — 바로 아래 파일도 담는다.
+    # fnmatch 는 그 뜻을 모르므로 `**/` 를 뺀 꼴도 같이 잰다.
     _missed = [str(q.relative_to(_root)) for q in _needed
-               if not _fn.fnmatch(str(q.relative_to(_root)), _inc)]
+               if not any(_fn.fnmatch(str(q.relative_to(_root)), pat)
+                          for pat in (_inc, _inc.replace("**/", "")))]
     check("배포 번들이 패키지가 읽는 파일을 걷어내지 않는다 (두 자리 다)",
           not _cut and any(q.name == "life_prompt.md" for q in _needed), str(_cut))
     check("배포 번들이 패키지가 읽는 파일을 이름 대어 싣는다", not _missed, str(_missed))
