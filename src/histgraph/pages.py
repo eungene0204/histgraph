@@ -964,7 +964,7 @@ def _shell(title: str, description: str, canonical: str, body: str,
 {body}
 
 <footer class="foot">
-  <a href="/">histgraph</a><span>·</span><a href="/n/">글로 읽기</a><span>·</span><a href="/about.html">제작 방식</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
+  <a href="/">histgraph</a><span>·</span><a href="/n/">글로 읽기</a><span>·</span><a href="/%EA%B8%80/">해설</a><span>·</span><a href="/about.html">제작 방식</a><span>·</span><a href="/privacy.html">개인정보처리방침</a><span>·</span><a href="/terms.html">이용약관</a>
   <div class="copy">{COPYRIGHT}</div>
 </footer>
 
