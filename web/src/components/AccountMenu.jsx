@@ -34,13 +34,16 @@ function GearMark() {
 // (2026-09-09 사용자: "서브메뉴로 가지 말고 사진처럼 모달을 보여줘").
 export function AccountMenu() {
   const [state, setState] = useState({ enabled: false, user: null });
+  // 서버가 답하기 전(미리 그린 HTML·첫 그림)에는 열렸는지 아직 모른다. 모르는 것을
+  // '준비 중'이라 적으면 로봇이 읽는 첫 화면에 '공사 중' 문구가 남는다.
+  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState(false);    // 설정 상자가 떠 있는 중
   const [busy, setBusy] = useState('');
   const [notReady, setNotReady] = useState(false);   // 아직 안 열렸다고 말하는 중
   const box = useRef(null);
 
-  useEffect(() => { auth.me().then(setState); }, []);
+  useEffect(() => { auth.me().then((s) => { setState(s); setLoaded(true); }); }, []);
 
   // 바깥을 누르거나 Esc 를 누르면 닫는다. 메뉴가 열린 채로 그래프를
   // 만지면 무엇이 눌린 것인지 알 수 없다.
@@ -60,11 +63,14 @@ export function AccountMenu() {
   const openMenu = useCallback(() => setOpen((was) => !was), []);
 
   if (!state.user) {
-    const ready = state.enabled;
+    const ready = state.enabled || !loaded;
     return (
       <div className="account" ref={box}>
         <button className="account-login" type="button"
-                onClick={() => (ready ? auth.login() : setNotReady((v) => !v))}
+                onClick={() => {
+                  if (!loaded) return;
+                  if (ready) auth.login(); else setNotReady((v) => !v);
+                }}
                 aria-expanded={notReady || undefined}
                 title={ready ? '구글 계정으로 로그인합니다' : '로그인은 아직 준비 중입니다'}>
           <GoogleMark />

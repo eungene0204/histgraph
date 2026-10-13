@@ -8059,6 +8059,26 @@ try:
     check("배포 함수가 개인 역사의 POST 를 받는다",
           _vapi.LIFE_POSTS == ("/api/life/analyze", "/api/life/refine"))
 
+    # 사이트맵을 확인하는 로봇이 HEAD 로 두드릴 수 있다. do_HEAD 가 없으면
+    # BaseHTTPRequestHandler 가 501 로 답한다 (2026-10-13 실측: 서치 콘솔에서
+    # 사이트맵이 'Couldn't fetch' 였고 HEAD 가 501 이었다).
+    def head(path):
+        h = _vapi.handler.__new__(_vapi.handler)
+        h.command, h.path, h.headers = "HEAD", path, {}
+        sent, body = [], []
+        h.send_response = lambda code, *a: sent.append(("status", code))
+        h.send_header = lambda k, v: sent.append((k, v))
+        h.end_headers = lambda: None
+        h.wfile = type("W", (), {"write": lambda self, b: body.append(b)})()
+        h.do_HEAD()
+        return dict(sent), body
+
+    _hs, _hb = head("/api?__p=sitemap.xml")
+    check("배포 함수가 사이트맵의 HEAD 에 헤더만 200 으로 답한다",
+          _hs.get("status") == 200 and "xml" in _hs.get("Content-Type", "") and not _hb)
+    _hs, _hb = head("/api/nodes")
+    check("글이 아닌 길의 HEAD 는 501 이 아니라 405 다", _hs.get("status") == 405 and not _hb)
+
     # 배포 번들에 **패키지가 읽는 파일**이 실리는가. 파이썬 런타임은 임포트를
     # 따라간 `.py` 만 담으므로 그 밖의 파일은 `includeFiles` 로 이름을 대야 하고,
     # `excludeFiles` 에 걸려서도 안 된다. 2026-09-09 실측: 배포에서 이야기를

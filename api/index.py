@@ -193,6 +193,21 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
 
         self._json(status, payload, cache=path not in LIFE_GETS)
 
+    def do_HEAD(self) -> None:  # noqa: N802
+        """글로 읽는 장에만 답한다 — 헤더만 있고 본문은 없다.
+
+        없으면 BaseHTTPRequestHandler 가 501 로 답한다. 사이트맵을 확인하는
+        로봇이 HEAD 로 먼저 두드릴 수 있어서 둔다."""
+        url = urlparse(self.path)
+        page = pages.route(api, _path(url), parse_qs(url.query))
+        if page is None:
+            self.send_response(405)
+            self.send_header("Allow", "GET")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send(page, head=True)
+
     def _json(self, status: int, payload: object, *, cache: bool = False) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -208,7 +223,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         self.end_headers()
         self.wfile.write(body)
 
-    def _send(self, page) -> None:
+    def _send(self, page, *, head: bool = False) -> None:
         """글로 읽는 장 (`pages.Page`). JSON 과 같은 이유로 엣지에 재운다 —
         그래프는 배포 사이에 바뀌지 않는다. 옛 주소의 301 도 같이 재운다:
         주소는 배포를 다시 해야 바뀐다."""
@@ -220,4 +235,5 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801  (Vercel 이 찾는 이름)
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "public, max-age=0, s-maxage=86400")
         self.end_headers()
-        self.wfile.write(raw)
+        if not head:
+            self.wfile.write(raw)
